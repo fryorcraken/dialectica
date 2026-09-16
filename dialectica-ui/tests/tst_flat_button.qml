@@ -58,6 +58,23 @@ TestCase {
                "destructive is missing");
     }
 
+    // The set of fields the table means every kind to have, derived as the
+    // UNION of what each kind declares. See the comment on the test below for
+    // why it is derived rather than restated, and for what it cannot reach.
+    function requiredFields(kindsTable, keys) {
+        var seen = {};
+        var out = [];
+        for (var i = 0; i < keys.length; i++) {
+            var spec = kindsTable[keys[i]];
+            for (var f in spec)
+                if (seen[f] === undefined) {
+                    seen[f] = true;
+                    out.push(f);
+                }
+        }
+        return out;
+    }
+
     // EVERY FIELD OF EVERY KIND IS PRESENT, and this exists because the table's
     // stated guarantee was only half true.
     //
@@ -74,9 +91,41 @@ TestCase {
     // The numeric fields do not fail loudly because `NaN` is a valid `real`;
     // the colour ones do because QML type-checks a QColor assignment. So the
     // guarantee needs an assertion rather than a type.
+    // THE REQUIRED SET IS DERIVED FROM THE TABLE, not restated beside it — the
+    // same correction `declaredKinds` already took, applied to the other axis.
+    //
+    // It was a literal `["fill", "stroke", "textInk", "font", "padX", "padY"]`,
+    // which is the `hand-maintained sweep lists go stale silently` trap in its
+    // second dimension: `declaredKinds` made a sixth KIND enter the sweep for
+    // free, while a seventh FIELD still had to be typed in here by hand.
+    //
+    // Measured, and the gap is real. Adding `spec.extraY` to `implicitHeight`
+    // with no kind declaring it left THIS test green — it swept the six names
+    // it was given and never looked for a seventh. What failed instead was
+    // `test_no_kind_renders_with_a_nan_dimension`, which measures the outcome
+    // rather than the list, on three kinds at once.
+    //
+    // So the outcome test is the one that is total over numeric fields, and it
+    // is why the gap was not a hole in the suite. This test still earns its
+    // place — it names WHICH kind and WHICH field, where the outcome test says
+    // only "NaN" — and deriving the set is what makes the name honest.
+    //
+    // The union across every kind is the right derivation: a field that any
+    // kind declares is a field the table means to have, so a sibling missing it
+    // fails here. It cannot catch a field NO kind declares (the `extraY` case
+    // above) — nothing keyed on the table can, since the table is where the
+    // knowledge would have to be — and the outcome tests cover that direction.
     function test_every_kind_declares_every_field() {
-        var required = ["fill", "stroke", "textInk", "font", "padX", "padY"];
         var b = buttonFactory.createObject(null, { text: "ACT" });
+        var required = requiredFields(b.kinds, declaredKinds);
+
+        // The derivation must have found a corpus, for the same reason
+        // `declaredKinds` is checked: a `requiredFields` that returned nothing
+        // would make the loop below a pass over zero fields.
+        verify(required.length >= 6,
+               "the derived field set holds " + required.length
+               + " fields — this sweep is vacuous below six");
+
         for (var i = 0; i < declaredKinds.length; i++) {
             var spec = b.kinds[declaredKinds[i]];
             for (var f = 0; f < required.length; f++)
@@ -259,13 +308,36 @@ TestCase {
 
     // No two kinds render identically, or the distinction they exist to draw
     // is not on screen. The signature is what a reader can actually tell apart.
+    //
+    // THE SIGNATURE MUST COVER EVERY FIELD THE COMPONENT READS, and an earlier
+    // version covered four of the six. It was `color / border.width /
+    // border.color / labelColor / implicitHeight`, which sees `fill`, `stroke`,
+    // `textInk` and `padY` — and is blind to `font` and `padX` except through
+    // the height and width they happen to move.
+    //
+    // Measured, because the gap is not obvious from reading: a sixth kind
+    // identical to `secondary` but set at `DTheme.label` (9px against 15px) with
+    // `padY` raised from 14 to 22 so the heights coincide at 35 produced the
+    // SAME signature as `secondary` and was reported as "renders identically" —
+    // of a button whose text is visibly two-thirds the size. The old signature
+    // could only err strict here, never pass a true duplicate, but it named a
+    // property it did not measure and its failure message would send a reader
+    // hunting a duplicate that is not there.
+    //
+    // `implicitWidth` and the label's `pixelSize` are added rather than the raw
+    // table fields, because what a reader tells apart is what is drawn: two
+    // kinds whose different `padX` values produce the same width ARE the same
+    // button. The signature is now total over the six fields — `fill`,
+    // `stroke`, `textInk` through the colours; `padX`, `padY` and `font`
+    // through the two dimensions and the type size.
     function test_no_two_kinds_render_identically() {
         var seen = {};
         for (var i = 0; i < declaredKinds.length; i++) {
             var b = button(declaredKinds[i]);
             var sig = String(b.color) + "/" + b.border.width + "/"
                     + String(b.border.color) + "/" + String(labelOf(b).color)
-                    + "/" + b.implicitHeight;
+                    + "/" + b.implicitHeight + "/" + b.implicitWidth
+                    + "/" + labelOf(b).font.pixelSize;
             verify(seen[sig] === undefined,
                    declaredKinds[i] + " renders identically to " + seen[sig]);
             seen[sig] = declaredKinds[i];

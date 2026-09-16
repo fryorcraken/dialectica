@@ -298,10 +298,74 @@ TestCase {
         return out;
     }
 
+    // EVERY element this walker visits that declares a format, offending or
+    // not. This is the corpus `nonPlainTextElements` filters, and it exists
+    // because that function's emptiness is ambiguous on its own: "nothing
+    // renders markup" and "the walker reached nothing" are the same `[]`, which
+    // is this suite's recorded defect family exactly.
+    function formatDeclaringElements(item) {
+        var out = [];
+        var visited = [];
+
+        function seen(node) {
+            for (var k = 0; k < visited.length; k++)
+                if (visited[k] === node)
+                    return true;
+            visited.push(node);
+            return false;
+        }
+
+        function walk(node) {
+            if (!node || seen(node))
+                return;
+            if (typeof node.text === "string" && node.textFormat !== undefined)
+                out.push(node);
+            if (node.contentItem !== undefined && node.contentItem !== null)
+                walk(node.contentItem);
+            var d = node.data;
+            if (d !== undefined)
+                for (var j = 0; j < d.length; j++)
+                    walk(d[j]);
+            var kids = node.children;
+            if (kids !== undefined)
+                for (var i = 0; i < kids.length; i++)
+                    walk(kids[i]);
+        }
+        walk(item);
+        return out;
+    }
+
+    // THE COUNT IS ASSERTED BEFORE THE FORMATS, and it was not.
+    //
+    // Measured, and this is the original defect reproduced rather than a
+    // hypothetical: with the attached `ToolTip.text:` binding restored to
+    // `DStatusBar.qml` — the real markup sink this piece exists to close — and
+    // this walker narrowed back to `children`, THIS TEST PASSED. Fourteen
+    // passed, one failed, and the one that failed was
+    // `test_every_tooltip_the_bar_opens_is_plain_text` on its own count.
+    //
+    // So the repair the author made to the walker was real, and the count
+    // assertion that protects it was added to the OTHER tooltip test but not to
+    // this one. This test is the one named in the finding, and until now it
+    // still could not fail for the reason its name gives: a walker narrowed
+    // back to `children` makes it report a clean bar without looking.
+    //
+    // Six is what the bar renders: three lamp labels and three tooltip content
+    // items. Asserted as a floor rather than an equality so that adding a
+    // fourth text element is not a test edit, but zero and three both fail —
+    // three being what a `children`-only walker sees.
     function test_every_text_the_bar_renders_is_plain_text() {
         var b = bar({ deliveryText: "<b>OWNED</b> <img src=x>",
                       storageText: "<i>x</i>",
                       zoneText: "<b>y</b>" });
+
+        var all = formatDeclaringElements(b);
+        verify(all.length >= 6,
+               "the walker reached " + all.length + " format-declaring elements, "
+               + "expected at least 6 (three lamp labels and three tooltip "
+               + "content items) — below that it is not reaching the popups, and "
+               + "the format assertion below passes without looking");
+
         var bad = nonPlainTextElements(b);
         compare(bad.length, 0, "a non-plain Text in the bar: " + bad.join(" | "));
         b.destroy();

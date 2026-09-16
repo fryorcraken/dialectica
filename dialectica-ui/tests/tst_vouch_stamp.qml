@@ -263,8 +263,63 @@ TestCase {
         return out;
     }
 
+    // EVERY element this walker visits that declares a format, offending or
+    // not — the corpus `nonPlainTextElements` filters. It exists because that
+    // function's emptiness is ambiguous alone: "nothing renders markup" and
+    // "the walker reached nothing" are the same `[]`.
+    function formatDeclaringElements(item) {
+        var out = [];
+        var visited = [];
+
+        function seen(node) {
+            for (var k = 0; k < visited.length; k++)
+                if (visited[k] === node)
+                    return true;
+            visited.push(node);
+            return false;
+        }
+
+        function walk(node) {
+            if (!node || seen(node))
+                return;
+            if (typeof node.text === "string" && node.textFormat !== undefined)
+                out.push(node);
+            if (node.contentItem !== undefined && node.contentItem !== null)
+                walk(node.contentItem);
+            var d = node.data;
+            if (d !== undefined)
+                for (var j = 0; j < d.length; j++)
+                    walk(d[j]);
+            var kids = node.children;
+            if (kids !== undefined)
+                for (var i = 0; i < kids.length; i++)
+                    walk(kids[i]);
+        }
+        walk(item);
+        return out;
+    }
+
+    // THE COUNT IS ASSERTED BEFORE THE FORMATS, the same repair
+    // `tst_status_bar.qml` takes and for the same measured reason.
+    //
+    // `test_the_stamps_tooltip_is_plain_text` below already counts what it
+    // found; this test did not, so a walker narrowed back to `children` made it
+    // report a clean stamp without reaching the tooltip — and reporting clean
+    // is exactly what the original walker did over a bar rendering markup.
+    //
+    // Two is what the stamp renders: the label and the tooltip's content item.
+    // A floor rather than an equality, so adding a text element is not a test
+    // edit, while one — what a `children`-only walker sees — fails.
     function test_every_text_the_stamp_renders_is_plain_text() {
         var s = stamp({ vouched: true, revealed: true });
+
+        var all = formatDeclaringElements(s);
+        verify(all.length >= 2,
+               "the walker reached " + all.length + " format-declaring elements, "
+               + "expected at least 2 (the label and the tooltip's content "
+               + "item) — below that it is not reaching the popup, and the "
+               + "format assertion below passes without looking");
+
         var bad = nonPlainTextElements(s);
         compare(bad.length, 0, "a non-plain Text in the stamp: " + bad.join(" | "));
         s.destroy();
@@ -306,6 +361,80 @@ TestCase {
         }
         walk(item);
         return out;
+    }
+
+    // Every tooltip's TEXT, distinct from `tooltipFormats` above, which reads
+    // the content item's format. The two are separate walks on purpose: a
+    // tooltip can carry the right string at the wrong format, or the reverse.
+    function tooltipTexts(item) {
+        var out = [];
+        var visited = [];
+
+        function seen(node) {
+            for (var k = 0; k < visited.length; k++)
+                if (visited[k] === node)
+                    return true;
+            visited.push(node);
+            return false;
+        }
+
+        function walk(node) {
+            if (!node || seen(node))
+                return;
+            if (node.contentItem !== undefined && node.contentItem !== null
+                && typeof node.text === "string" && node.children === undefined)
+                out.push(node.text);
+            var d = node.data;
+            if (d !== undefined)
+                for (var j = 0; j < d.length; j++)
+                    walk(d[j]);
+            var kids = node.children;
+            if (kids !== undefined)
+                for (var i = 0; i < kids.length; i++)
+                    walk(kids[i]);
+        }
+        walk(item);
+        return out;
+    }
+
+    // `copy.json` `common.vouchTooltip` and `common.vouchedTooltip`, VERBATIM
+    // and hardcoded here rather than read off the component — reading it back
+    // would be asking the implementation what it wrote and agreeing.
+    //
+    // THIS WAS UNPINNED, measured rather than supposed: replacing the two
+    // strings with "Vouch" and "Undo vouch" left this file green at 16 passed,
+    // 0 failed. `DVouchStamp.qml` carries a comment claiming both are the
+    // bundle's copy verbatim, and nothing held it to that.
+    //
+    // It is not only copy discipline. `vouchedTooltip` is the ONLY place the
+    // interface tells a viewer the stamp is clickable to reverse — "click to
+    // undo". A vouched stamp is otherwise an inked mark with no affordance on
+    // it, so a paraphrase that drops the clause removes the only route back
+    // from a decision the viewer already made. `SPEC.md:4` says the strings are
+    // written to be used verbatim; this is one of the cases that shows why.
+    //
+    // The em-dash is part of the string and is asserted with it — a paraphrase
+    // to a hyphen is the most likely way this drifts.
+    function test_the_tooltips_are_the_bundles_copy_verbatim() {
+        var un = stamp({ vouched: false, revealed: true });
+        var unTexts = tooltipTexts(un);
+        compare(unTexts.length, 1,
+                "expected one tooltip on an un-vouched stamp, found "
+                + unTexts.length + " — if this is 0 the walker reaches no popup "
+                + "and the comparison below is vacuous");
+        compare(unTexts[0], "Vouch for this author",
+                "the un-vouched tooltip is not copy.json common.vouchTooltip");
+        un.destroy();
+
+        var v = stamp({ vouched: true });
+        var vTexts = tooltipTexts(v);
+        compare(vTexts.length, 1,
+                "expected one tooltip on a vouched stamp, found " + vTexts.length);
+        compare(vTexts[0], "You vouched for this author — click to undo",
+                "the vouched tooltip is not copy.json common.vouchedTooltip — "
+                + "this string is the only place the interface says the stamp "
+                + "can be clicked to reverse the vouch");
+        v.destroy();
     }
 
     function test_the_stamps_tooltip_is_plain_text() {

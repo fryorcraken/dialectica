@@ -101,6 +101,56 @@ TestCase {
         return found;
     }
 
+    // SPEC.md:30 — "Full address on the slate (the user is choosing a key).
+    // Abbreviated elsewhere." A footer chip is elsewhere.
+    //
+    // THIS WAS UNPINNED, and the gap is not theoretical: setting `full: true`
+    // on the chip's `AddressLabel` put all 64 hex characters in the footer and
+    // the whole file stayed green — 15 passed, 0 failed, measured. Nothing else
+    // here could see it, because
+    // `test_a_held_identity_shows_the_label_the_name_and_the_address` keys on
+    // the head group `01020304`, which a FULL address renders too. Two
+    // explanations, one answer: "it abbreviated" and "it printed everything"
+    // both satisfy that assertion.
+    //
+    // Asserted three ways, none of which the others cover:
+    //
+    //   * the ellipsis is PRESENT — the abbreviation ran at all;
+    //   * a middle group is present, as three groups separated by two
+    //     ellipses. Head-and-tail alone is the format `SPEC.md:32-33` says
+    //     vanity generators are built to defeat, and it also renders an
+    //     ellipsis, so the ellipsis check alone cannot distinguish them;
+    //   * the full address is ABSENT. The positive checks would both pass on a
+    //     label that printed the abbreviation AND the whole address.
+    //
+    // Keyed on `AddressLabel`'s rendered text rather than on its `full`
+    // property, because what SPEC.md constrains is what reaches the screen: a
+    // second abbreviation hand-rolled past the component would set no property
+    // and is the defect `SPEC.md:33-34` names ("Implemented once, in
+    // AddressLabel.qml — do not hand-roll elision anywhere else").
+    function test_the_footer_abbreviates_rather_than_printing_the_whole_address() {
+        var c = chip({ hasIdentity: true, generatedName: "n", identityAddress: addr });
+        var all = joined(c);
+
+        verify(all.indexOf("…") >= 0,
+               "the footer renders no ellipsis — the address is not abbreviated, "
+               + "and SPEC.md:30 reserves the full address for the identity "
+               + "slate: " + all);
+
+        // The bare hex, ellipses and separators stripped, so the middle group
+        // is counted rather than inferred.
+        var groups = all.split("…");
+        verify(groups.length >= 3,
+               "the abbreviation renders " + groups.length + " group(s) — "
+               + "head-and-tail alone is the format SPEC.md:32-33 says vanity "
+               + "generators are built to defeat: " + all);
+
+        verify(all.indexOf(addr) < 0,
+               "the whole address is on screen in the footer — SPEC.md:30 puts "
+               + "it on the slate only: " + all);
+        c.destroy();
+    }
+
     // The mark is drawn from the SAME address the label prints. A chip whose
     // mark reads a different property renders a stranger's mark beside your
     // name, and nothing above would notice.

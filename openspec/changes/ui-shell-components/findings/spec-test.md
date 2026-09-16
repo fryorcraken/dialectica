@@ -260,3 +260,85 @@ value.
 `tasks.md` 1.2's claim that `apparatusWidth` was already absent at the branch
 point is true — `git log -S apparatusWidth` names `3901e99` (#70), which is this
 branch's base. Recording it rather than silently dropping the task was right.
+
+## `tester` pass — what the author could not check from inside
+
+Added after this review, by the `tester`. Recorded here rather than as new boxes
+because they are outcomes, not requests: each was found, fixed and proved in the
+same pass. Four findings, two of them tests that could not fail for the reason
+their names gave, and two `SPEC.md` obligations nothing held.
+
+**1. `test_no_two_kinds_render_identically` measured four of the table's six
+fields.** The signature was `color / border.width / border.color / labelColor /
+implicitHeight`, which reaches `fill`, `stroke`, `textInk` and `padY` — and is
+blind to `font` and `padX` except through the dimensions they happen to move.
+Measured: a sixth kind identical to `secondary` but set at `DTheme.label` (9px
+against 15px) with `padY` raised 14 → 22 so both heights land on 35 produced the
+SAME signature and was reported as "renders identically". The error direction is
+strict rather than permissive — it could not pass a true duplicate — but the test
+named a property it did not measure, and its message would send a reader hunting
+a duplicate that is not there. `implicitWidth` and the label's `pixelSize` are
+now in the signature, which makes it total over the six fields. Proved both
+ways: the compensated clone now passes, a byte-identical clone still fails.
+
+**2. `test_every_kind_declares_every_field` restated its field list by hand.**
+`declaredKinds` had already been corrected to derive from `Object.keys(kinds)`
+so a sixth KIND enters the sweep for free; the `required` array was the same trap
+in the other dimension, six names typed in beside the table. Measured: adding
+`spec.extraY` to `implicitHeight` with no kind declaring it left this test GREEN.
+What failed instead was `test_no_kind_renders_with_a_nan_dimension`, which
+measures the outcome rather than the list — so the suite had the direction
+covered and this test's name was the thing that was wrong. `required` is now the
+union of what every kind declares, with a corpus guard, and the comment states
+plainly what a table-keyed check cannot reach.
+
+**3. The markup walkers repaired for `data`, but only one of the two tests per
+file counts what it found.** This is the original tooltip defect, and it is still
+live in the test the finding named.
+
+The author's repair is real and the count assertion on
+`test_every_tooltip_the_bar_opens_is_plain_text` works exactly as reported —
+narrowing that walker to `children` fails it with "found 0", measured. But
+`test_every_text_the_bar_renders_is_plain_text`, the test the original finding
+was about, had no count of its own. Measured with BOTH halves of the original
+defect restored — the attached `ToolTip.text:` binding back in `DStatusBar.qml`
+and that walker narrowed to `children` — it PASSED, over a bar rendering
+`"<b>OWNED</b> <img src=x>"` through a StyledText content item. Fourteen passed,
+one failed, and the one that failed was the other test.
+
+So the suite was saved by a neighbour rather than by the test that claims the
+property. Both files now count the format-declaring elements their walker
+reached before asserting anything about formats: the bar expects at least six
+(three lamp labels, three tooltip content items) and fails at three; the stamp
+expects at least two and fails at one. Both measured.
+
+**4. `SPEC.md:30` — "Abbreviated elsewhere" — was unpinned on the chip.** Setting
+`full: true` on `DIdentityChip`'s `AddressLabel` put all 64 hex characters in the
+screen footer and `tst_identity_chip.qml` stayed green at 15 passed, 0 failed.
+Nothing could see it: the existing assertion keys on the head group `01020304`,
+which a full address renders too — "it abbreviated" and "it printed everything"
+give the same answer, this suite's recorded defect family.
+`test_the_footer_abbreviates_rather_than_printing_the_whole_address` pins it
+three ways, each proved to fire alone: the ellipsis is present (fails on
+`full: true`), three groups rather than two (fails on a head-and-tail
+`abbreviate`, which still renders an ellipsis, so the first arm cannot catch it),
+and the whole address is absent (fails on a chip rendering both).
+
+**5. `copy.json`'s two vouch tooltips were unpinned.** `DVouchStamp.qml` carries
+a comment claiming `common.vouchTooltip` / `common.vouchedTooltip` verbatim, and
+nothing held it to that: replacing them with "Vouch" and "Undo vouch" left the
+file green at 16 passed, 0 failed. It is not only copy discipline —
+`vouchedTooltip` is the ONLY place the interface says the stamp can be clicked to
+reverse, so a paraphrase that drops "click to undo" removes the route back from a
+decision already made, on a control that is otherwise an inked mark with no
+affordance on it. `test_the_tooltips_are_the_bundles_copy_verbatim` hardcodes
+both strings; both arms proved, the vouched one on an em-dash-to-hyphen drift.
+
+**What was checked and found sound.** The `hasIdentity` gate over all four
+states — `vouched || (hasIdentity && revealed)` fails three tests including the
+`vouched=true revealed=false` case this review named. A sixth kind entering the
+table is swept by everything without a test edit: a no-fill-no-stroke sixth kind
+failed `test_every_kind_is_either_filled_or_outlined` and
+`test_no_kind_renders_its_label_in_the_colour_behind_it`. And `design.md` D4 now
+matches its test — the wording correction this review asked for was taken, and
+the sentence describes what `compare(dim.opacity, 0.45)` actually does.

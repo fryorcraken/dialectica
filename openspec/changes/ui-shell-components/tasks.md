@@ -12,7 +12,17 @@
       `.openspec.yaml` (`schema: spec-driven` + `skip_specs: true`, with the
       measurement) and `proposal.md`. `openspec validate --strict` passes.
 - [x] design + code — `dev-writer`
-- [ ] tests — `tester`
+- [x] tests — `tester` — a tester pass over the `dev-writer`'s own tests, run on
+      the owner's ruling that an author testing their own code is a different
+      thing from a tester testing it. Nothing was re-done: the tests were kept
+      almost entirely and four were changed. Two closed a test that could not
+      fail for the reason its name gave (the kind signature was blind to `font`
+      and `padX`; two markup walkers had no count assertion, and the original
+      defect was reproduced passing through one of them), and two pinned
+      `SPEC.md` obligations nothing held — the footer abbreviating rather than
+      printing the whole address (`SPEC.md:30`), and the stamp's two tooltips
+      being `copy.json`'s copy verbatim. Every change proved able to fail by
+      mutation, one at a time; `git diff --stat` shows test files only.
 - [x] review: correctness — `code-reviewer`
 - [x] review: security — `code-reviewer`
 - [x] review: readability — `code-reviewer`
