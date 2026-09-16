@@ -126,26 +126,32 @@ pub struct ThreadItem {
     /// ask for hidden content. A caller must be able to render an item whose
     /// parent it does not hold in hand.
     pub parent: Option<String>,
-    /// The author's per-Stoa address (§5.2), hex.
+    /// The public key that signed this op (§5.2), hex — the whole of how an item
+    /// names its author.
     ///
-    /// **The unforgeable half of the pair.** A generated name and a generated
-    /// mark are both cheaply re-rolled to resemble someone else's; only the
-    /// address settles who published something.
+    /// **The unforgeable value.** A generated name and a generated mark are both
+    /// cheaply re-rolled to resemble someone else's; only the key is bound to a
+    /// signature, so only the key settles who published something. It is also
+    /// what makes the name and the mark computable at all — both read its own
+    /// bytes, under `generated-names`' *The three channels read pairwise
+    /// disjoint bytes of the public key*.
+    ///
+    /// **One field replaces two, because the reason for two is gone.** This
+    /// struct carried an `author` address and an `author_key` beside it, on the
+    /// ground that the name read the key while the mark read the address and
+    /// neither was recoverable from the other. Both channels now read the key,
+    /// so an address was an input to nothing a reader is shown — and a second
+    /// identifier beside the key it was derived from is one the two could
+    /// disagree about, with no way for a recipient to tell which was wrong.
+    ///
+    /// **No name and no mark are sent from here.** Both are pure functions of
+    /// this field, so sending one would put a derived value on the wire beside
+    /// the material it derives from — and a name on the wire is one a relay could
+    /// strip or forge. Deriving them is the job of whatever renders them.
+    ///
+    /// This field is the key that **actually signed**, which verification has
+    /// already established, and never an unverified claim.
     pub author: String,
-    /// The public key that signed this op, hex.
-    ///
-    /// Carried **beside** the address and never instead of it, because the two
-    /// are independent digests and a reader needs both: the generated display
-    /// name is a function of the **key**, the mark is a function of the
-    /// **address**, and an address is a one-way hash of a record rather than a
-    /// transformation of the key. An item carrying only an address is one whose
-    /// name nothing downstream can compute.
-    ///
-    /// **No name is sent from here.** A name is a pure function of this field, so
-    /// sending one would put a second, derivable identifier on the wire beside the
-    /// material it is derived from — where the two could disagree and a reader
-    /// would have no way to tell which was wrong.
-    pub author_key: String,
     /// The current version's body, sanitised — or `None` where it is **withheld**
     /// because this is a hidden root and the caller did not ask for hidden
     /// content.
@@ -624,9 +630,8 @@ fn resolve_item<L: OpLog>(
         id: id.to_hex(),
         current_version: version.current.id().to_hex(),
         parent,
-        // Both from the op verification has already bound to the key that signed.
-        author: entry.op.op.author.address().to_hex(),
-        author_key: hex::encode(entry.op.op.author.to_bytes()),
+        // From the op verification has already established the signature of.
+        author: entry.op.op.author.to_hex(),
         body: if withhold {
             None
         } else {
@@ -750,6 +755,20 @@ mod tests {
             op,
         };
         assert!(!forged.verify(), "the fixture must be an actual forgery");
+        // And an AUTHORSHIP forgery rather than junk: the same signature must be
+        // valid under the signer's own key. `!verify()` alone is a refusal guard
+        // that fabricated bytes satisfy identically, which would leave every
+        // caller of this helper testing "a bad signature is refused" rather than
+        // the forgery it names. Asserted here so every caller inherits it.
+        assert!(
+            crate::identity::verify_authored_op(
+                &signer.public_key().to_bytes(),
+                &forged.op.canonical_bytes(),
+                &forged.signature.to_bytes()
+            ),
+            "the signature must be valid under the signer's own key, or this \
+             fixture is a junk signature rather than a forgery"
+        );
         forged
     }
 
@@ -1649,14 +1668,18 @@ mod tests {
         );
     }
 
-    // ─── The author is an address AND a key ───────────────────────────────
+    // ─── The author is the key, and nothing beside it ─────────────────────
 
     #[test]
-    fn every_item_carries_both_an_address_and_the_key_that_signed() {
-        // Two independent digests: the generated name comes from the KEY and the
-        // mark from the ADDRESS, and an address is a one-way hash so the key
-        // cannot be recovered from it. An item carrying only an address is one
-        // whose name nothing downstream can compute.
+    fn every_item_carries_the_key_that_signed_and_no_second_identifier() {
+        // `thread-read`: "every item carries its author's public key" and "no
+        // item carries an author address".
+        //
+        // **One field where there were two.** An `author` address rode beside
+        // `author_key`, on the ground that the name read the key while the mark
+        // read the address and neither was recoverable from the other. Both
+        // channels now read the key's own bytes, so the second field was an input
+        // to nothing a reader is shown.
         let root = a_root(2, "root");
         let reply = a_reply(3, &root, "reply");
         let log = a_log(vec![root.clone(), reply.clone()]);
@@ -1665,31 +1688,39 @@ mod tests {
         let root_item = &page.items[0];
         let reply_item = &page.items[1];
 
-        assert_eq!(root_item.author, a_key(2).public_key().address().to_hex());
-        assert_eq!(
-            root_item.author_key,
-            hex::encode(a_key(2).public_key().to_bytes())
-        );
-        assert_eq!(reply_item.author, a_key(3).public_key().address().to_hex());
-        assert_eq!(
-            reply_item.author_key,
-            hex::encode(a_key(3).public_key().to_bytes())
+        // The expectation is derived from the fixture's own key rather than read
+        // back from the item, so this cannot pass by agreeing with itself.
+        assert_eq!(root_item.author, a_key(2).public_key().to_hex());
+        assert_eq!(reply_item.author, a_key(3).public_key().to_hex());
+
+        // The field holds a value that parses as a public key, which an author
+        // address would not have been required to. Both are 32 bytes of hex, so
+        // this is not a proof of which one it is — the equality above is — but a
+        // caller is entitled to parse it.
+        assert!(
+            PublicKey::from_bytes(&hex::decode(&root_item.author).unwrap()).is_ok(),
+            "the author field must parse as a public key"
         );
 
-        // The two fields are DIFFERENT values, and the address is the one the
-        // identity rules derive from that key — so a caller can check the pairing
-        // rather than trust it.
-        assert_ne!(root_item.author, root_item.author_key);
-        assert_eq!(
-            root_item.author,
-            PublicKey::from_bytes(&hex::decode(&root_item.author_key).unwrap())
-                .unwrap()
-                .address()
-                .to_hex()
-        );
-        // Two authors differ in BOTH fields.
+        // Two authors differ in it, so the field distinguishes rather than
+        // reporting something constant.
         assert_ne!(root_item.author, reply_item.author);
-        assert_ne!(root_item.author_key, reply_item.author_key);
+
+        // And the struct's fields, enumerated by destructuring rather than by a
+        // list somebody keeps up to date: re-adding `author_key`, or adding any
+        // second author-describing field, makes this stop compiling — which is a
+        // louder failure than an assertion and one that cannot go stale.
+        let ThreadItem {
+            thread: _,
+            id: _,
+            current_version: _,
+            parent: _,
+            author: _,
+            body: _,
+            attachments: _,
+            is_revised: _,
+            moderation: _,
+        } = root_item;
     }
 
     // ─── The current version, and whether it was revised ──────────────────
@@ -2223,11 +2254,24 @@ mod tests {
                 action: ModerationAction::Hide,
             },
         };
+        let attacker = a_key(9);
         let forged = SignedOp {
-            signature: sign_op_bytes(&a_key(9), &op.canonical_bytes()),
+            signature: sign_op_bytes(&attacker, &op.canonical_bytes()),
             op,
         };
         assert!(!forged.verify(), "the fixture must be an actual forgery");
+        // And a forgery of AUTHORSHIP, not junk bytes: valid under the attacker's
+        // own key, so the refusal is the moderator's key not matching rather than
+        // a malformed signature. Without this, fabricated bytes would satisfy the
+        // guard above and the test would pass for the wrong reason.
+        assert!(
+            crate::identity::verify_authored_op(
+                &attacker.public_key().to_bytes(),
+                &forged.op.canonical_bytes(),
+                &forged.signature.to_bytes()
+            ),
+            "the attacker's signature must be valid under the attacker's own key"
+        );
         let log = a_log(vec![root.clone(), reply.clone(), forged]);
 
         let item = read(&log, &root, false)

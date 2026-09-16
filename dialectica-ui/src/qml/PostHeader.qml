@@ -1,14 +1,23 @@
 import QtQuick
 import QtQuick.Layouts
 
-// The attribution unit: mark, generated name, address, badges.
-// The address is never optional. A generated name is neither unique nor an
-// identifier, and a MODERATOR badge beside a name with no address is precisely
+// The attribution unit: mark, generated name, public key, badges.
+// The key is never optional. A generated name is neither unique nor an
+// identifier, and a MODERATOR badge beside a name with no key is precisely
 // what turns a lookalike into apparent authority.
 RowLayout {
     id: root
 
-    property string identityAddress: ""
+    // The author's PUBLIC KEY, hex — what `author` carries on a feed row and a
+    // thread item. It was `identityAddress` and held an author address; issue #80
+    // deleted that value, and the property was renamed rather than left holding
+    // something its name denies.
+    //
+    // `Identicon` and `AddressLabel` below keep an `address` property, and that is
+    // deliberate rather than an oversight: both are GENERIC components that also
+    // render Stoa addresses, which survive. Their own comments say so. What flows
+    // into them here is a key.
+    property string identityKey: ""
     property string generatedName: ""
     property bool   isModerator: false
     property bool   edited: false
@@ -19,7 +28,7 @@ RowLayout {
     spacing: 10
 
     Identicon {
-        address: root.identityAddress
+        address: root.identityKey
         size: root.markSize
         visible: root.markSize >= DTheme.markMinDraw
         Layout.alignment: Qt.AlignVCenter
@@ -33,7 +42,7 @@ RowLayout {
     }
 
     AddressLabel {
-        address: root.identityAddress
+        address: root.identityKey
         emphasis: root.lookalikeWarning
     }
 

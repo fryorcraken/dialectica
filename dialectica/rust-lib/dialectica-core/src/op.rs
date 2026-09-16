@@ -53,7 +53,9 @@
 //!
 //! **No `senderId`.** §4.1: "`senderId` is not an author identity, and the plan
 //! should not treat it as one." It binds at channel creation as a transport
-//! self-filter. The author identity in an op is the key and the address.
+//! self-filter. The author identity in an op is the key it carries, and nothing
+//! else — issue #80 deleted the author address that used to be named here
+//! alongside it.
 //!
 //! **No `channelId`.** §4.5: "never let channel identity leak into payloads or
 //! storage keys", so that one-channel-per-thread later becomes a routing change
@@ -82,8 +84,8 @@ use sha2::{Digest, Sha256};
 
 /// Domain separation for an op id.
 ///
-/// Distinct from every address prefix in `identity.rs`, so no byte string is
-/// ever both a valid op id and a valid author or Stoa address. Padded to a
+/// Distinct from the Stoa-address prefix in `identity.rs`, so no byte string is
+/// ever both a valid op id and a valid Stoa address. Padded to a
 /// fixed 32 bytes for the same reason those are: a variable-length prefix
 /// concatenated with variable-length data is how two different inputs come to
 /// hash the same.
@@ -473,11 +475,16 @@ impl OpKind {
 
 /// A signed operation: the whole of what crosses the wire.
 ///
-/// The author's **public key** travels in the op, not merely their address.
-/// §3.3 puts verification on read with no directory to resolve an address
-/// against, so a peer holding only an address could not check the signature.
-/// The address is recoverable from the key ([`PublicKey::address`]), which is
-/// what [`identity::verify_authored_op`] re-derives.
+/// The author's **public key** travels in the op, and it is the whole of how an
+/// op names its author. §3.3 puts verification on read with no directory to
+/// resolve any other identifier against, so a peer must hold the key itself in
+/// order to check the signature.
+///
+/// **No second author identifier is carried or derivable.** The key is the
+/// author, so there is nothing beside it for a recipient to reconcile it
+/// against, and nothing a relay could strip or forge separately from the value
+/// the signature is checked under. An author address used to ride here too;
+/// issue #80 deleted it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Op {
     /// Which Stoa this belongs to.
@@ -705,8 +712,8 @@ impl Op {
     /// This op's id: the hash of its canonical bytes, domain-separated.
     ///
     /// Prefixed like every other hash in this crate, so an op id can never
-    /// collide with an author address or a Stoa address — which matters because
-    /// all three are 32 bytes and a moderation op names one of them.
+    /// collide with a Stoa address — which matters because both are 32 bytes and
+    /// a moderation op names one of them.
     pub fn id(&self) -> OpId {
         let mut hasher = Sha256::new();
         hasher.update(OP_ID_PREFIX);
@@ -716,11 +723,11 @@ impl Op {
 
     /// Sign this op, producing the envelope that crosses the wire.
     ///
-    /// The key must be the author's per-Stoa key ([`identity::derive_stoa_key`])
-    /// — signing with any other key produces an op that
-    /// [`SignedOp::verify`] rejects, since the address it re-derives will not
-    /// match. Taking the key rather than reading one from ambient state is
-    /// CLAUDE.md's "pass what it needs".
+    /// The key must be the one named in [`Op::author`]
+    /// ([`identity::derive_stoa_key`]) — signing with any other key produces an
+    /// op that [`SignedOp::verify`] rejects, because the **signature** will not
+    /// verify under the key the op carries. Taking the key rather than reading
+    /// one from ambient state is CLAUDE.md's "pass what it needs".
     pub fn sign(self, key: &SecretKey) -> SignedOp {
         let signature = sign_op_bytes(key, &self.canonical_bytes());
         SignedOp { op: self, signature }
@@ -730,9 +737,18 @@ impl Op {
 impl SignedOp {
     /// Whether this op is authentically from the author it claims.
     ///
-    /// Delegates to [`identity::verify_authored_op`], which is the function
-    /// that binds the key to the claimed address — the check that a caller
-    /// doing the steps by hand forgets. Nothing here re-implements it.
+    /// Delegates to [`identity::verify_authored_op`], which establishes that the
+    /// key this op carries signed the op's bytes. **That is the whole of
+    /// authorship**: an op names its author by carrying the author's public key,
+    /// so an op claiming a different author carries a different key and the
+    /// signature then fails under it.
+    ///
+    /// This used to pass a fourth argument, `self.op.author.address()` — the
+    /// claimed author, computed by calling `.address()` on the op's **own** key,
+    /// which the callee then compared against `key.address()`. A value against
+    /// itself. Issue #80 deleted the address and the parameter with it; nothing
+    /// here re-implements the check, because there was never a check to
+    /// re-implement on this path.
     ///
     /// **This answers authenticity only.** It does not ask whether the signer
     /// is a moderator (§6), whether a revision's author owns the post it
@@ -744,7 +760,6 @@ impl SignedOp {
     /// never on the read path".
     pub fn verify(&self) -> bool {
         verify_authored_op(
-            &self.op.author.address(),
             &self.op.author.to_bytes(),
             &self.op.canonical_bytes(),
             &self.signature.to_bytes(),
@@ -1320,9 +1335,9 @@ mod tests {
 
     #[test]
     fn an_op_id_is_not_a_bare_hash_of_the_canonical_bytes() {
-        // Domain separation, for the same reason `identity.rs` separates its
-        // two address derivations: an op id, an author address and a Stoa
-        // address are all 32 bytes, and a moderation op names one of them.
+        // Domain separation, for the same reason `identity.rs` prefixes its Stoa
+        // address: an op id and a Stoa address are both 32 bytes, and a
+        // moderation op names one of them.
         let op = a_post();
         let bare = {
             let mut h = Sha256::new();
@@ -1409,9 +1424,17 @@ mod tests {
     #[test]
     fn a_signed_op_verifies_against_its_own_author() {
         for op in one_of_each_kind() {
-            // The author must be the key that signs, or the address check in
-            // `verify_authored_op` rejects it — which is the point of that
-            // function.
+            // The author must be the key that signs, or `verify_authored_op`
+            // rejects it — because the **signature** is checked under the key
+            // the op carries, and no other key's signature verifies under it.
+            //
+            // This comment credited "the address check in `verify_authored_op`"
+            // until issue #80. That check never refused anything on this path:
+            // `SignedOp::verify` computed the claimed author by calling
+            // `.address()` on the op's own key, so the comparison was a value
+            // against itself. Measured: stubbing `verify_op_bytes` to return
+            // `true` makes `an_op_signed_by_someone_else_is_rejected` fail,
+            // which is what identifies the signature check as the mechanism.
             let key = a_key(2);
             let signed = op.sign(&key);
             assert!(signed.verify(), "a well-formed op must verify");
@@ -1421,8 +1444,15 @@ mod tests {
     #[test]
     fn an_op_signed_by_someone_else_is_rejected() {
         // THE forgery: a valid signature, untampered bytes, and still not from
-        // the author it claims. Only re-deriving the address from the key
-        // catches it, which is what `verify_authored_op` does.
+        // the author it claims. The **signature check** is what catches it —
+        // substituting the author substitutes the carried key, and the
+        // attacker's signature does not verify under the victim's key.
+        //
+        // Stated precisely because the comment here credited an address
+        // re-derivation until issue #80, and that was never the mechanism: the
+        // only caller derived the claimed author from the op's own key, so the
+        // comparison could not fail for any input. Measured — stubbing
+        // `verify_op_bytes` to return `true` fails this test.
         let victim = a_key(2);
         let attacker = a_key(3);
         let op = Op {
@@ -1434,6 +1464,27 @@ mod tests {
             op,
         };
         assert!(!signed.verify());
+        // **The control, and this is the crate's REFERENCE forgery test** — the
+        // one other modules' fixtures are written against, so a gap here
+        // propagates. `!verify()` alone is a refusal guard that 64 fabricated
+        // bytes satisfy identically: with the signature replaced by junk, this
+        // test and all 65 in `op::tests` still passed. That version demonstrates
+        // "a bad signature is refused", never "a valid signature under the wrong
+        // key is refused" — and the latter is the attack the test is named for.
+        //
+        // It matters more after issue #80. The deleted address guard used to give
+        // a forged op a second, independent reason to be refused; the signature
+        // check is now the only one, so a test that cannot tell a forgery from
+        // junk cannot see the mechanism it depends on.
+        assert!(
+            crate::identity::verify_authored_op(
+                &attacker.public_key().to_bytes(),
+                &signed.op.canonical_bytes(),
+                &signed.signature.to_bytes()
+            ),
+            "the attacker's signature must be valid under the attacker's own key, \
+             or this fixture is a junk signature rather than a forgery"
+        );
     }
 
     #[test]

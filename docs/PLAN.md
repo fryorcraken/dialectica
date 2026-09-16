@@ -869,19 +869,35 @@ reference for the storage pipeline shape rather than something to depend on.
 
 ### 5.1 The construction
 
-**Address = hash of a small genesis record**, in the style of LEZ private
-accounts — which use `AccountId = SHA256(prefix || npk || vpk || identifier)`
-with a `u128` diversifier giving 2^128 addresses per keypair.
+**An author is its public key.** There is no author address: the key is what
+signs, what travels in every op, and what the name and the mark are computed
+from. Built — see the `identity` spec, and `generated-names` for which key bytes
+each displayed channel reads.
 
-Hash a **record**, not the bare public key:
+**Stoa addresses are untouched.** A Stoa is still identified by the hash of its
+genesis record, which is what makes a pasted Stoa address self-authenticating.
+That construction is unchanged and lives in the `stoa-genesis` and `identity`
+specs.
+
+~~**Address = hash of a small genesis record**, in the style of LEZ private
+accounts — which use `AccountId = SHA256(prefix || npk || vpk || identifier)`
+with a `u128` diversifier giving 2^128 addresses per keypair.~~
+
+~~Hash a **record**, not the bare public key:~~
 
 ```
 address = H(prefix || genesis_record)      # record holds one key today
 ```
 
-Costs the same today. If rotation ever lands, the record can hold a key *log*
+~~Costs the same today. If rotation ever lands, the record can hold a key *log*
 and the address survives instead of forcing a migration. Do not foreclose it by
-hashing the raw key.
+hashing the raw key.~~
+
+**Superseded by issue #80**, which deleted the author address. The record-hashing
+argument above was specifically about the *author* address, and the rotation
+affordance it was holding open has been given up deliberately — the reasoning,
+and what replaces it, are in the `identity` requirement *Identity does not rotate,
+and this is a contract not an omission*.
 
 ### 5.2 Scope: one identity per Stoa, permanent
 
@@ -948,8 +964,11 @@ exists.** `derive_stoa_key(root, stoa_address)` is built and tested
 (`dialectica-core`'s `identity.rs`; the HKDF expansion and its reasoning are in
 that function's own doc comment). One identity per user means **not calling it**
 and signing with the root key directly. Restoring per-Stoa identity is switching
-that call back on, not a redesign — no wire-format change, no address change, no
-new primitive.
+that call back on, not a redesign — no wire-format change, no new primitive, and
+no change to which VALUE names an author, since the author is its public key
+either way. (That last clause read "no address change" until issue #80 deleted
+the author address; with the value gone, the sentence it made would have been
+about nothing.)
 
 **The deferred work is the flows, not the crypto.** Creating or joining a Stoa
 has to ask *which* identity, which means a create-or-select step at both of
@@ -1069,7 +1088,7 @@ invites the wrong conclusion — that between them the problem is handled:
 4. ~~**The address**~~ **The public key — the only thing that settles
    identity.** Unforgeable, unmintable, and what every signature binds to. Its
    one weakness is not cryptographic: **it settles the question only if someone
-   looks.** Issue #80 deletes the author address, so a layer still pointing at it
+   looks.** Issue #80 deleted the author address, so a layer still pointing at it
    would point at a value no longer carried; the `generated-names` requirement
    *A name is never unique, never an identifier, and never numbered* is the
    authority, and the rendering obligations below say the same thing. **Stoa
@@ -1086,7 +1105,7 @@ Collected for §11.1 ("Rendering obligations, collected"), which arrives with th
 incomplete without something the view says:
 
 - **A name is never unique and never an identifier.** ~~The address is the
-  identity.~~ **The public key is the identity** — issue #80 deletes the author
+  identity.~~ **The public key is the identity** — issue #80 deleted the author
   address, and the `generated-names` spec's requirement *A name is never unique,
   never an identifier, and never numbered* is the authority. The obligation
   itself is unchanged and is the one Stoa titles already carry (§4.8, §5.7),
@@ -2855,7 +2874,9 @@ carrying:~~
 - ~~body and attachments, from the current version~~
 - ~~`isRevised`~~
 - ~~the author address~~ — **superseded**: an address alone cannot produce the
-  generated name, which derives from the public key. The read returns both.
+  generated name, which derives from the public key. Issue #80 then deleted the
+  author address outright, so the read returns the **public key** and nothing
+  beside it — see the `thread-read` spec.
 - ~~the parent post's id, so the view can render the reply structure~~
 - ~~moderation state~~
 
@@ -2885,8 +2906,9 @@ third thing for that list.** §11.1 frames Unicode and bidi rendering around
 deliberately does not sanitise, since normalising would break op-id agreement
 between peers. The same reasoning applies unchanged to **every** attacker-
 supplied string this section renders — post bodies above all, which are the
-largest and least constrained of them, and also author addresses if a view ever
-abbreviates one. `op.rs` preserves display text exactly and never normalises it,
+largest and least constrained of them, and also the abbreviated **public key** a
+view renders beside an author (~~author addresses~~ — issue #80 deleted the
+author address). `op.rs` preserves display text exactly and never normalises it,
 by design and with a test pinning that; so the obligation follows the text
 everywhere it goes, not only to the field where it was first noticed.
 

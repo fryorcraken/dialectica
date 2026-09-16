@@ -1,0 +1,297 @@
+# Tasks — key-sweep
+
+## Stages
+
+- [x] spec — `spec-writer`. 22 requirements rewritten, 1 removed, 4 renamed,
+      across six capabilities. `content-authoring` was audited and deliberately
+      left alone; the proposal says why, so that "considered" and "missed" are
+      distinguishable from the delta alone.
+- [x] design + code — `dev-writer`. `PublicKey::address`,
+      `AUTHOR_ADDRESS_PREFIX` and five keystore/wire accessors deleted;
+      `verify_authored_op` lost its claimed-author parameter and the guard that
+      compared a value to itself. 987 Rust tests green (unchanged count: 2
+      deleted, 2 added, 12 renamed — every one accounted for in the handover),
+      286 QML assertions green, clippy clean, `nix build .#lgx` green so the
+      `cfg(logos_scaffold)` adapter is known to compile.
+- [x] tests — `tester`. Test-list diff against `origin/main` verified name by
+      name: 13 gone, 13 new, 987 both sides — 11 renames, then **a 2-for-1
+      collapse plus 1 genuinely new test**. The collapse:
+      `an_author_address_is_not_a_bare_hash_of_the_key` and
+      `an_author_address_and_a_stoa_address_never_collide` are both properties OF
+      the deleted derivation and merged into one successor,
+      `no_derivation_turns_a_public_key_into_an_address`; separately
+      `verification_takes_no_author_identifier_beside_the_key` is net new.
+      **This line said "2 deletions, 2 additions" until review.** The net count
+      is identical, so no gate could see the difference — but the shape a reader
+      would look for (two tests deleted and replaced by nothing, two additions
+      covering new ground) is not what happened. Corrected rather than re-ticked.
+      The handover said "2 deleted, 2 added, 12 renamed"; the twelfth was a
+      rename of a top-level integration test, so the count of renames was one
+      over. Five mutations run and restored, each failing as predicted — the
+      retired author-address pin proved to be the deleted derivation's real
+      output (repointing `STOA_ADDRESS_PREFIX` makes
+      `no_derivation_turns_a_public_key_into_an_address` fail `left == right`).
+      **Three surviving comments credited the deleted address re-derivation for
+      a refusal the SIGNATURE check produces** — `op.rs`'s two test comments
+      (which task 5.2 claims to have corrected), `transport.rs`'s forged-op test
+      and `revision.rs`'s module doc; all corrected, the mechanism measured by
+      stubbing `verify_op_bytes`. `an_op_whose_key_does_not_bind_to_its_claimed_
+      author_is_refused` gained the control clause its own spec scenario names —
+      that the forged signature is VALID under the attacker's key — without
+      which a junk-signature fixture passed identically.
+      `verification_consults_the_key_..._and_nothing_beside_it` renamed to
+      `verification_takes_no_author_identifier_beside_the_key`: the arity check
+      discharges the scenario's first clause structurally and only the
+      `supplied` half of its second, and the old name claimed the `derived`
+      half too. Both `// NO SPEC:` markers confirmed genuinely unspecified.
+- [x] review: correctness — `code-reviewer`. 2 entries, **neither a code
+      defect** — one for `closer` (task 5.2's wording is true only because the
+      tester repaired it; all three corrections verified present) and one for
+      `spec-writer` (the feed reply's `author` changed meaning with no governing
+      requirement; the deferral is right, the box keeps it from being lost).
+      **The test-list accounting holds**, rebuilt independently from
+      `cargo test -- --list` on both sides: 987 identifiers each, each side
+      verified duplicate-free so the difference is exact rather than a multiset
+      artefact, 13 gone / 13 new matching name by name. Ran rather than read: the
+      retired pin reproduces the deleted derivation's hex exactly; the dropped
+      guard was genuinely vacuous on its only production path; every surviving
+      `Address` swept **by type, not name**, all Stoa. `cargo mutants` on
+      `identity.rs` — 28 caught, 5 missed, all five pre-existing `Display`/`Debug`
+      paths untouched here. Hand-mutating both re-pointed author fields to a
+      *same-shape wrong identifier* (`stoa_address(key)`, still 64 hex chars —
+      the failure a length check cannot see) is caught at core, wire and
+      end-to-end. **`nix build .#lgx` ran green from the worktree**, so the
+      `cfg(logos_scaffold)` adapter is independently confirmed to compile rather
+      than merely reported.
+- [x] review: security — `code-reviewer`. 2 findings, both for `tester`, both
+      test-evidence gaps rather than live defects. **The vacuity claim holds**:
+      on main `SignedOp::verify` computed the claimed author by calling
+      `.address()` on the op's own key, so the guard compared a value to itself,
+      and the probe/keystore round-trips now bind at least as tightly by
+      comparing the reported public key. Stubbing `verify_op_bytes` to `true`
+      fails **43 tests across nine modules**, so the signature check is pinned in
+      depth as the sole remaining mechanism, and `PublicKey::from_bytes` is
+      *stricter* than the `Address` parse it replaces. `OP_SIGNING_PREFIX`,
+      `STOA_ADDRESS_PREFIX`, `OP_ID_PREFIX` and both HKDF salts byte-identical to
+      main; `moderation.rs`, `membership.rs` and `log/` entirely untouched. The
+      gap: ~17 unspecified forgery fixtures carry no control proving the forged
+      signature was genuinely valid, so they cannot tell an authorship forgery
+      from a junk signature — replacing the attacker signature with fabricated
+      bytes leaves **987 of 987 passing**. It matters more after this change,
+      since the deleted guard used to give a forged op a second independent
+      reason to be refused.
+- [x] review: readability — `code-reviewer`. 10 findings in
+      `findings/readability.md` — 8 defects, 2 stylistic. **Two false claims
+      survived both earlier sweeps**, both in `tests/end_to_end.rs`, the one file
+      neither reached: its module doc still teaches "an author address is a hash
+      of a key" as a live derivation technique, and the rival-explanation comment
+      on the keystore-to-feed test names an address three times for a body the
+      piece repointed to a key. **One fabricated numeric pair**: "THREE pins,
+      where there were four" against a test holding five (six on `origin/main`),
+      copied from the `identity` spec's own "three pins … three derivations",
+      so both need correcting or the tally returns. Tasks 5.2 and 5.3 are ticked
+      over statements the tester disproved — 5.2 still says "the two test
+      comments" and names neither of the two that were missed, and 5.3 still
+      records `grep -i "author address"` as its verification. Otherwise the
+      sweep is very good: every other spelling of the deleted claim across
+      `dialectica/`, `dialectica-ui/` and `docs/` is either a Stoa address or a
+      past-tense correction, every other numeric claim checked out against the
+      code, and the retired pin's "MEASURED" claim was confirmed by reinstating
+      the deleted derivation inline.
+- [x] review: architecture — `code-reviewer`. 3 findings, none blocking on
+      shape: 2 for `spec-writer` (the proposal promises two bare "The address is
+      the identity" sentences are scoped to say Stoa and neither delta makes the
+      edit — `stoa-metadata` has no delta at all; and one public key is now
+      reported under three field names across six replies, which this change
+      created by collapsing three values into one and records nowhere), 1 for
+      `dev-writer` (the shared `address` property's declaration says nothing
+      about now holding two kinds of value). **Leaving `Address` unenforced is
+      defensible** — every non-test `from_bytes` site is a Stoa address and
+      `OpId` is already its own type, so the newtype buys less than before;
+      the absence pin leaves a runtime witness. `verify_authored_op` still earns
+      its name and is not a pass-through — it owns the three parse refusals on
+      the attacker path and its arity is compile-gated. 987 Rust tests green.
+- [x] review: spec-test — `spec-test-reviewer`. Every delta requirement across
+      all six capabilities has a test; no delta scenario is untestable as
+      written. Both `// NO SPEC:` markers confirmed genuine against the LIVE spec
+      tree. Three mutations run and restored: repointing `STOA_ADDRESS_PREFIX` to
+      the retired author prefix fails `no_derivation_turns_a_public_key_into_an_
+      address` with both sides printing the identical pinned hex — the pin is a
+      witness, not a tautology; repointing `FeedRow::author` to the Stoa address
+      is caught by four tests. No surviving mutation. 987 green (957 + 30). One
+      finding, low severity: the test-list shape is a 2-for-1 collapse plus 1 new
+      test, not "2 deletions, 2 additions" — same net count, so no gate sees it.
+- [x] review: design — `design-reviewer`. 3 findings, all for `dev-writer`, all
+      gaps in the record rather than code contradicting it. Every one of the
+      seven Decisions is taken as recorded, and Decision 7's six `origin/main`
+      line citations were each read and are accurate. Both `// NO SPEC:` markers
+      exist (`feed.rs:657`, `wire.rs:6696`) and both cite a design entry that
+      exists. `docs/PLAN.md` is consistent — the one surviving "The address is
+      the identity" (`:3060`) is Stoa-scoped by its own paragraph. The gaps: the
+      rotation affordance is given up with no Decisions entry (it migrated to the
+      `identity` spec and `identity.rs` but not here); the slate distinctness
+      clause was *replaced* with derivation-path rather than dropped, unrecorded;
+      and `design.md:128` cites an `op-transport` "verification step" the spec
+      does not contain — measured, zero grep matches either side.
+- [x] findings all ticked, `findings/` deleted — `closer`. Both gates run:
+      `grep -rn "^- \[ \]"` returned nothing, and `grep -rc "^- \["` was
+      non-zero for all six files (10+3+2+3+1+2 = 21), so no findings file was
+      written in a shape the gate cannot see. The deferred finding's reasoning
+      had already moved to `design.md` §5, which names issue #91 as its home;
+      #91 verified OPEN before deleting.
+- [x] `openspec validate --strict`, then `archive` — `closer`. Every MODIFIED
+      and REMOVED heading checked character for character against the live
+      specs, and all three RENAMED pairs matched their FROM heading. Archive
+      applied 24 modified, 1 removed, 4 renamed across seven capabilities;
+      diffed the promotion rather than trusting it. The kept items survive:
+      the Stoa address, `OP_SIGNING_PREFIX`, both HKDF salts and the four
+      remaining derivation pins. `validate --strict --all`: 22 passed, 0 failed.
+- [ ] CI green, PR merged — `closer`
+
+## Implementation
+
+Ordered by dependency: the derivation goes first, because every other task is a
+call site the compiler names once it is gone.
+
+## 1. Delete the derivation
+
+- [x] 1.1 Delete `PublicKey::address` and `AUTHOR_ADDRESS_PREFIX` from
+      `identity.rs`, leaving a comment where the method was saying what it
+      derived and why not to add one back. Verify: `cargo build -p
+      dialectica-core` fails only at call sites, never inside `identity.rs`.
+- [x] 1.2 Rewrite `Address`'s doc comment to state the survivor positively — an
+      address identifies a Stoa — and record that `derive_stoa_key`'s `Address`
+      parameter is an *input* rather than a leftover. Verify by reading: the doc
+      opens by saying what the type IS ("A 32-byte **Stoa** address") rather than
+      what it stopped being.
+      **Corrected after review.** This line read *"the phrase 'One type for both'
+      appears nowhere"*, which is false — `grep -rn -i "one type for both"` over
+      `dialectica/` returns `identity.rs:108`, where it sits in a past-tense
+      clause describing what the type used to be. That instance is correct prose
+      and was deliberately kept, so the recipe, not the code, was wrong. A
+      verification stated as the absence of a string fails whenever the string
+      has a legitimate historical use; state it over what the doc now asserts.
+- [x] 1.3 Drop `verify_authored_op`'s `author: &Address` parameter and the
+      `key.address() != *author` guard. Verify: the new
+      `verification_consults_the_key_the_op_carries_and_nothing_beside_it` binds
+      `verify_authored_op` to a `fn(&[u8], &[u8], &[u8]) -> bool`, so a
+      reintroduced parameter is a COMPILE error rather than a silent widening.
+- [x] 1.4 Retire the author-address pin without touching the other three.
+      Verify: `no_derivation_turns_a_public_key_into_an_address` passes, and its
+      pinned hex was MEASURED to be the deleted derivation's own output — a probe
+      recomputing `SHA256(AUTHOR_ADDRESS_PREFIX || 0x01 || key)` inline was run
+      and watched fail an `assert_ne!` against it.
+
+## 2. Delete the accessors that returned one
+
+- [x] 2.1 Delete `Keystore::identity_address`, `Keystore::stoa_address` and
+      `Keystore::stoa_address_at_path`, driving the deletion by RETURN TYPE
+      rather than by name — the last two take a Stoa address and return an author
+      one. Verify: `identity::stoa_address` (the Stoa derivation) still exists and
+      `the_wire_constants_are_pinned_to_known_answers` still pins it.
+- [x] 2.2 Collapse `creator_and_poster_in` and `poster_address_in` into
+      `creator_key_in`, whose pair's second element was a pure function of its
+      first. Verify: `the_creator_a_creation_names_is_the_identity_the_probe_reports`
+      passes through both wire handlers, and the adapter compiles under
+      `nix build .#lgx`.
+
+## 3. Re-point the six reply sites
+
+- [x] 3.1 `feed.rs`'s `FeedRow::author` and `thread.rs`'s `ThreadItem::author`
+      carry the key's hex. Verify: `the_author_is_the_public_key_that_signed` and
+      `every_item_carries_the_key_that_signed_and_no_second_identifier`.
+- [x] 3.2 Delete `ThreadItem::author_key` and the `authorKey` JSON field, the
+      second of two fields whose justification is gone. Verify: the thread key-set
+      assertions in `a_thread_reply_carries_exactly_its_contracted_keys_and_no_others`
+      compare the WHOLE set, so a restored `authorKey` fails there.
+- [x] 3.3 Delete `Candidate::address`, `Kept::Stored::address` and
+      `Whoami::Identity::address` — each had a `publicKey` already beside it.
+      Verify: the three pinned JSON shapes, plus
+      `a_slate_reply_carries_a_public_key_and_no_address_for_every_candidate`.
+- [x] 3.4 Point `posting_identity` at `stoa_public_key_at_path`. Verify:
+      `the_probe_and_whoami_report_the_same_identity_for_one_user_and_stoa` and
+      `the_key_a_publish_signs_with_is_the_identity_the_probe_reports`.
+
+## 4. The view
+
+- [x] 4.1 Rename `PostHeader.identityAddress` to `identityKey` and rewire
+      `FeedScreen`. Verify: `check_qml_members.sh` and the QML suite pass, and
+      `check_qml_names.py` reports clean.
+- [x] 4.2 Point `DOnboardingScreen` at `publicKey` on the slate candidate and the
+      keep reply — `isCandidate`, the kept-reply guard, `keptIdentity`, and the
+      row and kept-state bindings — and correct the uniqueness note to name the
+      public key, which the spec requires. Verify: 286 QML assertions green with
+      `check_bindings` reporting no undefined binding. **Measured:** reverting one
+      kept-state binding to `keptIdentity.address` leaves all 52 assertions in
+      that spec "passed" and is caught only by `check_bindings`, so that gate —
+      not the assertions — is what covers this.
+- [x] 4.3 Leave `Identicon` and `AddressLabel` alone, both generic over a Stoa
+      address, and correct `Identicon`'s comment, which said the rename was this
+      piece's to make. Verify by reading: neither component's `address` property
+      changed, and no comment claims a pending rename.
+
+## 5. Correct every claim the code disproves
+
+- [x] 5.1 Correct `op.rs`' three claims that `verify_authored_op` "re-derives"
+      an address or "binds the key to the claimed address", and `identity.rs`'
+      paragraph saying the address check is why the function exists.
+- [x] 5.2 Correct the comments crediting the address check for a refusal the
+      SIGNATURE check produces. **These tests passed before and pass now**; only
+      the stated reason was wrong, and it was wrong before this change too, since
+      the only caller derived the claimed author from the op's own key.
+      **Corrected after review — this line overstated what the `dev-writer`
+      did.** It read *"the two test comments … `op.rs`'s forged-op test and
+      `revision.rs`'s `a_forged_revision_is_dropped`"*. There were **four such
+      comments across three files**, and this task, as written, named neither of
+      the two it missed. What the `dev-writer` corrected was `op.rs` (two test
+      comments, at 1427 and 1444). The **`tester` found and corrected the
+      remaining two**, `transport.rs:1441` and `revision.rs:42`, and measured the
+      mechanism by stubbing `verify_op_bytes` to return `true`. All four are
+      present in the tree today and were re-read at review time; the residue was
+      provenance, not code. Recorded this way because a ticked task is read as an
+      account of what its own stage measured, and the sibling tasks in section 5
+      inherit that trust.
+- [x] 5.3 Scope `stoa.rs`' bare "The address is the identity" to say Stoa, and
+      correct `transport.rs`' `FailsVerification` doc, which described a binding
+      step that no longer exists.
+      Verify with **several spellings, over the whole tree including `tests/`**:
+      `grep -rn -i -E "author address|authoraddress|re-deriv[a-z]* the address|`
+      `rederiv[a-z]* the address|expected address|hash of a key|address is a`
+      `hash"` over `dialectica/` and `dialectica-ui/`. Every hit must be a Stoa
+      address, a spec quotation, or a past-tense clause carrying its own
+      "until issue #80" attribution.
+      **Corrected after review — the original recipe was the defect it was meant
+      to catch.** This line recorded `grep -i "author address"` over
+      `dialectica*/src`, and that check was **proved insufficient twice**. It
+      missed `transport.rs:1441` and `revision.rs:42`, which said *"re-deriving
+      the address"* and contain no such substring; and its `*/src` scope excluded
+      `dialectica-core/tests/`, where the last two false claims survived both the
+      `dev-writer`'s and the `tester`'s sweeps until the readability review
+      reached them. This is the repo's recorded **"a gate the defect satisfies"**
+      pattern, and it had been left in the document that teaches it. A sweep is
+      only ever complete against its own search: vary the phrasing, and never
+      scope to `src` when the claim can live in a test comment.
+- [x] 5.4 Put `names.rs`, `Identicon.qml`, `docs/PLAN.md` and `docs/IDENTICON.md`
+      into the past tense — each said issue #80 "deletes" the address, and one
+      said `FeedRow` "currently has" the address-only gap, which the same change
+      closes.
+
+## 6. Gates
+
+- [x] 6.1 `cargo test -p dialectica -p dialectica-core`: 987 green, the same
+      count as the baseline. Accounted for exactly: 2 tests deleted (both about
+      the deleted derivation's own properties), 2 added, 12 renamed.
+- [x] 6.2 `cargo clippy --all-targets -- -D warnings`: clean, no new warning.
+- [x] 6.3 `nix build .#lgx`: green. This is the ONLY gate that compiles the
+      `#[cfg(logos_scaffold)]` adapter, where a compile error reached review on
+      #85 with every local gate passing.
+- [x] 6.4 `run-qml-tests.sh` and `check_qml_names.py`: green.
+
+**Not done, deliberately.** The feed reply's missing capability is not written —
+the proposal records the gap and says a feed contract is a capability's worth of
+work. The `// NO SPEC:` markers on the feed row's `author` and the thread item's
+surviving field name are what make the two choices this left visible.
+
+**Not done, pre-existing.** The nine unformatted files in `dialectica-core` are
+untouched; that is the known CI fmt-gate gap and reformatting them would bury
+this diff.

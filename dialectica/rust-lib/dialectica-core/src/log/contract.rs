@@ -81,6 +81,22 @@ fn an_op_with_an_invalid_signature_is_stored_anyway<L: OpLog>(log: &mut L) {
     };
     // The fixture must genuinely be a forgery, or this test proves nothing.
     assert!(!forged.verify(), "the fixture must be an actual forgery");
+    // **And the forgery must be an AUTHORSHIP forgery, not junk bytes.** The
+    // refusal guard above is satisfied identically by a fabricated signature, so
+    // on its own it demonstrates "a bad signature is refused" rather than "a
+    // valid signature under the wrong key is refused" — which is the attack this
+    // fixture names. The clause below is the control: the same signature verifies
+    // under the attacker's own key, so the refusal above is a mismatch of
+    // authorship and nothing else.
+    assert!(
+        crate::identity::verify_authored_op(
+            &attacker.public_key().to_bytes(),
+            &forged.op.canonical_bytes(),
+            &forged.signature.to_bytes()
+        ),
+        "the attacker's signature must be valid under the attacker's own key, or \
+         this fixture is a junk signature rather than a forgery"
+    );
 
     let id = forged.op.id();
     assert_eq!(

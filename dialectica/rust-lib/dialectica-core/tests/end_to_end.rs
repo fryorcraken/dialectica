@@ -118,9 +118,16 @@
 //! The instance this file has to work hardest to avoid is asserting that
 //! something "came back" using a value that came from the same call that produced
 //! it. A read that returns what the write just handed us is the test agreeing
-//! with itself. Where an expected value can be derived independently — an address
-//! is a hash of a record, an author address is a hash of a key — it is derived
-//! that way; where it cannot, it is hardcoded.
+//! with itself. Where an expected value can be derived independently — a Stoa
+//! address is a hash of its genesis record, a per-Stoa signing key is derived
+//! from the master key and the Stoa — it is derived that way; where it cannot,
+//! it is hardcoded.
+//!
+//! This paragraph offered "an author address is a hash of a key" as its second
+//! example until issue #80 deleted that derivation. It is replaced rather than
+//! dropped because the paragraph needs two examples to make its point, and
+//! because a reader following the old one would have written
+//! `key.public_key().address()`, which no longer compiles.
 //!
 //! # Mutations run against this file, and what each killed
 //!
@@ -619,8 +626,18 @@ fn a_moderation(
 /// which is exactly what a hostile peer does. The log stores it deliberately
 /// (§3.3), so this is the fixture that proves the reader is the thing refusing
 /// it.
+///
+/// **Both halves of "forgery" are asserted here**, in the helper, so every
+/// caller inherits them. The first — that it does not verify — is the obvious
+/// one. The second is the one that was missing: that the signature IS valid
+/// under the signer's own key, which is what makes this an authorship forgery
+/// rather than 64 junk bytes. A refusal guard alone is satisfied identically by
+/// a fabricated signature, so callers would have been demonstrating "a bad
+/// signature is refused" instead of the attack they name — and since issue #80
+/// deleted the address guard, the signature check is the sole mechanism that
+/// tells those two apart.
 fn a_forged_post(stoa: &Address, claimed: &PublicKey, signer: &SecretKey, body: &str) -> SignedOp {
-    Op {
+    let forged = Op {
         stoa: *stoa,
         author: claimed.clone(),
         kind: OpKind::Post {
@@ -630,7 +647,18 @@ fn a_forged_post(stoa: &Address, claimed: &PublicKey, signer: &SecretKey, body: 
             attachments: vec![],
         },
     }
-    .sign(signer)
+    .sign(signer);
+    assert!(!forged.verify(), "the fixture must be an actual forgery");
+    assert!(
+        dialectica_core::identity::verify_authored_op(
+            &signer.public_key().to_bytes(),
+            &forged.op.canonical_bytes(),
+            &forged.signature.to_bytes()
+        ),
+        "the signature must be valid under the signer's own key, or this fixture \
+         is a junk signature rather than a forgery"
+    );
+    forged
 }
 
 /// The bodies a feed page renders, in order. The shape most assertions compare.
@@ -647,12 +675,18 @@ fn a_keystore_on_disk_signs_a_post_that_a_reopened_store_still_attributes_to_it(
     // post goes into a SQLite file, both connections are dropped, and both files
     // are reopened from their paths before anything is asserted.
     //
-    // The rival explanation this fixture excludes: that the author address came
-    // out of the row we just wrote. It does not — the expected address is
-    // re-derived from the keystore REOPENED FROM DISK, so the assertion compares
-    // two independent paths to the same value. A store that stashed the address
-    // as a column and handed it back would pass a weaker version of this test and
-    // fail this one, because the keystore half would still have to agree.
+    // The rival explanation this fixture excludes: that the author key came out
+    // of the row we just wrote. It does not — the expected key is re-derived from
+    // the keystore REOPENED FROM DISK, so the assertion compares two independent
+    // paths to the same value. A store that stashed the author as a column and
+    // handed it back would pass a weaker version of this test and fail this one,
+    // because the keystore half would still have to agree.
+    //
+    // This paragraph said "author address" until issue #80 deleted that value.
+    // The mechanism is unchanged — it is the re-derivation from disk that
+    // excludes the rival, not which value is re-derived — but note the Stoa
+    // address a few lines below is a DIFFERENT value that survives, so this
+    // comment and that one are not saying the same thing.
     let dir = TempDir::new("keystore-to-feed");
     let key_path = dir.file("identity.key");
 
@@ -698,9 +732,9 @@ fn a_keystore_on_disk_signs_a_post_that_a_reopened_store_still_attributes_to_it(
     let reopened_keystore =
         Keystore::open(&key_path, &Unlock::Unencrypted).expect("the keystore reopens unencrypted");
 
-    // The expected author address, derived from the keystore that came back off
+    // The expected author key, derived from the keystore that came back off
     // disk — NOT read from the feed row being asserted on.
-    let expected_author = reopened_keystore.stoa_address(&stoa).to_hex();
+    let expected_author = reopened_keystore.stoa_public_key(&stoa).to_hex();
 
     let moderators = Moderators::of(&genesis).expect("a genesis record yields its moderator set");
     let page = feed::list_threads(&store, &moderators, &stoa, 0, 20, false)
@@ -713,7 +747,7 @@ fn a_keystore_on_disk_signs_a_post_that_a_reopened_store_still_attributes_to_it(
     );
     assert_eq!(
         page.items[0].author, expected_author,
-        "the surviving post is attributed to the address the reopened keystore derives"
+        "the surviving post is attributed to the key the reopened keystore derives"
     );
     // The thread id is the root post's op id, computed before the store ever saw
     // it. A store that re-derived an id from what it stored would differ here.
@@ -726,17 +760,17 @@ fn a_keystore_on_disk_signs_a_post_that_a_reopened_store_still_attributes_to_it(
 }
 
 #[test]
-fn the_same_keystore_posts_under_different_addresses_in_two_stoas() {
+fn the_same_keystore_posts_under_different_identities_in_two_stoas() {
     // §5.2's per-Stoa unlinkability, proved through the store rather than at the
     // derivation function. The rival explanation excluded: that the two feeds
     // differ because two different keystores wrote them. There is ONE keystore
     // here, reopened from one file, and it is asked for two Stoas' keys.
     //
-    // Asserting the two addresses merely differ would be weak — two hashes differ
-    // by default. So this also pins that each feed reports the address that
+    // Asserting the two identities merely differ would be weak — two derived keys
+    // differ by default. So this also pins that each feed reports the key that
     // keystore derives FOR THAT STOA, which a derivation ignoring its Stoa
     // argument would fail.
-    let dir = TempDir::new("per-stoa-address");
+    let dir = TempDir::new("per-stoa-identity");
     let key_path = dir.file("identity.key");
     Keystore::generate()
         .expect("the test host has randomness")
@@ -791,13 +825,13 @@ fn the_same_keystore_posts_under_different_addresses_in_two_stoas() {
     assert_eq!(bodies(&page_a), vec!["in Agora"]);
     assert_eq!(bodies(&page_b), vec!["in Lyceum"]);
 
-    // Each feed reports the address this keystore derives for that Stoa — the
+    // Each feed reports the key this keystore derives for that Stoa — the
     // independent derivation, not the row.
-    assert_eq!(page_a.items[0].author, ks.stoa_address(&a).to_hex());
-    assert_eq!(page_b.items[0].author, ks.stoa_address(&b).to_hex());
+    assert_eq!(page_a.items[0].author, ks.stoa_public_key(&a).to_hex());
+    assert_eq!(page_b.items[0].author, ks.stoa_public_key(&b).to_hex());
     assert_ne!(
         page_a.items[0].author, page_b.items[0].author,
-        "one identity must present two addresses across two Stoas (§5.2)"
+        "one master key must present two identities across two Stoas (§5.2)"
     );
 }
 
@@ -1313,6 +1347,19 @@ fn a_forged_hide_does_not_displace_the_genuine_one_that_sorts_after_it() {
     assert!(
         !forged_unhide.verify(),
         "the fixture's forgery must not verify, or it is not a forgery"
+    );
+    // And it is an AUTHORSHIP forgery rather than junk bytes: the signature is
+    // genuinely valid under the attacker's own key, so the refusal is the
+    // founder's key not matching. Without this, a fabricated signature satisfies
+    // the guard above and the test would pass while demonstrating something
+    // weaker than the attack it describes.
+    assert!(
+        dialectica_core::identity::verify_authored_op(
+            &attacker.public_key().to_bytes(),
+            &forged_unhide.op.canonical_bytes(),
+            &forged_unhide.signature.to_bytes()
+        ),
+        "the attacker's signature must be valid under the attacker's own key"
     );
 
     let genuine_hide = a_moderation(&stoa, &founder, &post_id, ModerationAction::Hide);
@@ -1885,19 +1932,20 @@ fn a_vote_is_stored_and_is_rendered_by_nothing() {
     // attribution a vote-rendering bug would produce.
     assert_eq!(
         author,
-        &poster.public_key().address().to_hex(),
+        &poster.public_key().to_hex(),
         "the row is attributed to whoever posted it"
     );
     assert_ne!(
         author,
-        &voter.public_key().address().to_hex(),
+        &voter.public_key().to_hex(),
         "and never to whoever voted on it"
     );
     // **No name on the row, and the destructure above is what pins that.**
     // `generated-names` requires that a name never travels on any reply, so the
     // attribution a view renders comes from deriving on the key rather than
-    // from a field here. The row carries the address; the key it owes a caller
-    // is the known gap recorded on `FeedRow::author`.
+    // from a field here. The row carries the key, which is that derivation's
+    // input — the gap `FeedRow::author` used to record as owed, closed by issue
+    // #80 deleting the author address the field used to hold.
     //
     // The destructure is the guard: restoring `display_name` to `FeedRow` makes
     // this test stop COMPILING, which is louder than a failed assertion and
@@ -2043,12 +2091,12 @@ fn a_request_naming_a_stoa_on_disk_comes_back_as_the_feed_in_json() {
     assert_eq!(v["items"][0]["body"]["text"], "over the wire");
     assert_eq!(v["page"], 0);
     assert_eq!(v["hasMore"], false);
-    // The author reaches the view as the hex address and never as a name: names
-    // are the view's to derive, and a name on the wire would be a second,
+    // The author reaches the view as the hex public key and never as a name:
+    // names are the view's to derive, and a name on the wire would be a second,
     // forgeable identifier beside the real one.
     assert_eq!(
         v["items"][0]["author"],
-        serde_json::Value::String(author.public_key().address().to_hex())
+        serde_json::Value::String(author.public_key().to_hex())
     );
 }
 
@@ -2440,7 +2488,7 @@ fn a_store_on_disk_that_is_not_a_database_reaches_the_view_as_the_error_shape() 
 ///   set is compared for equality rather than for containment;
 /// - **"the authors are whatever the ops say they are"** — excluded because the
 ///   expected pair is derived from the two SECRET KEYS, through
-///   `public_key().address()`, never read out of an op. A publish path that
+///   `public_key()`, never read out of an op. A publish path that
 ///   stamped a constant author, or the signer's key on somebody else's op, would
 ///   satisfy a self-referential version of this and fail this one.
 ///
@@ -2460,8 +2508,8 @@ fn a_store_seeded_from_two_identities_carries_exactly_those_two_authors() {
     // The expected pair, derived from the KEYS rather than from any op. This is
     // the operand the implementation did not produce.
     let mut expected = vec![
-        founder.public_key().address().to_hex(),
-        visitor.public_key().address().to_hex(),
+        founder.public_key().to_hex(),
+        visitor.public_key().to_hex(),
     ];
     expected.sort();
     assert_ne!(
@@ -2542,7 +2590,7 @@ fn a_store_seeded_from_two_identities_carries_exactly_those_two_authors() {
         .iter()
         .expect("the store is readable")
         .iter()
-        .map(|e| e.op.op.author.address().to_hex())
+        .map(|e| e.op.op.author.to_hex())
         .collect();
     authors.sort();
     authors.dedup();
@@ -2550,7 +2598,7 @@ fn a_store_seeded_from_two_identities_carries_exactly_those_two_authors() {
     assert_eq!(
         authors, expected,
         "the store must carry exactly the two identities that signed it — no \
-         collapse to one, no third author, and each address as its own key derives it"
+         collapse to one, no third author, and each key as the one that signed"
     );
 }
 
@@ -2684,8 +2732,8 @@ fn the_seeding_sequence_builds_a_nested_thread_whose_author_the_probe_does_not_r
     let feed_author = page.items[0].author.clone();
     assert_eq!(
         feed_author,
-        keystore.stoa_address(&stoa).to_hex(),
-        "the root must be attributed to the address the keystore derives for this Stoa"
+        keystore.stoa_public_key(&stoa).to_hex(),
+        "the root must be attributed to the key the keystore derives for this Stoa"
     );
 
     // ── Claim 3: the probe reports an identity the feed does not carry ──

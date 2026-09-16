@@ -190,8 +190,11 @@ pub struct Genesis {
     /// Declared at creation and immutable thereafter.
     pub policy: Policy,
     /// Human-readable, and explicitly NOT identity: names are never unique, and
-    /// §4.8 warns that announcements may impersonate a Stoa by name. The
-    /// address is the identity.
+    /// §4.8 warns that announcements may impersonate a Stoa by name. **The Stoa
+    /// address is the Stoa's identity** — scoped explicitly, because with the
+    /// author address deleted by issue #80 the unscoped sentence is the one a
+    /// reader would cite afterwards as authority for a value that no longer
+    /// exists.
     pub title: String,
 }
 

@@ -115,29 +115,32 @@ pub struct FeedRow {
     /// are two fields because they are two facts", and a moderator acts on this
     /// one.
     pub current_version: String,
-    /// The author's per-Stoa address (§5.2), hex.
+    /// The author's per-Stoa **public key** (§5.2), hex.
     ///
-    /// **The address is the identity.** No display name rides beside it: the
+    /// **The key is the identity.** No display name rides beside it: the
     /// `generated-names` capability requires that a name never travels, on any
     /// reply, because a derived value beside the material it derives from is two
     /// values that must agree and could disagree — and a name on the wire is one
     /// a relay could strip or forge.
     ///
-    /// This comment used to read: *"An address and never a name. There are no
-    /// names in core — the generated name is a pure function of this address and
-    /// is the view's to derive."* **The correction is kept because the false
-    /// half is still false**, and it is the half that matters: a name is a pure
-    /// function of the **public key**, not of the address. A holder of an
-    /// address alone cannot derive a name, because an address is a hash from
-    /// which no key is recoverable.
+    /// **This field carried an author address until issue #80**, and that was the
+    /// gap the comment here used to record as owed: a name and a mark are pure
+    /// functions of the **public key**, and a caller holding only an address
+    /// cannot arrive at either, an address being a hash from which no key is
+    /// recoverable. Carrying the key closes it — the row now supplies the
+    /// derivation's input, so a caller can render both channels.
     ///
-    /// **So this row does not yet put a caller in a position to render a name**,
-    /// and that is a known gap rather than a settled shape. What the row owes is
-    /// the derivation's *input* — the public key — which is a change to this
-    /// field's contract and to several merged specs, filed as its own issue.
-    /// What a caller may *not* conclude once it can is contracted by
+    /// What a caller may *not* conclude from a name it renders is contracted by
     /// `generated-names`, under *"A name is never unique, never an identifier,
     /// and never numbered"*, which binds whatever renders this row.
+    ///
+    /// **No capability owns this reply's shape, and that is stated rather than
+    /// hidden.** `generated-names` forbids a name on a feed row; nothing
+    /// specifies what a feed row *does* carry. So the change from an address's
+    /// hex to the key's was made with the code as its only authority, because
+    /// leaving it would have the row carry an identifier whose derivation no
+    /// longer exists. Writing that requirement is a capability's worth of work
+    /// and is deliberately not bundled into a deletion.
     pub author: String,
     /// The post body, sanitised for display.
     pub body: Sanitised,
@@ -267,7 +270,7 @@ pub fn list_threads<L: OpLog>(
         rows.push(FeedRow {
             thread: id.to_hex(),
             current_version: version.current.id().to_hex(),
-            author: entry.op.op.author.address().to_hex(),
+            author: entry.op.op.author.to_hex(),
             body: sanitise(version.body()),
             attachments: version.attachments().iter().map(|a| sanitise(a)).collect(),
             is_revised: version.is_revised(),
@@ -415,6 +418,21 @@ mod tests {
             op,
         };
         assert!(!forged.verify(), "the fixture must actually be a forgery");
+        // And an AUTHORSHIP forgery rather than junk bytes: valid under the
+        // attacker's own key. `!verify()` is a refusal guard that fabricated
+        // bytes satisfy identically, so without this the test would show "a bad
+        // signature does not render" rather than "a forged author does not
+        // render" — the property it names, and the one the signature check is now
+        // solely responsible for since issue #80 deleted the address guard.
+        assert!(
+            crate::identity::verify_authored_op(
+                &attacker.public_key().to_bytes(),
+                &forged.op.canonical_bytes(),
+                &forged.signature.to_bytes()
+            ),
+            "the attacker's signature must be valid under the attacker's own key, \
+             or this fixture is a junk signature rather than a forgery"
+        );
 
         let genuine = a_thread(2, "genuine");
         let log = a_log(vec![forged, genuine.clone()]);
@@ -630,7 +648,7 @@ mod tests {
     }
 
     #[test]
-    fn a_row_carries_the_address_and_no_derived_display_name() {
+    fn a_row_carries_the_public_key_and_no_derived_display_name() {
         // "No reply SHALL carry a display name: not a feed row, not a thread
         // item, not an onboarding slate candidate."
         //
@@ -651,11 +669,18 @@ mod tests {
         // would not violate the requirement but is the step before one that
         // does, and a reader of `feed.rs` should not have to open `wire.rs` to
         // learn that the absence is deliberate.
+        // NO SPEC: that the `author` field carries the signing key's hex is this
+        // change's choice. No capability owns the feed reply's shape —
+        // `generated-names` forbids a name on a feed row and nothing states what
+        // a row does carry — so the move from an author address's hex to the
+        // key's was made with the code as its only authority, because leaving it
+        // would have the row name an author in a form whose derivation no longer
+        // exists. `design.md` §5 carries it.
         let head = a_thread(4, "mine");
         let log = a_log(vec![head]);
         let rows = all_of(&log, false);
 
-        assert_eq!(rows[0].author, a_key(4).public_key().address().to_hex());
+        assert_eq!(rows[0].author, a_key(4).public_key().to_hex());
 
         // The struct's fields, enumerated by destructuring rather than by a
         // list someone keeps up to date: adding a field to `FeedRow` makes this
@@ -673,16 +698,16 @@ mod tests {
     }
 
     #[test]
-    fn two_keys_that_derive_one_name_stay_two_rows_with_two_addresses() {
+    fn two_keys_that_derive_one_name_stay_two_rows_with_two_keys() {
         // The collision case, with two REAL colliding keys rather than a stubbed
         // derivation — the pair was found by searching the shipped scheme (see
         // `names::tests_support::COLLIDING_SEED_A`).
         //
         // **What the feed owes here is narrower than it was**, now that no row
         // carries a name: two identities whose keys happen to derive one name
-        // must still be two rows with two addresses. The feed must not collapse,
-        // deduplicate or otherwise merge them — the addresses are what tells
-        // them apart, and they are the only thing on the row that could.
+        // must still be two rows with two keys. The feed must not collapse,
+        // deduplicate or otherwise merge them — the keys are what tells them
+        // apart, and they are the only thing on the row that could.
         //
         // The pair is kept rather than replaced by two arbitrary keys because it
         // exercises the case where everything a reader *sees rendered* is
@@ -718,18 +743,18 @@ mod tests {
 
         assert_ne!(
             rows[0].author, rows[1].author,
-            "the two rows must carry different author addresses"
+            "the two rows must carry different author keys"
         );
         assert_eq!(
             rows[0].author,
-            ka.public_key().address().to_hex(),
-            "each row's address must be its own signer's"
+            ka.public_key().to_hex(),
+            "each row's key must be its own signer's"
         );
-        assert_eq!(rows[1].author, kb.public_key().address().to_hex());
+        assert_eq!(rows[1].author, kb.public_key().to_hex());
     }
 
     #[test]
-    fn two_posts_by_one_author_carry_one_address() {
+    fn two_posts_by_one_author_carry_one_key() {
         let first = a_thread(4, "one");
         let key = a_key(4);
         let second = Op {
@@ -769,7 +794,7 @@ mod tests {
         let log = a_log(vec![head]);
         let rows = all_of(&log, false);
 
-        assert_eq!(rows[0].author, a_key(4).public_key().address().to_hex());
+        assert_eq!(rows[0].author, a_key(4).public_key().to_hex());
         assert_ne!(
             rows[0].author, "pensive aporia of lampsakos",
             "the body's text must not become the author field"
@@ -777,15 +802,15 @@ mod tests {
     }
 
     #[test]
-    fn the_author_is_an_address_and_matches_the_key_that_signed() {
-        // §11.1 obligation 6: the address is the identity. It must be the
-        // address of the key that actually signed, not of the field's claim —
-        // though verification has already made those the same thing by here.
+    fn the_author_is_the_public_key_that_signed() {
+        // §11.1 obligation 6: the public key is the identity. It must be the key
+        // that actually signed, not the field's claim — though verification has
+        // already made those the same thing by here.
         let head = a_thread(4, "mine");
         let log = a_log(vec![head]);
         let rows = all_of(&log, false);
-        assert_eq!(rows[0].author, a_key(4).public_key().address().to_hex());
-        assert_ne!(rows[0].author, a_key(2).public_key().address().to_hex());
+        assert_eq!(rows[0].author, a_key(4).public_key().to_hex());
+        assert_ne!(rows[0].author, a_key(2).public_key().to_hex());
     }
 
     // ─── Ordering ─────────────────────────────────────────────────────────

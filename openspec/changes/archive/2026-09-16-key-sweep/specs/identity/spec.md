@@ -1,105 +1,4 @@
-# identity Specification
-
-## Purpose
-
-Defines how a user's per-Stoa identity is derived, what an address is derived from, and what a verification of an op does and does not establish — so that a pseudonym is stable within a Stoa, unlinkable across Stoas, and no attacker-supplied key, signature or address can crash a parser or pass as someone else's.
-
-## Requirements
-
-### Requirement: A user has one identity per Stoa, and it is permanent
-
-A user SHALL have exactly one identity within a Stoa, and that identity SHALL be
-reproducible from the user's root secret, the Stoa's address, and the derivation
-path recorded for that Stoa.
-
-Derivation SHALL depend on nothing else. A session counter, a wall clock, a device
-identifier or any other value varying between runs SHALL NOT participate, because
-the same root, Stoa and path must yield the same identity on any device and after
-any restart. The derivation taking only a root secret and a Stoa address SHALL
-remain and SHALL keep that same property, because identities already derived under
-it are permanent and its inputs are what a peer can still recompute from.
-
-The derivation path is a value the user chose at onboarding rather than one any
-published value carries, so it SHALL be recorded in storage; the
-`identity-onboarding` capability owns that obligation and the requirement that the
-record be exportable. **This is a narrower guarantee than deriving from the root
-and the Stoa alone**, and the difference is deliberate: it buys the user a choice
-of identity, at the cost that the root secret is no longer sufficient on its own to
-reproduce their identities.
-
-Where a derivation scheme taking a path and one taking only the root and the Stoa
-both exist, they SHALL be distinguishable, so that one scheme's identities cannot
-be silently reproduced by the other. The scheme is versioned for this purpose.
-
-A stable pseudonym is what lets anything accumulate against an identity — a
-moderator's judgement, or a relevance signal — and the transport binds its sender
-identifier to it for a channel's lifetime, so instability here would change the
-identifier other peers know a user by.
-
-#### Scenario: The same root and Stoa always yield the same identity
-
-- **WHEN** a key is derived twice from one root secret and one Stoa address
-- **THEN** both derivations yield the same public key
-
-#### Scenario: The same root, Stoa and path always yield the same identity
-
-- **WHEN** a key is derived twice from one root secret, one Stoa address and one
-  derivation path
-- **THEN** both derivations yield the same public key
-
-#### Scenario: A derived identity survives storage and reload
-
-- **WHEN** a derived key's stored form is written out and read back
-- **THEN** the restored key has the same public key as the original
-
-#### Scenario: A derived key is a usable identity, not merely a distinct one
-
-- **WHEN** a derived key signs an op
-- **THEN** the signature verifies under that key's public half
-
-#### Scenario: Different paths for one Stoa yield different identities
-
-- **WHEN** two keys are derived from one root secret and one Stoa address under
-  two different derivation paths
-- **THEN** their public keys differ
-
-#### Scenario: The path-taking scheme does not collide with the scheme without one
-
-- **WHEN** a key is derived from a root and a Stoa under the scheme that takes a
-  path
-- **AND** a key is derived from the same root and Stoa under a scheme that takes
-  none
-- **THEN** the two public keys differ
-
-### Requirement: Identities are unlinkable across Stoas
-
-The same user in two Stoas SHALL be two identities that the protocol does not
-relate. Deriving for two different Stoa addresses from one root SHALL yield
-different keys, and two different roots in one Stoa SHALL yield different keys.
-
-There SHALL be no way to compute a Stoa identity's public half from the root's
-public half. This is the property cross-Stoa unlinkability rests on: were public
-derivation available, anyone holding a user's root public key could enumerate
-their pseudonym in every Stoa they participate in.
-
-This is a privacy guarantee about the protocol and not about the world. Within a
-Stoa a pseudonym is deliberately stable, and writing style, posting time and the
-reply graph link a user's identities whatever the key derivation does.
-
-#### Scenario: Two Stoas yield different identities from one root
-
-- **WHEN** one root secret is used to derive identities for two different Stoas
-- **THEN** the two public keys differ
-
-#### Scenario: Two users in one Stoa do not collide
-
-- **WHEN** two different root secrets are used to derive identities for one Stoa
-- **THEN** the two public keys differ
-
-#### Scenario: A per-Stoa identity is not the root identity
-
-- **WHEN** a per-Stoa key is derived from a root secret
-- **THEN** its public key differs from the public key of the root used directly
+## MODIFIED Requirements
 
 ### Requirement: A public key that can never verify a signature is refused at the parse
 
@@ -138,71 +37,6 @@ ordinary generation SHALL always parse.
 
 - **WHEN** a key that can never verify a signature is held despite the parse
   guard, and any signature is checked under it
-- **THEN** verification fails
-
-### Requirement: A wrong-length key or signature is an error, never a panic
-
-Parsing a public key, a secret key or a signature SHALL reject input of any
-length other than the one the scheme defines, and SHALL do so by returning an
-error.
-
-Every one of these values arrives inside an inbound op and is
-attacker-controlled. A panic on this path aborts the module process, the caller
-learns only that its call timed out, and every later call reports the module as
-not loaded — so a parser that panics on a short slice is a remotely triggerable
-denial of service, not a robustness nicety.
-
-#### Scenario: A key of the wrong length is refused
-
-- **WHEN** a byte string shorter or longer than a public key is parsed
-- **THEN** parsing fails rather than panicking
-
-#### Scenario: A signature of the wrong length is refused
-
-- **WHEN** a byte string shorter or longer than a signature is parsed
-- **THEN** parsing fails rather than panicking
-
-#### Scenario: Malformed fields on the verification path are a refusal
-
-- **WHEN** an op is verified with a key or a signature of any wrong length or
-  with arbitrary bytes in either
-- **THEN** verification reports failure rather than panicking
-
-### Requirement: Signing is domain-separated by purpose
-
-A signature SHALL commit to a fixed prefix naming what it is for, so that a
-signature made over one kind of payload cannot be presented as a signature over
-something else that happens to share bytes.
-
-The prefix SHALL be fixed-width. A variable-length prefix concatenated with
-variable-length data is how two different inputs come to share a preimage.
-
-This prefix separates a dialectica op signature from a signature over anything
-else. It does **not** separate one op kind from another, because every op is
-signed under the same prefix — that separation comes from the op encoding being
-unambiguously typed, and belongs to the `op-format` capability.
-
-#### Scenario: A signed payload is not a bare hash of itself
-
-- **WHEN** the value signed over a payload is compared with the undomain-
-  separated hash of that same payload
-- **THEN** they differ
-
-#### Scenario: A signature verifies over the bytes it was made over
-
-- **WHEN** a signature is made over some bytes and checked against those bytes
-  under the signing key's public half
-- **THEN** verification succeeds
-
-#### Scenario: A signature does not verify over different bytes
-
-- **WHEN** a signature is checked against bytes other than those it was made
-  over
-- **THEN** verification fails
-
-#### Scenario: A signature does not verify under a different key
-
-- **WHEN** a signature made by one key is checked under a different key
 - **THEN** verification fails
 
 ### Requirement: The derivation constants are pinned against silent change
@@ -361,24 +195,6 @@ would offer a choice that does not exist.
   carries, and the signature
 - **AND** no separate author identifier is supplied or derived
 
-### Requirement: Authenticity is not authority
-
-A successful verification SHALL mean exactly that this op is authentically from
-the author it claims. It SHALL NOT be read as meaning the op is permitted.
-
-Whether an author may moderate, may revise a given post, or may post at all
-under a Stoa's policy each requires state an op does not carry, and each is
-settled elsewhere on read. A caller that treats a successful verification as
-"this op is valid" is therefore wrong, and the contract says so rather than
-leaving it to be inferred.
-
-#### Scenario: Verification consults no authority state
-
-- **WHEN** an op is verified
-- **THEN** the check uses only the claimed author, the key, the signed bytes and
-  the signature
-- **AND** no moderator set, genesis record or posting policy is consulted
-
 ### Requirement: Identity does not rotate, and this is a contract not an omission
 
 There SHALL be no way to replace the key behind an identity while keeping the
@@ -417,29 +233,50 @@ now harder, rather than infer that nobody considered it.
   forbids it — so a scenario written over that counterfactual could never be
   run. What is checkable is how many identifiers an identity is reported by.
 
-### Requirement: A secret key cannot be copied, logged or serialised by accident
+## RENAMED Requirements
 
-A secret key SHALL NOT be duplicable, renderable for display, or serialisable
-through any interface this capability provides. Each of those is a way a secret
-reaches a log line, a reply or a second copy nobody tracks, and none is needed
-in order to sign.
+- FROM: `### Requirement: Verification binds the key to the claimed author`
+- TO: `### Requirement: Verification establishes that the key carried by the op signed it`
 
-A secret key SHALL be reconstructible from its stored form, because a keystore
-must be able to hand one back.
+The old name asserts the property this change removes. There is no claimed author
+beside the key to bind it to, so a requirement still called "binds the key to the
+claimed author" would name a step its own body says does not exist.
 
-**This does not cover memory.** A stored form handed out is a plain byte array
-this capability no longer controls, and the intermediate values in generation
-and derivation are ordinary stack memory. Owning a secret's lifetime is the
-keystore's job; what is claimed here is only that a secret does not reach a log
-or a wire through this surface.
+- FROM: `### Requirement: An address's display form parses strictly`
+- TO: `### Requirement: A Stoa address's display form parses strictly`
 
-#### Scenario: A secret key survives a storage round trip
+The unqualified name was accurate while one type served both kinds of address.
+With only the Stoa kind left, the unqualified name reads as a requirement that
+lost a case rather than one whose whole subject was always the Stoa address — the
+rationale it already gives names only the Stoa.
 
-- **WHEN** a secret key's stored form is written out and read back
-- **THEN** the restored key has the same public key as the original
+## REMOVED Requirements
 
-#### Scenario: Every stored form of the right length is a valid secret key
+### Requirement: An address is derived from a record, never from a bare key
 
-- **WHEN** any byte string of the secret key's length is read as a secret key
-- **THEN** it is accepted
-- **AND** a wrong length is the only failure this parse reports
+**Reason**: The public key is now the sole author identifier, so there is no
+author address for this requirement to constrain. Every sentence and all three of
+its scenarios were about the author address specifically: that it hashes a record
+carrying a key count rather than a bare key, and that its domain prefix keeps it
+from colliding with a Stoa address. With the value deleted, the requirement
+describes a derivation that does not run.
+
+It also stood in direct contradiction with the `generated-names` requirement *A
+display name is derived from a public key and from nothing else*, which states
+that the public key is the sole author identifier and that there is no address to
+derive from. Two live capabilities answering the same question oppositely is the
+condition this removal ends.
+
+**Migration**: An author is identified by its public key. Where an author address
+was derived, held, compared or displayed, the public key's own bytes take its
+place — both values are 32 bytes and render as 64 hex characters, so no field
+changes shape, length or type. A caller holding a previously-reported author
+address cannot convert it to the key, the derivation having been one-way; it must
+re-read the author from the reply that now carries the key.
+
+**Stoa addresses are not affected.** A Stoa is still identified by its address,
+that address is still a domain-separated hash of its genesis record, and the
+requirement *A Stoa address's display form parses strictly* above continues to
+govern its display form. The domain separation between an author address and a
+Stoa address is not preserved but retired: with only one kind of address left,
+there is no second kind for it to be separated from.

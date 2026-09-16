@@ -15,7 +15,7 @@ Creating a Stoa SHALL NOT be an op. A Stoa is a genesis record its creator publi
 
 Replying SHALL NOT be a separate kind. A reply is a post that names a parent, so that "is this a reply?" is one question about a field rather than a second question about which kind arrived.
 
-The author's **public key** SHALL travel in the op, not merely their address. Verification happens on read with no directory to resolve an address against, so a peer holding only an address could not check the signature. The address SHALL be recoverable from the key rather than carried separately.
+The author's **public key** SHALL travel in the op, and it SHALL be the whole of how an op names its author. Verification happens on read with no directory to resolve any other identifier against, so a peer must hold the key itself in order to check the signature. **No second author identifier SHALL be carried or derivable**: the key is the author, so there is nothing beside it for a recipient to reconcile it against.
 
 Kind discriminants SHALL be appended, never inserted among those already allocated. Inserting would re-mean every op already signed, since the discriminant is inside both the signature and the op id. A kind added later therefore costs one unused discriminant and no encoding version, and an older client meets it as an unrecognised kind rather than misparsing it.
 
@@ -35,6 +35,12 @@ Kind discriminants SHALL be appended, never inserted among those already allocat
 - **WHEN** an op declares the first discriminant above those allocated
 - **THEN** decoding fails naming that discriminant
 - **AND** it is not read as any allocated kind
+
+#### Scenario: An op names its author by public key and by nothing else
+
+- **WHEN** an encoded op's fields are enumerated
+- **THEN** the author is named by a public key
+- **AND** no other field identifies the author
 
 ### Requirement: The encoding is canonical
 
@@ -150,7 +156,7 @@ A content-derived id is available wherever the op is — replaying a local store
 
 This id is **not** the transport's message id. The ordering rule's tiebreak refers to that one, which arrives with the message and is the transport's to assign. Two identifiers with two jobs; a reader must not substitute one for the other.
 
-Domain separation matters because an op id, an author address and a Stoa address are all 32 bytes, and a moderation op names one of them by value. No byte string may be a valid instance of two of them.
+Domain separation matters because an op id and a Stoa address are both 32 bytes, and a moderation op names one of them by value. No byte string may be a valid instance of both.
 
 #### Scenario: An op id is domain-separated from a bare hash
 
@@ -353,7 +359,7 @@ An op SHALL NOT carry a Lamport timestamp, a transport message id, a wall-clock 
 
 Ordering is the transport's to assign. A self-asserted Lamport value would be forgeable by exactly the author it is meant to order, which defeats the purpose of ordering; a wall clock is a field the adversary sets. Both the Lamport timestamp and the message id are recorded alongside an op rather than inside it.
 
-An op SHALL NOT carry the transport's sender identifier. That identifier binds at channel creation as a transport self-filter and is not an author identity; the author identity in an op is the key it carries and the address derived from it.
+An op SHALL NOT carry the transport's sender identifier. That identifier binds at channel creation as a transport self-filter and is not an author identity; the author identity in an op is the key it carries.
 
 This omission SHALL be enforced by the encoding rather than merely documented: the encoding's length is fully accounted for by the fields that are present, so a field cannot be added without the encoding's shape visibly changing.
 
@@ -441,7 +447,9 @@ Decoding SHALL NOT normalise, case-fold, reorder, strip or otherwise transform t
 
 Declining to transform valid text is a canonicality requirement, not an oversight. Any normalisation applied at decode would mean an accepted byte string re-encoding to something other than itself, which contradicts "An accepted encoding re-encodes to itself" and would break op-id agreement between peers — the property the whole encoding exists to provide. Two peers on builds with different Unicode tables would compute different ids for one op, silently.
 
-**The consequence is that display text is attacker-controlled and SHALL NOT be trusted for rendering or identification.** A title may contain bidirectional controls, zero-width characters, or homoglyphs of an established Stoa's name, and while no authority check exists any peer may sign such an op. Mitigation belongs to whoever renders: strip or visibly mark bidi and zero-width controls, show the Stoa address alongside any name, and never treat a title as an identifier. The address is the identity; a name never is.
+**The consequence is that display text is attacker-controlled and SHALL NOT be trusted for rendering or identification.** A title may contain bidirectional controls, zero-width characters, or homoglyphs of an established Stoa's name, and while no authority check exists any peer may sign such an op. Mitigation belongs to whoever renders: strip or visibly mark bidi and zero-width controls, show the Stoa address alongside any name, and never treat a title as an identifier. The Stoa address is the identity; a name never is.
+
+**Only the final sentence changes**, from "The address is the identity" to "The Stoa address is the identity". The requirement is about titles and its subject was always the Stoa — the preceding clause says "show the Stoa address alongside any name" — so nothing here changes meaning. The bare sentence is scoped because it is the one a later reader would cite out of context as authority for an author address, which this change deletes.
 
 #### Scenario: Valid text is returned exactly as it arrived
 

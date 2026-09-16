@@ -599,11 +599,20 @@ ScreenFrame {
                 spacing: DTheme.itemGap
 
                 PostHeader {
-                    identityAddress: row.modelData.author
-                    // There is no generated name on the wire: core sends an
-                    // address, and the name is the address's shadow. Until the
-                    // name derivation lands the address carries the row alone,
-                    // which is the honest half of the pair.
+                    identityKey: row.modelData.author
+                    // There is no generated name on the wire, and that is the
+                    // contract rather than a gap: `generated-names` requires a
+                    // name never travel on any reply, because a derived value
+                    // beside the material it derives from is two values that
+                    // could disagree, and a name on the wire is one a relay could
+                    // strip or forge.
+                    //
+                    // `author` now carries the author's PUBLIC KEY, which IS that
+                    // derivation's input — so deriving here is possible where it
+                    // was not while the row carried an author address. Wiring
+                    // `displayName` to that derivation is the next piece; until it
+                    // lands the key carries the row alone, which is honest rather
+                    // than incomplete.
                     generatedName: ""
                     edited: row.modelData.isRevised === true
                     Layout.fillWidth: true

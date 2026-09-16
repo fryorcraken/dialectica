@@ -158,42 +158,67 @@ Verification SHALL run before an op's parent is followed, so that a forged op ca
 - **AND** the message is the same one an op id the log holds nothing for produces, so it names neither the Stoa the op belongs to nor the fact that it was found
 - **AND** no post of either Stoa is returned
 
-### Requirement: An author is reported as both an address and a public key, and never as a name
+### Requirement: An author is reported as a public key, and never as a name
 
-Each item SHALL report its author's per-Stoa address **and** the public key that signed that op. Both SHALL be present on every item, and neither SHALL be omitted in favour of the other.
+Each item SHALL report the public key that signed that op, as the whole of how
+it names its author. No item SHALL report an author address.
 
-**Two fields are required because two different digests are rendered from them, and neither input can be recovered from the other.** A reader is shown a generated display name and a generated mark beside every post. The name is derived from the author's **public key**; the mark is derived from the author's **address**; and an address is a one-way hash of a record rather than a transformation of the key. So an item carrying only an address is one whose name cannot be computed by anything that receives it, and an item carrying only a key is one whose address a reader would have to trust rather than check.
+**One field replaces two because the reason for two is gone.** The previous
+contract required an address *and* a key on every item, on the ground that a
+reader is shown two derived channels — a display name and a mark — reading two
+different digests, neither recoverable from the other. Both channels now read the
+public key's own bytes directly, under the `generated-names` requirement *The
+three channels read pairwise disjoint bytes of the public key*. An address is
+therefore an input to nothing a reader is shown, and carrying one would put a
+second identifier beside the key it was derived from, where the two could
+disagree and a recipient would have no way to tell which was wrong.
 
-The address SHALL NOT be dropped once the key is present. The address is the only unforgeable identifier of the two in a reader's hands: a name and a mark are both cheaply re-rolled to resemble someone else's, and only the address settles who published something. A surface that offered recognition aids without it would give a reader three ways to be reassured and no way to be sure.
+The key is what makes the item's name and mark computable at all, and it is also
+what settles authorship: a name and a mark are both cheaply re-rolled to resemble
+someone else's, and only the key is bound to a signature. So the field that
+survives is the unforgeable one, and the derivable ones stay absent.
 
-**No item SHALL carry a display name.** A name is a pure function of the public key, so sending one from here would put a second, derivable identifier on the wire beside the material it is derived from — where the two could disagree, and a reader would have no way to tell which was wrong. Deriving names is the job of whatever renders them, and this contract supplies the input rather than the output. The same holds for the mark.
+**No item SHALL carry a display name or a mark.** A name is a pure function of
+the public key, so sending one from here would put a derived value on the wire
+beside the material it derives from — and a name on the wire is one a relay could
+strip or forge. Deriving names is the job of whatever renders them, and this
+contract supplies the input rather than the output. The same holds for the mark.
 
-The author fields reported SHALL be those of the key that actually signed the op, which verification has already established, and SHALL NOT be taken from an unverified claim.
+The author field reported SHALL be that of the key that actually signed the op,
+which verification has already established, and SHALL NOT be taken from an
+unverified claim.
 
 #### Scenario: Each item carries both an address and a key
 
 - **WHEN** a thread's posts are returned
-- **THEN** every item carries its author's address
-- **AND** every item carries its author's public key
+- **THEN** every item carries its author's public key
+- **AND** no item carries an author address
+
+  The scenario keeps its name while its content inverts, because the name is how
+  this delta addresses the scenario it alters. The two-field contract is what
+  this change ends, so what was asserted as a pair is now asserted as one field
+  present and the other absent.
 
 #### Scenario: The two fields identify the key that signed
 
 - **WHEN** a thread containing posts by two different authors is read
 - **THEN** each item's public key is the one whose signature verifies that op
-- **AND** each item's address is the address derived from that same key
-- **AND** the items by different authors differ in both fields
+- **AND** the items by different authors differ in it
 
 #### Scenario: The two fields are distinct values and neither substitutes for the other
 
-- **WHEN** an item's address and public key are compared
-- **THEN** they are different values
-- **AND** the address is the one the identity rules derive from that key, so a caller can check the pairing rather than trust it
+- **WHEN** an item's author field is compared with the public key whose signature
+  verifies that op
+- **THEN** they are the same value, the key being the whole of how an author is
+  named
+- **AND** no second author field is present for it to be distinct from
 
 #### Scenario: No item carries a derived display name
 
 - **WHEN** a thread is read and every field of an item is enumerated
-- **THEN** the only fields describing the author are the address and the public key
-- **AND** the item carries no third author-describing field, which is what a name or a mark would have to be
+- **THEN** the only field describing the author is the public key
+- **AND** the item carries no second author-describing field, which is what a
+  name, a mark or an address would have to be
 
 ### Requirement: Each returned post renders its current version and says whether it was revised
 

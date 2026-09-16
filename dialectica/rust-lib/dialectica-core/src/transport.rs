@@ -336,14 +336,18 @@ pub enum InboundRefusal {
     TooLong { bytes: usize, limit: usize },
     /// The op decoder did not accept the payload.
     Undecodable(OpError),
-    /// The signature does not verify, or the presented key does not bind to the
-    /// author the op claims.
+    /// The signature does not verify under the public key the op carries.
     ///
-    /// One variant for both, because [`SignedOp::verify`] answers them together —
-    /// it re-derives the author address from the presented key and compares, so a
-    /// caller cannot be told which half failed without splitting a function whose
-    /// whole purpose is that the pair is checked as one. The spec lists them in
-    /// one bullet for the same reason.
+    /// **One variant, and it used to be one variant for two mechanisms.** It read
+    /// "the signature does not verify, **or** the presented key does not bind to
+    /// the author the op claims", on the reasoning that [`SignedOp::verify`]
+    /// answered both together. Issue #80 deleted the author address, so there is
+    /// no separately-claimed author for a key to fail to bind to: substituting
+    /// the author substitutes the key, and the signature then fails under it.
+    ///
+    /// The forged-authorship case is therefore wholly caught by the signature
+    /// check. The spec's list still has five refusals — it was always this
+    /// bullet's second mechanism that went, not a bullet.
     FailsVerification,
     /// The op names a Stoa other than the one whose channel it arrived on.
     ///
@@ -1099,14 +1103,31 @@ mod tests {
         let victim = a_key(2);
         let attacker = a_key(3);
         let op = a_post_in(stoa, "forged");
+        let signed_bytes = op.canonical_bytes();
         let forged = SignedOp {
-            signature: sign_op_bytes(&attacker, &op.canonical_bytes()),
+            signature: sign_op_bytes(&attacker, &signed_bytes),
             op: Op {
                 author: victim.public_key(),
                 ..op
             },
         };
         assert!(!forged.verify(), "the fixture must be an actual forgery");
+        // And an AUTHORSHIP forgery rather than junk bytes: the signature is
+        // genuinely valid under the attacker's own key, over the bytes the
+        // attacker actually signed. `!verify()` alone is satisfied by any 64
+        // fabricated bytes, so without this the test would demonstrate "a bad
+        // signature is refused" rather than "a forged author is refused" — and
+        // since issue #80 deleted the address guard, the signature check is the
+        // only mechanism left to distinguish them.
+        assert!(
+            crate::identity::verify_authored_op(
+                &attacker.public_key().to_bytes(),
+                &signed_bytes,
+                &forged.signature.to_bytes()
+            ),
+            "the attacker's signature must be valid under the attacker's own key, \
+             or this fixture is a junk signature rather than a forgery"
+        );
 
         let refusal = receive(
             InboundMessage {
@@ -1434,8 +1455,16 @@ mod tests {
     #[test]
     fn an_op_whose_key_does_not_bind_to_its_claimed_author_is_refused() {
         // THE forgery: a VALID signature over untampered bytes, from a key that
-        // is not the author the op names. Only re-deriving the address from the
-        // presented key catches it, which is what `verify_authored_op` does.
+        // is not the author the op names. The **signature check** is what
+        // catches it: the op carries the victim's key, and the attacker's
+        // signature does not verify under it.
+        //
+        // The comment here credited an address re-derivation until issue #80.
+        // That mechanism is deleted, and it never refused anything on this
+        // path anyway — `SignedOp::verify` derived the claimed author from the
+        // op's own key, comparing a value to itself. Measured: stubbing
+        // `verify_op_bytes` to return `true` makes this test fail, which is
+        // what identifies the signature check as the mechanism.
         //
         // Distinguishable from a malformed payload: the payload decodes.
         let stoa = a_stoa("Agora");
@@ -1454,6 +1483,26 @@ mod tests {
         assert!(
             SignedOp::from_bytes(&payload).is_ok(),
             "the fixture must decode, or this is the decode test"
+        );
+
+        // The clause the `op-transport` scenario names and this test did not
+        // assert: "the same signature still verifies under the original key, so
+        // the refusal is the signature not matching the carried key rather than
+        // a decode failure".
+        //
+        // Without it a fixture whose signature was simply junk would be refused
+        // identically, and the test could not tell the forgery it names from any
+        // other bad signature — two explanations, one answer. The signature here
+        // is genuinely valid; what makes the op a forgery is which key it is
+        // presented beside.
+        assert!(
+            crate::identity::verify_authored_op(
+                &attacker.public_key().to_bytes(),
+                &forged.op.canonical_bytes(),
+                &forged.signature.to_bytes(),
+            ),
+            "the forged op's signature must be VALID under the attacker's own \
+             key, or this test is refusing junk rather than a forgery"
         );
 
         let refusal = receive(

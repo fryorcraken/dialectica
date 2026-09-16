@@ -45,6 +45,10 @@ import QtQuick
 Text {
     id: root
 
+    // A Stoa address or an author's public key; 32 bytes of hex either way, and
+    // the name is only half right. The component is generic over both — see the
+    // header — and issue #80 left the name alone because nine of its call sites
+    // still pass a Stoa address.
     property string address: ""
     property bool   full: false       // true wherever a decision is being made
     property bool   emphasis: false   // e.g. a lookalike's key, in accent

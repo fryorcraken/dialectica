@@ -39,8 +39,14 @@
 //! # Verify first, then compare authors — the order is load-bearing
 //!
 //! An op's `author` field is a **claim**. [`SignedOp::verify`] is what turns it
-//! into a fact, by re-deriving the address from the key that actually signed
+//! into a fact, by checking the signature under the very key the op carries
 //! (`identity::verify_authored_op`) rather than taking the field's word.
+//!
+//! This paragraph said "by re-deriving the address from the key that actually
+//! signed" until issue #80. There is no author address to re-derive, and that
+//! re-derivation was never what refused a forgery: the author *is* the carried
+//! key, so substituting the author substitutes the key and the signature fails
+//! under it.
 //!
 //! Compare authors before verifying and the check compares one attacker-supplied
 //! string against another: an attacker writes the victim's public key into
@@ -425,7 +431,19 @@ mod tests {
     ///
     /// THE forgery this module exists to stop: the author field names the
     /// victim, so an authorship check performed before verification passes.
-    /// Asserted to be a genuine forgery at every use, or the test proves nothing.
+    ///
+    /// **Asserted to be a genuine forgery here, in the helper.** That sentence
+    /// previously read "at every use" and was false: the helper asserted nothing
+    /// and one of its two callers carried no guard at all. Asserting in the
+    /// helper makes the claim true by construction rather than by every caller
+    /// remembering.
+    ///
+    /// Both halves are checked, and the second is the one that is easy to miss:
+    /// the signature must FAIL under the claimed key (it is a forgery) and must
+    /// SUCCEED under the signer's own (it is an authorship forgery rather than
+    /// junk bytes). A fabricated signature satisfies the first alone, which would
+    /// leave every caller demonstrating "a bad signature is refused" instead of
+    /// the attack they name.
     fn a_forged_revision(
         claimed: &PublicKey,
         signer: &SecretKey,
@@ -441,10 +459,21 @@ mod tests {
                 attachments: vec![],
             },
         };
-        SignedOp {
+        let forged = SignedOp {
             signature: sign_op_bytes(signer, &op.canonical_bytes()),
             op,
-        }
+        };
+        assert!(!forged.verify(), "the fixture must be an actual forgery");
+        assert!(
+            crate::identity::verify_authored_op(
+                &signer.public_key().to_bytes(),
+                &forged.op.canonical_bytes(),
+                &forged.signature.to_bytes()
+            ),
+            "the signature must be valid under the signer's own key, or this \
+             fixture is a junk signature rather than a forgery"
+        );
+        forged
     }
 
     /// Two revisions of `target` whose op ids are known to differ, lower first.
@@ -634,10 +663,10 @@ mod tests {
 
     #[test]
     fn a_forged_revision_is_dropped() {
-        // The attack the check ORDER exists to stop: the author field names the
-        // victim, so an authorship comparison made before verification passes.
-        // Only `verify()` — which re-derives the address from the key that
-        // actually signed — catches it.
+        // The attack the check ORDER exists to stop: the op's author field names
+        // the victim's key, so an authorship comparison made before verification
+        // passes. Only `verify()` catches it — the signature was made by the
+        // stranger's key and does not verify under the victim's.
         let post = a_post("mine");
         let id = post.op.id();
         let forged = a_forged_revision(&post.op.author, &stranger(), id, "forged");

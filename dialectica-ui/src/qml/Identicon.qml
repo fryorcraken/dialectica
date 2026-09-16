@@ -58,7 +58,7 @@ import QtQuick
 // there was no shared space to overlap in, and no allocation was required or
 // possible.
 //
-// Issue #80 deletes the author address and removes NAME_PREFIX. The name, the
+// Issue #80 deleted the author address and removed NAME_PREFIX. The name, the
 // mark and the abbreviation all read the SAME 32 bytes now, with no hash between
 // the key and any of them, so THE ALLOCATION IS REAL AND IS LOAD-BEARING. Two
 // channels reading one byte are two searches that partly coincide. Disjointness
@@ -87,14 +87,14 @@ Canvas {
     // The 32-byte value to render, as hex, with or without a "stoa:" / "k:"
     // prefix.
     //
-    // **Still named `address`, and that is deliberate rather than overlooked.**
-    // For an AUTHOR this now carries the public key; for a STOA it carries the
-    // Stoa address, which issue #80 keeps. Renaming the property is a change to
-    // every call site — FeedScreen, PostHeader, the screens — and those are
-    // `key-identity-sweep`'s, which is also what rewires the author call sites
-    // to pass a key instead of an address. Renaming here and rewiring there
-    // would split one rename across two pieces and leave the tree not compiling
-    // in between.
+    // **Still named `address`, and the sweep that deleted the author address
+    // left it that way on purpose.** For an AUTHOR this carries the public key;
+    // for a STOA it carries the Stoa address, which issue #80 kept. This
+    // component is GENERIC over both, so `address` is not a name that went
+    // stale — it is a name that is now only half right, and the surviving half
+    // is a real caller. Renaming it would narrow a component that still has a
+    // Stoa-address caller, which is why the author call sites were rewired to
+    // pass a key while this property stayed.
     //
     // The arithmetic below does not care: it reads 32 bytes of hex. What the
     // byte allocation above is about is which bytes each channel reads OF THE
