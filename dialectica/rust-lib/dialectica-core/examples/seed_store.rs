@@ -97,17 +97,17 @@
 //! (`findings/security.md` entry 4).
 //!
 //! **The visible consequence, and the reason it is printed rather than hidden:**
-//! the *founder's* posts carry the *signing* address as their feed `author`, and
+//! the *founder's* posts carry the *signing* public key as their feed `author`, and
 //! `getCapabilities` reports a *different* one. A UI developer who saw only the
 //! second would conclude the feed was attributing their own posts to a stranger.
 //! Both are printed, side by side and labelled as the known gap, and the program
 //! asserts they still disagree — so the day the spec settles it, this fails loudly
 //! and tells whoever fixed it that these paragraphs are now stale.
 //!
-//! **The visitor's ops carry the visitor's address, and there are more of them
+//! **The visitor's ops carry the visitor's public key, and there are more of them
 //! than the founder's.** Four of the nine ops are the founder's and five are the
 //! visitor's, which is the whole point of seeding from two identities — so the
-//! report labels four addresses rather than three, and no line claims a single
+//! report labels four keys rather than three, and no line claims a single
 //! author for the store. An earlier version of this paragraph and of the report
 //! said "every seeded op is by" one address; that was true only while both roots
 //! were the founder's, and it went false without any assertion noticing

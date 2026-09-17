@@ -185,7 +185,7 @@
 //! |---|---|---|
 //! | `pub score: i64` added to `FeedRow`, set to `7` | the vote test, as a COMPILE error | `E0027: pattern does not mention field \`score\`` — as predicted. This is the mutation a review ran against the previous form of that test and watched **pass**; the destructure is what changed it |
 //! | `list_threads_from_request` returns an empty page instead of `error_json` on a failed store open | the JSON error-shape test alone | that test alone, `{"hasMore":false,"items":[],"page":0}` where an `error` was required — and the `feed::list_threads`-level test one layer down **stayed green**, which is why that layer could not cover this seam |
-//! | the wire row's `author` is emitted as `""` | the JSON happy-path test alone | that test alone, `""` vs the independently derived address — as predicted |
+//! | the wire row's `author` is emitted as `""` | the JSON happy-path test alone | that test alone, `""` vs the independently derived key — as predicted |
 //! | the paging slice loses one row per page | the TILING test, and not the past-the-end test | exactly that split, first page 2 vs 3 — which is what splitting the old `…and…` name bought |
 //! | `iter_stoa` compares `substr(stoa, 1, 8)` | shared-prefix test alone | that test alone, `["right","left"]` vs `["left"]` — so the 16-byte fixture is as strong as the 31-byte one it replaced |
 //! | `SqliteOpLog::open` refuses a path that does not exist | the created-file test **at its own assertion**, plus fixture-guard deaths | 18 of 24: the split test died on `a missing store is created, not refused`, the other 17 at the `dir.store()` helper — see note 4 |
@@ -427,7 +427,7 @@ const TITLE_CAP: usize = 1024;
 /// So removing the `set_permissions` call below does not break a `create` — it
 /// breaks the *reopen* in both
 /// `a_keystore_on_disk_signs_a_post_that_a_reopened_store_still_attributes_to_it`
-/// and `the_same_keystore_posts_under_different_addresses_in_two_stoas`, which is
+/// and `the_same_keystore_posts_under_different_identities_in_two_stoas`, which is
 /// where to look when one of them starts refusing a keystore.
 struct TempDir(PathBuf);
 
@@ -1973,7 +1973,7 @@ fn a_vote_is_stored_and_is_rendered_by_nothing() {
     // Note what is still asserted: the row is attributed to the POSTER and not
     // the voter. That was the substance of the two name assertions removed from
     // here — a vote-rendering bug shows up as the wrong author — and it is
-    // checked on the address just above, which is the field that survives.
+    // checked on the key just above, which is the field that survives.
     assert_eq!(body.text, "voted on");
     assert!(attachments.is_empty());
     assert!(!is_revised);
@@ -2638,7 +2638,7 @@ fn a_store_seeded_from_two_identities_carries_exactly_those_two_authors() {
 /// 3. **The probe and the publish path disagree about which identity this user
 ///    posts under** — the three-derivations gap. Asserted as the state of the
 ///    world TODAY, self-invalidatingly: the operands are `wire::posting_identity`'s
-///    own answer and the address the feed actually carries, both produced by the
+///    own answer and the key the feed actually carries, both produced by the
 ///    module, so closing the gap anywhere makes this fail and name itself.
 ///
 /// **Claim 3 is why this is not just the example re-typed.** The example asserts
@@ -2679,7 +2679,7 @@ fn the_seeding_sequence_builds_a_nested_thread_whose_author_the_probe_does_not_r
     // ── The chosen path, so the probe has one to read ──
     //
     // Without this row `posting_identity` answers `NO_CHOICE_FOR_THIS_STOA` and
-    // claim 3 below would be comparing against an error rather than an address.
+    // claim 3 below would be comparing against an error rather than a key.
     let seeded_path: u32 = 0;
     let paths = IdentityStore::open(&IdentityStore::default_path_in(&dir.0))
         .expect("an identity record opens");
