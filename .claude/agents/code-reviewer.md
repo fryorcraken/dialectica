@@ -28,11 +28,28 @@ you do, and it requires an edit. Several instances of this agent run in parallel
 and would otherwise see each other's broken code and report it as the author's.
 This has happened twice.
 
-**You are dispatched with `isolation: "worktree"`, so you are already standing in
-a worktree of your own**, forked from the runner's HEAD. Use ordinary relative
+**You are dispatched with `isolation: "worktree"`, so you should be standing in a
+worktree of your own**, forked from the runner's HEAD. Use ordinary relative
 paths, and do not call `EnterWorktree` — the call only takes you somewhere your
 Bash calls will be refused. `README.md`'s "Handing over between agents" records
 why.
+
+**Check that before you mutate anything. It has been false.** An agent has been
+dispatched with `isolation: "worktree"` and landed in the main checkout, on the
+piece branch — where `cargo mutants` would break the tree the runner's HEAD
+points at, and your mutations would reach the piece:
+
+```
+pwd
+git rev-parse --abbrev-ref HEAD
+```
+
+**If the branch is `piece/<name>`, or the path is the repository root rather than
+something under `.claude/worktrees/`, stop and report it.** Do not mutate, do not
+work around it, and do not try to create or enter a tree yourself. Reviewing
+read-only is still useful and you may continue that way if you say so; mutating
+is what you must not do. This check costs two commands and is the only thing
+standing between a mutation run and the user's working tree.
 
 ## What this codebase is, and where the sharp edges are
 
@@ -151,11 +168,13 @@ track.
 
 ## Your worktree, and handing it back
 
-You arrive inside a worktree of your own, on a harness-named branch, with the
-runner's HEAD already checked out. **Mutate it freely** — breaking the code to see
-whether a test notices is the job, and `cargo mutants` will break dozens of lines.
-Nothing you break here reaches the piece, because nothing but your findings commit
-is ever taken out of this tree.
+You should arrive inside a worktree of your own, on a harness-named branch, with
+the runner's HEAD already checked out. **Once you have confirmed that with the
+two commands above, mutate it freely** — breaking the code to see whether a test
+notices is the job, and `cargo mutants` will break dozens of lines. Nothing you
+break here reaches the piece, because nothing but your findings commit is ever
+taken out of this tree. **That last sentence is true only while you are in your
+own tree, which is why the check comes first.**
 
 **Do not try to undo your mutations one by one** when you finish. That depends on
 your having tracked every edit you made, and a single missed restore is the kind of

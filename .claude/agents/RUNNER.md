@@ -165,6 +165,19 @@ harness-named `worktree-agent-<id>`, not on `piece/<name>`, so its commits need
 cherry-picking onto the piece — and the name is assigned by the harness rather
 than chosen by you. Have the agent report it rather than guessing it.
 
+**The isolation does not always take, and the agent is told to stop when it
+doesn't.** An agent dispatched with `isolation: "worktree"` has landed in the
+main checkout on the piece branch instead — so every agent file now has it run
+`pwd` and `git rev-parse --abbrev-ref HEAD` and refuse to mutate or commit if the
+answer is wrong. **An agent reporting that is doing the right thing: do not
+re-dispatch it with instructions to work around it.** There is no brief that
+fixes this, because the agent cannot place itself. Check `.claude/settings.json`
+still carries `worktree.baseRef: "head"`, and if the tree is genuinely wrong,
+stop and raise it with the user rather than dispatching into the main checkout.
+
+A mutating reviewer that ran without the check would break the tree your own HEAD
+points at, which is why the guard is in every file rather than in the brief.
+
 **Cherry-pick before you dispatch the next agent, and make sure your HEAD carries
 it.** This is the ordering rule that replaces "one writer at a time because they
 share a tree": every dispatch forks from *your HEAD*, so an agent launched before
@@ -261,11 +274,8 @@ remote-tracking ref, and git's `branch.autoSetupMerge` default then writes
 branch is set up to push to `main` from the moment it exists.
 
 This is the cause of the bare-`git push`-lands-on-`main` warning that this file
-and `CLAUDE.md` both carry. Measured in the sibling `logos-radicle-module` repo:
-a branch created without the flag has `merge refs/heads/main` in its config, and
-`git push origin <branch>` from it was **rejected by branch protection for
-`refs/heads/main`**, going through only with a fully-qualified refspec. The
-lesson is about branch creation, not about the push form.
+and `CLAUDE.md` both carry. The lesson is about branch creation, not about the
+push form.
 
 **Check it with `git config`, not `git branch -vv`.** `branch -vv` cannot catch
 this: it prints `[origin/main]`, and nothing in that output tells an intended

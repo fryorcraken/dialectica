@@ -109,10 +109,15 @@ branch it has to guess. Never `git add -A`.
 
 ## Your worktree, and handing it back
 
-You arrive inside a worktree of your own, forked from the runner's HEAD, on a
-harness-named branch. Use ordinary relative paths, and do not call
+You should arrive inside a worktree of your own, forked from the runner's HEAD,
+on a harness-named branch. Use ordinary relative paths, and do not call
 `EnterWorktree`: the call only moves you somewhere your Bash calls are refused.
 `README.md`'s "Handing over between agents" records why.
+
+**Check it before you commit** — `pwd` and `git rev-parse --abbrev-ref HEAD`. If
+the branch is `piece/<name>` or the path is the repository root, the isolation
+did not take; **stop and report it** rather than committing from there. It has
+happened. You read rather than mutate, so the review itself is unaffected.
 
 **You cannot remove the tree — you are standing in it, and `git worktree remove`
 refuses the directory you are in.** That refusal reads like a permissions problem

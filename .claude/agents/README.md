@@ -307,62 +307,37 @@ already in the right place needs neither, and a brief carrying them sends it
 looking for a problem it does not have. What the brief must say is where the
 commits end up.
 
-#### Why the prohibition is written down anyway
+### How an agent gets the right tree: `isolation: "worktree"`
 
-This is not an operating instruction but the explanation behind one. Keep it
-findable: an agent that meets the refusal without it improvises, reaching for
-`env -C` or `cd &&` — an approval click each, and neither needed.
+**Dispatch with `isolation: "worktree"` and no `EnterWorktree` call.** The agent
+arrives in its own worktree with a working directory that needs no correcting:
+relative paths resolve and every Bash command runs.
 
-**A dispatched agent must not call `EnterWorktree`.** Not "should try and fall
-back" — the call cannot succeed usefully, and two probes measured both routes.
-These transcripts come from the sibling `logos-radicle-module` repo, which shares
-this flow; the tool is the harness's, not the repo's, so the measurement carries:
-
-- **Dispatched normally**, working directory at the repository root, worktree
-  correctly registered in `git worktree list`. Verbatim: *"Cannot enter worktree:
-  the current working directory /…/radicle-logos-module is the repository root,
-  not an isolated worktree — switching is only available to sessions whose
-  working directory is inside a worktree of this repository."* The repository
-  root is where every dispatched agent starts, so this refusal is certain rather
-  than possible.
-- **Dispatched with `isolation: "worktree"`**, which pins the working directory
-  inside a throwaway worktree and so clears that precondition. The call
-  **succeeded** and an environment update reported the directory change — then
-  the agent was split: the Read tool followed the switch and read the piece
-  branch by relative path, while **every Bash call was refused** with *"This
-  agent is isolated in the worktree …/agent-<id>, but this command's working
-  directory resolved to the shared checkout (…). Refusing to run it there — a
-  worktree-isolated agent's commands must run inside its worktree."*
-
-**There is no supported way to place a dispatched subagent inside a pre-existing
-worktree with full tool access.** Route 2 is the more dangerous of the two
-because it *looks* like it worked: nothing goes wrong until the first Bash call,
-long after the agent has concluded it is in the right place. Do not reach for
-`isolation: "worktree"` on discovering route 1 — that is the trap this paragraph
-exists to close.
-
-### How an agent actually gets the right tree: `isolation: "worktree"`
-
-**This is the route the flow runs on. Dispatch with `isolation: "worktree"` and
-no `EnterWorktree` call**, and the agent arrives in its own worktree with a
-working directory that needs no correcting: relative paths resolve and every Bash
-command runs.
-
-The distinction is the single easiest thing to conflate, so it is worth stating
-flatly:
+**A dispatched agent must not call `EnterWorktree`** — not "try it and fall
+back". Who calls it decides the outcome:
 
 | | Works? |
 |---|---|
-| a dispatched agent entering a **pre-existing** worktree (`EnterWorktree`) | **no**, and both failure modes are above |
+| a dispatched agent entering a **pre-existing** worktree (`EnterWorktree`) | **no** — refused outright at the repository root, and from an isolated tree it appears to succeed while every Bash call is then refused |
 | a dispatched agent placed in **its own** fresh worktree (`isolation`) | **yes** |
 | a **session moving itself** into a worktree (`EnterWorktree`) | **yes** — the case the tool is built for |
 
-Probe 2 failed because it *crossed* from an isolated tree into a pre-existing
-one. `isolation: "worktree"` alone never crosses, so nothing breaks. And a
-session moving *itself* is a third thing again — measured: a main interactive
-session called `EnterWorktree(path: …)` and got *"Entered worktree at
-…/probe-baseref on branch probe/baseref. The session is now working in the
-worktree."* **Who calls it decides the outcome, not whether the tool works.**
+The second row is the dangerous one: it *looks* like it worked, and nothing goes
+wrong until the first Bash call. So do not reach for `EnterWorktree` on top of
+`isolation: "worktree"` — isolation alone is the whole mechanism, and an agent
+that improvises around a refusal reaches for `env -C` or `cd &&`, an approval
+click each and neither needed.
+
+**Every agent verifies it arrived, because the isolation does not always take.**
+An agent dispatched this way has landed in the main checkout on the piece branch
+instead. So each agent file has it run `pwd` and `git rev-parse --abbrev-ref
+HEAD` first, and **stop and report** rather than mutate or commit when the branch
+is `piece/<name>` or the path is the repository root. A mutating reviewer without
+that check breaks the tree the runner's HEAD points at.
+
+The check is in the agent files rather than in the brief because it is a
+precondition on the agent's own tools, not a fact about the piece — and because a
+brief the runner forgets to write leaves the guard off exactly when it is needed.
 
 #### `baseRef: "head"` is required
 
@@ -503,19 +478,10 @@ measurement and a guess that reads like one. This is CLAUDE.md's "do not write
 down anything a command can answer" applied to the thing an agent writes most
 often: a count in a report, a task list or a doc comment.
 
-The caution became a step because a single review round in the sibling
-`logos-radicle-module` repo found **five** fabricated quantities and **one**
-phantom test name across two independently written pieces — assertion counts,
-test counts, and a doc comment citing a test that did not exist. None of the
-writers was careless; each number was the kind that feels remembered rather than
-invented.
-
 **When you correct a stale number, measure it fresh — do not apply the delta a
-reviewer quoted.** The reviewer's figure was itself measured at some earlier
-moment, and a branch moves. Verified there: the phantom test name a reviewer
-reported had already been corrected on that branch by the time it was re-checked,
-so writing down the reviewer's number would have introduced a second wrong claim
-while fixing the first. Re-run the command against the tree in front of you.
+reviewer quoted.** The reviewer's figure was measured at some earlier moment and
+a branch moves, so a quoted delta can introduce a second wrong claim while fixing
+the first. Re-run the command against the tree in front of you.
 
 **A test must assert against something the implementation did not produce.**
 Three tests have shipped that could not fail for the reason they named:

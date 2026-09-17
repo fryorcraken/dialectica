@@ -107,17 +107,26 @@ satisfied-by-construction and say what makes the absence real.
 
 ## Where your commits go
 
-**You arrive already inside your own worktree**, forked from the runner's HEAD,
-so it holds the piece's commits. Use **plain relative paths**, and do not call
-`EnterWorktree` — it is for a session moving itself, and `README.md`'s "Handing
-over between agents" says why a dispatched agent cannot.
+**You should arrive already inside your own worktree**, forked from the runner's
+HEAD, so it holds the piece's commits. Use **plain relative paths**, and do not
+call `EnterWorktree` — it is for a session moving itself, and `README.md`'s
+"Handing over between agents" says why a dispatched agent cannot.
 
 **You are not on `piece/<name>`.** The harness puts you on its own branch, named
-`worktree-agent-<id>`. Read it rather than assuming it:
+`worktree-agent-<id>`. Read it rather than assuming it, and check where you are
+standing while you are at it:
 
 ```
+pwd
 git rev-parse --abbrev-ref HEAD
 ```
+
+**If the branch comes back as `piece/<name>`, or the path is the repository root
+rather than something under `.claude/worktrees/`, the isolation did not take —
+stop and report it.** It has happened. Committing from there puts your work
+straight onto the runner's checked-out branch, which is not where the flow
+expects it and is not something the runner can cherry-pick. Do not create or
+enter a tree yourself.
 
 **`lgs basecamp build` acts on the cwd's project root — which is now yours, so
 run it plainly.** `lgs` resolves `scaffold.toml`'s relative module refs

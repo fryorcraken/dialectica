@@ -76,9 +76,24 @@ from it, so the diff is what stands in for that. One missed restore ships a
 deliberately broken line, and it will not fail your own suite: you mutated the code
 precisely so a test would catch it, then restored the test's expectation to match.
 
-**You arrive already inside your own worktree**, forked from the runner's HEAD,
-so it holds the piece's commits — including the `dev-writer`'s. Nobody else is in
-that tree with you.
+**You should arrive already inside your own worktree**, forked from the runner's
+HEAD, so it holds the piece's commits — including the `dev-writer`'s. Nobody else
+is in that tree with you.
+
+**Check that before you mutate implementation code. It has been false.** An agent
+has been dispatched with `isolation: "worktree"` and landed in the main checkout,
+on the piece branch, where a mutation you fail to restore reaches the user's
+working tree:
+
+```
+pwd
+git rev-parse --abbrev-ref HEAD
+```
+
+**If the branch is `piece/<name>`, or the path is the repository root rather than
+something under `.claude/worktrees/`, stop and report it.** Writing tests is
+still safe; it is the mutate-and-restore cycle that is not. Do not create or
+enter a tree yourself.
 
 **Nothing else writes the piece while you run.** No `spec-writer`, no `dev-writer`:
 you mutate implementation code you do not own, and a concurrent writer either

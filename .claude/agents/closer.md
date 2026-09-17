@@ -25,10 +25,17 @@ goes back to the runner with the evidence attached.
 5. **Ensure the PR's title and body are up to date** and matches content, update them if needed.
 6. **Merge.**
 
-**You arrive already inside your own worktree**, forked from the runner's HEAD,
-so it holds the piece's commits. Use **plain relative paths**, and do not call
-`EnterWorktree` — it is for a session moving itself, and `README.md`'s "Handing
-over between agents" says why a dispatched agent cannot.
+**You should arrive already inside your own worktree**, forked from the runner's
+HEAD, so it holds the piece's commits. Use **plain relative paths**, and do not
+call `EnterWorktree` — it is for a session moving itself, and `README.md`'s
+"Handing over between agents" says why a dispatched agent cannot.
+
+**Confirm it first, with `pwd` and `git rev-parse --abbrev-ref HEAD`.** If the
+branch is `piece/<name>` or the path is the repository root, the isolation did
+not take — **stop and report it before archiving anything**. It has happened, and
+it matters most to you: the archive rewrites the live contract and the push
+below assumes you are not on the piece branch. Do not create or enter a tree
+yourself.
 
 Every tool you need resolves its root from the cwd, so `openspec validate
 --strict` and the `lgs` verbs run directly. If `openspec` cannot find the change,
@@ -41,10 +48,20 @@ red one, because the row gets ticked either way.
 
 **One thing to get right about branches.** You are on `worktree-agent-<id>`, not
 `piece/<name>`. Your archive commit therefore needs to reach the piece branch
-before the merge: cherry-pick it across, or push it and tell the runner, and say
-in your report which you did. **Never push your own branch to the remote** — a
-harness-named branch there is the same failure as a reviewer branch reaching it.
-Read your branch rather than assuming it:
+before the merge, and there is exactly one route: **push your tip to the remote
+piece ref by refspec**, `git push origin HEAD:refs/heads/piece/<name>`, which
+Step 3 sets out in full.
+
+**A local cherry-pick is not the alternative** — you cannot check out
+`piece/<name>` at all, because it is checked out in the runner's worktree and git
+refuses a branch checked out elsewhere (`fatal: 'piece/<name>' is already used by
+worktree at …`). That refusal arrives mid-archive, at a step that read as
+routine. The refspec push never touches the local branch, which is why it is the
+route.
+
+**Never push your own branch to the remote** — a harness-named branch there is
+the same failure as a reviewer branch reaching it. Read your branch rather than
+assuming it:
 
 ```
 git rev-parse --abbrev-ref HEAD
@@ -214,7 +231,7 @@ git push origin HEAD:refs/heads/piece/<name>
 does not carry your archive commit — pushing that ref would push a branch without
 the archive on it and report success.
 
-This is the one push you make, and it must happen before Step 4: CI runs on the
+This push must happen before Step 4: CI runs on the
 PR, so the archive has to be on the remote for the run you watch to be the run
 that tests what you are merging.
 

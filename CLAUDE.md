@@ -158,17 +158,14 @@ project a stalled session.
   dispatched agent that case does not arise at all: `isolation: "worktree"` puts
   its cwd in the tree holding its change, and `openspec` then runs plainly.
 
-  **`run-qml-tests.sh`'s output truncates before the run ends** when an agent
-  runs it, because the script covers the whole `dialectica-ui/tests/` suite. The
-  suite itself is fine and CI reads all of it; what truncates is what you get
-  back in a tool result. So a local pass is a **green gate you cannot read to the
-  end**, and that has already produced a wrong conclusion in the sibling
-  `logos-radicle-module` repo — a reviewer recorded a mutation as survived when
-  the output had simply stopped before reaching the mutated file. When you need
-  an unambiguous answer about one file, run the runner against that file alone
-  and read the whole thing: `qmltestrunner -input
-  dialectica-ui/tests/tst_<name>.qml`. **Not `| tail`** — the answer to output
-  you cannot read is a narrower command, and here there is one.
+  **Run one QML spec through the script, not through `qmltestrunner`:**
+  `sh dialectica-ui/tests/run-qml-tests.sh dialectica-ui/tests/tst_<name>.qml`.
+  A bare `qmltestrunner` resolves to Qt5 here and exits 1 with **no output at
+  all**, which reads exactly like a broken suite; the script picks the Qt6
+  binary, sets the import path and the offscreen platform, and runs the
+  `check_bindings` gate that turns an undefined binding from a warning into a
+  failure. Passing it one file is the supported shape and needs no approval
+  click.
 
 - **Never `readlink` or `ls` a `/nix/store` path** to find where a build
   artefact went. Use the documented artefact paths under `.scaffold/basecamp/`.
@@ -228,12 +225,8 @@ git worktree add --no-track -b <branch> .claude/worktrees/<name> origin/main
 Branching from a remote-tracking ref makes git's `branch.autoSetupMerge` default
 write `remote = origin` and `merge = refs/heads/main` into the new branch's
 config. That — not anything about worktrees inheriting state — is why a bare
-`git push` from one has landed commits on `main`. Measured here: `git config
---get-regexp "^branch\.piece"` in this repo lists five piece branches carrying
-`merge refs/heads/main`, every one of them made without the flag, while a branch
-created with it returns nothing. The sibling `logos-radicle-module` repo, which
-runs the same flow, measured the consequence: one such branch's `git push origin
-<branch>` was **rejected by branch protection for `refs/heads/main`**.
+`git push` from one has landed commits on `main`. The branch is set up to push to
+`main` from the moment it exists.
 
 **Check it with `git config --get-regexp "^branch\.<name>"`, which returns
 nothing when the branch is right.** `git branch -vv` cannot catch this: it prints

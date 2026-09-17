@@ -20,15 +20,30 @@ The one exception to not reading the implementation is the mutation sampling in
 part 2, which necessarily edits code. Change it, run the test, restore it, and
 read no further than the lines you are mutating.
 
-**You are dispatched with `isolation: "worktree"`, so you arrive inside a worktree
-of your own**, forked from the runner's HEAD and on a harness-named branch. Use
-ordinary relative paths, and do not call `EnterWorktree`: the call only moves you
-somewhere every Bash call is refused, which for you would mean no test run ever
-executes while the files you read look right. `README.md`'s "Handing over between
-agents" records why.
+**You are dispatched with `isolation: "worktree"`, so you should arrive inside a
+worktree of your own**, forked from the runner's HEAD and on a harness-named
+branch. Use ordinary relative paths, and do not call `EnterWorktree`: the call
+only moves you somewhere every Bash call is refused, which for you would mean no
+test run ever executes while the files you read look right. `README.md`'s
+"Handing over between agents" records why.
 
 The isolation is what makes mutation safe: two reviewers sharing a tree see each
 other's broken code and cannot tell it from the author's.
+
+**So check it before your first mutation. It has been false.** An agent has been
+dispatched this way and landed in the main checkout, on the piece branch, where a
+mutation reaches the piece and the user's working tree:
+
+```
+pwd
+git rev-parse --abbrev-ref HEAD
+```
+
+**If the branch is `piece/<name>`, or the path is the repository root rather than
+something under `.claude/worktrees/`, stop and report it** rather than mutating.
+Parts 1, 3, 4, 5 and 6 read only and are still worth doing; say in your report
+that part 2's mutations were skipped and why. Do not create or enter a tree
+yourself.
 
 **You cannot remove the tree when you finish — you are standing in it, and `git
 worktree remove` refuses the directory you are in.** That refusal reads like a
@@ -89,29 +104,24 @@ field A while named for field B), and a constant assumed invalid that is not
 consensus-critical constant, anything asserting a security property, and any
 test you suspect but cannot convict by reading. Sampling, not exhaustive.
 
-**`run-qml-tests.sh`'s output truncates in this harness before the run ends.**
-The script runs `qmltestrunner` across the whole suite, and the result you are
-shown stops part-way. **This makes it a green gate you cannot read to the end** —
-and it has already cost a wrong conclusion in the sibling `logos-radicle-module`
-repo, which runs the same script shape: a reviewer judged a mutation as survived
-when the output simply never reached the file it had mutated.
-
-The fix is a narrower command, not a wider one with a filter. Run `qmltestrunner`
-against the single file you mutated and read the whole result:
+**To check one QML spec, pass it to the script:**
 
 ```
-qmltestrunner -input dialectica-ui/tests/tst_<name>.qml
+sh dialectica-ui/tests/run-qml-tests.sh dialectica-ui/tests/tst_<name>.qml
 ```
 
-**Do not pipe the full run to `tail`.** A pipe is unanalysable to the permission
-checker and costs the user an approval click on every call — which is the
-opposite of what reaching for it was meant to achieve. CLAUDE.md states this as a
-general rule ("a long output is not a reason to pipe"); the QML suite is the
-place it bites hardest, because the truncation is silent and the run looks
-complete.
+**Never invoke `qmltestrunner` directly.** The bare name resolves to Qt5 here and
+exits 1 with **no output at all**, which reads exactly like the mutation having
+broken the suite — a false positive on the highest-value check in this file. The
+script picks the Qt6 binary, sets the import path and the offscreen platform, and
+runs `check_bindings`, which is what turns an undefined binding from a warning
+into a failure. Running the whole suite with no argument works too.
+
+**Do not pipe either form to `tail`.** A pipe is unanalysable to the permission
+checker and costs the user an approval click on every call.
 
 If you report a mutation as survived, say which command produced the output you
-read. A conclusion drawn from a truncated full-suite run is not a measurement.
+read.
 
 Report every test that survives a mutation of the property it names, and say
 which mutations you ran — and which are still in the tree when you hand it back.
@@ -166,8 +176,6 @@ A strikethrough plus "answered: see `<spec>`" is the right shape, so the
 question's history stays legible.
 
 Reasoning left in PLAN.md is the `design-reviewer`'s check, not yours.
-
-## Output
 
 ## Output
 

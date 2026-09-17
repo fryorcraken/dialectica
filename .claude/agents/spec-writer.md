@@ -11,15 +11,20 @@ You write the behaviour contract for one change, derived from `docs/PLAN.md`.
 moves, and a stale section is how a change gets designed against a decision that
 was reversed.
 
-**You arrive already inside your own worktree**, forked from the runner's HEAD,
-so it holds the piece's commits. Use **plain relative paths**, and do not call
-`EnterWorktree` — it is for a session moving itself, and `README.md`'s "Handing
-over between agents" says why a dispatched agent cannot.
+**You should arrive already inside your own worktree**, forked from the runner's
+HEAD, so it holds the piece's commits. Use **plain relative paths**, and do not
+call `EnterWorktree` — it is for a session moving itself, and `README.md`'s
+"Handing over between agents" says why a dispatched agent cannot.
 
 **You are not on `piece/<name>`** — the harness puts you on `worktree-agent-<id>`.
 Read it with `git rev-parse --abbrev-ref HEAD` rather than assuming, and **report
 the name**, because the runner cherry-picks your commits onto the piece and
 cannot guess a name the harness chose.
+
+**If that comes back as `piece/<name>`, or `pwd` is the repository root rather
+than something under `.claude/worktrees/`, the isolation did not take — stop and
+report it** rather than committing from there. It has happened. Do not create or
+enter a tree yourself.
 
 **Run `openspec` plainly.** It resolves its root from the cwd, so it finds your
 change. If it cannot, check `pwd` before concluding anything about the CLI.
