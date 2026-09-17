@@ -52,11 +52,22 @@ dialectica/logos-rust-sdk-src
 # The role agents are the exception: they are part of the process rather than
 # one machine's settings, so they belong in the repo.
 #
+# `settings.json` is re-admitted for the same reason, and it is not a
+# preference file: it carries `worktree.baseRef = "head"`, which is what makes
+# `isolation: "worktree"` fork an agent from the runner's HEAD instead of
+# `origin/main`. Ignored, it reached no clone and no fresh checkout, and
+# **nothing failed when it was absent** — agents were silently cut from the
+# wrong base, which is the failure shape this repo keeps re-learning. Machine-
+# local settings — the permission allowlist and the absolute home paths under
+# `additionalDirectories` — belong in `settings.local.json`, which stays
+# ignored.
+#
 # `.claude/*` rather than `.claude/` because git will not re-include a file
 # whose parent DIRECTORY is excluded — with a `.claude/` rule the negation below
 # is never consulted.
 .claude/*
 !.claude/agents/
+!.claude/settings.json
 .cursor/
 AGENTS.md
 
