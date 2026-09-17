@@ -10,6 +10,13 @@ the live contract in `openspec/specs/`, so it has to be in the tree CI tests and
 in the diff the merge applies. The whole change — code, spec delta and the
 promotion — lands as one squashed commit under one PR.
 
+The alternative — archive after the merge — **cannot work here**: it needs a
+second push straight to `main`, and `main` has `enforce_admins` on, so that push
+is rejected with `GH006`. The ordering that would demand it does not survive
+either — `openspec archive` *moves* the change folder rather than deleting it,
+so a squash costs nothing that matters, and what it buys is that the code and
+the spec describing it revert together.
+
 `openspec` is installed. **Run `openspec --version` rather than believing any
 document about it** — including this one. This file once recorded the CLI as
 absent (exit 127); the absence was real, the sentence outlived it, and "openspec
@@ -32,6 +39,10 @@ archive.
 
 A change declaring `retire_capabilities` makes archive **delete** a spec instead
 of merging into it. It takes an explicit marker; nothing here does it.
+
+**A change that declared `skip_specs: true` has no delta to promote** and
+archives with `--skip-specs`, which the CLI documents for exactly this case;
+taking the delta-merge prompt there would be promoting nothing.
 
 **`archive` aborts and writes nothing if the target spec has no `## Purpose`.**
 

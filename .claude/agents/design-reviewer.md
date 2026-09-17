@@ -10,6 +10,13 @@ You check the code against the change's `design.md` — specifically its
 considered — and check `design.md` against `docs/PLAN.md`. You do not review
 code quality or test coverage; separate reviewers do those.
 
+**If the change has no `design.md`, say so and stop.** It is a conditional
+artifact — `dev-writer.md` writes one when the change involves a new data
+format, a security boundary, a new dependency, or migration or performance
+complexity, and legitimately skips it otherwise. A missing `design.md` is a
+finding only when the change met one of those triggers; then report *that*,
+rather than reviewing against a file that does not exist.
+
 ## 1. Did the code take the decisions that were recorded?
 
 For each entry under Decisions, find where the code implements it and confirm it
@@ -59,6 +66,13 @@ works that way is a finding.
 Report reasoning this change acted on that is still in PLAN.md, and reasoning
 duplicated across both — two copies drift and the wrong one gets read.
 
+One thing to check in the other direction: a trap that belongs to a **built**
+subsystem belongs in its trigger-specific doc (`docs/SCAFFOLD.md`,
+`docs/OPENSPEC-ARCHIVE.md`) or CLAUDE.md, not only in an archived `design.md`.
+The archive answers "why was this decided"; those docs answer "what will bite
+me tomorrow". A change that learned something the next toucher of that file
+needs should have put it where they will look.
+
 ## What a good Decisions entry contains
 
 Judge each against this and say which part is missing:
@@ -69,6 +83,11 @@ Judge each against this and say which part is missing:
   first and matters most: an entry with no alternatives reads as though there
   was no choice, and the next person re-litigates it from scratch.
 - **What it costs**, including what it forecloses
+- **The mutation evidence, where the decision is a guard** — "removing this
+  turns exactly these tests red". This is the most perishable thing in a
+  change: it usually exists only in a commit message, and it is what stops a
+  future reader deleting a guard whose purpose is no longer obvious. Report an
+  entry that describes a guard without it.
 
 ## Output
 

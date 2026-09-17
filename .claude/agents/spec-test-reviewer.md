@@ -80,6 +80,13 @@ gap.
 Coverage may be many-to-many. What matters is that the behaviour is pinned, not
 that names line up.
 
+**Check the layer, not just the presence.** A test at a layer that cannot
+observe the behaviour is a coverage gap wearing a green tick: a QML component
+test structurally cannot see a cross-process call, so a requirement about
+something core does is uncovered no matter how many `tst_*.qml` files mention
+it. Check that the layer running the test can actually see what the requirement
+describes.
+
 ## 2. Can each test actually fail?
 
 The highest-value check in this file.
@@ -104,6 +111,13 @@ field A while named for field B), and a constant assumed invalid that is not
 consensus-critical constant, anything asserting a security property, and any
 test you suspect but cannot convict by reading. Sampling, not exhaustive.
 
+**Budget: one or two mutations, then stop and report.** This is a hard stop,
+not a target — a partial report that arrives beats a complete one that never
+does. Pick the mutation you would most regret not running. Prefer the Rust
+core tests (`cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p
+dialectica -p dialectica-core`, seconds) and the QML suite over anything needing
+a slow Nix build.
+
 **To check one QML spec, pass it to the script:**
 
 ```
@@ -122,6 +136,10 @@ checker and costs the user an approval click on every call.
 
 If you report a mutation as survived, say which command produced the output you
 read.
+
+**One capability per agent.** If you were handed more than one, review the
+first properly and say which you did not reach, rather than skimming all of
+them.
 
 Report every test that survives a mutation of the property it names, and say
 which mutations you ran — and which are still in the tree when you hand it back.

@@ -42,7 +42,20 @@ route by kind:
 - **A decision about technology or strategy** — a library, a data structure, an
   encoding, a type chosen to make a mistake unrepresentable — goes in
   `design.md` under Decisions: what you chose, what else you considered, and
-  what ruled the alternatives out.
+  what ruled the alternatives out. **Where the decision is a guard, record what
+  breaks without it** — "removing this turns exactly these tests red". You are
+  the only person who cheaply knows that, and it is what stops the guard being
+  deleted later by someone who cannot see what it was for.
+
+**You own the PLAN.md reasoning migration.** `spec-writer` runs before
+`design.md` exists, so it strikes through the *behaviour* PLAN.md described and
+leaves the *reasoning* passages this change acted on where they are — rejected
+alternatives, spike results, a "why X and not Y". As you write each Decisions
+entry, move the passage that belongs to it out of PLAN.md and into that entry.
+Do not leave a second copy: two copies drift and the wrong one gets read.
+PLAN.md keeps what is still ahead. `design-reviewer` checks you did this, and a
+passage that was struck from PLAN.md but never landed in `design.md` is the
+silent failure to avoid — the reasoning is then only in a commit message.
 
 **Make the unspecified behaviour visible in the code**, not only in your report.
 Write a test for it, marked so it cannot be missed:
@@ -89,6 +102,17 @@ reproduces it before fixing, or the fix is unproven.
 
 Hand over which of your tests you are least confident in, and every `NO SPEC:`
 you left behind.
+
+**A fake or fixture returning the same answer for every input cannot tell
+"reloaded" from "never reloaded".** Before writing an assertion against a fake,
+ask what the null implementation — the one that does nothing — would produce;
+if the assertion would still pass, it is decoration. Make fakes return
+input-dependent data.
+
+Pick the cheapest layer that can actually see what you changed, and be honest
+when none of them can: a change touching no QML can break no QML test, so a
+green component suite proves nothing about it. Say so rather than letting the
+green stand in for coverage.
 
 Stop and say so if a task cannot be done as written. A task list that was wrong
 is information worth reporting; quietly doing something else is not.

@@ -11,6 +11,18 @@ code.
 Work scenario by scenario. One scenario may need several tests, and one test may
 cover several scenarios; do not force one-to-one.
 
+## Pick the layer that can actually see the behaviour
+
+| Layer | Sees |
+|---|---|
+| Rust core tests (`dialectica/rust-lib/dialectica-core/tests/`, `-p dialectica-core`) | pure logic — no Qt, no network, no FFI |
+| QML component tests (`dialectica-ui/tests/tst_*.qml`) | what one component decides on its own |
+
+Component tests **structurally cannot** see wiring or a cross-process call. If
+the thing that broke was core's `delivery_module` reaching a real cross-process
+call, no component test will ever catch it, and adding one is worse than adding
+nothing because it reports safety that was never checked.
+
 ## You inherit the dev's tests
 
 The dev writes tests while implementing; they are yours to keep, adapt or
@@ -25,6 +37,16 @@ Read the dev's handover: which of their tests they were least confident in, and
 every `NO SPEC:` marker they left. Keep the markers and report each one — that
 is behaviour chosen because the spec was silent, and the spec-writer decides
 whether the choice was right.
+
+**The tiebreaker, when you cannot decide whether to keep one:** ask what the
+test would catch that yours would not. A dev test usually encodes an edge case
+found while implementing — keep it, even where it duplicates yours, because
+rediscovering that edge case costs more than the duplicate. **Two kinds you MUST
+NOT remove:** one the dev reports as a **regression test watched failing before
+its fix** (deleting it discards the only proof the bug was real), and one
+carrying a **`NO SPEC:` marker** (that is a live question for the spec-writer,
+not yours to close by deletion). Otherwise, remove a dev test only when it cannot
+fail for the reason it names — and say which invariant it broke.
 
 ## A test must be able to fail for the reason it names
 
@@ -62,6 +84,14 @@ reason. Probe rather than assume.
 CLAUDE.md's engineering principles apply to test code too. The two that bite
 most: a table of cases beats four near-identical test functions, and a test
 asserting three unrelated things reports the first failure and hides the rest.
+
+## One QML hazard worth testing for directly
+
+**A binding does not update inside the handler that changed its source.** A
+handler that sets a property and then reads a binding derived from it, in the
+same handler body, sees the *old* value — the binding has not re-evaluated yet.
+A test for anything of that shape must be able to tell which value a deferred
+read actually used, not just that a read happened.
 
 ## Scope
 

@@ -65,8 +65,8 @@ backs it; a paraphrase arrives without that, and the content occupies your
 context twice — once from the report, once rewritten into the next brief. That
 crowding is what loses the state you are supposed to be tracking.
 
-The same holds for `design.md`, `proposal.md`, the spec and the code: point at
-them. If you are reading a diff to judge whether it is right, that is a
+The same holds for `design.md`, `proposal.md`, PLAN.md, the spec and the code:
+point at them. If you are reading a diff to judge whether it is right, that is a
 reviewer's dispatch, not your reading.
 
 ## Rebuild the state before you act on it
@@ -96,9 +96,17 @@ grep -c "^## Stages" openspec/changes/<name>/tasks.md
 `0` means untracked, not done. Changes predating the rule answer `0`; a new one
 should not, since the `spec-writer` writes the block first.
 
+A struck-through row keeps its empty box, so read the strike, not the box.
+
 ## Is an agent still working?
 
 **`ListAgents`.** A piece not in that list has no agent, whatever you remember.
+
+`ListAgents` and `ScheduleWakeup` are available to an **interactive main-loop
+session** — which the runner is — and not to a subagent. So a reviewer sent to
+check this file cannot see them and will report them as missing; that is a fact
+about who dispatched it, not an error here. `Monitor` is the fallback if you ever
+find they are genuinely absent.
 
 - **One is running → `SendMessage` it.** Never start a second with `Agent`: two
   writers on one piece fork from the same HEAD and neither sees the other's
@@ -116,7 +124,8 @@ should not, since the `spec-writer` writes the block first.
 The shape that breaks this: each stage looks like a finished unit of work, so
 spec, dev and tests each get a branch and a PR — leaving the contract, the code
 and the tests that prove they match in three places, none reviewable. **A stage
-is not a unit of review**, and `openspec archive` runs once, on merge.
+is not a unit of review**, and `openspec archive` runs once, as a commit on the
+piece branch that rides the same PR.
 
 - **One branch per piece: `piece/<name>`.** A branch named for a stage is the
   failure happening.
@@ -141,6 +150,11 @@ both push their tip **to `refs/heads/piece/<name>`**, which creates no agent
 branch on the remote. Agent branches are named by the harness rather than by you,
 so you learn each one from the agent's report and cherry-pick from it.
 
+**Do not rename or re-point a branch with an open PR.** A PR's head ref is
+immutable, and every workaround loses something; open a new PR on the correctly
+named branch and close the old one, saying where the work went. The README's
+branch section has the specifics.
+
 ## Dispatching
 
 **A brief points at the work; it does not contain it.** Name the piece, the
@@ -159,6 +173,15 @@ tree, forked from your HEAD, with a working directory it does not have to correc
 right place needs neither, and a brief carrying them sends it hunting for a
 problem it does not have. The explanation stays in README.md, where a reader who
 meets the refusal can find it.
+
+**Do not phrase an instruction in a way that invites a chain.** "`cargo test`
+from `dialectica/rust-lib/`" reads as `cd dialectica/rust-lib && cargo test`,
+which costs an approval click even though `cargo test` is allow-listed. Name the
+directory as its own step, or give a `--manifest-path`.
+
+**Address this repo's agents unqualified** — `code-reviewer`, not
+`agent-skills:code-reviewer`. The plugin ships a similarly-described reviewer
+carrying none of this repo's traps.
 
 **What you must still ask for is the branch name.** The agent lands on a
 harness-named `worktree-agent-<id>`, not on `piece/<name>`, so its commits need
@@ -258,6 +281,10 @@ two becomes whichever it started with. A small change can take one covering all
 four — but the other two are still separate dispatches, because what
 distinguishes them is what they may read.
 
+**A change with no source diff still gets all six.** Agent files, prose and
+config are reviewable material; treating "no code" as an exemption is how this
+flow's own adopting change nearly shipped with `code-reviewer` skipped.
+
 **Two concurrent authors across pieces is the ceiling.** Fanning agents across
 sequential work moves dependency discovery to collision time.
 
@@ -274,8 +301,11 @@ remote-tracking ref, and git's `branch.autoSetupMerge` default then writes
 branch is set up to push to `main` from the moment it exists.
 
 This is the cause of the bare-`git push`-lands-on-`main` warning that this file
-and `CLAUDE.md` both carry. The lesson is about branch creation, not about the
-push form.
+and `CLAUDE.md` both carry. Measured: a branch created without the flag has
+`merge refs/heads/main` in its config, and `git push origin piece/<name>` from it
+was **rejected by branch protection for `refs/heads/main`**, going through only
+with a fully-qualified refspec. The lesson is about branch creation, not about
+the push form.
 
 **Check it with `git config`, not `git branch -vv`.** `branch -vv` cannot catch
 this: it prints `[origin/main]`, and nothing in that output tells an intended
@@ -300,6 +330,9 @@ and a citation from a stale copy reads exactly like one from the real tree.
 open PR and no running agent is prunable. The gap grows quietly, since nothing
 fails — the greps just get less trustworthy. `git worktree prune` clears entries
 whose directories are already gone.
+
+**Check merged-ness with `gh pr list`, not `git branch --merged`** — this repo
+squash-merges, so a squashed branch never looks merged to git.
 
 **Removing each agent's worktree is yours, and it is not optional housekeeping —
 it is the last step of collecting the work.** An agent cannot remove its own

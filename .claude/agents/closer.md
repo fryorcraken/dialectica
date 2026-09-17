@@ -166,8 +166,18 @@ your piece does not touch, stop and report rather than guess, because that is
 the signal the branch has picked up something that is not yours. `git rebase
 --abort` returns the branch exactly as it was, and costs nothing.
 
-After the rebase, go back to Step 2's diff check — the tree changed, so the
-answer can have changed with it — then to Step 4 against the new run.
+Commit signing is required on `main` here, and **a signing failure is a
+stop-and-ask, never something to work around** — do not reach for
+`--no-gpg-sign` or set `commit.gpgsign false` to get a rebase through.
+
+After the rebase, come back to the diff check above — the tree changed, so the
+answer can have changed with it. **Then carry on from wherever you were**,
+which is not always the same place: on the forward pass that is **Step 3, the
+archive**, because the archive commit has to be in the tree CI tests; if you
+got here from Step 4 having found the branch behind after archiving, it is
+Step 4 against the new run. **Never skip Step 3 on the way out of a rebase** —
+merging without it puts code on `main` whose contract was never promoted,
+which is the split this whole ordering exists to prevent.
 
 **After the merge the same command gives a false alarm, and it is the loud
 one.** `git diff origin/main HEAD --stat` on a correctly merged branch showed
@@ -315,11 +325,12 @@ The asking part is not squeamishness about a command. **Merging is the one
 irreversible, outward-facing act in this flow.** Everything else an agent here
 does lives on a branch or in a worktree and can be thrown away; a merge changes
 what `main` says to everyone reading the repo, and it carries the archive commit
-that rewrites the live contract. The repo's own protection does not stand in
-for the judgement: `required_approving_review_count` is **0**, so nothing
-between you and `main` would stop a wrong merge. Run
-`gh api repos/<owner>/<repo>/branches/main/protection` to see what is actually
-required rather than trusting that number here.
+that rewrites the live contract. **The repo's own protection does not stand in
+for the judgement**: it requires four green checks and a signed commit, but
+`required_approving_review_count` is **0**, so nothing between you and `main`
+asks a human whether the change should land. Green is not approval. Run
+`gh api repos/fryorcraken/dialectica/branches/main/protection` to see what is
+actually required rather than trusting that number here.
 
 So: bring the owner a merge-ready report — findings gate clean, stage block
 complete, the stale-branch diff, the green run URL — and merge on their word.
@@ -354,7 +365,8 @@ Each of these is here because the cheap version of it is tempting:
   `--force-with-lease` onto current `main` and nothing else. You never
   force-push to reshape history, drop a commit, or tidy a branch.
 - **Push to `main`.** Not the archive, not anything. `main` takes commits
-  through a PR only.
+  through a PR only, and `enforce_admins` is on, so a direct push is rejected
+  with `GH006`. The archive rides the piece's PR.
 - **Merge a PR you did not check the diff of**, however green the run.
 
 ## Your report

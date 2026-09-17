@@ -119,11 +119,14 @@ They get a worktree each because a reviewer running `cargo mutants` breaks dozen
 of lines to see whether a test notices — two sharing a tree read each other's
 breakage as the author's, which has happened here.
 
-**The runner removes each agent's worktree** once its work is cherry-picked; an
-agent cannot remove its own, because it is standing in it. Ambiguity about who
-owns that is destructive both ways: an agent that assumes the tree is its to
-delete may `--force`-remove the state another finding cites, and one that assumes
-somebody else will clean up leaves a full copy of the repo behind per dispatch.
+**The runner creates each reviewer's worktree and names it in the dispatch**, and
+the reviewer does not remove it — the runner does, once its work is
+cherry-picked. Ambiguity here is silent and destructive both ways: an agent that
+assumes it must make its own may instead mutate the piece's tree, and one that
+assumes the tree is its to delete may `--force`-remove the state another finding
+cites, or leave a full copy of the repo behind per dispatch by assuming somebody
+else will clean up. **A reviewer that was not given a worktree path stops and
+says so** rather than choosing either fallback.
 
 ### Branch names say which kind of branch it is
 
@@ -186,9 +189,21 @@ closer tried it.
 Cherry-pick rather than merge, so the task branch reads as a flat sequence rather
 than six merge commits carrying six branches.
 
-**Never `git add -A`** — commit named paths. Worktrees collect build output and a
-gitignored SDK symlink, and sweeping up another agent's half-finished edit
-corrupts the branch you were working on.
+**Never `git add -A`** — commit named paths. Two reasons, and they are not the
+same rule:
+
+- **Sweeping up another agent's half-finished edit corrupts the branch you were
+  working on.** This is the one that matters, because it is silent: the commit
+  looks like yours, and the agent whose work you took has no way to see that it
+  left.
+- **A worktree collects build output that is not yours to commit** —
+  `.scaffold/`, `target/`, `result-*` out-links, `./tmp/` scratch, a gitignored
+  SDK symlink, and whatever is added to that list next. Noise, which a reviewer
+  spots.
+
+**This is the canonical copy of the artefact list**; each agent file states the
+rule and points here rather than repeating the list, which is the part that
+changes.
 
 **Check `git config --get-regexp "^branch\.<name>"` before any git write, and
 expect it to return nothing.** A bare `git push` has landed commits directly on
@@ -213,43 +228,42 @@ stash stack is shared with every other worktree, so never bare `git stash pop`.
 Each agent's own file says what it writes. These are the shapes everyone needs to
 recognise, because everyone reads both.
 
-**`tasks.md` opens with a stage block**, written once by `spec-writer` and unticked:
+**`tasks.md` opens with a stage block**, written once by `spec-writer` and
+unticked: one row per stage, then three rows the `closer` owns. **The roster
+itself lives in [`spec-writer.md`](spec-writer.md)**, which is the agent that
+writes it into `tasks.md`; copying it here as well would mean a roster change
+made in one file shipping the stale list from the other.
 
-```markdown
-## Stages
-- [ ] spec — `spec-writer`
-- [ ] design + code — `dev-writer`
-- [ ] tests — `tester`
-- [ ] review: correctness — `code-reviewer`
-- [ ] review: security — `code-reviewer`
-- [ ] review: readability — `code-reviewer`
-- [ ] review: architecture — `code-reviewer`
-- [ ] review: spec-test — `spec-test-reviewer`
-- [ ] review: design — `design-reviewer`
-- [ ] findings all ticked, `findings/` deleted — `closer`
-- [ ] `openspec validate --strict`, then `archive` — `closer`
-- [ ] CI green, PR merged — `closer`
-```
-
-**One row per agent instance, not per role** — `code-reviewer` runs four times, so
-it gets four rows, each ticked by the instance that did it. Do not collapse them
-onto one line to save space: a shared checkbox is one nobody can tick truthfully,
-and all four instances would then edit the same line, which is the conflict
-one-row-per-agent exists to prevent.
+**One row per agent instance, not per role** — `code-reviewer` runs once per
+dimension, so it gets one row per dimension, each ticked by the instance that did
+it. Do not collapse them onto one line to save space: a shared checkbox is one
+nobody can tick truthfully, and all four instances would then edit the same
+line, which is the conflict one-row-per-agent exists to prevent.
 
 Each agent flips its own row and adds none, so concurrent cherry-picks never
 touch the same line. **An unticked row with no agent running is a stage nobody is
-doing** — that is the whole point, and without it this session took a piece to the
-edge of merge with zero reviewers and another missing four, neither visible until
-someone asked.
+doing** — that is the whole point — **unless it is struck through**, which is how
+a stage says it does not apply and why the row is struck rather than deleted: a
+deleted row and a skipped stage look identical, and a struck one says which. **A
+struck row keeps its empty box, so read the strike, not the box.** One
+consequence to expect rather than debug: `openspec archive` counts a struck row
+as incomplete and warns before continuing, because the box really is empty. That
+is the price of keeping `[x]` single-valued, and it is the right way round — a
+tool that counts a skipped stage beats one that cannot tell it from a finished
+one. Without this whole mechanism, a piece here once reached the edge of merge
+with zero reviewers and another missing four, neither visible until someone
+asked.
 
 **A piece with no behaviour change still gets a change folder and a stage block.**
 A test-only piece — an integration target, a regression suite — adds no
 requirement, so it has no spec delta and its spec row is struck through with that
-reason. It still needs reviewing, and without the block there is no unticked row to
-say so: the signal that catches a missing reviewer is absent exactly where it is
-easiest to skip one. The first such piece here reached review with no
-`openspec/changes/<name>/` at all, so a reviewer had no row to tick and said so.
+reason — declared as `skip_specs: true` **alongside a `schema:` key** in the
+change's `.openspec.yaml`, because the marker on its own is reported as "not
+valid change metadata, so the marker is not honored". It still needs reviewing,
+and without the block there is no unticked row to say so: the signal that
+catches a missing reviewer is absent exactly where it is easiest to skip one.
+The first such piece here reached review with no `openspec/changes/<name>/` at
+all, so a reviewer had no row to tick and said so.
 
 **`findings/<dimension>.md`**, one file per reviewer — `correctness`, `security`,
 `readability`, `architecture`, `spec-test`, `design-review`. **Every finding is a
@@ -459,6 +473,41 @@ agents.
 code judges tests by what the code does — exactly the failure a spec exists to
 catch: a test that faithfully pins the wrong behaviour.
 
+### Every agent pays CLAUDE.md's Bash costs
+
+This applies to every role, and the reviewers most of all, because they run
+suites and mutations in a loop. **Read CLAUDE.md's "How to work in this repo,
+and what Bash costs" before the first shell command.**
+
+The rule that catches agents most often is **never chain**: `cd somewhere &&
+cargo test` prompts *even though* `cargo test` is allow-listed, because the
+permission checker cannot statically analyse a compound command, so no rule
+applies to it. Run one plain command per call — `cd` alone in its own call is
+free, and the Bash tool's directory persists between calls.
+
+**A long output is not a reason to pipe.** This is the most common way the rule
+gets broken by someone who knows it: appending `| tail -30` to keep the output
+manageable turns a call the checker would have approved into a prompt, which is
+the opposite of what the pipe was for. Run it plain and read the whole thing.
+Likewise `gh` is free until you filter it — adding `--jq` costs a click where the
+plain call costs nothing.
+
+**Address this repo's agents unqualified** — `code-reviewer`, not
+`agent-skills:code-reviewer`. The plugin ships a similarly-described reviewer,
+and it carries none of this repo's traps.
+
+**One shell trap worth not re-learning**, because it makes a gate silently
+passing: `tar tzf … | grep -q` exits 141, since `grep -q` closes the pipe at the
+first match and `tar` dies of SIGPIPE. Under a bare `set -eu` that is invisible,
+and it becomes a spurious failure the moment anyone adds `-o pipefail`. Use
+`[ "$(… | grep -c …)" -gt 0 ]`, which consumes all the output. `ci.yml`'s release
+job carries this one, verbatim, because a port of it once reverted the fix.
+
+**A change with no source diff still gets reviewed.** That is not an exemption,
+and treating it as one is how this flow's own adopting change nearly shipped with
+the `code-reviewer` step skipped entirely. Agent instruction files, config and the
+prose in `CLAUDE.md` and `docs/` are all reviewable material.
+
 ## What experience has taught this flow
 
 Each of these is in the agent files because it cost something here.
@@ -517,6 +566,17 @@ path dependencies, so it never reaches `dialectica-core` — where nearly all th
 logic lives. Anything behind `cfg(logos_scaffold)` is not compiled by
 `cargo test` at all. Say what a gate cannot see rather than reporting it as
 passed; "exit 0" on a gate that measured nothing is worse than no gate.
+
+**Silent failure is this codebase's house style, and it must be designed
+against.** Basecamp swallows QML errors, so a view that fails to compile, a
+plugin skipped for a missing manifest field, and a binding evaluating to
+`undefined` all present identically as "clicking the app does nothing" — the
+`Theme`/`DTheme` name collision took the entire visual system out this way, with
+every gate green. `qmllint --missing-property error` printed the same class of
+defect as a warning into a green log. CLAUDE.md's "Module contract traps" has
+the full account and the gates it produced
+(`check_qml_names.py`, `check_qml_members.sh`); do not re-derive it from a
+second copy here.
 
 **Specs get reorganised as concepts generalise**, and two capabilities asserting
 one rule is the failure that prevents — both already live here. See
