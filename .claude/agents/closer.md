@@ -25,11 +25,37 @@ goes back to the runner with the evidence attached.
 5. **Ensure the PR's title and body are up to date** and matches content, update them if needed.
 6. **Merge.**
 
+**You arrive already inside your own worktree**, forked from the runner's HEAD,
+so it holds the piece's commits. Use **plain relative paths**, and do not call
+`EnterWorktree` — it is for a session moving itself, and `README.md`'s "Handing
+over between agents" says why a dispatched agent cannot.
+
+Every tool you need resolves its root from the cwd, so `openspec validate
+--strict` and the `lgs` verbs run directly. If `openspec` cannot find the change,
+check `pwd` and `git rev-parse --abbrev-ref HEAD` before concluding anything
+about the CLI.
+
+**Do not report a validation you did not perform**, and do not let a skipped
+`validate --strict` pass silently into the merge — an unrun gate is worse than a
+red one, because the row gets ticked either way.
+
+**One thing to get right about branches.** You are on `worktree-agent-<id>`, not
+`piece/<name>`. Your archive commit therefore needs to reach the piece branch
+before the merge: cherry-pick it across, or push it and tell the runner, and say
+in your report which you did. **Never push your own branch to the remote** — a
+harness-named branch there is the same failure as a reviewer branch reaching it.
+Read your branch rather than assuming it:
+
+```
+git rev-parse --abbrev-ref HEAD
+```
+
 ## Step 1 — is the piece finished?
 
 Two files answer this, and both are greppable rather than a matter of opinion.
 
-**The findings gate**, from the piece's worktree:
+**The findings gate**, run from your own worktree — it holds the piece's commits,
+so relative paths resolve:
 
 ```
 grep -rn "^- \[ \]" openspec/changes/<name>/findings/
@@ -100,12 +126,15 @@ rewrites the head commit and CI starts again from the top, so everything after
 the rebase point was measured against a tree that will not be the one merged.
 Waiting it out spends a full run to learn what one field already said.
 
-From inside the piece's worktree:
+**You are on `worktree-agent-<id>`, not `piece/<name>`**, and you cannot check the
+piece branch out — git refuses a branch checked out in another worktree. So
+rebase the branch you are on, which carries the piece's commits, and push it to
+the remote piece ref by refspec:
 
 ```
 git fetch origin
 git rebase origin/main
-git push --force-with-lease origin piece/<name>
+git push --force-with-lease origin HEAD:refs/heads/piece/<name>
 ```
 
 **`--force-with-lease`, never `--force`.** It refuses if the remote moved since
@@ -142,10 +171,10 @@ absence was real, the sentence outlived it, and "openspec is not installed"
 reached five agents in one day on that basis. Believe the command, not any
 document — this one included.
 
-The root comes from the cwd: `openspec` walks up to the nearest `openspec/` and
-has no `--directory`, `-C` or `--root`. `cd <dir> && openspec …` with **no path
-argument after it** is the one shape the permission checker accepts for this.
-Check the reported root before concluding a change is missing.
+`openspec` walks up from the cwd to the nearest `openspec/`, so it resolves to
+your change — you are standing in the tree that holds it. Check the reported root
+before concluding a change is missing or the CLI is broken; it distinguishes "no
+such change" from "wrong tree", which otherwise look identical.
 
 Three things to get right in the closing context specifically:
 
@@ -162,11 +191,32 @@ Three things to get right in the closing context specifically:
   the order from `git log --name-status --diff-filter=A -- openspec/changes`;
   do not guess from folder names.
 
-Then `openspec validate --strict`, and commit it to `piece/<name>` with named
-paths. Most of the diff is renames — the change folder is *moved* into
-`changes/archive/<date>-<name>/`. The findings tracker you deleted in Step 1 is
-the one real deletion, so say so in the commit message, or the diff reads as
-though it is removing review evidence.
+Then `openspec validate --strict`, and commit it to **your own branch** with named
+paths — you are on `worktree-agent-<id>` and cannot check out `piece/<name>`; the
+push below is what puts it on the piece. Most of the diff is renames — the change
+folder is *moved* into `changes/archive/<date>-<name>/`. The findings tracker you
+deleted in Step 1 is the one real deletion, so say so in the commit message, or
+the diff reads as though it is removing review evidence.
+
+**Then push it** — check `git config --get-regexp "^branch\.piece"` first and
+expect **nothing** back, because the branch is created with `git worktree add
+--no-track` and has no upstream. `merge refs/heads/main` coming back means it was
+made without the flag and is configured to push to `main`; stop and say so. `git
+branch -vv` is not the check — it prints `[origin/main]` either way, which is how
+a bare `git push` has landed commits on `main` here more than once. With no
+upstream, name the refspec in full:
+
+```
+git push origin HEAD:refs/heads/piece/<name>
+```
+
+`HEAD` on the left, because the local `piece/<name>` is the runner's checkout and
+does not carry your archive commit — pushing that ref would push a branch without
+the archive on it and report success.
+
+This is the one push you make, and it must happen before Step 4: CI runs on the
+PR, so the archive has to be on the remote for the run you watch to be the run
+that tests what you are merging.
 
 ## Step 4 — watching CI
 
@@ -260,10 +310,17 @@ complete, the stale-branch diff, the green run URL — and merge on their word.
 green without coming back, that is the authority and you do not ask again.
 
 **`gh pr merge --delete-branch` exits 1 after a successful merge** when a local
-worktree still holds the branch. The merge and the remote deletion both
-succeeded; only the local delete failed, and that non-zero exit reads exactly
-like a failed merge. Remove the worktree first, or check
-`gh pr view <n> --json state` before believing the exit code.
+worktree still holds the branch — which it does, since the runner's worktree is
+checked out on `piece/<name>`. The merge and the remote deletion both succeeded;
+only the local delete failed, and that non-zero exit reads exactly like a failed
+merge. Check `gh pr view <n> --json state` before believing the exit code; do not
+try to remove the runner's worktree to avoid it.
+
+**You do not remove any worktree at the end — not yours, not the piece's.** You
+are standing in your own, and `git worktree remove` refuses the directory you are
+in; the piece's belongs to the runner. Stale worktrees accumulate when nobody
+owns that job, so **say in your report that both are ready to prune** rather than
+leaving it implied.
 
 ## What you never do
 

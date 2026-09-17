@@ -84,11 +84,30 @@ up from the current directory to the first `openspec/` it finds. There is **no
 `--directory`, `-C` or `--root`**. `--store` takes a registered kebab-case store
 id, not a path.
 
-Agents work in worktrees, so this bites immediately: run from the main checkout
-and a change in a worktree is simply not listed. Run `openspec` from inside the
-worktree — `cd <dir> && openspec …` with no path argument after the `cd` is a
-shape the permission checker accepts. **Check the reported root before concluding
-a change is missing or the CLI is broken.**
+Agents work in worktrees, so where an agent stands decides whether its change is
+visible at all — an agent whose cwd is the main checkout while its change lives
+in a worktree gets the change simply not listed. **The dispatch is what makes
+this a non-problem, not anything in `openspec`.** With `isolation: "worktree"`,
+an agent's cwd *is* the tree holding its change, so `openspec` resolves the right
+root and runs plainly — no compound command, no approval click, no workaround. A
+tool that takes its root from the cwd is correct exactly when the cwd is.
+
+**Check the reported root before concluding a change is missing or the CLI is
+broken.** It is one line of `openspec list --json`, and it distinguishes "the
+change does not exist" from "I am standing in the wrong tree" — which otherwise
+look identical.
+
+Two things not to reach for if it ever does go wrong. **`EnterWorktree` is not
+for a dispatched agent** — it refuses a session at the repository root, and
+crossing between worktrees succeeds while leaving every Bash call refused;
+`.claude/agents/README.md`'s "Handing over between agents" has both probes
+verbatim. And **`cd <dir> && openspec …` costs an approval click** unless it
+carries no path argument after the `cd`, because the checker cannot analyse a
+compound command.
+
+If validation genuinely cannot run, **say in the report that it did not run, and
+why**. An unrun gate reported as passed is worse than a skipped one, because the
+row gets ticked either way.
 
 ## Reading two capabilities together
 

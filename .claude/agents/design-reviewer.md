@@ -99,18 +99,31 @@ the code had — and a `design.md` atomicity claim has been found with no test
 behind it. A decision that is only pinned by a test added afterwards was made by
 accident, which is the thing you exist to catch.
 
-**Then commit that one file** on `review/<name>/design`, **tick your own row** in
-`tasks.md`'s stage block in the same commit, and **cherry-pick that commit onto the
-local `piece/<name>`**. Do not push — the runner does. Never `git add -A`.
+**Then commit that one file** on the branch you are already on — the harness named
+it `worktree-agent-<id>`, not `review/<name>/design`, so **read it rather than
+assume it**: `git rev-parse --abbrev-ref HEAD`. **Tick your own row** in
+`tasks.md`'s stage block in the same commit. **Push nothing** — a reviewer is the
+one role that pushes no branch at all. **Name that branch in your report**, because
+the runner cherry-picks your commit onto `piece/<name>` and cannot do so for a
+branch it has to guess. Never `git add -A`.
 
-**Step out of your worktree and remove it when you finish** —
-`ExitWorktree(action: "keep")`, then `git worktree remove <absolute-path>
---force`. The exit comes first because `git worktree remove` cannot remove the
-directory you are standing in, and `keep` rather than `remove` because the tool
-only deletes worktrees it created itself and the runner made this one. Your
-findings file is already committed and cherry-picked, so nothing you want lives
-there, and deleting is unconditional where restoring depends on having tracked
-every edit you made.
+## Your worktree, and handing it back
+
+You arrive inside a worktree of your own, forked from the runner's HEAD, on a
+harness-named branch. Use ordinary relative paths, and do not call
+`EnterWorktree`: the call only moves you somewhere your Bash calls are refused.
+`README.md`'s "Handing over between agents" records why.
+
+**You cannot remove the tree — you are standing in it, and `git worktree remove`
+refuses the directory you are in.** That refusal reads like a permissions problem
+and is not one. Removal is the **runner's** job, and that is the right owner rather
+than a workaround: `--force` discards uncommitted work irreversibly, including the
+state your findings cite, and only the runner knows whether something still needs to
+read your tree — re-checking a finding against the exact state that produced it, or
+comparing two reviewers' citations.
+
+So your hand-off is your report: the **branch name**, so the runner can cherry-pick
+your findings commit, and a line saying the tree is ready to prune once it has.
 
 **Your final report is a pointer, not a copy** — the path, the entry count, and who
 each is for.

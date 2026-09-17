@@ -69,16 +69,16 @@ Test code is yours, including what the dev wrote. Implementation code is not:
 change it only to mutate, and restore it after each mutation.
 
 **Prove the implementation is untouched before you commit, with a diff rather than
-from memory** — `git diff --stat` against the piece branch should show test files
-only. You cannot delete your tree the way a reviewer does, because your tests are
-the deliverable, so the diff is what stands in for that. One missed restore ships a
+from memory** — `git diff --stat` against the commit you started from should show
+test files only. You cannot hand the tree back mutated the way a reviewer does,
+because your tests are the deliverable and the runner cherry-picks your commit
+from it, so the diff is what stands in for that. One missed restore ships a
 deliberately broken line, and it will not fail your own suite: you mutated the code
 precisely so a test would catch it, then restored the test's expectation to match.
 
-**You work in the piece's own worktree, on `piece/<name>`** — the same tree the
-`spec-writer` and `dev-writer` use. You share it because you never overlap: at most
-one of the three runs at a time. Reviewers get separate trees because they are
-concurrent; you do not need one.
+**You arrive already inside your own worktree**, forked from the runner's HEAD,
+so it holds the piece's commits — including the `dev-writer`'s. Nobody else is in
+that tree with you.
 
 **Nothing else writes the piece while you run.** No `spec-writer`, no `dev-writer`:
 you mutate implementation code you do not own, and a concurrent writer either
@@ -93,7 +93,7 @@ Reviewers address findings to `spec-writer`, `dev-writer` or `tester`, and the o
 marked for you are usually a test that cannot fail for the reason its name claims.
 
 **Your brief points at the files; it does not contain them.** Expect a dispatch
-naming the piece, the worktree and `openspec/changes/<name>/findings/` — then read
+naming the piece and `openspec/changes/<name>/findings/` — then read
 every box addressed to you. If a brief also summarises one, **read the file and
 trust it over the summary**, and say so if they disagree: the file carries the
 measurement, the summary is somebody's recollection of it.
@@ -109,17 +109,28 @@ rather than writing a test that cannot fail.
 
 ## Where your work lands
 
-**Commit straight to `piece/<name>`** — the piece's one branch, the one its PR is
-open on — and **tick the tests row** in `tasks.md`'s stage block in the same commit.
-Same when you come back to act on a finding: you are the only agent writing tests
-on the piece either time, so no side branch and no cherry-pick are needed.
+**Use plain relative paths.** You are already in the right tree, so the suites run
+as written: `cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p
+dialectica -p dialectica-core` and `sh dialectica-ui/tests/run-qml-tests.sh`.
+Never a compound command; `cd <dir> && cargo test` costs an approval click even
+though `cargo test` is allow-listed. For a suite in a subdirectory, prefer the
+tool's own path flag over moving directory.
 
-**Push `piece/<name>` once you are done**, and do not open a PR — the
-`dev-writer` opened it before you ran. Push by name, `git push origin
-piece/<name>`, after checking `git branch -vv`; a worktree inherits its parent
-branch's upstream, and a bare `git push` has landed commits on `main` here more
-than once. Never `git add -A`; a worktree collects build output and a gitignored
-SDK symlink.
+**Do not call `EnterWorktree`** — it is for a session moving itself;
+`README.md`'s "Handing over between agents" says why a dispatched agent cannot.
+
+**You are not on `piece/<name>`.** The harness puts you on `worktree-agent-<id>`.
+Read it with `git rev-parse --abbrev-ref HEAD`, commit there, and **tick the
+tests row** in `tasks.md`'s stage block in the same commit.
+
+**Report your branch name and do not push.** The runner cherry-picks your commits
+onto `piece/<name>`; a harness-named branch on the remote is the same failure as
+a reviewer branch reaching it. The name is the one thing the runner cannot
+recover without you, because the harness chose it.
+
+Never `git add -A`; commit your test files by name — the tree carries build
+output and a gitignored SDK symlink that are not yours to commit. The README's
+branch section has the artefact list.
 
 Report what you kept, adapted and removed, and why. Report the
 predicted-versus-observed failure for each test you proved can fail — if they
