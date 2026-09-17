@@ -631,6 +631,65 @@ failure this repo has already paid for.
 
 ## Open Questions
 
-None that change what is built. Who computes a lamp's state — a core probe, a
-UI heuristic, or a mix — is a screen-and-core question, and the component is
-written so that answer can arrive later without touching it.
+None of the three below changes what is built. The first was open while the
+piece was written; the other two are review findings left open on purpose, and
+they are recorded here because `openspec archive` deletes `findings/` while it
+moves this document — so without an entry each would leave the tree entirely.
+Both are addressed to a `spec-writer` and neither is discharged here.
+
+**Who computes a lamp's state** — a core probe, a UI heuristic, or a mix — is a
+screen-and-core question, and the component is written so that answer can arrive
+later without touching it.
+
+**Nothing executable reserves green and orange to the three status lamps.**
+`SPEC.md:133` says *"Green and orange appear nowhere else in the design"*, and
+that is a whole-codebase invariant with no gate behind it. What holds it today
+is the comment at `DTheme.qml:65-76` and nothing else — which is checkable, and
+stops being true the moment a gate exists. The tree is correct as of this piece:
+`grep -rn "statusOk\|statusDegraded\|#4f6b3a\|#b5731f" dialectica-ui/src/qml/`
+returns only `DTheme.qml`'s declarations and `DStatusBar.qml`'s three uses.
+Nothing keeps it correct. The failure is silent and arrives from outside this
+piece: a later screen writes `color: "#4f6b3a"` for a success badge, every test
+and every gate here passes, and the one signal the interface reserves for "is
+this machine working" has been spent on something that is not that.
+
+Closing it means a static sweep over the QML tree in the shape of
+`check_qml_names.py` — a lint-job check needing no Qt, with its own
+`tst_` beside it pinning both directions, since a sweep narrowed to nothing
+passes as quietly as a correct one. That is a piece of its own and deliberately
+not this one's work. Two things the sweep must get right, both learned here: the
+rule is about the **interface** palette, not "the design" — `markGreen` and
+`markSage` are identicon inks, selected by an address and signalling no state,
+so they are outside the rule rather than exceptions to it, and a sweep that
+flags them will be disabled rather than fixed; and a literal-only sweep misses
+`DTheme.statusOk` reached through the token, so it needs both the hex values and
+the token names, which is why the grep above carries four patterns.
+
+**Whether the six `copy.json status.tooltips` strings belong in a spec.**
+`SPEC.md:132` requires each lamp carry *"a tooltip that says what the state means
+for this machine (strings in copy.json)"*, but `DStatusBar` takes
+`deliveryText`/`storageText`/`zoneText` as caller-supplied properties and
+invents nothing when they are unset. That split is right — computing a state is
+a screen's problem, as Non-Goals says — and it leaves the six strings owed by
+whoever wires the footer, with no test checking them against the bundle.
+`tst_status_bar.qml` asserts only the negative, that an unset explanation
+invents nothing.
+
+What makes this more than copy discipline: `deliveryNoPeers` reads *"Delivery: no
+peers to reach — you have joined nothing yet"*, and the second clause is the
+whole of what tells an empty feed apart from an unreadable store — the exact
+distinction `SPEC.md:135-136` exists to force. A footer-wiring screen that
+paraphrases it to "No peers" loses that distinction and nothing fails.
+
+The obligation is recorded, in `DStatusBar.qml`'s own header (the "six tooltip
+strings travel with the screen that computes the states, verbatim" block) —
+placed there rather than in a document of its own because `docs/UI-BRIEF.md` was
+deleted by #83 while this piece was in review, on the ruling that reading our own
+brief back as input made the codebase cite itself, and a component header is
+where a screen author already looks. **A comment is not a gate**, which is
+precisely the question left open: whether a verbatim-strings obligation belongs
+in a contract something can enforce, or stays a note to the next author. That is
+a judgement about the contract rather than about this piece, so it was not made
+on the spec-writer's behalf. Note that the header's pointer at
+`findings/spec-test.md` dangles once this change is archived; this section is
+the surviving record.
