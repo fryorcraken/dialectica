@@ -103,8 +103,27 @@ Canvas {
     property int    size: 40
     property int    stroke: size >= 34 ? 3 : 2
 
+    // De-emphasis for a mark standing beside something already acted on — an
+    // author in the moderated list, where the mark is there to be recognised
+    // rather than attended to.
+    //
+    // IT IS AN OPACITY ON THE ROOT, AND DELIBERATELY NOT A DRAWING CHANGE.
+    // Desaturating the inks inside `onPaint` would make what a mark looks like
+    // depend on the CONTEXT it is drawn in, so two peers rendering the same
+    // person in different lists would disagree — which is precisely what the
+    // determinism contract above exists to forbid. Opacity cannot reach a
+    // selector: `onPaint` is not re-entered, and every value
+    // `tst_identicon.qml` pins is unchanged by construction rather than by
+    // promise.
+    //
+    // The contour dims with the fill, which is intended. Holding the outline at
+    // full strength would make a muted mark MORE conspicuous in silhouette than
+    // an unmuted one — the opposite of recessive.
+    property bool   muted: false
+
     width: size
     height: size
+    opacity: muted ? DTheme.markMutedAlpha : 1
     onAddressChanged: requestPaint()
     onSizeChanged: requestPaint()
 

@@ -49,7 +49,7 @@ QtObject {
     // ---- surfaces -------------------------------------------------------
     readonly property color desk:      "#d9d2c2"   // behind the cards
     readonly property color paper:     "#efe9dc"   // card
-    readonly property color paperDeep: "#e7dfcd"   // a deeper paper, for panels inset in a card
+    readonly property color paperDeep: "#e7dfcd"   // recessed panel
     readonly property color field:     "#f7f3ea"   // inset panels, inputs
 
     // ---- interface inks: three, and only three --------------------------
@@ -59,8 +59,31 @@ QtObject {
     readonly property color inkSoft:   "#3a362e"
     readonly property color inkMuted:  "#6f685a"
     readonly property color inkFaint:  "#8c8577"
-    readonly property color accent:    "#a33a2b"   // red: caveats, destructive
+    readonly property color accent:    "#a33a2b"   // red: caveats, destructive, moderation
     readonly property color accent2:   "#4a6b74"   // teal: second fill ink, secondary marks
+
+    // ---- status lamps: the only INTERFACE green and orange ----------------
+    // Three lamps replace every prose status line, and the colour is half of
+    // what a lamp says. Using green or orange anywhere else would spend the
+    // one signal the interface reserves for "is this machine working" on
+    // something that is not that.
+    //
+    // "interface" and not "the design": the mark palette below carries
+    // `markGreen` and `markSage`, and they are outside this rule rather than
+    // exceptions to it — an identicon ink is selected by an address and never
+    // signals a state, so it spends nothing. An unqualified claim here is one
+    // a reader disproves thirty lines down, and a rule disproved on first
+    // check stops being consulted.
+    //
+    // statusFailed is deliberately the SAME value as `accent` rather than a
+    // fourth red. A failed lamp and a destructive action are the same alarm at
+    // different scales, and two nearly-identical reds on one screen read as a
+    // distinction the design does not intend. They are separate tokens because
+    // they are separate ROLES — retuning the destructive red must not silently
+    // retune the failure lamp — not because the values differ today.
+    readonly property color statusOk:       "#4f6b3a"
+    readonly property color statusDegraded: "#b5731f"
+    readonly property color statusFailed:   "#a33a2b"
 
     // ---- mark inks: SEVEN, and they are NOT the interface palette --------
     // The identicon's palette has a different job from the interface's, so it
@@ -166,6 +189,14 @@ QtObject {
     readonly property int markInList:     40
     readonly property int markMinWeave:   12   // below this: flat fill, contour only
     readonly property int markMinDraw:    10   // below this: no mark, print the address
+
+    // How far a mark recedes when it stands for something already acted on —
+    // an author in the moderated list. A TOKEN and not a literal in
+    // `Identicon.qml`, because this is a theme decision (how loud is
+    // "recessive" on this paper) and not part of the mark's determinism
+    // contract: it changes how visible a mark is, never which shape or inks it
+    // selects. See design.md D4 for why muting is an opacity at all.
+    readonly property real  markMutedAlpha: 0.45
 
     // ---- address abbreviation -------------------------------------------
     readonly property int headChars:   8
