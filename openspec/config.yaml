@@ -9,6 +9,4 @@
 #
 # Reasoning never goes in a spec: a spec is a behaviour contract, and prose
 # rationale in one is prose nobody maintains.
-#
-# See `.claude/agents/README.md` for the document model and the role agents.
 schema: spec-driven

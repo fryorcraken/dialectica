@@ -10,6 +10,13 @@ the live contract in `openspec/specs/`, so it has to be in the tree CI tests and
 in the diff the merge applies. The whole change — code, spec delta and the
 promotion — lands as one squashed commit under one PR.
 
+The alternative — archive after the merge — **cannot work here**: it needs a
+second push straight to `main`, and `main` has `enforce_admins` on, so that push
+is rejected with `GH006`. The ordering that would demand it does not survive
+either — `openspec archive` *moves* the change folder rather than deleting it,
+so a squash costs nothing that matters, and what it buys is that the code and
+the spec describing it revert together.
+
 `openspec` is installed. **Run `openspec --version` rather than believing any
 document about it** — including this one. This file once recorded the CLI as
 absent (exit 127); the absence was real, the sentence outlived it, and "openspec
@@ -32,6 +39,10 @@ archive.
 
 A change declaring `retire_capabilities` makes archive **delete** a spec instead
 of merging into it. It takes an explicit marker; nothing here does it.
+
+**A change that declared `skip_specs: true` has no delta to promote** and
+archives with `--skip-specs`, which the CLI documents for exactly this case;
+taking the delta-merge prompt there would be promoting nothing.
 
 **`archive` aborts and writes nothing if the target spec has no `## Purpose`.**
 
@@ -84,11 +95,30 @@ up from the current directory to the first `openspec/` it finds. There is **no
 `--directory`, `-C` or `--root`**. `--store` takes a registered kebab-case store
 id, not a path.
 
-Agents work in worktrees, so this bites immediately: run from the main checkout
-and a change in a worktree is simply not listed. Run `openspec` from inside the
-worktree — `cd <dir> && openspec …` with no path argument after the `cd` is a
-shape the permission checker accepts. **Check the reported root before concluding
-a change is missing or the CLI is broken.**
+Agents work in worktrees, so where an agent stands decides whether its change is
+visible at all — an agent whose cwd is the main checkout while its change lives
+in a worktree gets the change simply not listed. **The dispatch is what makes
+this a non-problem, not anything in `openspec`.** With `isolation: "worktree"`,
+an agent's cwd *is* the tree holding its change, so `openspec` resolves the right
+root and runs plainly — no compound command, no approval click, no workaround. A
+tool that takes its root from the cwd is correct exactly when the cwd is.
+
+**Check the reported root before concluding a change is missing or the CLI is
+broken.** It is one line of `openspec list --json`, and it distinguishes "the
+change does not exist" from "I am standing in the wrong tree" — which otherwise
+look identical.
+
+Two things not to reach for if it ever does go wrong. **`EnterWorktree` is not
+for a dispatched agent** — it refuses a session at the repository root, and
+crossing between worktrees succeeds while leaving every Bash call refused;
+`.claude/agents/README.md`'s "Handing over between agents" has both probes
+verbatim. And **`cd <dir> && openspec …` costs an approval click** unless it
+carries no path argument after the `cd`, because the checker cannot analyse a
+compound command.
+
+If validation genuinely cannot run, **say in the report that it did not run, and
+why**. An unrun gate reported as passed is worse than a skipped one, because the
+row gets ticked either way.
 
 ## Reading two capabilities together
 

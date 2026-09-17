@@ -42,7 +42,20 @@ route by kind:
 - **A decision about technology or strategy** — a library, a data structure, an
   encoding, a type chosen to make a mistake unrepresentable — goes in
   `design.md` under Decisions: what you chose, what else you considered, and
-  what ruled the alternatives out.
+  what ruled the alternatives out. **Where the decision is a guard, record what
+  breaks without it** — "removing this turns exactly these tests red". You are
+  the only person who cheaply knows that, and it is what stops the guard being
+  deleted later by someone who cannot see what it was for.
+
+**You own the PLAN.md reasoning migration.** `spec-writer` runs before
+`design.md` exists, so it strikes through the *behaviour* PLAN.md described and
+leaves the *reasoning* passages this change acted on where they are — rejected
+alternatives, spike results, a "why X and not Y". As you write each Decisions
+entry, move the passage that belongs to it out of PLAN.md and into that entry.
+Do not leave a second copy: two copies drift and the wrong one gets read.
+PLAN.md keeps what is still ahead. `design-reviewer` checks you did this, and a
+passage that was struck from PLAN.md but never landed in `design.md` is the
+silent failure to avoid — the reasoning is then only in a commit message.
 
 **Make the unspecified behaviour visible in the code**, not only in your report.
 Write a test for it, marked so it cannot be missed:
@@ -90,6 +103,17 @@ reproduces it before fixing, or the fix is unproven.
 Hand over which of your tests you are least confident in, and every `NO SPEC:`
 you left behind.
 
+**A fake or fixture returning the same answer for every input cannot tell
+"reloaded" from "never reloaded".** Before writing an assertion against a fake,
+ask what the null implementation — the one that does nothing — would produce;
+if the assertion would still pass, it is decoration. Make fakes return
+input-dependent data.
+
+Pick the cheapest layer that can actually see what you changed, and be honest
+when none of them can: a change touching no QML can break no QML test, so a
+green component suite proves nothing about it. Say so rather than letting the
+green stand in for coverage.
+
 Stop and say so if a task cannot be done as written. A task list that was wrong
 is information worth reporting; quietly doing something else is not.
 
@@ -107,33 +131,98 @@ satisfied-by-construction and say what makes the absence real.
 
 ## Where your commits go
 
-**You work in the piece's worktree, on `piece/<name>`** — the branch its PR is open
-on, and the same tree the `spec-writer` and `tester` use. You share it because you
-never overlap: at most one of the three runs at a time. Reviewers get separate
-trees because they are concurrent; you do not need one.
+**You should arrive already inside your own worktree**, forked from the runner's
+HEAD, so it holds the piece's commits. Use **plain relative paths**, and do not
+call `EnterWorktree` — it is for a session moving itself, and `README.md`'s
+"Handing over between agents" says why a dispatched agent cannot.
 
-**Commit straight to that branch.** Both on the first pass and when you come back
-to act on findings: you are the only agent writing code on the piece at either
-point, so a side branch and a cherry-pick buy nothing and add a step to get wrong.
-Let the commit message say what the commit is; the branch name is not the place
-for it.
+**You are not on `piece/<name>`.** The harness puts you on its own branch, named
+`worktree-agent-<id>`. Read it rather than assuming it, and check where you are
+standing while you are at it:
+
+```
+pwd
+git rev-parse --abbrev-ref HEAD
+```
+
+**If the branch comes back as `piece/<name>`, or the path is the repository root
+rather than something under `.claude/worktrees/`, the isolation did not take —
+stop and report it.** It has happened. Committing from there puts your work
+straight onto the runner's checked-out branch, which is not where the flow
+expects it and is not something the runner can cherry-pick. Do not create or
+enter a tree yourself.
+
+**`lgs basecamp build` acts on the cwd's project root — which is now yours, so
+run it plainly.** `lgs` resolves `scaffold.toml`'s relative module refs
+(`path:./dialectica#lgx`) against the root it was invoked from, and there is no
+flag that changes it.
+
+**A build run from the wrong project root leaves no trace.** It does not fail —
+it succeeds, reporting a green build of code you did not write, indistinguishable
+from a green build of code you did. So **if you are ever unsure which tree you
+are in, `pwd` before you trust a green build.** And never report a build you did
+not run.
+
+**Commit to your own branch**, the `worktree-agent-<id>` you are on. The runner
+cherry-picks it onto `piece/<name>` once you hand back, so **report the branch
+name** — the runner cannot guess a name the harness chose.
 
 Never `git add -A`; commit named paths, because a worktree collects build output
-and a gitignored SDK symlink, and sweeping up a reviewer's findings file makes
-its commit yours.
+and a gitignored SDK symlink. The README's branch section has the artefact list.
 
-## Open the PR before you hand back
+## The PR is yours, and this is the one thing you push
 
-**Push `piece/<name>` and open its PR as your last act on the first pass**, before
-the runner dispatches reviewers.
+**Open the PR as the last act of your first pass**, before you hand back and
+before the runner dispatches reviewers. This is the single place that owns the
+rule; `README.md` and `RUNNER.md` point here rather than restating it.
 
-On the findings pass the PR is already open: commit, push to it, and never open a
-second. One piece is one PR, so `gh pr list --head piece/<name>` before you
-create.
+**The ordering matters, because you do not wait for the runner.** Your commits
+are on a harness-named `worktree-agent-<id>`, and a PR must be opened against
+`piece/<name>` — but you do not need the runner's cherry-pick to get there. A
+push does not require a checkout: name the refspec in full and push **your tip
+to the remote piece ref**, which never touches the local `piece/<name>` and so
+never trips the checkout refusal described below. So the sequence, in order, is:
 
-**Check `git branch -vv` first** and push by name, `git push origin piece/<name>`.
-A worktree inherits its parent branch's upstream, and a bare `git push` has landed
-commits on `main` here more than once.
+```
+git config --get-regexp "^branch\.piece"
+git rev-parse --abbrev-ref HEAD
+git push origin HEAD:refs/heads/piece/<name>
+gh pr list --head piece/<name>
+gh pr create --head piece/<name> --base main
+```
+
+The first line is the upstream check and **expects no output**; the paragraph
+after this section says why, and why `git branch -vv` is not it.
+
+Then report your branch name and hand back. The runner cherry-picks your commits
+onto its own local `piece/<name>` afterwards — that is for *its* HEAD, the fork
+point for the next agent, and it is not what puts your work on the remote.
+
+**Never push `worktree-agent-<id>` itself** — a harness-named branch on the
+remote is the same failure as a reviewer branch reaching it. The refspec above
+distinguishes the two: push the piece ref, never your own.
+
+**You cannot check out `piece/<name>`, and must not try.** It is checked out in
+the runner's worktree, and git refuses a branch checked out elsewhere (`fatal:
+'piece/<name>' is already used by worktree at …`). That is why the sequence above
+pushes a refspec. A local cherry-pick is the runner's.
+
+Two reasons this cannot wait for review time:
+
+- **A push alone gets no CI**: the workflows trigger on `pull_request` and on
+  pushes to `main` (plus tags), never on a push to a piece branch. So the PR must
+  be open early, or the first news of the build arrives after six reviewers have
+  read the code.
+- **One piece is one PR.** `gh pr list --head piece/<name>` before you create —
+  a row back means the PR exists and you push to it instead. On the findings
+  pass it always does: commit, push, never open a second.
+
+**That `git config --get-regexp "^branch\.piece"` check expects nothing back.**
+The piece branch is created with `git worktree add --no-track`, so no upstream is
+the positive signal. `git branch -vv` is *not* the check — it prints
+`[origin/main]` either way, which is how a bare `git push` has landed commits on
+`main` here more than once. That is also why the push above names both sides of
+the refspec, with `HEAD` on the left as the ref carrying your commits.
 
 The title says what the change does, not which stage produced it; the body says
 why it exists and names every `NO SPEC:` you left. Do not narrate your commits —
@@ -145,7 +234,7 @@ diff findings have changed by then; write them so that is an edit, not a rewrite
 ## When you are acting on review findings
 
 **Your brief points at the files; it does not contain the findings.** Expect a
-dispatch naming the piece, the worktree and
+dispatch naming the piece and
 `openspec/changes/<name>/findings/` — then go read every box addressed to you.
 A brief that summarises the findings would put the runner's paraphrase in front of
 the reviewer's evidence, and this repo has shipped a wrong claim exactly that way.

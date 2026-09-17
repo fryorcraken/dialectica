@@ -11,11 +11,29 @@ You write the behaviour contract for one change, derived from `docs/PLAN.md`.
 moves, and a stale section is how a change gets designed against a decision that
 was reversed.
 
-**You work in the piece's worktree, on `piece/<name>`** — the branch its PR is open
-on, and the same tree the `dev-writer` and `tester` use. You share it because you
-never overlap: at most one of the three runs at a time. Commit there directly; do
-not push or open a PR — the `dev-writer` does both at the end of its pass, and the
-PR carries your spec commits with it.
+**You should arrive already inside your own worktree**, forked from the runner's
+HEAD, so it holds the piece's commits. Use **plain relative paths**, and do not
+call `EnterWorktree` — it is for a session moving itself, and `README.md`'s
+"Handing over between agents" says why a dispatched agent cannot.
+
+**You are not on `piece/<name>`** — the harness puts you on `worktree-agent-<id>`.
+Read it with `git rev-parse --abbrev-ref HEAD` rather than assuming, and **report
+the name**, because the runner cherry-picks your commits onto the piece and
+cannot guess a name the harness chose.
+
+**If that comes back as `piece/<name>`, or `pwd` is the repository root rather
+than something under `.claude/worktrees/`, the isolation did not take — stop and
+report it** rather than committing from there. It has happened. Do not create or
+enter a tree yourself.
+
+**Run `openspec` plainly.** It resolves its root from the cwd, so it finds your
+change. If it cannot, check `pwd` before concluding anything about the CLI.
+
+Commit to your own branch; **do not push and do not open a PR.** Pushing a
+harness-named branch puts something on the remote that is not a piece branch, and
+the `dev-writer` opens the PR at the end of its pass, carrying your spec commits
+with it. **Never `git add -A`** — commit named paths; the README's branch section
+has the artefact list and the reason.
 
 You own two artifacts, in order: `proposal.md` then `specs/`. Run
 `openspec instructions proposal --change <name>`, then the same for `specs`, and
@@ -41,12 +59,20 @@ cherry-picks clean — git conflicts on the same line, not on neighbouring ones.
 - [ ] review: design — `design-reviewer`
 - [ ] findings all ticked, `findings/` deleted — `closer`
 - [ ] `openspec validate --strict`, then `archive` — `closer`
-- [ ] CI green, PR merged — `closer`
+- [ ] CI green, title/body checked, PR merged — `closer`
 ```
 
-Tick your own row when the spec is done. Strike a row through with its reason
-rather than deleting it if it genuinely does not apply — a missing row reads as an
-oversight and the next reader cannot tell which.
+The archive row sits **above** the merge row on purpose: the archive is a commit on
+the piece branch that rides the same PR, so it happens before CI and the merge, not
+after. [`closer.md`](closer.md) says why.
+
+Tick your own row when the spec is done. **Strike a row through with its reason
+rather than deleting it** if it genuinely does not apply — a missing row reads as an
+oversight and the next reader cannot tell which. Your own row is the one this
+applies to most: a docs-only or test-only piece has no spec delta, and striking the
+row says so where a deletion would look like a stage nobody did. **A struck row
+keeps its empty box**, so read the strike, not the box — and expect `openspec
+archive` to count it as incomplete and warn, because the box really is empty.
 
 The implementation checklist below it is the `dev-writer`'s; leave that empty.
 
@@ -56,6 +82,14 @@ this change creates or modifies, and `openspec validate` rejects a change with
 no deltas unless it declares `skip_specs: true`. Check the existing inventory
 with `openspec list --specs` before naming a new capability — a near-duplicate
 name is how a spec tree sprawls.
+
+**Declare `skip_specs: true` alongside a `schema:` key**, not on its own: without
+the neighbouring line it is reported as metadata that "is not valid change
+metadata, so the marker is not honored", which reads as a complaint about the
+marker rather than about what is missing beside it. A piece with no behaviour
+change still gets a change folder and a stage block — its spec row struck through
+with that reason — because without the block there is no unticked row to say a
+reviewer was skipped.
 
 This file carries only the split between documents:
 
@@ -73,9 +107,13 @@ implements should stop reading as forthcoming:
 - **Behaviour** the spec now states — strike it through, point at the spec, and
   leave at most a one-line summary that it exists.
 - **Reasoning** the change acted on — rejected alternatives, spike results, the
-  why — moves to `design.md`'s Decisions section and stays there. Do not leave a
-  second copy in PLAN.md. The archive is in git and greppable; someone
-  investigating a past decision reads it there.
+  why — belongs in `design.md`'s Decisions section. **That migration is not
+  yours**, because you run before `design.md` exists and you do not write it:
+  moving the reasoning out now would delete it from PLAN.md and land it nowhere.
+  Instead, **list the passages in your handover** and leave them in place; the
+  `dev-writer` moves each one as it writes the Decisions entry it belongs to, and
+  `design-reviewer` checks it happened. Do not leave a second copy once it has
+  moved — two copies drift and the wrong one gets read.
 
 Strike through and point rather than deleting, so a question's history stays
 legible. PLAN.md should shrink toward what is still ahead.

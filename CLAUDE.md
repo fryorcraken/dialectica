@@ -80,13 +80,34 @@ project a stalled session.
   you spawn an agent, tell it this rule explicitly, or it will inherit the
   habit and stall on its first sweep.
 
-  **The exception is `EnterWorktree`, which moves the session rather than
-  prefixing a command.** An agent working in a worktree enters it once with
+  **The exception is `EnterWorktree`, which moves a session rather than
+  prefixing a command** — an interactive session enters a worktree once with
   `EnterWorktree(path: <absolute path>)` and then uses ordinary relative paths:
   there is no `cd` for the checker to defeat it, and no `git -C <dir>` on every
-  call. That is the shape to put in an agent's brief — see
-  [`.claude/agents/README.md`](.claude/agents/README.md). Absolute paths remain
-  the rule for anything reaching *outside* the tree you are in.
+  call. Pass `path` and never `name`: `name` creates a *new* worktree branched
+  from `origin/main`. Absolute paths remain the rule for anything reaching
+  *outside* the tree you are in.
+
+  **A dispatched agent must not call it, and does not need to.** A subagent that
+  tries lands on one of two failures: dispatched normally its cwd is the
+  repository root, which the tool refuses outright (*"switching is only available
+  to sessions whose working directory is inside a worktree of this repository"*);
+  and crossing from one worktree into another *succeeds* while leaving **every
+  Bash call refused** for resolving to "the shared checkout" — the worse of the
+  two, because it looks like it worked until the first shell command.
+
+  **Agents get their tree from `isolation: "worktree"` instead**, which places
+  them inside their own worktree with a working cwd, plain relative paths and no
+  approval clicks. That is the route this repo runs on, so a brief carries no
+  `git -C <worktree>` instruction. It depends on `.claude/settings.json`
+  carrying `{"worktree": {"baseRef": "head"}}`, which forks each agent from the
+  runner's HEAD rather than `origin/main`. **That file is tracked** —
+  `.gitignore` excludes `.claude/*` and re-admits it by name, because while it
+  was ignored nothing failed when it was absent; agents were simply cut from the
+  wrong base. See [`.claude/agents/README.md`](.claude/agents/README.md) for the
+  probes and [`.claude/agents/RUNNER.md`](.claude/agents/RUNNER.md) for
+  one-runner-per-piece. **Settings are the user's — do not write that file on
+  your own initiative.**
 
   **Before sending an agent somewhere, check the directory is in scope.**
   Absolute paths fix the *analysability* problem; they do nothing for a
@@ -133,7 +154,18 @@ project a stalled session.
   --manifest-path <abs-path>` prompts even though the manifest path is absolute,
   because the `cd` is what defeats the analyser and the `cd` was never needed;
   and `openspec`, which genuinely has no directory flag, is the one case where
-  `cd <dir> && openspec …` is right — **with no path argument after it**.
+  `cd <dir> && openspec …` is right — **with no path argument after it**. For a
+  dispatched agent that case does not arise at all: `isolation: "worktree"` puts
+  its cwd in the tree holding its change, and `openspec` then runs plainly.
+
+  **Run one QML spec through the script, not through `qmltestrunner`:**
+  `sh dialectica-ui/tests/run-qml-tests.sh dialectica-ui/tests/tst_<name>.qml`.
+  A bare `qmltestrunner` resolves to Qt5 here and exits 1 with **no output at
+  all**, which reads exactly like a broken suite; the script picks the Qt6
+  binary, sets the import path and the offscreen platform, and runs the
+  `check_bindings` gate that turns an undefined binding from a warning into a
+  failure. Passing it one file is the supported shape and needs no approval
+  click.
 
 - **Never `readlink` or `ls` a `/nix/store` path** to find where a build
   artefact went. Use the documented artefact paths under `.scaffold/basecamp/`.
@@ -183,6 +215,35 @@ from whatever the recursive search happened to hit first.
 So: **prune a worktree as soon as its branch is merged or abandoned**
 (`git worktree remove <path>`), and check `git worktree list` when the count
 starts feeling unfamiliar.
+
+**Create it with `--no-track`, or the branch is configured to push to `main`:**
+
+```
+git worktree add --no-track -b <branch> .claude/worktrees/<name> origin/main
+```
+
+Branching from a remote-tracking ref makes git's `branch.autoSetupMerge` default
+write `remote = origin` and `merge = refs/heads/main` into the new branch's
+config. That — not anything about worktrees inheriting state — is why a bare
+`git push` from one has landed commits on `main`. The branch is set up to push to
+`main` from the moment it exists.
+
+**Check it with `git config --get-regexp "^branch\.<name>"`, which returns
+nothing when the branch is right.** `git branch -vv` cannot catch this: it prints
+`[origin/main]`, and nothing in that output distinguishes an intended upstream
+from a wrong one. A `--no-track` branch has no upstream, so push the refspec in
+full: `git push origin refs/heads/<branch>:refs/heads/<branch>`.
+
+**The stash stack is shared with the main checkout and every other worktree**,
+and other sessions may be using it concurrently. Never bare `git stash` /
+`git stash pop`. Prefer a throwaway WIP commit to set work aside — it is local to
+your branch and cannot be popped by anyone else.
+
+**Agent worktrees are the runner's to remove, and they arrive faster than piece
+worktrees** — one per dispatch rather than one per piece. An agent cannot remove
+its own: it is standing in it, and `git worktree remove` refuses the directory
+you are in. So the runner cherry-picks the agent's commits off its branch and
+then removes the tree. See [`.claude/agents/RUNNER.md`](.claude/agents/RUNNER.md).
 
 ## What this is
 

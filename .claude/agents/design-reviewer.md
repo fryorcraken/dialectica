@@ -10,6 +10,13 @@ You check the code against the change's `design.md` — specifically its
 considered — and check `design.md` against `docs/PLAN.md`. You do not review
 code quality or test coverage; separate reviewers do those.
 
+**If the change has no `design.md`, say so and stop.** It is a conditional
+artifact — `dev-writer.md` writes one when the change involves a new data
+format, a security boundary, a new dependency, or migration or performance
+complexity, and legitimately skips it otherwise. A missing `design.md` is a
+finding only when the change met one of those triggers; then report *that*,
+rather than reviewing against a file that does not exist.
+
 ## 1. Did the code take the decisions that were recorded?
 
 For each entry under Decisions, find where the code implements it and confirm it
@@ -59,6 +66,13 @@ works that way is a finding.
 Report reasoning this change acted on that is still in PLAN.md, and reasoning
 duplicated across both — two copies drift and the wrong one gets read.
 
+One thing to check in the other direction: a trap that belongs to a **built**
+subsystem belongs in its trigger-specific doc (`docs/SCAFFOLD.md`,
+`docs/OPENSPEC-ARCHIVE.md`) or CLAUDE.md, not only in an archived `design.md`.
+The archive answers "why was this decided"; those docs answer "what will bite
+me tomorrow". A change that learned something the next toucher of that file
+needs should have put it where they will look.
+
 ## What a good Decisions entry contains
 
 Judge each against this and say which part is missing:
@@ -69,6 +83,11 @@ Judge each against this and say which part is missing:
   first and matters most: an entry with no alternatives reads as though there
   was no choice, and the next person re-litigates it from scratch.
 - **What it costs**, including what it forecloses
+- **The mutation evidence, where the decision is a guard** — "removing this
+  turns exactly these tests red". This is the most perishable thing in a
+  change: it usually exists only in a commit message, and it is what stops a
+  future reader deleting a guard whose purpose is no longer obvious. Report an
+  entry that describes a guard without it.
 
 ## Output
 
@@ -99,18 +118,36 @@ the code had — and a `design.md` atomicity claim has been found with no test
 behind it. A decision that is only pinned by a test added afterwards was made by
 accident, which is the thing you exist to catch.
 
-**Then commit that one file** on `review/<name>/design`, **tick your own row** in
-`tasks.md`'s stage block in the same commit, and **cherry-pick that commit onto the
-local `piece/<name>`**. Do not push — the runner does. Never `git add -A`.
+**Then commit that one file** on the branch you are already on — the harness named
+it `worktree-agent-<id>`, not `review/<name>/design`, so **read it rather than
+assume it**: `git rev-parse --abbrev-ref HEAD`. **Tick your own row** in
+`tasks.md`'s stage block in the same commit. **Push nothing** — a reviewer is the
+one role that pushes no branch at all. **Name that branch in your report**, because
+the runner cherry-picks your commit onto `piece/<name>` and cannot do so for a
+branch it has to guess. Never `git add -A`.
 
-**Step out of your worktree and remove it when you finish** —
-`ExitWorktree(action: "keep")`, then `git worktree remove <absolute-path>
---force`. The exit comes first because `git worktree remove` cannot remove the
-directory you are standing in, and `keep` rather than `remove` because the tool
-only deletes worktrees it created itself and the runner made this one. Your
-findings file is already committed and cherry-picked, so nothing you want lives
-there, and deleting is unconditional where restoring depends on having tracked
-every edit you made.
+## Your worktree, and handing it back
+
+You should arrive inside a worktree of your own, forked from the runner's HEAD,
+on a harness-named branch. Use ordinary relative paths, and do not call
+`EnterWorktree`: the call only moves you somewhere your Bash calls are refused.
+`README.md`'s "Handing over between agents" records why.
+
+**Check it before you commit** — `pwd` and `git rev-parse --abbrev-ref HEAD`. If
+the branch is `piece/<name>` or the path is the repository root, the isolation
+did not take; **stop and report it** rather than committing from there. It has
+happened. You read rather than mutate, so the review itself is unaffected.
+
+**You cannot remove the tree — you are standing in it, and `git worktree remove`
+refuses the directory you are in.** That refusal reads like a permissions problem
+and is not one. Removal is the **runner's** job, and that is the right owner rather
+than a workaround: `--force` discards uncommitted work irreversibly, including the
+state your findings cite, and only the runner knows whether something still needs to
+read your tree — re-checking a finding against the exact state that produced it, or
+comparing two reviewers' citations.
+
+So your hand-off is your report: the **branch name**, so the runner can cherry-pick
+your findings commit, and a line saying the tree is ready to prune once it has.
 
 **Your final report is a pointer, not a copy** — the path, the entry count, and who
 each is for.
