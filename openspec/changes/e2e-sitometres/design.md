@@ -178,14 +178,47 @@ the listing needs a root-level handle. Added as `readonly` aliases that compute
 from what is already there rather than as new state — a second writable copy of
 the listing is exactly the drift `visibleRows` was reshaped to prevent.
 
-### D7 — Divergence: no `with:` list
+### D7 — `with: [dialectica]`, matching radicle. **A corrected mistake, kept
+here because the wrong reasoning is the tempting one**
 
-Radicle's `browse.yaml` declares `with: [radicle]` because two modules must be
-findable from one `--app-dir` search root. Dialectica's UI declares one
-dependency (`dialectica`), and `lgs basecamp build` collects both into
-`.scaffold/basecamp/lgx` the same way, so the single `--app-dir` is enough and
-`with:` adds nothing. Recorded because its *absence* would otherwise read as an
-oversight against the reference.
+The spec declares `with: [dialectica]`, exactly as radicle's `browse.yaml`
+declares `with: [radicle]`.
+
+**This entry first said the opposite, and the first CI run disproved it.** The
+reasoning was: `--app-dir` is a single search root, `lgs basecamp build` already
+collects both modules into it, so naming the dependency is redundant. That
+conflates two different things. `--app-dir` is where sitometres *looks*;
+`with:` is what causes a dependency to be **staged** into the throwaway
+user-dir. Being findable is not being staged.
+
+Measured, on run 35302791588:
+
+```
+FAIL  the app opens                             120.1s
+      "dialectica_ui" did not open within 120s
+        dialectica_ui declares the core module "dialectica", and Basecamp
+        could not load it. Stage it with --with dialectica, or check that
+        it is built.
+  0 passed, 1 failed, 18 inconclusive
+```
+
+Two things worth keeping from that run beyond the fix:
+
+- **The failure presented exactly as D1 warns a variant mismatch does** — the
+  app never opening and step 1 timing out. So "step 1 timed out" does *not*
+  identify the matched-pair problem on its own; it is the shared symptom of
+  several causes, and the harness's own message is what distinguishes them.
+  Read it before reaching for the pairing.
+- **The adjudicator behaved correctly on its first real failure**: it reported
+  the verdict and named all 19 steps rather than stopping at the first, and the
+  18 downstream steps came back `inconclusive` rather than `fail` — which is
+  the distinction `--strict` exists to stop being read as a pass.
+
+The general lesson, and the reason this is not quietly rewritten: **a
+divergence from a working reference deserves more evidence than a plausible
+argument.** Every other divergence below (D8, D9, D10) rests on a measured
+property of this repo; this one rested on an inference about a tool's internals,
+and it was wrong.
 
 ### D8 — Divergence: no seeded profile, and therefore no `--env`
 

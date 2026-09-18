@@ -66,6 +66,21 @@
 # diagnostic while passing on a view that showed the wrong message entirely.
 
 app: dialectica_ui
+# The core module must be STAGED, not merely findable.
+#
+# This was omitted on the reasoning that `lgs basecamp build` already collects
+# both modules into the one `--app-dir`, so naming the dependency would be
+# redundant. Measured, that is wrong: `--app-dir` is a SEARCH ROOT, and `with:`
+# is what causes the dependency to be staged into the throwaway user-dir. The
+# run failed with the app never opening and sitometres naming the cause exactly
+# —
+#
+#   dialectica_ui declares the core module "dialectica", and Basecamp could
+#   not load it. Stage it with --with dialectica, or check that it is built.
+#
+# — after 120s on step 1, with the remaining 18 steps reported inconclusive.
+# Radicle's browse.yaml declares `with: [radicle]` for this same reason.
+with: [dialectica]
 timeout: 30s
 
 steps:
