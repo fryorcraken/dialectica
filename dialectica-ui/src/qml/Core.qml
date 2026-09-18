@@ -73,6 +73,37 @@ QtObject {
             return { ok: false, error: "The core module returned something that is not JSON." }
         }
 
+        // **The host hands back the module's reply DOUBLE-ENCODED, and this
+        // second parse is what undoes it.**
+        //
+        // Core returns a JSON string. Basecamp's `LogosQmlBridge::callModule`
+        // then "serialize[s] QVariant result to JSON" (logos-basecamp
+        // `docs/project.md` §"UI App Calling a Logos Module"), and serialising a
+        // QString that already holds JSON produces a JSON STRING LITERAL — the
+        // whole reply escaped inside quotes. So one `JSON.parse` yields a
+        // `string`, never the object every caller here expects.
+        //
+        // Measured under basecamp rather than inferred, which matters because
+        // the shape is invisible from the QML suite: `list_stoas` came back as
+        //   "{\"hasMore\":false,\"items\":[],\"page\":0}"
+        // — a 45-character string whose `typeof` after parsing is `string`. That
+        // is why every call failed identically while the module was healthy and
+        // answering correctly: the guard below fired on a reply that was, one
+        // layer down, perfectly well-formed.
+        //
+        // **Unwrap exactly one layer, and only when a layer is there.** A blind
+        // second parse would break the moment the host stops double-encoding;
+        // this asks whether the first parse produced a string and re-parses only
+        // then, so it is correct against both hosts. A string that is not itself
+        // JSON falls through to the guard and is reported, not swallowed.
+        if (typeof reply === "string") {
+            try {
+                reply = JSON.parse(reply)
+            } catch (e) {
+                return { ok: false, error: "The core module returned something that is not JSON." }
+            }
+        }
+
         if (reply === null || typeof reply !== "object")
             return { ok: false, error: "The core module returned something that is not a reply." }
 
