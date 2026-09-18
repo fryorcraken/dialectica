@@ -210,7 +210,7 @@ there is no conflict, because the two agents were never in the same tree. The
 sequence per agent is: hand-back → cherry-pick onto `piece/<name>` → remove the
 agent's tree → dispatch the next.
 
-Reviewers are the exception that proves it: six run concurrently precisely
+Reviewers are the exception that proves it: they run concurrently precisely
 because they only *read* the code, so forking them all from the same HEAD is
 correct. It is writers that must be serialised.
 
@@ -257,33 +257,83 @@ not arise on it; and the setting is global, applying to every
 | Stage | How many |
 |---|---|
 | `spec-writer` / `dev-writer` / `tester` | **one in total**, not one each — cherry-pick and commit before dispatching the next, or it forks from a HEAD without the previous one's work |
-| reviewers | **six, in parallel** — a tree and a findings file each |
+| reviewers | **three to five, in parallel** — see the tier table below — a tree and a findings file each |
 | `closer` | one, never beside a writer |
 
-A full review is six agents of three types, one per stage-block row:
+The reviewers are three types, one stage-block row each:
 
 | Dispatch | Reads | Writes |
 |---|---|---|
-| `code-reviewer` × 4 — correctness, security, readability, architecture, named in the prompt | the code | `findings/<dimension>.md` |
+| `code-reviewer` × N — correctness+readability, security, architecture, named in the prompt | the code | `findings/<lane>.md` |
 | `spec-test-reviewer` | **spec and tests only — never the implementation** | `findings/spec-test.md` |
 | `design-reviewer` | code, `design.md`, PLAN.md | `findings/design-review.md` |
 
-The last two are not smaller `code-reviewer`s:
+### How many reviewers: read it off what the change contains
+
+| The change holds | Lanes | Which |
+|---|---|---|
+| Rust or QML **and** a spec delta | **five** | correctness+readability, security, architecture, spec-test, design-review |
+| code, no new contract | **four** | the same, less spec-test |
+| prose, config, agent files — no source diff | **three** | correctness+readability, architecture, design-review |
+
+**Read the tier off the change, not off its size.** "It's only a small piece" is
+not a tier; a spec delta is a spec delta. The question each row asks is whether
+the *material the lane reads* is present — a piece with no tests for
+`spec-test-reviewer` to read, or no code for `security` to attack, has nothing
+for that lane to do, and one with both has both whatever its diffstat says.
+
+**The last two lanes are not smaller `code-reviewer`s, and never merge into
+one:**
 
 - **`spec-test-reviewer` is blind to the implementation on purpose** — someone
   who has read the code judges tests by what the code does, which is the defect
-  a spec exists to catch. Do not hand it the code to "give it context".
+  a spec exists to catch. Do not hand it the code to "give it context". Its
+  value is measurable: on `thread-read` it produced six findings, three proved
+  by mutation with the suite green beforehand — including `"total": 42` added
+  to a wire reply with all 876 tests passing.
 - **`design-reviewer`** asks whether the recorded decisions were the ones taken.
   A gap it finds is a missing `design.md` entry, not a code defect.
 
-**Name the dimension** when launching a `code-reviewer`: one agent asked to hold
-two becomes whichever it started with. A small change can take one covering all
-four — but the other two are still separate dispatches, because what
-distinguishes them is what they may read.
+**Readability folds into correctness, and that is the one merge this flow
+makes.** It is the merge the evidence picks rather than the intuitive one, so
+the measurement is worth carrying: across 60 findings files from 10 changes,
+readability had the **lowest substantive fraction of the six (~61%)**, and its
+real findings were mostly already filed by correctness in the same round — on
+`wire-request-envelope` and `authoring-content` the readability box says so
+itself, citing the correctness entry. Its remaining catch is the stale comment
+or dead doc-link, which is a correctness reviewer's territory anyway once that
+reviewer is told to read prose as a claim.
 
-**A change with no source diff still gets all six.** Agent files, prose and
+**Architecture stays its own lane, against the intuition that it pairs with
+readability.** It scored ~93% substantive, and it is the lane that catches the
+class this repo keeps being bitten by — a hand-maintained list that will go
+stale silently, a guard copied to a fourth call site instead of moving into the
+data structure. Correctness asks whether this call is right today; architecture
+asks whether the next call site will be. Merging it into the weakest lane would
+bury the stronger rubric inside it.
+
+**`security` stays separate too, and "it often finds nothing" is not an
+argument against it.** It returns zero findings on some pieces (`key-identity`,
+with a full attack-and-verify writeup instead) and near-zero nits throughout —
+but its unique catches are severe, and at least one, the markup-injection sink
+in `ui-shell-components`, is something no other lane would have gone looking
+for.
+
+**What the parallel split buys beyond coverage, which is the reason not to
+merge further:** on 4 of 10 changes two lanes independently re-derived the same
+defect with the same mutation, without seeing each other's work — `thread-read`'s
+spec-test reviewer re-ran correctness's `wrapping_mul` mutation and reported a
+*larger* test count, which is how you can tell it was re-run rather than copied.
+That redundancy is what catches a reviewer's own mistake, and it is cheap: the
+self-declared duplicates cost one cross-reference in the same pass.
+
+**Name the lane** when launching a `code-reviewer`: one agent asked to hold two
+unrelated rubrics becomes whichever it started with.
+
+**A change with no source diff still gets its three.** Agent files, prose and
 config are reviewable material; treating "no code" as an exemption is how this
-flow's own adopting change nearly shipped with `code-reviewer` skipped.
+flow's own adopting change nearly shipped with `code-reviewer` skipped. The
+tier table drops the lanes with nothing to read — it never drops review.
 
 **Two concurrent authors across pieces is the ceiling.** Fanning agents across
 sequential work moves dependency discovery to collision time.

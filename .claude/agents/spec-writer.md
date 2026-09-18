@@ -51,9 +51,8 @@ cherry-picks clean — git conflicts on the same line, not on neighbouring ones.
 - [ ] spec — `spec-writer`
 - [ ] design + code — `dev-writer`
 - [ ] tests — `tester`
-- [ ] review: correctness — `code-reviewer`
+- [ ] review: correctness+readability — `code-reviewer`
 - [ ] review: security — `code-reviewer`
-- [ ] review: readability — `code-reviewer`
 - [ ] review: architecture — `code-reviewer`
 - [ ] review: spec-test — `spec-test-reviewer`
 - [ ] review: design — `design-reviewer`
@@ -65,6 +64,14 @@ cherry-picks clean — git conflicts on the same line, not on neighbouring ones.
 The archive row sits **above** the merge row on purpose: the archive is a commit on
 the piece branch that rides the same PR, so it happens before CI and the merge, not
 after. [`closer.md`](closer.md) says why.
+
+**The five review rows are the maximum, not the fixture. Strike the ones your
+piece's tier does not run**, with the reason, the same way any other inapplicable
+row is struck — [`RUNNER.md`](RUNNER.md)'s tier table is the authority on which.
+A piece with no code strikes `security`; one with no spec delta strikes
+`spec-test`. Leaving them unticked instead is the worse failure of the two: an
+unticked row with nobody running is the signal that a stage was forgotten, and a
+row that was never going to run spends that signal on noise.
 
 Tick your own row when the spec is done. **Strike a row through with its reason
 rather than deleting it** if it genuinely does not apply — a missing row reads as an

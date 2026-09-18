@@ -114,8 +114,10 @@ conflict either:
   mutation. A concurrent writer inherits the broken state or overwrites the
   restore, and neither is touching git when it happens.
 
-**Reviewers run in parallel, up to six**, each writing only its own findings file.
-They get a worktree each because a reviewer running `cargo mutants` breaks dozens
+**Reviewers run in parallel, three to five of them** — [`RUNNER.md`](RUNNER.md)'s
+tier table says how many, read off what the change contains — each writing only
+its own findings file. They get a worktree each because a reviewer running
+`cargo mutants` breaks dozens
 of lines to see whether a test notices — two sharing a tree read each other's
 breakage as the author's, which has happened here.
 
@@ -235,10 +237,10 @@ writes it into `tasks.md`; copying it here as well would mean a roster change
 made in one file shipping the stale list from the other.
 
 **One row per agent instance, not per role** — `code-reviewer` runs once per
-dimension, so it gets one row per dimension, each ticked by the instance that did
-it. Do not collapse them onto one line to save space: a shared checkbox is one
-nobody can tick truthfully, and all four instances would then edit the same
-line, which is the conflict one-row-per-agent exists to prevent.
+lane, so it gets one row per lane, each ticked by the instance that did it. Do
+not collapse them onto one line to save space: a shared checkbox is one nobody
+can tick truthfully, and every instance would then edit the same line, which is
+the conflict one-row-per-agent exists to prevent.
 
 Each agent flips its own row and adds none, so concurrent cherry-picks never
 touch the same line. **An unticked row with no agent running is a stage nobody is
@@ -265,9 +267,11 @@ catches a missing reviewer is absent exactly where it is easiest to skip one.
 The first such piece here reached review with no `openspec/changes/<name>/` at
 all, so a reviewer had no row to tick and said so.
 
-**`findings/<dimension>.md`**, one file per reviewer — `correctness`, `security`,
-`readability`, `architecture`, `spec-test`, `design-review`. **Every finding is a
-checkbox**, written unticked by the reviewer:
+**`findings/<lane>.md`**, one file per reviewer — `correctness-readability`,
+`security`, `architecture`, `spec-test`, `design-review`, less whichever lanes
+the piece's tier drops. The combined lane is written with a hyphen in the
+filename and a `+` in prose and in its stage-block row; it is one file either
+way. **Every finding is a checkbox**, written unticked by the reviewer:
 
 ```markdown
 - [ ] **`dev-writer`** — `wire.rs:96` — what is wrong
@@ -465,12 +469,14 @@ The reviewers run in parallel and ask different questions:
 - `design-reviewer` — **did the code take the decisions that were recorded, and
   were the decisions worth recording recorded?**
 
-**Launch `code-reviewer` once per dimension** — correctness, security,
-readability, architecture — naming which in the prompt. Scanning for a reachable
-panic is a different reading of a file from scanning for a function doing two
-jobs, and one agent holding both becomes whichever it started with. A small
-change can take one instance covering all four; a full review is typically six
-agents.
+**Launch `code-reviewer` once per lane** — correctness+readability, security,
+architecture — naming which in the prompt. Scanning for a reachable panic is a
+different reading of a file from scanning for a function doing two jobs, and one
+agent holding both becomes whichever it started with. Readability rides with
+correctness because its findings were measured to be largely the ones correctness
+already files; architecture stays alone because it asks a question neither of the
+others does — whether the *next* call site will be right.
+[`RUNNER.md`](RUNNER.md)'s tier table has the count and the measurements.
 
 **`spec-test-reviewer` is blind to the implementation.** Someone who has read the
 code judges tests by what the code does — exactly the failure a spec exists to

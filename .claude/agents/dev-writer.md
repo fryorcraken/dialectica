@@ -214,7 +214,7 @@ Two reasons this cannot wait for review time:
 
 - **A push alone gets no CI**: the workflows trigger on `pull_request` and on
   pushes to `main` (plus tags), never on a push to a piece branch. So the PR must
-  be open early, or the first news of the build arrives after six reviewers have
+  be open early, or the first news of the build arrives after every reviewer has
   read the code.
 - **One piece is one PR.** `gh pr list --head piece/<name>` before you create —
   a row back means the PR exists and you push to it instead. On the findings
