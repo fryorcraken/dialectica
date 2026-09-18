@@ -27,7 +27,8 @@
 # typo, exit 0 on the unmutated tree.
 #
 # WHAT IT CANNOT SEE, stated here because a gate whose green is mistaken for a
-# broader guarantee is worse than no gate — this repo has paid for that once.
+# broader guarantee is the anti-false-green problem PLAN.md §10 (CI) describes
+# — and this repo has paid for that once.
 #
 #   * NOT the host collision. CI passes `-I <qml-dir>`, which puts OUR OWN
 #     singleton on the import path, so qmllint resolves `DTheme` to the correct
@@ -160,8 +161,9 @@ fi
 # until qmllint adds a category, with nothing able to notice. A gate STRICTER
 # than its name fails loudly and gets fixed; one looser than its name is the
 # failure this whole file exists to prevent. If an unrelated category ever does
-# fire here, the fix is to address it or disable that one category by name —
-# never to raise the `-W` ceiling, which would restore the silent-pass defect.
+# fire here, addressing it or disabling that one category by name keeps the
+# guarantee; raising the `-W` ceiling instead would restore the silent-pass
+# defect this gate was written to close, so weigh that cost before doing it.
 set +e
 "$linter" --unqualified disable --missing-property warning -W 0 \
     -I "$qml_dir" "$@"

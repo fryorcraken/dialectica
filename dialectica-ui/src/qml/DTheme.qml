@@ -62,11 +62,11 @@ QtObject {
     readonly property color accent:    "#a33a2b"   // red: caveats, destructive, moderation
     readonly property color accent2:   "#4a6b74"   // teal: second fill ink, secondary marks
 
-    // ---- status lamps: the only INTERFACE green and orange ----------------
+    // ---- status lamps: currently the only INTERFACE green and orange ------
     // Three lamps replace every prose status line, and the colour is half of
-    // what a lamp says. Using green or orange anywhere else would spend the
-    // one signal the interface reserves for "is this machine working" on
-    // something that is not that.
+    // what a lamp says. That works because these are, at present, the only
+    // green and orange in the interface palette: using either elsewhere would
+    // draw on the signal the interface reserves for "is this machine working".
     //
     // "interface" and not "the design": the mark palette below carries
     // `markGreen` and `markSage`, and they are outside this rule rather than

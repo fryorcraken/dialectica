@@ -26,10 +26,9 @@ ColumnLayout {
     // earlier comment here claimed more than that — it said "a post must not
     // have one", stated as an invariant that nothing established. A
     // `DComposer { kind: "post"; parentOp: "deadbeef" }` was accepted and
-    // silently dropped the parent: no warning, no refusal, no test. A sentence
-    // that reads as a constraint the component enforces, when it enforces
-    // nothing, is worse than no sentence — the next person writes a call site
-    // trusting it.
+    // silently dropped the parent: no warning, no refusal, no test. So the
+    // comment described an enforcement that did not exist, and a call site
+    // written against it would have been wrong.
     //
     // `replyParent` below is what makes it true rather than merely stated: a
     // parent belonging to a post is not "ignored", it is not reachable.

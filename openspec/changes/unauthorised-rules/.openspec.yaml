@@ -1,0 +1,38 @@
+# `schema` is REQUIRED for this file to be valid change metadata, and without it
+# `skip_specs` is silently NOT HONOURED — `openspec validate --strict` reports
+# the marker as ignored and then fails for having no deltas, which reads as two
+# problems rather than one. It must name a known schema; this project's is the
+# built-in `spec-driven`, set in `openspec/config.yaml`.
+schema: spec-driven
+
+# No spec delta: this change edits comment and doc-comment prose only. It adds
+# no requirement, withdraws none, and changes no behaviour — no logic, no
+# renames, no test assertions.
+#
+# The distinction that makes `skip_specs` correct here rather than convenient:
+# the sentences being removed were never requirements in the first place. That
+# is the whole finding. Each asserted a rule binding on future work while
+# `openspec/specs/` said nothing about it, and in the primary case the spec
+# said the opposite. Removing an unratified sentence from a comment cannot be
+# a spec delta, because there was no contract to delta.
+#
+# Measured rather than assumed. What the spec DOES contract in this area, and
+# which therefore stays untouched:
+#
+#   - `composer-view` "A row whose shape core did not guarantee degrades…"
+#     REQUIRES inert affordances, and says the rule "is general and SHALL NOT
+#     be read as being about any one field". That is the ratified text the
+#     FeedScreen comment contradicted.
+#   - `composer-view` "The vote control displays no score" is a ratified
+#     SHALL NOT carrying the same argument as `VoteControl.qml`'s comment.
+#     That comment is therefore grounded and is deliberately NOT touched by
+#     this change; editing it would be a spec change and is a different piece.
+#
+# The tempting alternative, rejected: promoting the removed sentences into
+# spec requirements so they become authorised rather than deleted. The owner
+# ruled the opposite — "remove the rule from the repo, I never authorised such
+# a rule" — and ratifying a rule to avoid deleting it would launder an
+# unapproved rule into a contract via the change that was meant to remove it.
+# Where a claim IS grounded (the identicon mark not being an identifier), this
+# change keeps it and cites its source rather than restating it as a rule.
+skip_specs: true

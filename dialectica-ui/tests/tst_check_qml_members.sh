@@ -207,9 +207,11 @@ fi
 #
 # THE HARDEST CASE, and the reason the three above are not enough. The gate
 # runs over a glob; if the glob silently stops matching, every check passes
-# vacuously and the gate reports `ok` — a green that measured nothing, which
-# this repo rates as worse than no gate because it closes the question. So an
-# empty corpus must produce a FAILURE, not a clean bill.
+# vacuously and the gate reports `ok` — a green that measured nothing. PLAN.md
+# §10 (CI), under "Anti-false-green", takes from Radicle's CI the observation
+# that a green gate which cannot see the thing it claims to check is worse than
+# no gate, and says to copy the habit. So an empty corpus must produce a
+# FAILURE, not a clean bill.
 empty=$work/empty
 mkdir -p "$empty"
 if "$gate" "$empty" >/dev/null 2>&1; then
