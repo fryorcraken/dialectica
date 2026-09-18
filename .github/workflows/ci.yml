@@ -262,6 +262,29 @@ jobs:
       - name: no QML type name collides with the host
         run: dialectica-ui/tests/check_qml_names.py dialectica-ui
 
+      # The render probe's demonstration pair must differ by exactly one line.
+      #
+      # `tst_render_probe.qml` proves it can fail by rendering a healthy subject
+      # against one carrying the sibling repo's `property var data` bug. The spec
+      # requires those two to differ ONLY in whether their children reach the
+      # scene graph: a pair differing in anything else — a colour, a size —
+      # leaves two explanations for the difference in verdict and establishes
+      # neither, which is this repo's most-recorded test defect.
+      #
+      # Nothing in the QML suite can check that. The two tests would still show
+      # two verdicts after someone edited one twin's colours, and would still
+      # pass, while no longer demonstrating WHY. Hence a static gate, here in
+      # `lint` rather than the `qml` job because it needs no Qt.
+      #
+      # Its own tests run FIRST, to the same standard as the gates above: they
+      # pin both directions, including that an EMPTY corpus is rejected rather
+      # than reported clean.
+      - name: the probe-twins gate's own tests
+        run: dialectica-ui/tests/tst_check_probe_twins.sh
+
+      - name: the render probe's twins differ by exactly one line
+        run: dialectica-ui/tests/check_probe_twins.sh
+
       # `sed` strips `//` comments before matching, for the same reason the
       # `ToolTip` step below does it: a gate that fires on its own
       # documentation gets deleted. This one learned it the expensive way —

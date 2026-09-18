@@ -1,0 +1,8 @@
+# `schema` is REQUIRED for this file to be valid change metadata. It must name a
+# known schema; this project's is the built-in `spec-driven`, set in
+# `openspec/config.yaml`.
+schema: spec-driven
+
+# No `skip_specs` here, deliberately. This change adds a real behaviour contract:
+# a new `view-render-probe` capability stating what a rendering probe asserts,
+# what it must be demonstrated to catch, and what it does not cover.

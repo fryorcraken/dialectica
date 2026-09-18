@@ -3813,14 +3813,14 @@ section, since three of the claims below turned out to be wrong.
   whatever the installer action happens to bundle. Radicle never hit this only
   because its build job uses a different installer.
 
-**Anti-false-green, throughout.** Radicle's CI is built around the observation
-that a green gate which cannot see the thing it claims to check is worse than no
-gate. Copy the habits, not just the jobs: assert test *counts* against spec
-counts, assert packaged manifests kept their entry points, assert dev and
-portable variants were not transposed, and verify a new test fails before it
-passes.
+**Anti-false-green, throughout.** The reasoning behind this — why a green gate
+that cannot see what it claims to check is worse than no gate, and the habits
+that follow from it — moved into `ui-render-probe`'s `design.md` when that change
+applied it to the `qml` job. Read it there rather than keeping a second copy
+here.
 
-That principle earned its place immediately, and against the template itself:
+The principle earned its place immediately, and against the CI template this
+repo was ported from:
 
 - **Radicle's `qmllint` gate cannot fire, and ours inherited it.** It greps for
   `^.*:[0-9]+:[0-9]+: (error|Error)`, which expects `file:line:col: error:` —
@@ -3865,10 +3865,27 @@ foot of the workflow too):
 - **No `install`/`launch` job**, and no drift check on the checked-in delivery
   contract.
 
-**The `qml` job is the weakest gate that exists**, and it is labelled as such in
-the workflow rather than left to be discovered: it proves `Main.qml` parses and
-nothing about `call()`'s JSON parsing, its error branch, or the missing-bridge
-path. That logic is genuinely testable and currently untested.
+**The `qml` job's coverage is a moving target — measure it rather than citing a
+number from here.** `sh dialectica-ui/tests/run-qml-tests.sh` prints the spec
+count and each file's totals; `grep -c "function test_"
+dialectica-ui/tests/tst_*.qml` counts the assertions.
+
+It was once true that the job proved only that `Main.qml` parses. It is not any
+more: `tst_core_call.qml` covers `call()`'s JSON parsing, its error branch and
+the missing-bridge path — the three things this paragraph used to name as
+untested — and `tst_render_probe.qml` checks that each screen paints content
+rather than only satisfying property assertions.
+
+What the job still cannot see is worth keeping, because it is structural rather
+than a matter of how many specs exist:
+
+- **A component test runs with no host.** Under `qmltestrunner` basecamp is
+  simply absent, so a QML type name colliding with one the host registers cannot
+  fail here. That is `check_qml_names.py`'s, and CLAUDE.md records why a
+  component test is blind to it.
+- **The probe bounds its own claim.** It shows a screen painted more than one
+  colour inside its card, and nothing about whether what was painted is correct,
+  complete, well laid out or the right colour.
 
 ---
 
