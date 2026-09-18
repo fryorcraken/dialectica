@@ -81,11 +81,26 @@ the two diffs together shows the duplicate lamps.
 `FeedScreen` now carries the same argument in its own comments, so the claim is
 live in the tree even though this branch's code for it is gone.
 
-The chip must be bound to `who_am_i`, **not** to the posting probe — verified at
-`dialectica/rust-lib/src/lib.rs:258`, which says the two "can honestly disagree:
-a stored identity whose keystore permissions are too open is a real identity
-that cannot currently be used. A view with only the posting probe would have to
-render 'you are nobody' to a user who has an identity and a fixable problem."
+The chip must be bound to `who_am_i`, **not** to the posting probe — verified
+against `who_am_i`'s own doc comment on the trait in
+`dialectica/rust-lib/src/lib.rs`, which calls it "**A different question from
+`getCapabilities`**, and the two can honestly disagree: a stored identity whose
+keystore permissions are too open is a real identity that cannot currently be
+used. A view with only the posting probe would have to render 'you are nobody'
+to a user who has an identity and a fixable problem."
+
+*Cited by method name rather than by line.* An earlier draft of this line said
+`lib.rs:258`, which was wrong when written — 258 is blank, and the sentence is
+in `who_am_i`'s doc comment some thirty lines below `generate_identity_slate`,
+where that number lands. The wrong number is inherited: it entered at
+`2026-09-18-ui-navigation/proposal.md:48` and was copied from there into
+`DIdentityChip.qml`, `DThreadScreen.qml` and `FeedScreen.qml`, which is four
+copies of one miscount rather than four people counting. Those three are
+byte-identical to `origin/main` and out of this piece's scope; this file's copy
+was this piece's own prose, so it is fixed here. `grep -n "honestly disagree"`
+does not find the sentence either — it wraps mid-phrase across two lines, which
+is how the original miscount survived being checked. `who_am_i` is unique in the
+trait and survives the file growing, which a line number does not.
 
 The consequence is sharp: the chip's no-identity arm offers identity
 **creation**, and `keep_identity` refuses where an identity already exists. A
@@ -327,14 +342,58 @@ this piece changed: `Actual 15, Expected 19`.
 
 It carries a `NO SPEC:` marker, because by D5b the type is contracted nowhere.
 
-**The separator is given `objectName: "rowSeparator"`** so the test keys on
-intent. A walker keyed on geometry would match anything else that happened to be
-a 1px-high `Rectangle`, and would go on passing if this element were deleted and
-an unrelated rule took its place in the walk.
-
 **What no test here can still see:** whether any of it renders under basecamp.
 `qmltestrunner` instantiates with the host absent, so a layout correct in a spec
 and colliding at launch is indistinguishable from one that works.
+
+### D5e — The separator is found by `objectName`, never by geometry
+
+**Chosen:** the separator carries `objectName: "rowSeparator"`, and the test
+walker matches on that name.
+
+**Rejected: keying the walk on geometry** — matching any `Rectangle` one pixel
+high. It needs no production change at all, which is the whole of its appeal,
+and it is the more dangerous option in both directions. It **over-matches**:
+anything else that happens to be a 1px `Rectangle` — a future underline, a
+divider, a focus ring — joins the count, and a count is the entire assertion in
+each of the four separator tests. And it **survives deletion of the thing it
+measures**: delete the separator, let an unrelated 1px rule take its place in
+the walk, and the suite stays green while the behaviour the delta contracts is
+gone. That is this repo's recorded defect family — a fixture where two
+explanations give the same answer — reached by a different route.
+
+The name is a **test seam in production code**, which is a real cost and the
+reason this is a decision rather than an obvious call: `objectName` exists to be
+read by something outside the component. It is paid deliberately. The
+alternative is not "no seam" but "an implicit seam keyed on a coincidence of
+geometry", and an implicit seam cannot be deleted honestly — nothing tells the
+next person that the height they are changing is load-bearing for a test.
+
+**What breaks without it, measured:** deleting the `objectName` line gives
+**79 passed, 3 failed** against an 82 baseline — the walk finds zero, so the
+three counting tests fail with `Actual 0` against 3, 1 and 4 respectively.
+
+`test_an_empty_list_draws_no_row_boundary` **stays green**, and that is worth
+stating rather than rounding to "all four". It asserts zero boundaries, and an
+unnamed separator also yields zero, so the mutation and the correct behaviour
+give it the same answer. It is not a weak test — it is the only one that catches
+the *hoist* defect in D5c's table — but it cannot see this one, and a claim that
+all four turn red would have been a fabricated number in a table of real ones.
+(That claim was written here first and corrected by running it.)
+
+The silent direction is the one to protect: *replacing* the name-keyed walk with
+a geometry-keyed one leaves the suite green today and blind to the deletion case
+described above. A reader who finds the `objectName` decorative and drops it for
+a height match has made the tests stop measuring the separator without any gate
+saying so. And the over-matching is not hypothetical in this very file:
+`grep -n -B1 "Layout.preferredHeight: DTheme.hairline" dialectica-ui/src/qml/DStoaListScreen.qml`
+returns **six** rectangles of exactly the separator's width and height — the row
+separator plus five others at lines 271, 272, 560, 691 and 798 — differing from
+it only in `color`. A geometry-keyed walk over the screen would already count
+all six today, before anyone adds a seventh.
+
+Recorded in `DStoaListScreen.qml` beside the element as well, since that is
+where someone tidying an "unused" property will be standing.
 
 ### D6 — ~~The delivery sweep excludes lamp LABELS~~ — withdrawn on rebase
 

@@ -557,6 +557,11 @@ ScreenFrame {
             // on geometry instead would match whatever else happened to be a
             // 1px-high Rectangle, and would go on passing if this element were
             // deleted and some unrelated rule took its place in the walk.
+            //
+            // Not decorative: dropping the name takes tst_stoa_screens.qml from
+            // 82 passed to 79 passed, 3 failed. Five other rectangles in this
+            // file share this exact width and height, so a geometry walk would
+            // count them too. See design.md D5e.
             Rectangle {
                 objectName: "rowSeparator"
                 Layout.fillWidth: true
