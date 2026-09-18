@@ -3704,11 +3704,16 @@ That principle earned its place immediately, and against the template itself:
 **Deliberately not built, each with its re-entry condition** (recorded at the
 foot of the workflow too):
 
-- **No e2e job.** The view is four buttons with no specs, and a matrixed job
+- ~~**No e2e job.** The view is four buttons with no specs, and a matrixed job
   over zero specs cannot fail — the exact thing this section forbids. It
-  arrives with the specs, and **sitometres is pinned to its latest release**
-  when it does: radicle pins a git commit only to work around a probe bug in
-  published 0.1.0, which is a workaround rather than a pattern to copy.
+  arrives with the specs.~~ **Built.** The specs arrived — `openspec list
+  --specs` shows four capabilities contracting the view — and the condition
+  this entry set was met. A sitometres suite drives a real Basecamp through its
+  QML inspector; what a run must establish before its result may be believed is
+  the **`e2e-ui-harness`** capability, which is the contract to read rather than
+  this paragraph. **Sitometres is pinned to its latest release**: radicle pins a
+  git commit only to work around a probe bug in published 0.1.0, which is a
+  workaround rather than a pattern to copy.
 - **No `doctor` job**, despite §11 saying to run `doctor`. Two pins WARN on
   every run by design (PHASE0-FINDINGS §8), so the job would be permanently
   red, and a permanently red gate trains people to ignore it. Run it by hand;

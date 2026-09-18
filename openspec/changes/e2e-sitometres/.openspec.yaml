@@ -1,0 +1,4 @@
+# `schema` is REQUIRED for this file to be valid change metadata. It must name a
+# known schema; this project's is the built-in `spec-driven`, set in
+# `openspec/config.yaml`.
+schema: spec-driven
