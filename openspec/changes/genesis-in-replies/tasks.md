@@ -25,8 +25,8 @@ happened; none is ticked on anybody's recollection.
   stage genuinely did not run as its own dispatch.
 - [x] review: correctness — `code-reviewer` (`findings/correctness.md`)
 - [x] review: security — `code-reviewer` (`findings/security.md`)
-- [ ] review: readability — `code-reviewer`
-- [ ] review: architecture — `code-reviewer`
+- [x] review: readability — `code-reviewer` (`findings/readability-architecture.md`)
+- [x] review: architecture — `code-reviewer` (`findings/readability-architecture.md`)
 - [x] review: spec-test — `spec-test-reviewer` (`findings/spec-test.md`)
 - [x] review: design — `design-reviewer` (`findings/design-review.md`)
 - [ ] findings all ticked, `findings/` deleted — `closer`
