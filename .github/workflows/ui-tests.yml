@@ -405,10 +405,27 @@ jobs:
           # `linux-amd64-dev`, which is exactly what `.#lgx` produces. An
           # override here would BREAK the pairing rather than establish it — it
           # was only ever needed for the portable bundle.
+          # --user-dir, rather than the default throwaway, so BASECAMP'S OWN
+          # LOG SURVIVES THE RUN. It is the only record of what the app did —
+          # QML errors, module load failures, the calls the view dispatched —
+          # and a throwaway user-dir is reaped on a clean exit, which is
+          # exactly the exit a failing spec produces. Measured: the first two
+          # runs here uploaded a report naming "could not load the core
+          # module" and no log to diagnose it with, because the directory
+          # holding the log was already gone.
+          #
+          # It is created fresh under $RUNNER_TEMP for this run and destroyed
+          # with the runner, so the isolation the throwaway dir provided is
+          # kept: no profile belonging to a person is reachable from here, and
+          # --real-home is deliberately NOT passed.
+          user_dir="$RUNNER_TEMP/${{ matrix.spec }}-user-dir"
+          mkdir -p "$user_dir"
+          echo "E2E_USER_DIR=$user_dir" >> "$GITHUB_ENV"
           npx --yes "$SITOMETRES" run "$SPEC" \
             --app dialectica_ui \
             --app-dir "$APP_DIR" \
             --basecamp "$BASECAMP_BIN" \
+            --user-dir "$user_dir" \
             --strict \
             --json  "ui-results/${{ matrix.spec }}.json" \
             --junit "ui-results/${{ matrix.spec }}.xml" \
@@ -441,20 +458,35 @@ jobs:
             "ui-results/${{ matrix.spec }}.json" "$SPEC"
 
       # Basecamp's own log is the only record of what the app did — QML errors,
-      # module load failures, the calls the view dispatched. sitometres runs
-      # against a throwaway user-dir and reaps it on exit, so this only catches
-      # anything when the process was killed rather than exiting cleanly; it is
-      # best-effort by nature, hence the `|| true`.
+      # module load failures, the calls the view dispatched — and it is what
+      # the spec's "evidence from a failed run is retained" requirement is
+      # actually about. The run step above uses --user-dir precisely so this
+      # step has something to find.
+      #
+      # The log sits several directories deeper than anyone guesses and is
+      # TIMESTAMPED rather than being `basecamp.log`; CLAUDE.md records that a
+      # wrong path for it sat in the docs for months and is part of why nobody
+      # read one while diagnosing a defect. So this searches by pattern rather
+      # than naming a path, and SAYS SO when it finds nothing instead of
+      # uploading an empty directory that reads as "nothing went wrong".
       - name: Collect Basecamp logs
         if: failure()
         run: |
           set -eu
           mkdir -p ui-results/logs
-          find "${TMPDIR:-/tmp}" -maxdepth 3 -type f -name 'basecamp_*.log' \
+          if [ -n "${E2E_USER_DIR:-}" ] && [ -d "${E2E_USER_DIR:-}" ]; then
+            find "$E2E_USER_DIR" -type f -name 'basecamp_*.log' \
+              -exec cp {} ui-results/logs/ \; || true
+          fi
+          # The throwaway HOME is a sibling of the user-dir and is where an
+          # older layout put them, so it is searched too rather than assumed
+          # empty.
+          find "${TMPDIR:-/tmp}" -maxdepth 4 -type f -name 'basecamp_*.log' \
             -path '*sitometres*' -exec cp {} ui-results/logs/ \; 2>/dev/null || true
           ls -la ui-results/logs || true
-          [ -n "$(ls -A ui-results/logs 2>/dev/null)" ] \
-            || echo "no basecamp log survived — sitometres reaps its user-dir on exit"
+          if [ -z "$(ls -A ui-results/logs 2>/dev/null)" ]; then
+            echo "::warning::no basecamp log was found — the run cannot be diagnosed from this artifact"
+          fi
 
       # On failure only: this is the evidence needed to diagnose a red run, and
       # there is nothing to look at when it is green.

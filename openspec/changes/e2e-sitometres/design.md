@@ -220,6 +220,26 @@ argument.** Every other divergence below (D8, D9, D10) rests on a measured
 property of this repo; this one rested on an inference about a tool's internals,
 and it was wrong.
 
+### D7a — `--user-dir`, so Basecamp's own log survives a failed run
+
+**The default throwaway user-dir is reaped on a clean exit — which is exactly
+the exit a failing spec produces.** So the first two runs here uploaded a
+report saying the core module could not be loaded, and no log to diagnose it
+with: the directory holding the log was already gone. The evidence requirement
+was satisfied on paper and useless in practice.
+
+`--user-dir <path>` runs against a directory the job creates instead, so the
+log survives into the artifact. The isolation that the throwaway dir provided
+is kept by construction rather than given up: the directory is created fresh
+under `$RUNNER_TEMP` for this run and destroyed with the runner, and
+`--real-home` — which would hand the app every credential in `$HOME` — is
+deliberately not passed.
+
+This is what makes the "evidence from a failed run is retained" requirement
+real rather than nominal. A collect step that finds nothing now emits a warning
+saying the run cannot be diagnosed, rather than uploading an empty directory
+that reads as though nothing went wrong.
+
 ### D8 — Divergence: no seeded profile, and therefore no `--env`
 
 Radicle's `write` and `local` specs need `RAD_HOME` pointing at a profile seeded
