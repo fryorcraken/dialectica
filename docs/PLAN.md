@@ -1689,6 +1689,20 @@ own answer:
 > are built, tested and merged, and they stay. The read-time authority check
 > below **remains the design** whenever the publishing half lands.
 >
+> **The exclusion reaches the UI: the MVP ships no moderation screen.** That
+> follows from "no moderation UI" above, and it is restated because §9.2's MVP
+> list is where a screen author looks and it did not say so.
+>
+> **It is blocked at the contract, not merely deferred**, which is the part
+> worth knowing before anyone treats the screen as a phase somebody skipped. The
+> `Dialectica` trait in `dialectica/rust-lib/src/lib.rs` exposes `publish_post`,
+> `publish_reply` and `publish_vote` and **no moderation-publishing method at
+> all**; `publish_moderation` appears once in that file and only hypothetically,
+> as the fourth pair a reshaping argument would have had to keep in step. So a
+> moderation screen is not a screen someone declined to write — there is nothing
+> for it to call. Read the trait rather than this sentence for the current
+> surface.
+>
 > ~~The limitation two paragraphs down — that an `Unhide` cannot currently win —
 > is the reason the sequencing is comfortable.~~ **That limitation is lifted**
 > (the `op-clock` spec): an `Unhide` published after a `Hide` carries a higher
@@ -1930,6 +1944,18 @@ against it: the gate was substantively rebound partway through, and an earlier
 deployed shallow gate verifies no proof at all.
 
 ### 7.2 Relevance
+
+> **Out of the MVP, by owner decision — scope, not a design change (§9.2).**
+> Voting and every ordering built on it are out of the MVP and out of the MVP's
+> UI target. Nothing below is withdrawn and nothing is deleted: this section
+> remains the relevance design, and the contracts that exist stay merged —
+> `content-authoring` contracts publishing a vote, `composer-view` contracts the
+> control.
+>
+> **The sentence immediately below is about the project, not about the MVP**,
+> and that distinction is the reason this note is here rather than only in §9.2:
+> read as a staging instruction it says to build vote weighting first, which is
+> exactly what this ruling decides against.
 
 **This is where dialectica is investing.** Nobody can be prevented from
 publishing (§6.1), so what a Stoa *surfaces* is its main lever over what reading
@@ -3224,13 +3250,26 @@ being asked for rather than discovering it from a stalled view.
 
 #### 8. What could not be decided here, and what would decide it
 
-- **Whether `listThreads` needs an `unread` concept.** Every forum has one and
-  it needs per-user local state that is not an op and never crosses the wire.
-  It is not hard; it is that nothing in this design has yet needed peer-local,
-  never-published state that is not a projection of ops, and inventing the
-  first instance of that as a feed field is how it gets designed badly. What
-  would decide it: a first user reading a Stoa with more than a screenful of
-  threads. Until then the question is theoretical.
+- **Whether `listThreads` needs an `unread` concept — no longer a question.**
+  **Unread counts are out of the MVP, by owner decision — scope, not a design
+  change (§9.2).** This entry is kept in the list rather than deleted because
+  its reasoning is why the exclusion is comfortable, and because the change in
+  *kind* is the point: an open question invites the next agent to answer it, and
+  this one is answered for the MVP.
+
+  The reasoning stands unchanged. Every forum has one and it needs per-user
+  local state that is not an op and never crosses the wire. It is not hard; it
+  is that nothing in this design has yet needed peer-local, never-published
+  state that is not a projection of ops, and inventing the first instance of
+  that as a feed field is how it gets designed badly.
+
+  ~~What would decide it: a first user reading a Stoa with more than a
+  screenful of threads. Until then the question is theoretical.~~ **Decided
+  ahead of that**: the MVP ships no unread count, so `listThreads` gains no
+  `unread` field and no screen renders one. The question reopens as a design
+  question — not a staging one — whenever peer-local state is wanted for its
+  own sake, at which point it is designed as that category rather than as a
+  feed field.
 - ~~**Whether a thread view paginates by reply order or by reply tree.**~~
   **Settled by the `thread-read` spec, in the direction that keeps the question
   open where it matters.** The read returns a flat page in which each item names
@@ -3432,7 +3471,11 @@ the costs below were named and accepted.
    `stoa-membership` capability, the screen is `stoa-navigation-view`
 3. Post
 4. Reply to a post
-5. Upvote / downvote
+5. ~~Upvote / downvote~~ — **out of the MVP, by owner decision (ruling 1
+   below). Scope, not a design change.** §7.2 stays as the relevance design and
+   both contracts stay merged: `content-authoring` for publishing a vote,
+   `composer-view` for the control. The item is struck rather than deleted
+   because a deleted item and an item nobody staged look identical
 6. ~~Share a Stoa — copy its address~~ **Share a Stoa — what is shared carries
    its address *and* its genesis record**, for the same reason item 7 does: an
    address is a one-way hash, so it verifies a record and cannot reconstruct
@@ -3451,12 +3494,110 @@ the costs below were named and accepted.
 All of it over **delivery's reliable channel** (§4.1). **No Logos Storage** —
 §4.6's attachments-by-CID are out, so a post in the MVP is text.
 
-**Out of the MVP:** moderation (§6), per-Stoa identity (§5.2), Logos Storage
-(§4.6).
+**Out of the MVP:** moderation (§6) — **including any moderation screen**,
+per-Stoa identity (§5.2), Logos Storage (§4.6), **voting and vote-based ordering
+(§7.2)**, and **unread counts** (§9.1's question 8).
 
 Nothing on either list is deleted or withdrawn. `moderation.rs` and its specs are
 built, tested and merged and they stay; §4.6 stands as the attachment design for
 when attachments ship.
+
+#### Four owner rulings, and the one consequence they share
+
+The four below are **scope decisions — what ships first — and none is a design
+change.** They are recorded because scope that lives only in a conversation is
+scope the next agent re-derives from the design documents, and the design
+documents argue for building all of it.
+
+**The standing consequence, which is why the four cohere: the MVP is an MVP of
+what core already serves. Scope follows the contract rather than the mockup.**
+
+**1. Voting is out of the MVP and out of the UI target.** §7.2 stays as the
+relevance design; its MVP membership does not. Read from the contract side this
+is the same fact: core computes **exactly one ordering and takes no `order`
+argument**, so "by relevance" is not implementable today — see the list below.
+
+**2. Unread counts are out of the MVP.** §9.1's question 8 is now a decided
+exclusion rather than an open question, with its reasoning kept there.
+
+**3. Moderation stays out, and the MVP ships no moderation screen.** §6 carries
+the ruling and the reason it is blocked at the contract rather than merely
+deferred: the trait exposes no moderation-publishing method, so there is nothing
+for a screen to call.
+
+**4. The core contract is the UI authority.** Where the design bundle asks for
+something core cannot honestly serve, **the bundle is amended** — core does not
+grow to satisfy a mockup. The sequencing is: an MVP over basic UI features
+first, then the remaining core features. From that, a two-case rule for any
+control on a screen:
+
+- **Case 1 — core serves it: the control MUST be wired.** Inertness is not an
+  acceptable shortcut where the call exists; **an unwired control is a defect
+  rather than a phase.** Read the current surface from the `Dialectica` trait in
+  `dialectica/rust-lib/src/lib.rs` rather than from any list here — a list of
+  methods in a document is this repo's `hand-maintained sweep lists go stale
+  silently` trap, and a method added to the trait must widen case 1 without
+  anyone editing PLAN.md.
+
+  **`publish_vote` is on that trait, and ruling 1 does not conflict with this.**
+  The two answer different questions: ruling 1 decides whether the MVP *has* a
+  vote control, and case 1 decides what a control must do *if a screen has one*.
+  A vote control that ships must be wired.
+
+- **Case 2 — core cannot serve it: an inert control or a placeholder value is
+  acceptable for this MVP phase, on one condition — it is documented in this
+  file.** The documentation requirement is what makes it acceptable: an
+  undocumented placeholder is indistinguishable from one nobody noticed. The
+  list below is that documentation, so the set can be worked off later rather
+  than rediscovered screen by screen.
+
+**Two merged requirements narrow case 2, and a scope note in this file does not
+override them.** This is the boundary a later reader is most likely to get
+wrong, so it is stated rather than left to be found:
+
+- `stoa-navigation-view`'s **"Every number rendered is one this peer can
+  actually answer"** forbids a rendered count on the Stoa list and the join
+  preview, including substituting another call's page length.
+- `composer-view`'s **"The vote control displays no score"** forbids a rendered
+  score on the vote control.
+
+Case 2 permits a placeholder **where nothing forbids one**. Where a requirement
+forbids one, the requirement governs, and relaxing it is a spec change rather
+than a scope note.
+
+#### Case 2: where core cannot serve what the bundle asks
+
+The documented placeholders for this MVP phase, per ruling 4. Each entry names
+what cannot be served and the file that establishes the absence; read the
+citation rather than this list for the current state, and **remove an entry when
+core grows to serve it** rather than leaving it to be disproved.
+
+1. **No score anywhere.** Nothing reads `Vote` ops, so no feed row carries a
+   score — `feed.rs` states it for the projection, `wire.rs` structurally for a
+   post, a reply and a vote alike, and the trait's `publish_vote` doc contracts
+   it on the method: the reply carries an op id and nothing describing an
+   effect. The UI already refuses to fake one; `VoteControl.qml` gates the
+   numeral behind a property defaulting to false, and records why a rendered `0`
+   is worse than a rendered absence.
+2. **Exactly one ordering, and no `order` parameter.** `feed.rs` — there is no
+   ordering parameter, no comparator to select, and no enum with variants
+   nothing implements; the trait says the same on `list_threads`. **So "by
+   relevance" is not implementable**, which is ruling 1 seen from the contract
+   side. The ordering row is present and offers no selection.
+3. **No post count on a Stoa row, and no unread count.** `DStoaListScreen.qml`
+   records that nothing computes either: a listed item carries an address and a
+   title, no call answers how many posts this peer holds for a Stoa, and the
+   thread listing reports whether a further page exists rather than a total.
+   **This entry is one the narrowing above governs** — `stoa-navigation-view`
+   forbids the placeholder *number* here, so the position is left empty rather
+   than filled.
+4. **History is kept, but no contract method reads earlier versions.**
+   `revision.rs` states that superseded versions stay in the op log; the trait
+   exposes no method reading them, `read_thread` being the thread read. So "read
+   the earlier versions" is a case 2 control.
+5. **No moderation-publishing method**, per ruling 3 — the case 2 entry with the
+   simplest resolution, since ruling 3 also removes the screen that would carry
+   the control.
 
 ~~`derive_stoa_key` is built and simply is not called~~ — **this was false when
 written.** The adapter called it twice, and a Stoa's `creator` was derived under a
@@ -3596,16 +3737,15 @@ only:
   oversight: D before C. §9.1 permits it, since D depends on A and on nothing
   later.
 
-**Votes are the one item that contradicts a §9.1 decision, and it is worth
-naming rather than reconciling quietly.** §9.1 deliberately does not stage votes,
-on the reasoning that §7.2 rule 2 ships no score, so a vote button publishes an
-op that changes nothing a reader sees — *"a control with no visible effect
-teaches users the app is broken."* Item 5 puts the control in the MVP anyway.
-**That argument is not refuted by this scope decision and should be read
-alongside it**: whoever builds the vote control inherits the problem §9.1
-identified, and the honest options are a visible per-post tally that is not a
-ranking, or a control whose effect the copy does not overstate. §7.4 settles the
-control's shape; it does not settle this.
+~~**Votes are the one item that contradicts a §9.1 decision, and it is worth
+naming rather than reconciling quietly.**~~ **The contradiction is resolved, in
+§9.1's direction: votes are out of the MVP (ruling 1).** §9.1's argument — that
+a vote button publishes an op changing nothing a reader sees, so *"a control
+with no visible effect teaches users the app is broken"* — was never refuted,
+and the MVP list no longer disagrees with it.
+
+The reasoning, including why one of the two honest options this paragraph
+offered turned out not to exist, is in the `mvp-scope` change's `design.md`.
 
 ~~**The core half is now settled and the UI half is not.**~~ **Both halves are
 now contracted.** The `content-authoring` spec contracts publishing a vote at
@@ -3615,12 +3755,12 @@ effect. So core makes no claim a reader could be misled by.
 
 ~~What remains is entirely an interface obligation, and this is the open item.~~
 The interface obligation is now the **`composer-view`** spec's, which resolved it
-in the only direction available: of the two honest options named above, a
-per-post tally turned out **not to be one** — no call returns a score, a tally or
-the viewer's earlier votes — so the control shows the viewer their own vote back
-and **no number at all**, specifically not a zero. The reasoning, including why a
-rendered zero is worse than a rendered absence, is in that change's
-`proposal.md`.
+in the only direction available: a per-post tally is not an option, because no
+call returns a score, a tally or the viewer's earlier votes — so the control
+shows the viewer their own vote back and **no number at all**, specifically not a
+zero. Why a rendered zero is worse than a rendered absence, and why that
+generalises to every case 2 placeholder above, is in the `mvp-scope` change's
+`design.md`.
 
 ---
 

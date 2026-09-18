@@ -7,7 +7,7 @@
       Every capability the four rulings touch stays exactly as it is. Declared as
       `skip_specs: true` alongside `schema:` in `.openspec.yaml`, which carries
       the argument — including why ruling 4 is not contract material.
-- [ ] design + code — `dev-writer`
+- [x] design + code — `dev-writer`
 - [ ] tests — `tester`
 - [ ] review: correctness — `code-reviewer`
 - [ ] review: security — `code-reviewer`
@@ -18,3 +18,41 @@
 - [ ] findings all ticked, `findings/` deleted — `closer`
 - [ ] `openspec validate --strict`, then `archive` — `closer`
 - [ ] CI green, title/body checked, PR merged — `closer`
+
+## Implementation
+
+`docs/PLAN.md` only, plus `design.md`. **No code changes**, so no gate in this
+repo can see this piece — see the note under "What no gate can see" below.
+
+- [x] `design.md` written, with the three migrated reasoning passages under
+      Decisions 6a/6b/6c
+- [x] **Ruling 1** — §7.2 gains a block-quoted scope note; §9.2's MVP item 5 is
+      struck and pointed at the ruling
+- [x] **Ruling 2** — §9.1's question 8 rewritten in place as a decided
+      exclusion, keeping its reasoning and striking only the "what would decide
+      it" clause
+- [x] **Ruling 3** — §6's existing note extended with the UI half and with the
+      contract-level block
+- [x] **Ruling 4** — §9.2 gains the four-ruling section, the two-case rule, and
+      the statement that the two merged requirements are not overridden
+- [x] **The case 2 list** — new §9.2 subsection, seeded with the five verified
+      instances
+- [x] §9.2's open question at the old lines 3599-3608 resolved in place rather
+      than answered by a parallel entry
+- [x] Migrated reasoning leaves no second copy in PLAN.md — verified by grep:
+      `grep -c "teaches users the app is broken" docs/PLAN.md` returns 1, in the
+      strike-and-point passage that names what was resolved
+- [x] Every citation re-read against this tree rather than relayed from the
+      proposal (see the report's verification list)
+
+### What no gate can see
+
+**This piece changes no code, so every gate in this repo is structurally blind
+to it.** `cargo test`, the QML suite, `check_qml_names.py` and
+`check_qml_members.sh` all pass unchanged and none of them measured anything
+about this change. That is stated rather than reported as a green run, per
+`.claude/agents/README.md`: "exit 0 on a gate that measured nothing is worse
+than no gate."
+
+The only mechanical check that applies is `openspec validate --strict`, which
+checks the change's own structure and not PLAN.md's content.
