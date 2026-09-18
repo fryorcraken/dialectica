@@ -81,12 +81,28 @@ ScreenFrame {
             return
         if (typeof genesis !== "string" || genesis === "")
             return
-        // Reassigned rather than mutated: a QML `var` property does not notify on
-        // an in-place key write, so bindings on `canShare` would not re-evaluate
-        // and a share button would stay hidden until something else changed.
-        var next = screen.genesisByStoa
-        next[stoa] = genesis
-        screen.genesisByStoa = next
+        // **The explicit `genesisByStoaChanged()` is what makes the screen
+        // re-evaluate, and it is load-bearing on its own.** A QML `var` property
+        // does not notify on an in-place key write, so without this emit the map
+        // would hold the record while `canShare`'s binding kept the share button
+        // hidden and `Open` inert — data right, screen wrong, and silent, because
+        // basecamp swallows QML errors.
+        //
+        // Do not replace it with a reassignment. `var next = screen.genesisByStoa`
+        // binds `next` to the SAME object the property already holds — JS objects
+        // are reference types and nothing here clones — so `screen.genesisByStoa =
+        // next` assigns the property to the object it already pointed at and
+        // notifies nothing on its own merits. That reassignment was here, was
+        // credited by this comment for the fix, and was measured to be a no-op
+        // (object identity unchanged across the call); it was removed rather than
+        // left with a note, because a line whose only role is to be explained away
+        // is the line a later reader mistakes for the mechanism.
+        //
+        // NOT covered by the suite: see `design.md`, "The record map notifies
+        // through an explicit signal". Removing this emit leaves the specs green,
+        // because they read `canShare` as a function rather than through a live
+        // binding.
+        screen.genesisByStoa[stoa] = genesis
         screen.genesisByStoaChanged()
     }
 

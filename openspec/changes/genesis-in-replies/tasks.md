@@ -76,9 +76,14 @@ happened; none is ticked on anybody's recollection.
   otherwise leaves the map untouched. Writing `""` in would make `canShare` true
   for a Stoa whose share text cannot be built and would send that same `""` back
   to `read_feed`.
-- [x] 3.2 The map is REASSIGNED rather than mutated in place. A QML `var`
-  property does not notify on an in-place key write, so bindings on `canShare`
-  would not re-evaluate and a share button would stay hidden.
+- [x] 3.2 The write is followed by an explicit `genesisByStoaChanged()`. A QML
+  `var` property does not notify on an in-place key write, so without the emit
+  bindings on `canShare` would not re-evaluate and a share button would stay
+  hidden. (Originally written as a reassignment, which the readability review
+  measured to be a no-op — `var next = screen.genesisByStoa` aliases the same
+  object — so the reassignment was removed and the explicit emit is the whole
+  mechanism. See `design.md`, "The record map notifies through an explicit
+  signal". **Not witnessed by the suite**: removing the emit leaves 81/81 green.)
 - [x] 3.3 `reload()` records every item's record, additively, before the rows
   render — so paging away from a Stoa does not drop its record.
 - [x] 3.4 `create()` records the creation reply's own record rather than leaving

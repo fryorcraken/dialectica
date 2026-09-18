@@ -16,7 +16,7 @@ two targeted mutation checks (both reverted; see below).
 
 ## Findings
 
-- [ ] **`dev-writer`** — `dialectica-ui/src/qml/DStoaListScreen.qml:84-90`
+- [x] **`dev-writer`** — `dialectica-ui/src/qml/DStoaListScreen.qml:84-90`
       (`rememberGenesis`'s comment and the mechanism it credits)
       **Scenario:** the comment reads "Reassigned rather than mutated: a QML
       `var` property does not notify on an in-place key write... and a share
@@ -64,6 +64,57 @@ two targeted mutation checks (both reverted; see below).
       **Severity:** low — no behavioural defect, and the coverage gap itself
       is already disclosed in `design.md`; this refines that disclosure rather
       than opening a new one.
+
+      **Fixed.** Your aliasing premise was re-derived here before acting on it,
+      rather than taken on the prose: a temporary probe spec asserted
+      `before === after` on `screen.genesisByStoa` across a `rememberGenesis`
+      call, plus `before.hasOwnProperty(addr)` on the pre-existing reference.
+      Both passed (82/82 with the probe present), which measures the object
+      identity directly rather than inferring it from a mutation's outcome — the
+      probe was then removed and the test file is byte-unchanged (`git status
+      --short` lists only the three files below).
+
+      Three changes, going further than the recommendation on the second half:
+
+      1. **`DStoaListScreen.qml` — the reassignment is deleted, not just
+         re-commented.** The body is now `screen.genesisByStoa[stoa] = genesis;
+         screen.genesisByStoaChanged()`. Judgment recorded rather than left
+         implicit: keeping a measured no-op alongside a comment explaining that
+         it does nothing preserves the exact line that produced this misreading,
+         and CLAUDE.md's "one function, one job" argues against carrying a line
+         whose only role is to be explained away. The explicit emit is
+         unconditional and on every path, so it carries the behaviour alone —
+         which is your own finding's conclusion. The replacement comment credits
+         the emit as load-bearing, states why a reassignment is *not* an
+         equivalent substitute (the aliasing), records that the line was removed
+         and why, and points at `design.md` for the coverage gap.
+      2. **`design.md` — the gap entry is widened and its heading corrected.**
+         It was "The QML record map is reassigned, never mutated in place",
+         naming a mechanism that no longer exists; it is now "The record map
+         notifies through an explicit signal". The "what breaks without it"
+         paragraph previously said a simplification "would very likely stay
+         green", which understated it in exactly the way you identify. It now
+         states that **nothing in the suite witnesses the emit at all**, citing
+         both of your measurements (81/81 with the emit removed; 81/81 with the
+         reassignment removed) rather than my paraphrase of them. The
+         "alternative considered" paragraph records that this entry itself
+         credited the wrong line, since that is the durable part.
+      3. **`tasks.md` 3.2** said "The map is REASSIGNED rather than mutated in
+         place" — a live description of the removed mechanism, found by grepping
+         for what cited the claim before changing it. Rewritten to describe the
+         explicit emit, with the no-op measurement and the coverage gap named.
+
+      **No test was added, and deliberately not.** The gap is real and remains
+      open: catching either mutation needs a spec that instantiates the row and
+      asserts the button's `visible` after a reload, which is the rendering layer
+      no component test here reaches — so a test I could write at this layer
+      would pass with the emit deleted, which is decoration rather than
+      coverage. Re-ran `sh dialectica-ui/tests/run-qml-tests.sh
+      dialectica-ui/tests/tst_stoa_screens.qml` — **81/81**, unchanged, which is
+      the honest result: this is a comment-and-disclosure fix plus the removal of
+      a no-op, and the suite is structurally unable to see any of it. Both QML
+      gates re-run green (`check_qml_members.sh`: 24 files; `check_qml_names.py`:
+      46 files, 23 qmldir entries).
 
 ## Readability — areas reviewed and clean
 
