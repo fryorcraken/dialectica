@@ -1072,7 +1072,7 @@ ScreenFrame {
     // **Bound to the identity report, NOT to `capability.canPost`.** The chip's
     // own header says to bind `canPost === true`, which was right while the chip
     // was the posting gate's indicator and is wrong for this placement: binding
-    // it here shows "Create an identity" to a user who HAS one and cannot
+    // it here shows the identity-choosing affordance to a user who HAS one and cannot
     // currently use it, and routing them to creation is irreversible. The header
     // is updated to state both bindings and which placement takes which.
     // (design.md D3.)

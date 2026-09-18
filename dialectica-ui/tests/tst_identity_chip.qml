@@ -226,9 +226,15 @@ TestCase {
         var all = joined(c);
         verify(all.indexOf("Voting, posting and replying need an identity.") >= 0,
                "the no-identity sentence is missing: " + all);
-        // copy.json common.createIdentity, verbatim.
-        verify(all.indexOf("Create an identity") >= 0,
-               "the create affordance is missing: " + all);
+        // NOT copy.json common.createIdentity — see DIdentityChip.qml, which
+        // records why this diverges from the bundle. The chip's arm is layer
+        // 2 (a per-Stoa identity), and the bundle's string names layer 1.
+        verify(all.indexOf("Choose an identity for this Stoa") >= 0,
+               "the choose affordance is missing: " + all);
+        // The label must not name layer 1, the master key the user has
+        // already created by the time this arm can render.
+        verify(all.indexOf("Create an identity") < 0,
+               "the chip offers to create a key, not to choose a path: " + all);
         c.destroy();
     }
 
@@ -261,8 +267,8 @@ TestCase {
         var all = joined(c);
         verify(all.indexOf("Voting, posting and replying need an identity.") < 0,
                "the no-identity sentence survives into the held state: " + all);
-        verify(all.indexOf("Create an identity") < 0,
-               "the create button survives into the held state: " + all);
+        verify(all.indexOf("Choose an identity for this Stoa") < 0,
+               "the choose button survives into the held state: " + all);
         c.destroy();
     }
 
@@ -274,7 +280,7 @@ TestCase {
         var all = joined(c);
         verify(all.indexOf("CURRENT IDENTITY") < 0,
                "the identity row survived hasIdentity going false: " + all);
-        verify(all.indexOf("Create an identity") >= 0,
+        verify(all.indexOf("Choose an identity for this Stoa") >= 0,
                "the prompt did not appear: " + all);
         c.destroy();
     }
