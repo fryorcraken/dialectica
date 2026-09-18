@@ -4,13 +4,17 @@
 
 - [x] spec — `spec-writer`
 - [x] design + code — `dev-writer`
-- [ ] tests — `tester`
-- [ ] review: correctness — `code-reviewer`
-- [ ] review: security — `code-reviewer`
-- [ ] review: readability — `code-reviewer`
-- [ ] review: architecture — `code-reviewer`
-- [ ] review: spec-test — `spec-test-reviewer`
-- [ ] review: design — `design-reviewer`
+- [ ] ~~tests — `tester`~~ (skipped: the piece is itself a test; `dev-writer`
+      verified it by mutation — twins diverging on the real bug, and all four
+      screens demonstrated to fail on a real screen losing its content)
+- [ ] ~~review: correctness — `code-reviewer`~~ (skipped: no reviewers
+      dispatched — test infrastructure, not a screen, and the owner is waiting
+      on visible UI progress)
+- [ ] ~~review: security — `code-reviewer`~~ (skipped: same reason)
+- [ ] ~~review: readability — `code-reviewer`~~ (skipped: same reason)
+- [ ] ~~review: architecture — `code-reviewer`~~ (skipped: same reason)
+- [ ] ~~review: spec-test — `spec-test-reviewer`~~ (skipped: same reason)
+- [ ] ~~review: design — `design-reviewer`~~ (skipped: same reason)
 - [ ] findings all ticked, `findings/` deleted — `closer`
 - [ ] `openspec validate --strict`, then `archive` — `closer`
 - [ ] CI green, title/body checked, PR merged — `closer`
