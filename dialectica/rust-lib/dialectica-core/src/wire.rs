@@ -12842,6 +12842,53 @@ mod tests {
     }
 
     #[test]
+    fn a_stoa_is_openable_from_the_listing_after_a_restart() {
+        // **The scenario the in-memory tests above structurally cannot reach**,
+        // and the one the owner actually lives in. A caller can only remember
+        // records for Stoas it created or joined during the current session, so
+        // every Stoa it was already in is one the listing alone must make usable.
+        //
+        // A real file and a genuinely reopened store: the record is re-decoded
+        // from `genesis_bytes` on the way out rather than being the one this
+        // process happened to build, which is what makes this a test of what
+        // SURVIVES rather than of what was held in memory.
+        let dir = WireTempDir::new("restart-openable");
+        let path = dir.path().join("stoas.sqlite");
+
+        let created = {
+            let mut store = crate::membership::MembershipStore::open(&path)
+                .expect("a membership store is creatable");
+            create(&mut store, "Agora")
+        };
+        let address = created["stoa"]
+            .as_str()
+            .expect("a creation names its address");
+
+        let reopened = crate::membership::MembershipStore::open(&path).expect("the store reopens");
+        let listing: serde_json::Value =
+            serde_json::from_str(&list_stoas("{}", &reopened)).unwrap();
+        let row = &listing["items"][0];
+
+        assert_eq!(row["stoa"].as_str().unwrap(), address);
+        // The record came back across the restart and still names this address.
+        assert_eq!(genesis_of(row).title, "Agora");
+        // And it is what the record-taking calls accept — the whole point of
+        // carrying it, asserted through the call rather than by inspection.
+        let request = serde_json::json!({
+            "stoa": address,
+            "genesis": row["genesis"].as_str().unwrap(),
+        })
+        .to_string();
+        let mut writable = crate::membership::MembershipStore::open(&path).unwrap();
+        let out = join_stoa(&request, &mut writable);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(
+            v.get("error").is_none(),
+            "a record recovered across a restart must still be accepted: {out}"
+        );
+    }
+
+    #[test]
     fn a_peer_in_no_stoa_lists_nothing_and_reports_no_failure() {
         let store = a_membership_store();
         let out = list_stoas("{}", &store);
