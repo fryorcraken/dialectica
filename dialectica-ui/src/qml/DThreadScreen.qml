@@ -57,15 +57,7 @@ ScreenFrame {
     property var capability: ({ canPost: false, reason: "" })
 
     function capabilityFrom(probe) {
-        var granted = probe.ok && probe.value.canPost === true
-        var supplied = probe.ok
-            ? (typeof probe.value.reason === "string" ? probe.value.reason : "")
-            : probe.error
-
-        return {
-            canPost: granted,
-            reason: granted ? "" : (typeof supplied === "string" ? supplied : "")
-        }
+        return Core.capabilityFrom(probe)
     }
 
     // The identity report, as `who_am_i` answered it THIS read.
@@ -87,17 +79,11 @@ ScreenFrame {
     // looser: `"true"`, `1` and `null` are each truthy-or-falsy in a way that
     // does not match what they mean, and a line handed one of them under a
     // looser test names an identity the machine may not have.
+    //
+    // **The rule lives on `Core`**, shared with `FeedScreen.qml` rather than
+    // copied into it — see `Core.qml`'s `identityFrom`.
     function identityFrom(probe) {
-        var present = probe.ok && probe.value.hasIdentity === true
-        return {
-            hasIdentity: present,
-            publicKey: present && typeof probe.value.publicKey === "string"
-                ? probe.value.publicKey : "",
-            reason: !present && probe.ok
-                    && typeof probe.value.reason === "string"
-                ? probe.value.reason
-                : (probe.ok ? "" : probe.error)
-        }
+        return Core.identityFrom(probe)
     }
 
     signal closed()

@@ -62,11 +62,12 @@ import QtQuick.Layouts
 //   * **Bind `<capability>.canPost === true` only where the chip reports whether
 //     the user can ACT** and no creation route is offered from it.
 //
-// `FeedScreen.qml` normalises both at the boundary — `identityFrom()` and
-// `capabilityFrom()` — so a screen that routes through either inherits the
-// `=== true` rule. One that reads a probe reply directly does not. The three
-// degenerate shapes are driven as fixtures in `tst_gate_affordance.qml` and
-// `tst_vote_and_gate.qml`.
+// `Core` normalises both at the boundary — `Core.identityFrom()` and
+// `Core.capabilityFrom()` — so a screen that routes through either inherits the
+// `=== true` rule. One that reads a probe reply directly does not. The rule
+// lives on the singleton rather than on a screen precisely so that adding a
+// screen cannot add a copy of it. The three degenerate shapes are driven as
+// fixtures in `tst_gate_affordance.qml` and `tst_vote_and_gate.qml`.
 //
 // **`generatedName` cannot be filled by any caller yet.** The QML sandbox
 // holds no wordlists and cannot derive a name for itself; `generated-names`'

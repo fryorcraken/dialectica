@@ -80,19 +80,13 @@ ScreenFrame {
     // inventing text: the spec forbids substituting a reason of the view's own,
     // and an empty reason is a visible gap in core's answer rather than a
     // plausible sentence covering for one.
+    //
+    // **The rule itself lives on `Core`**, which is where the probe reply is
+    // produced, so this screen and the thread screen cannot hold copies that
+    // drift apart. See `Core.qml`'s `capabilityFrom` for the fail-closed
+    // argument.
     function capabilityFrom(probe) {
-        var granted = probe.ok && probe.value.canPost === true
-        var supplied = probe.ok
-            ? (typeof probe.value.reason === "string" ? probe.value.reason : "")
-            : probe.error
-
-        return {
-            canPost: granted,
-            // An open gate carries no reason: there is no blockage to name, and
-            // a leftover reason beside an open composer would describe a state
-            // the reader is not in.
-            reason: granted ? "" : (typeof supplied === "string" ? supplied : "")
-        }
+        return Core.capabilityFrom(probe)
     }
 
     // The identity report, as `who_am_i` answered it THIS render.
@@ -139,19 +133,7 @@ ScreenFrame {
     // IDENTITY PRESENT arm, claiming an identity the machine does not have, with
     // every gate green.
     function identityFrom(probe) {
-        var present = probe.ok && probe.value.hasIdentity === true
-        return {
-            hasIdentity: present,
-            publicKey: present && typeof probe.value.publicKey === "string"
-                ? probe.value.publicKey : "",
-            // The reason a user is nobody here, as core wrote it. Empty where
-            // there is an identity: a leftover reason beside a filled chip would
-            // describe a state the reader is not in.
-            reason: !present && probe.ok
-                    && typeof probe.value.reason === "string"
-                ? probe.value.reason
-                : (probe.ok ? "" : probe.error)
-        }
+        return Core.identityFrom(probe)
     }
 
     // Whether the closed gate's guidance is revealed. A view-local disclosure,
