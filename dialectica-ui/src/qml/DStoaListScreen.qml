@@ -437,9 +437,19 @@ ScreenFrame {
         // restated 213 lines from the state that makes it necessary.
         model: screen.visibleRows
 
-        delegate: RowLayout {
-            id: row
+        // The reference's screen 08 separates rows by a hairline under EVERY row,
+        // the last one included — unlike the moderation lists, which drop it on
+        // the last. A ColumnLayout per row rather than a bare RowLayout is what
+        // gives the rule somewhere to live.
+        delegate: ColumnLayout {
+            id: rowBlock
             required property var modelData
+            Layout.fillWidth: true
+            spacing: DTheme.itemGap
+
+        RowLayout {
+            id: row
+            readonly property var modelData: rowBlock.modelData
 
             // The address, as the reply spelled it. A row must never be able to
             // render a title without one: a founding title is chosen freely by
@@ -469,7 +479,7 @@ ScreenFrame {
                 // be a title no peer agrees on.
                 Text {
                     text: row.rowTitle
-                    font: DTheme.body
+                    font: DTheme.rowTitle
                     color: DTheme.ink
                     // Peer-supplied, unnormalised, carrying whatever characters
                     // its creator typed. Never markup.
@@ -532,6 +542,16 @@ ScreenFrame {
                 kind: "secondary"
                 onClicked: screen.stoaChosen(row.rowStoa, row.rowTitle,
                                              screen.genesisFor(row.rowStoa))
+            }
+        }
+
+            // The separator under every row, the last included. The reference
+            // draws it that way so the list reads as a bounded block rather
+            // than as rows trailing off into the page.
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: DTheme.hairline
+                color: DTheme.rule
             }
         }
     }
@@ -881,4 +901,35 @@ ScreenFrame {
         }
     }
 
+    // ---- THIS SCREEN CARRIES NO IDENTITY CHIP, AND THAT IS A REQUIREMENT ---
+    //
+    // A `DScreenFooter` — the pagination/identity/lamps row — was mounted here
+    // and removed. It is recorded rather than silently dropped, because adding
+    // one back is the obvious next idea and it breaks a merged requirement that
+    // no gate would catch by inspection.
+    //
+    // **`stoa-navigation-view` R13 forbids this screen raising identity at all**
+    // — `tst_stoa_screens.qml`'s
+    // `test_neither_the_list_nor_the_creation_outcome_claims_moderation_or_identity`
+    // fails on the word, by design: one key signs in every Stoa in this release,
+    // so anything on a per-Stoa screen that raises identity offers an
+    // unlinkability property the software does not have. `DIdentityChip`'s
+    // no-identity arm renders "Voting, posting and replying need an identity",
+    // which trips it. The requirement is right and the chip is what was wrong.
+    //
+    // **This is NOT in tension with the key block above.** That block is about
+    // a key belonging to THIS MACHINE — its strings say so and say nothing about
+    // identity, which is exactly the distinction R13 draws. A chip claiming a
+    // per-Stoa identity is the thing forbidden here; naming the one key the
+    // machine signs everything with is not.
+    //
+    // **The lamps are not here either, and that is `Main.qml`'s decision rather
+    // than this screen's.** `DStatusBar` is mounted once as shared chrome
+    // outside every screen's `visible:` binding, so it accompanies this screen
+    // too — see `Main.qml`'s "shared chrome" block for why a per-screen subset
+    // would make its absence ambiguous.
+    //
+    // **The reference agrees on the chip**: screen 08 carries no identity chip.
+    // It belongs to the feed (03/05), where posting is what the identity is FOR
+    // and the claim is about this machine rather than about a Stoa.
 }
