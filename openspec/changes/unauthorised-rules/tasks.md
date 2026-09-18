@@ -9,7 +9,7 @@
       the argument — including why ratifying them instead was rejected.
 - [x] design + code — `dev-writer`
 - [ ] tests — `tester`
-- [ ] review: correctness — `code-reviewer`
+- [x] review: correctness — `code-reviewer`
 - [ ] review: security — `code-reviewer`
 - [ ] review: readability — `code-reviewer`
 - [ ] review: architecture — `code-reviewer`
