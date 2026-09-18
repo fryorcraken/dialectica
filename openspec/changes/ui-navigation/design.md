@@ -453,3 +453,83 @@ requirement to point at:
   hidden root comes back with its body withheld while a hidden reply is omitted,
   because "a thread read that dropped its own subject would be indistinguishable
   from a thread this peer never received".
+
+## The host double-encodes every reply, and only a launch could show it
+
+Every core call from the view failed with *"The core module returned something
+that is not a reply."* while the module was healthy and answering correctly.
+The two facts are reconciled by one encoding layer.
+
+Core returns a JSON string. Basecamp's `LogosQmlBridge::callModule` then
+"serialize[s] QVariant result to JSON" (logos-basecamp `docs/project.md`,
+§"UI App Calling a Logos Module"), and serialising a `QString` that *already
+holds* JSON wraps the whole reply in a JSON **string literal**. So one
+`JSON.parse` yields a `string`, never the object every caller expects, and
+`Core.call`'s `typeof reply !== "object"` guard fires on a reply that is, one
+layer down, perfectly well-formed.
+
+Measured in a launch rather than inferred, which is the only reason it is
+settled:
+
+```
+DIALECTICA_PROBE method=list_stoas nativeType=string rawLen=45
+  raw=<<<"{\"hasMore\":false,\"items\":[],\"page\":0}">>>
+DIALECTICA_PROBE parsedType=string
+```
+
+`create_stoa` arrived the same way carrying a real domain error — *no keystore
+found* — which is what proves the call **reached the module and the module
+answered**. A bridge that was not working could not return a different,
+method-specific, semantically correct answer for each method.
+
+**The unwrap is conditional, not a second blind parse.** It asks whether the
+first parse produced a string and re-parses only then, so it stays correct
+against a host that does not double-encode, and a string that is not JSON
+underneath falls through to the guard and is reported rather than swallowed.
+A blind second parse would be a bet on one host's current behaviour.
+
+### The synchronous `callModule` is the right API for a QML-only view
+
+Recorded because the opposite was proposed from a reading of the working
+sibling, and the distinction is easy to lose.
+
+`/home/fryorcraken/src/rad/radicle-logos-module/radicle-ui` calls its module
+through `logos.module(<name>)` for a handle, `logos.watch(handle, onOk, onErr)`
+for an asynchronous reply, and `logos.isViewModuleReady(name)` for readiness.
+**That is the C++ QtRO-backend route**: radicle ships
+`radicle_ui_backend.cpp` and a `radicle_ui.rep`, and the handle is a generated
+replica of that backend.
+
+Dialectica is **QML-only** and has neither file. Its route is
+`logos.callModule(module, method, args)`, which is:
+
+- documented as the QML-only bridge API in basecamp's own
+  `docs/project.md` (`callModule(module, method, args) → QString`) and
+  `docs/spec.md`;
+- exercised by basecamp's own doctest for a QML-only plugin with no C++ backend
+  and no `.rep` (`doctests/basecamp-fullapi-ui-qml.test.yaml`, which asserts
+  every method type round-trips this way);
+- used the same way by the ecosystem's QML tutorial app; and
+- **measured working here**, synchronously, returning each method's correct
+  reply.
+
+So no call site becomes asynchronous and no screen needs converting. Porting
+radicle's mechanism would have meant adding a C++ backend dialectica does not
+have, to replace an API that does work — and would have been justified by a
+premise the launch disproves.
+
+### Why the suite could not have caught this, and what can
+
+**A component suite is structurally blind to this class of defect.** Under
+`qmltestrunner` the host is simply absent, so the bridge under test is whatever
+the fake models. `fakeBridge()` returned the reply verbatim — modelling a host
+that does not exist — and so 22 spec files passed green over a bridge on which
+every single call failed. The suite was not weak here; it was measuring
+something else entirely.
+
+The fake now applies the host's extra `JSON.stringify`, and a second fake pins
+the un-wrapped shape so the unwrap cannot be a bet on one host's quirk. But the
+durable lesson is the one the fix cannot encode: **a fake is a claim about the
+host, and only a basecamp launch can check that claim.** Any future disagreement
+about what the bridge does is settled by `console.log` in `Core.qml` and the
+launch log, never by the suite going green.
