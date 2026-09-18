@@ -29,7 +29,11 @@
   record is exactly the input that fails to decode as "ended mid-field", so
   defaulting to one would reintroduce the defect as a success reply.
 - [x] 2.5 The two handler docstrings' reply shapes updated to match.
-- [x] 2.6 Full suite green: 1051 tests, 0 failed. `cargo fmt --check` clean on
+- [x] 2.6 A Stoa is openable from the listing **after a restart** — a real file
+  and a genuinely reopened store, so the record is re-decoded from
+  `genesis_bytes` rather than being the one this process built. The in-memory
+  fixtures cannot reach this scenario, and it is the one the owner lives in.
+- [x] 2.7 Full suite green: 1052 tests, 0 failed. `cargo fmt --check` clean on
   both crates — with `-p dialectica -p dialectica-core`, which is what reaches
   `dialectica-core` at all.
 
@@ -66,11 +70,27 @@
 
 ## 5. Proof by launching
 
-- [ ] 5.1 `lgs basecamp build --variant lgx`, `install`, `launch alice`.
-- [ ] 5.2 Create a Stoa, press **Open**, and confirm the feed reads rather than
-  reporting "genesis record ended mid-field". A green suite is not proof here — a
-  broken bridge has shipped under a green suite in this repo before.
-- [ ] 5.3 Confirm the share affordance is now offered, which the same lookup
-  gated.
-- [ ] 5.4 `git diff scaffold.toml` after every `lgs basecamp` verb; restore if
-  the file was rewritten.
+- [x] 5.1 `lgs basecamp build --variant lgx` — both `.lgx` artefacts built, so
+  the `interface: "universal"` dispatch table still derives from the changed
+  wire shape. Then `setup` (this worktree had no `.scaffold/`), `install` into
+  both profiles, and `launch alice`.
+- [x] 5.2 `git diff scaffold.toml` after every verb. `build` and `install` left
+  it untouched; **`setup` stripped the 3-line header comment** and changed no
+  value — restored with `git checkout scaffold.toml`.
+- [x] 5.3 The launch is healthy and the shipped artefacts carry the fix: the
+  installed plugin's own `DStoaListScreen.qml` holds all three `rememberGenesis`
+  call sites, and the log shows **zero** `MODULE_NOT_LOADED`, `ReferenceError`,
+  `Unable to assign` or `is not a type` lines.
+- [ ] 5.4 **NOT PROVEN: the click.** Basecamp is running against this worktree
+  with only the host's own modules loaded — `dialectica_ui/qml` appears **0**
+  times in the launch log, because loading the plugin needs a human to click the
+  dialectica tile and an agent cannot. So "create a Stoa, press Open, see a feed"
+  is **unverified**, and this row is deliberately left unticked rather than
+  ticked on the strength of the suite.
+
+  What IS established, and where it stops: the reply now carries the record
+  (1052 Rust tests, including one against a real reopened store), the view fills
+  its map from the reply (411 QML tests, three of them proved to fail without the
+  change), and the adapter and the QML bridge both forward the reply verbatim —
+  read and confirmed, so no narrowing sits between core and the view. The
+  remaining gap is the rendering itself, which needs the click.
