@@ -24,8 +24,9 @@
 `docs/PLAN.md` only, plus `design.md`. **No code changes**, so no gate in this
 repo can see this piece — see the note under "What no gate can see" below.
 
-- [x] `design.md` written, with the three migrated reasoning passages under
-      Decisions 6a/6b/6c
+- [x] `design.md` written, with the two migrated reasoning passages under
+      Decisions 6a/6b; 6c records the third candidate and why it stayed in
+      PLAN.md instead
 - [x] **Ruling 1** — §7.2 gains a block-quoted scope note; §9.2's MVP item 5 is
       struck and pointed at the ruling
 - [x] **Ruling 2** — §9.1's question 8 rewritten in place as a decided
