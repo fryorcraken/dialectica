@@ -447,103 +447,105 @@ ScreenFrame {
             Layout.fillWidth: true
             spacing: DTheme.itemGap
 
-        RowLayout {
-            id: row
-            readonly property var modelData: rowBlock.modelData
+            RowLayout {
+                id: row
+                readonly property var modelData: rowBlock.modelData
 
-            // The address, as the reply spelled it. A row must never be able to
-            // render a title without one: a founding title is chosen freely by
-            // whoever created the Stoa, is not unique, is verified against
-            // nothing, and can be picked to resemble another Stoa's. The address
-            // is the only distinguishing half.
-            readonly property string rowStoa:
-                typeof modelData.stoa === "string" ? modelData.stoa : ""
-            readonly property string rowTitle:
-                typeof modelData.foundingTitle === "string" ? modelData.foundingTitle : ""
+                // The address, as the reply spelled it. A row must never be able
+                // to render a title without one: a founding title is chosen
+                // freely by whoever created the Stoa, is not unique, is verified
+                // against nothing, and can be picked to resemble another Stoa's.
+                // The address is the only distinguishing half.
+                readonly property string rowStoa:
+                    typeof modelData.stoa === "string" ? modelData.stoa : ""
+                readonly property string rowTitle:
+                    typeof modelData.foundingTitle === "string" ? modelData.foundingTitle : ""
 
-            Layout.fillWidth: true
-            spacing: 16
+                Layout.fillWidth: true
+                spacing: 16
 
-            Identicon {
-                address: row.rowStoa
-                size: DTheme.markInList
-            }
-
-            ColumnLayout {
-                spacing: 2
-
-                // An EMPTY founding title renders as nothing, and the row is
-                // still a row. An empty title is legal — the genesis record has
-                // no minimum length — so a row that collapsed would be a Stoa
-                // the user cannot reach, and a substitute like "Untitled" would
-                // be a title no peer agrees on.
-                Text {
-                    text: row.rowTitle
-                    font: DTheme.rowTitle
-                    color: DTheme.ink
-                    // Peer-supplied, unnormalised, carrying whatever characters
-                    // its creator typed. Never markup.
-                    textFormat: Text.PlainText
-                    visible: row.rowTitle !== ""
+                Identicon {
+                    address: row.rowStoa
+                    size: DTheme.markInList
                 }
 
-                // The one abbreviation, owned by AddressLabel: head 8, middle 8,
-                // tail 6. No second elision is written anywhere — a head-and-tail
-                // form is the shape vanity-address generators are built to
-                // defeat, and a second implementation is how one screen quietly
-                // acquires the weaker one.
-                AddressLabel {
-                    address: row.rowStoa
-                    // A click copies the FULL address, not the abbreviation on
-                    // screen. This is not the share string: an address alone
-                    // cannot be joined, and the share affordance below is the
-                    // only thing that produces something joinable.
-                    copyText: row.rowStoa
-                    onCopyRequested: {
-                        if (screen.clipboard)
-                            screen.clipboard.copy(row.rowStoa)
+                ColumnLayout {
+                    spacing: 2
+
+                    // An EMPTY founding title renders as nothing, and the row is
+                    // still a row. An empty title is legal — the genesis record
+                    // has no minimum length — so a row that collapsed would be a
+                    // Stoa the user cannot reach, and a substitute like
+                    // "Untitled" would be a title no peer agrees on.
+                    Text {
+                        text: row.rowTitle
+                        font: DTheme.rowTitle
+                        color: DTheme.ink
+                        // Peer-supplied, unnormalised, carrying whatever
+                        // characters its creator typed. Never markup.
+                        textFormat: Text.PlainText
+                        visible: row.rowTitle !== ""
+                    }
+
+                    // The one abbreviation, owned by AddressLabel: head 8,
+                    // middle 8, tail 6. No second elision is written anywhere —
+                    // a head-and-tail form is the shape vanity-address
+                    // generators are built to defeat, and a second
+                    // implementation is how one screen quietly acquires the
+                    // weaker one.
+                    AddressLabel {
+                        address: row.rowStoa
+                        // A click copies the FULL address, not the abbreviation
+                        // on screen. This is not the share string: an address
+                        // alone cannot be joined, and the share affordance below
+                        // is the only thing that produces something joinable.
+                        copyText: row.rowStoa
+                        onCopyRequested: {
+                            if (screen.clipboard)
+                                screen.clipboard.copy(row.rowStoa)
+                        }
                     }
                 }
-            }
 
-            Item { Layout.fillWidth: true }
+                Item { Layout.fillWidth: true }
 
-            // **Nothing occupies the position the mockup puts a count in**, and
-            // that is deliberate. `31 posts received here` would be a legitimate
-            // number — it counts what this machine holds — and it is simply not
-            // computed: a listed item carries an address and a title, no call
-            // answers how many posts this peer holds for a Stoa, and the thread
-            // listing reports whether a further page exists rather than a total.
-            // A page length from some other call rendered here would look like a
-            // total, would not be one, and would be wrong by an amount that
-            // grows with the Stoa. `nothing received yet` is unavailable for the
-            // same reason: it is a claim about a count nothing computed.
+                // **Nothing occupies the position the mockup puts a count in**,
+                // and that is deliberate. `31 posts received here` would be a
+                // legitimate number — it counts what this machine holds — and it
+                // is simply not computed: a listed item carries an address and a
+                // title, no call answers how many posts this peer holds for a
+                // Stoa, and the thread listing reports whether a further page
+                // exists rather than a total. A page length from some other call
+                // rendered here would look like a total, would not be one, and
+                // would be wrong by an amount that grows with the Stoa.
+                // `nothing received yet` is unavailable for the same reason: it
+                // is a claim about a count nothing computed.
 
-            // Share: offered only where this view HOLDS the genesis record, and
-            // absent otherwise. An address is a one-way hash of the record, so a
-            // share without one would produce a plausible-looking string that
-            // fails to verify on somebody else's machine, as a refusal they
-            // cannot explain. The absence is the honest rendering and is not an
-            // error state.
-            FlatButton {
-                objectName: "shareButton"
-                text: "Copy a shareable reference"
-                kind: "secondary"
-                visible: screen.canShare(row.rowStoa)
-                onClicked: {
-                    var text = DStoaReference.shareText(row.rowStoa, screen.genesisFor(row.rowStoa))
-                    if (text !== "" && screen.clipboard)
-                        screen.clipboard.copy(text)
+                // Share: offered only where this view HOLDS the genesis record,
+                // and absent otherwise. An address is a one-way hash of the
+                // record, so a share without one would produce a
+                // plausible-looking string that fails to verify on somebody
+                // else's machine, as a refusal they cannot explain. The absence
+                // is the honest rendering and is not an error state.
+                FlatButton {
+                    objectName: "shareButton"
+                    text: "Copy a shareable reference"
+                    kind: "secondary"
+                    visible: screen.canShare(row.rowStoa)
+                    onClicked: {
+                        var text = DStoaReference.shareText(row.rowStoa, screen.genesisFor(row.rowStoa))
+                        if (text !== "" && screen.clipboard)
+                            screen.clipboard.copy(text)
+                    }
+                }
+
+                FlatButton {
+                    text: "Open"
+                    kind: "secondary"
+                    onClicked: screen.stoaChosen(row.rowStoa, row.rowTitle,
+                                                 screen.genesisFor(row.rowStoa))
                 }
             }
-
-            FlatButton {
-                text: "Open"
-                kind: "secondary"
-                onClicked: screen.stoaChosen(row.rowStoa, row.rowTitle,
-                                             screen.genesisFor(row.rowStoa))
-            }
-        }
 
             // The separator under every row, the last included. The reference
             // draws it that way so the list reads as a bounded block rather
