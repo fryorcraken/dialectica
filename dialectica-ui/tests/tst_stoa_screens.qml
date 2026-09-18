@@ -667,6 +667,15 @@ TestCase {
         screen.destroy()
     }
 
+    // **Narrowed by the `moderation-screen` change's amendment**, and what it
+    // still forbids is the whole of what had a permanent reason. The owner
+    // amended `stoa-navigation-view` to admit a MARKED PLACEHOLDER in the count
+    // position; every assertion below survives that amendment unchanged, because
+    // a placeholder rendering no number satisfies all of them. If a later change
+    // renders a numeral there, this test and
+    // `test_no_digit_is_rendered_that_the_reply_did_not_supply` both fail — which
+    // is the intended outcome, since the amendment permits a placeholder rather
+    // than a number.
     function test_no_row_renders_a_count_of_held_posts_or_anything_global() {
         // A thread listing is answered too, so a screen tempted to render some
         // other call's page length in the row's margin has one available.
@@ -2243,6 +2252,100 @@ TestCase {
                    + "taken from another call's page length. Rendered: " + shown)
         }
         screen.destroy()
+    }
+
+    // ---- the count placeholder --------------------------------------------
+
+    // The amended requirement permits a placeholder and requires that it be
+    // derived from no reply. **The assertion is that it does not MOVE**, which
+    // is the property that distinguishes a placeholder from a page length
+    // rendered in the count position — the failure the requirement names.
+    //
+    // A null implementation that rendered a constant would satisfy "does not
+    // move" for free, so the fixtures below differ in every quantity a screen
+    // could reach for: the number of Stoas listed, and the number of threads the
+    // other call answered. If the position were bound to either, the two runs
+    // would differ.
+    // Both halves of the amended requirement, in one function.
+    //
+    // **They were written as two and one of them did not appear in the run**, at
+    // two different names, with no warning of any kind. What resolved it was
+    // folding them together; what the cause was is NOT established, and saying
+    // so is the honest version — an earlier draft of this comment blamed a
+    // runner enumeration limit and that was a guess dressed as a measurement.
+    // The count that looked like evidence for it was my own miscount: a
+    // `grep -c "    function test_"` reads the words "function test_" inside a
+    // comment as a declaration, so the file's real total was one lower than the
+    // number the claim rested on.
+    //
+    // The diagnostic that actually works, if a test here stops appearing:
+    // list the declared names and the run names and `comm` them, rather than
+    // comparing two totals. Two totals cannot say which one is missing, and one
+    // of them is easy to get wrong.
+    function test_the_row_count_placeholder_claims_no_measurement() {
+        // ---- it does not read as a measurement ---------------------------
+        //
+        // A placeholder saying "0 posts" would be constant AND false about
+        // every Stoa on the list, so the two halves below are both needed.
+        var screen = makeList({
+            "list_stoas": '{"items":[{"stoa":"' + "cc".repeat(32)
+                        + '","foundingTitle":"Transport Notes"}],'
+                        + '"page":0,"hasMore":false}'
+        })
+        var text = spec.namedAnywhere(screen, "rowCountPlaceholder")[0].text
+
+        verify(spec.digitRunsIn(text).length === 0,
+               "a placeholder carrying a numeral reads as a count: " + text)
+        // NO SPEC: the requirement says a placeholder must not be presented as
+        // this peer's measurement and does not fix the wording. This pins that
+        // it does not assert emptiness, which is the one substitute value that
+        // would be both digit-free and false.
+        verify(text.toLowerCase().indexOf("nothing received") < 0
+               && text.toLowerCase().indexOf("no posts") < 0,
+               "asserting emptiness is a claim about a count nothing computed: "
+               + text)
+        screen.destroy()
+
+        // ---- it does not MOVE with the data ------------------------------
+        //
+        // The property that distinguishes a placeholder from another call's
+        // page length rendered in the count position, which is the failure the
+        // requirement names. The two fixtures differ in every quantity a screen
+        // could reach for — the number of Stoas listed and the number of threads
+        // the other call answered — so a position bound to either would differ
+        // between them.
+        var addrOne = "aa".repeat(32)
+        var addrTwo = "bb".repeat(32)
+
+        var thin = makeList({
+            "list_stoas": '{"items":[{"stoa":"' + addrOne + '","foundingTitle":"One"}],'
+                        + '"page":0,"hasMore":false}',
+            "list_threads": '{"items":[],"page":0,"hasMore":false}'
+        })
+        compare(thin.visibleRows.length, 1)
+        var firstFound = spec.namedAnywhere(thin, "rowCountPlaceholder")
+        compare(firstFound.length, 1, "the row carries the placeholder")
+        var placeholder = firstFound[0].text
+        verify(placeholder !== "", "and it renders something")
+        thin.destroy()
+
+        var thick = makeList({
+            "list_stoas": '{"items":[{"stoa":"' + addrOne + '","foundingTitle":"One"},'
+                        + '{"stoa":"' + addrTwo + '","foundingTitle":"Two"}],'
+                        + '"page":0,"hasMore":true}',
+            "list_threads": '{"items":[{"thread":"t1"},{"thread":"t2"},'
+                          + '{"thread":"t3"},{"thread":"t4"}],'
+                          + '"page":0,"hasMore":true}'
+        })
+        compare(thick.visibleRows.length, 2, "a different amount of data")
+        var bothFound = spec.namedAnywhere(thick, "rowCountPlaceholder")
+        compare(bothFound.length, 2, "one placeholder per row")
+
+        for (var i = 0; i < bothFound.length; i++)
+            compare(bothFound[i].text, placeholder,
+                    "the placeholder is the same string whatever the data, so "
+                    + "it is not another call's page length in disguise")
+        thick.destroy()
     }
 
     // ---- the two paste outcomes, pinned by meaning rather than by difference
