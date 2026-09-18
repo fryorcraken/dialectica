@@ -19,7 +19,7 @@
       change.
 - [ ] ~~review: spec-test — `spec-test-reviewer`~~ — no spec delta
       (`skip_specs: true`), nothing for a spec-test review to check.
-- [ ] review: design — `design-reviewer`
+- [x] review: design — `design-reviewer`
 - [ ] findings all ticked, `findings/` deleted — `closer`
 - [ ] `openspec validate --strict`, then `archive` — `closer`
 - [ ] CI green, title/body checked, PR merged — `closer`
