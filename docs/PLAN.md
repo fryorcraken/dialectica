@@ -3788,7 +3788,12 @@ section, since three of the claims below turned out to be wrong.
   accepted a force-push risk that dialectica does not have to take. Radicle
   pins an unreleased rev for two reasons, and neither applies here.
 
-  `setup --inspector` is the first, and dialectica's CI never calls `setup`.
+  `setup --inspector` is the first, and **no dialectica workflow calls `setup`**
+  — not `ci.yml`, and not the e2e workflow either, which builds the dev `#app`
+  (already carrying the inspector) with a raw `nix build`. That is now a
+  standing property rather than an accident of having no e2e job: any
+  `lgs basecamp` verb rewrites `scaffold.toml` and strips its comments, and the
+  e2e workflow asserts the file is unchanged after its build for that reason.
 
   The second is `build --print-output`, absent from v0.3.1 — and the reason it
   does not matter is worth stating precisely, because the obvious version is
@@ -3853,11 +3858,16 @@ repo was ported from:
 **Deliberately not built, each with its re-entry condition** (recorded at the
 foot of the workflow too):
 
-- **No e2e job.** The view is four buttons with no specs, and a matrixed job
+- ~~**No e2e job.** The view is four buttons with no specs, and a matrixed job
   over zero specs cannot fail — the exact thing this section forbids. It
-  arrives with the specs, and **sitometres is pinned to its latest release**
-  when it does: radicle pins a git commit only to work around a probe bug in
-  published 0.1.0, which is a workaround rather than a pattern to copy.
+  arrives with the specs.~~ **Built.** The specs arrived — `openspec list
+  --specs` shows four capabilities contracting the view — and the condition
+  this entry set was met. A sitometres suite drives a real Basecamp through its
+  QML inspector; what a run must establish before its result may be believed is
+  the **`e2e-ui-harness`** capability, which is the contract to read rather than
+  this paragraph. Which host and module builds it uses, why sitometres is pinned
+  to a release rather than a commit, and what the suite deliberately does not
+  cover are in that change's `design.md`.
 - **No `doctor` job**, despite §11 saying to run `doctor`. Two pins WARN on
   every run by design (PHASE0-FINDINGS §8), so the job would be permanently
   red, and a permanently red gate trains people to ignore it. Run it by hand;

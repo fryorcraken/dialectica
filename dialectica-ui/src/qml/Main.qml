@@ -66,6 +66,26 @@ Item {
       : root.previewing !== null ? "join"
       : "list"
 
+    // ---- what an end-to-end assertion reads ------------------------------
+    //
+    // A sitometres `state:` expression evaluates against the application's QML
+    // root, so anything a spec asserts has to be reachable from here. These are
+    // READ-ONLY and COMPUTED from the screens that already own the state —
+    // never a second copy of it. A writable mirror of the listing is exactly
+    // the drift `DStoaListScreen.visibleRows` was reshaped to prevent, and a
+    // spec asserting against a copy would pass while the screen rendered
+    // something else.
+    //
+    // They are a contract with the suite rather than a debugging affordance:
+    // renaming one breaks a spec, which is the intended coupling.
+    readonly property int stoaCount: list.visibleRows.length
+    readonly property string listReadState: list.readState
+    readonly property string createState: list.createState
+    readonly property string createFailure: list.createFailure
+    readonly property string pasteFailure: list.pasteFailure
+    readonly property string joinState: join.joinState
+    readonly property string joinFailure: join.failure
+
     // The two transitions, each clearing what the other owns.
     //
     // Functions rather than bare assignment because the clearing is the point:
