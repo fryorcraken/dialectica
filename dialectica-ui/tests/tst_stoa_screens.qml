@@ -553,33 +553,59 @@ TestCase {
         screen.destroy()
     }
 
-    function test_the_row_count_and_the_separator_count_move_together() {
-        // The relation, asserted by varying the input rather than by trusting
-        // one fixture. A screen with the separator hoisted out of the delegate
-        // renders a fixed number of them and satisfies the test above at
-        // whatever row count that number happens to equal; it cannot satisfy
-        // both of these.
-        var one = makeList({
+    // One screen, created, measured and destroyed before returning, so no two
+    // component trees are ever live at once. The earlier single-function form
+    // of the two tests below read a count from one screen, called `destroy()`
+    // on it — which only QUEUES the deletion onto the event loop — and then
+    // built a second screen through `makeList`, which reassigns `Core.bridge`.
+    // The two trees briefly coexisted, and correctness rested on `Repeater`
+    // populating synchronously and on the walk beating the queued deletion:
+    // timing assumptions the test neither stated nor pinned. Measuring inside
+    // a helper that owns the whole lifetime removes the overlap rather than
+    // documenting it.
+    //
+    // The count is captured while the object is live and only the NUMBER
+    // outlives it, so nothing here walks a destroyed tree.
+    function separatorsForRowCount(replies, expectedRows) {
+        var screen = makeList(replies)
+        compare(screen.readState, "ok", "the fixture's own precondition")
+        compare(screen.visibleRows.length, expectedRows,
+                "the fixture must render the row count it claims")
+        var count = spec.visibleNamed(screen, "rowSeparator").length
+        screen.destroy()
+        return count
+    }
+
+    // The two halves of what was one function. Neither alone is the relation:
+    // the one-row case is what a separator dropped on the last row fails (1
+    // expected, 0 found), and the four-row case is what a separator hoisted out
+    // of the delegate fails — a hoisted rule renders a FIXED number however many
+    // rows there are, so it can satisfy any single fixture whose row count it
+    // happens to equal and cannot satisfy two that disagree. Keeping the counts
+    // different (1 and 4, neither of them 3) is what makes the pair a relation
+    // rather than two independently tunable constants; the arithmetic is
+    // asserted in the second, against the first re-measured from its own screen.
+    function test_one_row_draws_exactly_one_boundary() {
+        compare(separatorsForRowCount({
             "list_stoas": '{"items":[{"stoa":"' + "aa".repeat(32) + '","foundingTitle":"One"}],'
                         + '"page":0,"hasMore":false}'
-        })
-        compare(one.visibleRows.length, 1)
-        var afterOne = spec.visibleNamed(one, "rowSeparator").length
-        one.destroy()
+        }, 1), 1, "one row must draw exactly one boundary")
+    }
 
-        var four = makeList({
+    function test_the_row_count_and_the_separator_count_move_together() {
+        var afterOne = separatorsForRowCount({
+            "list_stoas": '{"items":[{"stoa":"' + "aa".repeat(32) + '","foundingTitle":"One"}],'
+                        + '"page":0,"hasMore":false}'
+        }, 1)
+        var afterFour = separatorsForRowCount({
             "list_stoas": '{"items":['
                         + '{"stoa":"' + "a1".repeat(32) + '","foundingTitle":"One"},'
                         + '{"stoa":"' + "a2".repeat(32) + '","foundingTitle":"Two"},'
                         + '{"stoa":"' + "a3".repeat(32) + '","foundingTitle":"Three"},'
                         + '{"stoa":"' + "a4".repeat(32) + '","foundingTitle":"Four"}'
                         + '],"page":0,"hasMore":false}'
-        })
-        compare(four.visibleRows.length, 4)
-        var afterFour = spec.visibleNamed(four, "rowSeparator").length
-        four.destroy()
+        }, 4)
 
-        compare(afterOne, 1, "one row must draw exactly one boundary")
         compare(afterFour, 4, "four rows must draw exactly four boundaries")
         compare(afterFour - afterOne, 3,
                 "three further rows must add three further boundaries, got "

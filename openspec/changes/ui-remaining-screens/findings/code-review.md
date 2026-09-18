@@ -94,7 +94,7 @@ ships against `origin/main` — `dialectica-ui/src/qml/DStoaListScreen.qml`
 
 ## Findings
 
-- [ ] **`dev-writer`** — `openspec/changes/ui-remaining-screens/design.md:230` vs.
+- [x] **`dev-writer`** — `openspec/changes/ui-remaining-screens/design.md:230` vs.
       the dispatch brief's "57 lines" — **readability/documentation, low severity.**
       **Scenario:** design.md itself says "the 62 lines this piece ships"; the
       actual `git diff origin/main...HEAD -- dialectica-ui/src/qml/DStoaListScreen.qml`
@@ -112,7 +112,22 @@ ships against `origin/main` — `dialectica-ui/src/qml/DStoaListScreen.qml`
       reindent in `d59b479`" so nobody re-derives the discrepancy from
       scratch the way this review did. Optional wording fix, not a blocker.
 
-- [ ] **`dev-writer`** — `dialectica-ui/tests/tst_stoa_screens.qml:556-587`
+      **Fixed** — but not by the suggested wording. The figure is **dropped**
+      rather than restated. A count qualified as "62 lines of behavioural diff
+      (`git diff -w`)" would still be a number nobody re-measures: correct on
+      the day it was written and silently wrong after the next commit to the
+      delegate, which is the failure mode CLAUDE.md's "do not write down
+      anything a command can answer" names. The sentence's actual claim is that
+      the row treatment was untested, and that claim does not need a line count
+      at all, so D5c now opens "Answering *nothing tests the row treatment this
+      piece ships*". An italic note underneath records why the count is absent —
+      that the raw diff is much larger than the behavioural change because of
+      the reindent in `d59b479`, and that `git diff -w` is what separates them —
+      so the discrepancy this review re-derived is written down once without a
+      figure that can rot. Nothing in the line count was load-bearing for the
+      argument.
+
+- [x] **`dev-writer`** — `dialectica-ui/tests/tst_stoa_screens.qml:556-587`
       (`test_the_row_count_and_the_separator_count_move_together`) —
       **correctness/test-quality, the author's own flagged low-confidence
       test.** **Scenario:** the function creates `one` (a `DStoaListScreen`),
@@ -138,6 +153,53 @@ ships against `origin/main` — `dialectica-ui/src/qml/DStoaListScreen.qml`
       same function body. This removes the object-lifetime dependency the
       author already flagged as their own least-confident test, at no cost to
       what is covered.
+
+      **Fixed.** Split, as suggested, but through a helper rather than by
+      duplicating the create/measure/destroy sequence into each function:
+      `separatorsForRowCount(replies, expectedRows)` creates one screen,
+      asserts its row count, reads the separator count and destroys it before
+      returning, so the overlap is removed by construction rather than by each
+      test remembering the ordering. Only the number outlives the screen. The
+      two functions are now `test_one_row_draws_exactly_one_boundary` and
+      `test_the_row_count_and_the_separator_count_move_together`; baseline goes
+      from 81 to **82 passed, 0 failed**.
+
+      **Both mutations re-run against the split, and both halves still catch
+      what the combined test caught** — this was the risk in the split and it
+      was measured, not assumed:
+
+      - drop the separator on the last row (`visible: rowBlock.index <
+        screen.visibleRows.length - 1`, with `required property int index`
+        added) → **79 passed, 3 failed**: `test_one_row_draws_exactly_one_boundary`
+        (1 expected, 0 found), `test_every_rendered_row_is_separated_from_the_next`
+        (3 expected, 2 found) and the relation test (4 expected, 3 found). The
+        empty-list test correctly stays green. The combined form failed 2 here;
+        the split fails 3, so nothing was lost.
+      - hoist the separator to the list container → **79 passed, 3 failed**:
+        the empty-list test (0 expected, 1 found), the three-row test (3
+        expected, 1 found) and the relation test (4 expected, 1 found). **The
+        second property is intact** — the empty-list case still catches the
+        mutation nothing else does.
+
+      One result worth recording because it justifies keeping both halves:
+      `test_one_row_draws_exactly_one_boundary` **passes** under the hoist, since
+      a hoisted rule renders exactly one and a one-row list cannot tell that from
+      a correct delegate. That is why the relation test re-measures the one-row
+      count from its own screen instead of asserting `afterFour - afterOne == 3`
+      against a hardcoded `1`: reducing it to a literal would turn the relation
+      back into a second assertion about the four-row fixture. Each of the two
+      mutations now turns a *different* set of three tests red, which is what
+      makes each test in the set non-redundant.
+
+      `font: DTheme.rowTitle` → `DTheme.body` re-measured too rather than
+      relayed: **81 passed, 1 failed**, `Actual 15, Expected 19`. All three
+      mutations reverted; `git status` shows only the intended files.
+
+      The reasoning is now durable in `design.md` — D5d records why each test
+      owns one screen's whole lifetime and what breaks if the two-screens-in-one-
+      function form comes back, and D5c's mutation table carries the re-measured
+      numbers. `tasks.md`'s two coverage rows were updated to match (four
+      separator tests, not three).
 
 No other correctness, security, readability or architecture defects were
 found in the piece's actual diff. The four review dimensions named in the

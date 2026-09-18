@@ -227,8 +227,18 @@ why the last row is included.
 
 ### D5c — The row treatment is tested by COUNT, and the type by RELATION
 
-**Answering "nothing tests the 62 lines this piece ships", which `tasks.md` left
-as an unticked row.**
+**Answering "nothing tests the row treatment this piece ships", which `tasks.md`
+left as an unticked row.**
+
+*An earlier draft of this line counted the lines instead. It is written as the
+behaviour now, deliberately: the raw diff of `DStoaListScreen.qml` is far larger
+than any count of the behavioural change, because the reindent in `d59b479`
+touches nearly every line of the delegate without altering one — `git diff -w`
+is what separates the two. A figure quoted here would have sent a future reader
+to `git diff origin/main...HEAD -- dialectica-ui/src/qml/DStoaListScreen.qml`,
+found them a much bigger number, and left them checking whether they had the
+right commit. What the tests below must cover is the separator and the row
+title, and that does not change with the line count.*
 
 **`tst_render_probe.qml` does not cover it.** It probes `DStoaListScreen`
 (`test_a_populated_stoa_list_screen_paints_content`), but its assertion is that
@@ -237,7 +247,7 @@ paints a title, an address, an identicon and two buttons, so it passes that prob
 unchanged. The probe is a floor against a screen that never reached the scene
 graph, and its own spec says so; it cannot see this.
 
-**Three separator tests, because one cannot distinguish the failures.** The
+**Four separator tests, because one cannot distinguish the failures.** The
 assertions are on the **count of boundaries against the count of rows**, never on
 how one is drawn — matching what the delta contracts and what the capability
 declines to contract:
@@ -245,23 +255,65 @@ declines to contract:
 - `test_every_rendered_row_is_separated_from_the_next` — three rows, three
   boundaries. Three rather than one deliberately: a screen drawing a single rule
   for the whole list satisfies any assertion phrased as "a separator exists".
-- `test_the_row_count_and_the_separator_count_move_together` — one row then four,
+- `test_one_row_draws_exactly_one_boundary` — the smallest non-empty list, which
+  is what the drop-it-on-the-last-row convention reduces to zero.
+- `test_the_row_count_and_the_separator_count_move_together` — one row and four,
   asserting the difference is three. This is the relation, established by varying
   the input rather than by trusting one fixture.
 - `test_an_empty_list_draws_no_row_boundary` — the other direction, and **not a
   formality**. A separator hoisted to the list container renders on the empty
-  state, where it is a rule belonging to a row that is not there. Both count
-  tests are blind to that, because neither instantiates an empty list.
+  state, where it is a rule belonging to a row that is not there. The count tests
+  above are blind to that, because none instantiates an empty list.
 
-**Each was proved able to fail, by two mutations that are the two real defects:**
+**Each was proved able to fail, by two mutations that are the two real defects**
+(measured on the split tests, 82 baseline):
 
 | Mutation | What fails |
 |---|---|
-| `visible: index < visibleRows.length - 1` — the drop-it-on-the-last-row convention the requirement rules out | the two count tests (3 rows → 2 found; 1 row → 0 found). The empty-list test correctly stays green |
-| the separator hoisted out of the delegate to the list container | **all three** — 3 rows → 1 found, 4 rows → 1 found, and the empty list → 1 found |
+| `visible: index < visibleRows.length - 1` — the drop-it-on-the-last-row convention the requirement rules out | **79 passed, 3 failed** — 3 rows → 2 found, 1 row → 0 found, 4 rows → 3 found. The empty-list test correctly stays green |
+| the separator hoisted out of the delegate to the list container | **79 passed, 3 failed** — 3 rows → 1 found, 4 rows → 1 found, and the empty list → 1 found. `test_one_row_draws_exactly_one_boundary` correctly stays green: a hoisted rule renders exactly one, which a one-row list cannot tell from a correct delegate |
 
-That the second mutation is the only one the empty-list test catches is the
-argument for keeping it as a third test rather than folding it in.
+Those last two sentences are the argument for the shape of the set. The empty-list
+test is the only one that catches the hoist's *second* symptom, and the one-row
+test is the only one that isolates the drop-last defect at its minimum — neither
+is redundant with the others, and each stays green under exactly one mutation,
+which is how a set of four tests says four different things.
+
+**Why the relation test re-measures the one-row count rather than reusing the
+constant.** `test_the_row_count_and_the_separator_count_move_together` builds its
+own one-row screen even though `test_one_row_draws_exactly_one_boundary` already
+pins that number. Asserting `afterFour - afterOne == 3` against a hardcoded `1`
+would reduce the relation to a second assertion about the four-row fixture, and
+two fixtures separately tuned to two literals are exactly what a relation is
+supposed to rule out. Keeping the row counts different (1 and 4, neither of them
+3) is the other half of that: a hoisted separator renders a fixed number and can
+satisfy any single fixture whose row count it happens to equal, but not two that
+disagree.
+
+### D5d — Each separator test owns one screen's whole lifetime
+
+`separatorsForRowCount(replies, expectedRows)` creates a screen, asserts its row
+count, reads the separator count and destroys it before returning, so no two
+component trees are ever live at once.
+
+The earlier single-function form read a count from one screen, called `destroy()`
+on it, then built a second through `makeList` — which reassigns `Core.bridge`.
+QML's `destroy()` only **queues** the deletion onto the event loop, so the two
+trees briefly coexisted and the test's correctness rested on `Repeater`
+populating synchronously and on the walk beating the queued deletion. Both are
+true here and the test passed reliably, but neither was stated or asserted: they
+were timing assumptions the test depended on and could not detect the failure of.
+
+Measuring inside a helper that owns the lifetime removes the overlap rather than
+documenting it — CLAUDE.md's "complexity in the data structure, not the logic",
+applied to object lifetime. Only the *number* outlives the screen, so nothing
+walks a destroyed tree.
+
+**What breaks without it:** nothing red today, which is why this is recorded
+rather than left to the diff. Restoring the two-screens-in-one-function form
+turns a passing suite into one whose green depends on Qt's deletion scheduling —
+a regression that would not announce itself until some unrelated change to
+`makeList` or to `Repeater` incubation made the queued deletion land earlier.
 
 **The title is tested against the TOKENS, not against 19.** `DTheme.rowTitle` is
 compared to the element's `pixelSize`, and then `rowTitle > body` and

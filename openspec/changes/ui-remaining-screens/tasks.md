@@ -84,20 +84,25 @@ the spec, blind to the implementation — has not run.
       had found a real defect on the way (the degenerate-author shared slot),
       which is why the removal is a scope decision rather than a retreat: the
       code was correct and out of scope, not broken.
-- [x] **The row treatment is covered, by count and by relation.** Four tests in
-      `tst_stoa_screens.qml`: three asserting the number of boundaries against
-      the number of rows (three rows, one-versus-four, and the empty list), and
-      one asserting the title's type against the `DTheme` tokens rather than
-      against a hardcoded 19. design.md D5c has what each covers and why three
-      separator tests rather than one.
+- [x] **The row treatment is covered, by count and by relation.** Five tests in
+      `tst_stoa_screens.qml`: four asserting the number of boundaries against
+      the number of rows (three rows, one row, one-versus-four, and the empty
+      list), and one asserting the title's type against the `DTheme` tokens
+      rather than against a hardcoded 19. design.md D5c has what each covers and
+      why four separator tests rather than one; D5d has why each owns one
+      screen's whole lifetime.
 - [x] **Each proved able to fail, by the two mutations that are the two real
-      defects.** Dropping the separator on the last row — the convention the
-      requirement rules out — turns the two count tests red (3 rows → 2 found,
-      1 row → 0 found) and correctly leaves the empty-list test green. Hoisting
-      the separator out of the delegate turns **all three** red, the empty-list
-      one included, which is why it is a third test rather than folded in.
-      Reverting `font: DTheme.rowTitle` to `DTheme.body` — exactly the line this
-      piece changed — fails the type test with `Actual 15, Expected 19`.
+      defects**, re-measured against the split tests (82 baseline). Dropping the
+      separator on the last row — the convention the requirement rules out —
+      gives **79 passed, 3 failed** (3 rows → 2 found, 1 row → 0 found, 4 rows →
+      3 found) and correctly leaves the empty-list test green. Hoisting the
+      separator out of the delegate also gives **79 passed, 3 failed**, the
+      empty-list one included and the one-row one correctly green — a hoisted
+      rule renders exactly one, which a one-row list cannot distinguish. The two
+      mutations turn different sets of three red, which is what makes each test
+      non-redundant. Reverting `font: DTheme.rowTitle` to `DTheme.body` — exactly
+      the line this piece changed — fails the type test with
+      `Actual 15, Expected 19`.
 - [x] `tst_render_probe.qml` **does not already cover this**, checked rather
       than assumed. It probes `DStoaListScreen`, but asserts only that the
       content area is not one flat colour; a screen with no separator at all
