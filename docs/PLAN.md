@@ -2950,9 +2950,13 @@ forbids. The thread read's shape is the correct one; the feed's is the older.
 Until the feed is brought to it, `restored` is a state the feed cannot express
 at all.
 
-**And one obligation the core does not meet**: a view must not render a hidden
+~~**And one obligation the core does not meet**: a view must not render a hidden
 post indistinguishably from a visible one in the show-hidden view. A reader who
-asked to see what was hidden is owed the knowledge of which ones those were.
+asked to see what was hidden is owed the knowledge of which ones those were.~~
+**Contracted on the view side — see the `thread-view` spec**, whose *A withheld
+body and an empty body are rendered differently* requires a withheld body to
+render as a moderation outcome rather than as a blank post, and requires the two
+to be distinguishable on screen.
 
 **The bidi obligation is wider than §11.1 currently states it, and that is a
 third thing for that list.** §11.1 frames Unicode and bidi rendering around
