@@ -173,7 +173,7 @@ have to have moved.
 
 - **Self-consistency.** `openspec validate --strict` checks heading structure
   only and will pass a spec whose requirements contradict each other. Read the
-  whole file. This has happened here.
+  whole file.
 - **Testability.** A scenario asserting something no test could check is a spec
   defect, not a coverage gap — say which it is.
 - **Staleness against `docs/PLAN.md` on `origin/main`**, not the branch's copy.

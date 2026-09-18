@@ -147,16 +147,11 @@ cherry-picked onto it — writers exactly as reviewers.
 landed on (`git rev-parse --abbrev-ref HEAD`) and the runner picks from that. A
 name nobody recorded is work nobody can find.
 
-**The PR is opened on `piece/<name>` and nothing else. Whichever ref it is opened
-on, it is stuck with — and every workaround loses something.** A PR's head ref is
-immutable:
-`PATCH /pulls/<n> -f head=…` returns **200 and silently ignores the field**, and
-`--base` changes the target, not the source. The rename endpoint
-(`POST /branches/<old>/rename`) does follow open PRs — but it **auto-closes** one
-whose *head* vanished, and if the target name already exists you must delete that
-ref first, at which point the rename recreates it **at the old branch's tip and
-silently drops anything the deleted ref held**. Six reviewers' findings went that
-way here and were recovered only because the commit was still in a local reflog.
+**The PR is opened on `piece/<name>` and nothing else.** A PR's head ref is
+immutable and every workaround loses something: `PATCH /pulls/<n> -f head=…`
+returns 200 and silently ignores the field, `--base` changes the target rather
+than the source, and the rename endpoint auto-closes a PR whose head vanished —
+recreating the ref at the old tip and dropping whatever the deleted one held.
 
 **Consolidating branches is not finished until the orphaned PRs are closed.**
 Folding a branch into the piece leaves its PR open, describing work that now
@@ -340,69 +335,37 @@ back". Who calls it decides the outcome:
 | a **session moving itself** into a worktree (`EnterWorktree`) | **yes** — the case the tool is built for |
 
 The second row is the dangerous one: it *looks* like it worked, and nothing goes
-wrong until the first Bash call. So do not reach for `EnterWorktree` on top of
-`isolation: "worktree"` — isolation alone is the whole mechanism, and an agent
-that improvises around a refusal reaches for `env -C` or `cd &&`, an approval
-click each and neither needed.
+wrong until the first Bash call.
 
-**Every agent verifies it arrived, because the isolation does not always take.**
-An agent dispatched this way has landed in the main checkout on the piece branch
-instead. So each agent file has it run `pwd` and `git rev-parse --abbrev-ref
-HEAD` first, and **stop and report** rather than mutate or commit when the branch
-is `piece/<name>` or the path is the repository root. A mutating reviewer without
-that check breaks the tree the runner's HEAD points at.
-
-The check is in the agent files rather than in the brief because it is a
-precondition on the agent's own tools, not a fact about the piece — and because a
-brief the runner forgets to write leaves the guard off exactly when it is needed.
+**Every agent verifies it arrived, because the isolation does not always take** —
+an agent dispatched this way has landed in the main checkout on the piece branch.
+Run `pwd` and `git rev-parse --abbrev-ref HEAD` first, and **stop and report**
+rather than mutate or commit when the branch is `piece/<name>` or the path is the
+repository root.
 
 #### `baseRef: "head"` is required
 
-By default the agent's tree is cut from `worktree.baseRef: "fresh"` —
-`origin/<default-branch>` — which holds **none** of the piece's commits. An agent
-reviewing or extending a piece would be reading the wrong code.
-`.claude/settings.json` fixes the fork point to the runner's HEAD:
+`.claude/settings.json` carries `{ "worktree": { "baseRef": "head" } }`, which
+forks each agent from the runner's HEAD. Without it the default is
+`origin/<default-branch>`, which holds **none** of the piece's commits — and
+**nothing fails when it is absent.** If an agent reports a fork point that is not
+your HEAD, check this file first.
 
-```json
-{ "worktree": { "baseRef": "head" } }
-```
-
-**That file is tracked, so it arrives with a clone.** `.gitignore` excludes
-`.claude/*` but re-admits it by name, for the reason recorded beside the rule:
-ignored, it reached no fresh checkout, and **nothing failed when it was absent** —
-agents were silently cut from `origin/main` and no error said so. If an agent
-reports a fork point that is not your HEAD, check this file before looking
-anywhere else.
-
-Like everything under `.claude/`, it is the owner's — CLAUDE.md's "`.claude/` is
-the owner's" carries the rule, and this line points rather than restating it,
-because a second copy is what invited reading the rest of the directory as fair
-game. What is local to this section: machine-local settings belong in
-`settings.local.json`, which stays ignored.
+The file is tracked, so it arrives with a clone. It is the owner's; machine-local
+settings go in `settings.local.json`, which stays ignored.
 
 #### What the agent's own branch means for getting work back
 
 The agent lands on a harness-named branch, `worktree-agent-<id>` — **not** the
-piece branch. So commits still need a cherry-pick onto `piece/<name>`, exactly
-the step reviewers already perform for findings, with one difference worth
-noticing: the branch name is assigned by the harness rather than being the
-`review/<name>/<dimension>` the runner chose, so **read it rather than assuming
-it** (`git rev-parse --abbrev-ref HEAD`).
-
-This applies to writers as much as reviewers: no agent stands in the piece's
-tree, so nobody commits straight to the piece branch.
+piece branch, and not a name the runner chose, so **read it rather than assuming
+it** (`git rev-parse --abbrev-ref HEAD`). Every agent's commits are cherry-picked
+onto `piece/<name>`; nobody commits straight to it.
 
 #### Tools that resolve their root from the cwd
 
-Two tools here cannot be pointed at another tree: **`openspec`** resolves its
-root from the cwd and has no `-C`, `--directory` or `--root`; **`lgs basecamp
-build`** resolves `scaffold.toml`'s relative module refs against the root it was
-invoked from.
-
-**Placing the agent correctly is what makes both work**, and that is the
-strongest practical argument for this dispatch shape: a tool that takes its root
-from the cwd is right whenever the cwd is right. An agent in its own tree runs
-`openspec` and `lgs` plainly, with no workaround and no compound command.
+**`openspec`** has no `-C`, `--directory` or `--root`; **`lgs basecamp build`**
+resolves `scaffold.toml`'s relative module refs against the root it was invoked
+from. An agent in its own tree runs both plainly, with no compound command.
 
 The hazard they share is worth keeping in view, because it is what makes a wrong
 cwd expensive rather than merely inconvenient: **a wrong-tree success is
@@ -512,76 +475,43 @@ and treating it as one is how this flow's own adopting change nearly shipped wit
 the `code-reviewer` step skipped entirely. Agent instruction files, config and the
 prose in `CLAUDE.md` and `docs/` are all reviewable material.
 
-## What experience has taught this flow
+## Rules this flow runs on
 
-Each of these is in the agent files because it cost something here.
+**Run the command before you write a number.** `grep -c "#\[test\]"` for Rust
+tests, `grep -c "function test_"` for QML ones, `git log -S` for a duration. A
+count in a report, a task list or a doc comment is a claim, and a plausible one
+nobody checked reads exactly like evidence.
 
-**A number in a comment is a claim, and this repo fabricates them.** One sweep
-found six comments in a single file arguing from premises the code disproves, and
-the worst were quantities, because a quantity reads as though someone measured it:
-*"wrong for two years"* in a repo five days old — written, no less, in the commit
-titled "stop three comments from saying the wrong thing". A plausible number
-nobody checks is a fabricated citation that looks like evidence.
-
-**So this is a step, not a caution: run the command before you write the
-number.** `grep -c "function test_" <file>` for QML test functions, `grep -c
-"#\[test\]"` for Rust ones, `git log -S` for a duration — whichever answers the
-claim you are about to make. It is one call, and it is the difference between a
-measurement and a guess that reads like one. This is CLAUDE.md's "do not write
-down anything a command can answer" applied to the thing an agent writes most
-often: a count in a report, a task list or a doc comment.
-
-**When you correct a stale number, measure it fresh — do not apply the delta a
-reviewer quoted.** The reviewer's figure was measured at some earlier moment and
-a branch moves, so a quoted delta can introduce a second wrong claim while fixing
-the first. Re-run the command against the tree in front of you.
+**Correcting a stale number means measuring it fresh**, not applying a delta a
+reviewer quoted — their figure was taken against an older tree.
 
 **A test must assert against something the implementation did not produce.**
-Three tests have shipped that could not fail for the reason they named:
-
-- comparing `"ab"` with `"abc"` to prove a length prefix mattered — they differ
-  either way;
-- mutating a byte and asserting a hash moved — a property of SHA-256, not of the
-  encoding;
-- `assert_eq!(bytes[0], VERSION_1)` — asking the implementation what it wrote,
-  and agreeing.
-
-The fix is a hardcoded expectation. See
+`assert_eq!(bytes[0], VERSION_1)` asks the implementation what it wrote and
+agrees with it. Hardcode the expectation instead; see
 `identity.rs::the_wire_constants_are_pinned_to_known_answers`.
 
-**`cargo mutants` is a complement, not a substitute.** It found a real gap in
-7 seconds (`Policy::to_byte` replaced by a constant survived the suite) but
-cannot see the defect above, because it mutates functions and not `const`
-values.
+**`cargo mutants` is a complement, not a substitute** — it mutates functions,
+not `const` values, so it cannot see the defect above.
 
-**Mark unspecified behaviour in the code.** When the spec is silent and the dev
-chooses, the test carries `// NO SPEC: <what was chosen>`. Without a marker a
-reasonable default becomes permanent by accident.
+**Mark unspecified behaviour**: when the spec is silent and the dev chooses, the
+test carries `// NO SPEC: <what was chosen>`, or a default becomes permanent by
+accident.
 
-**Never write a scenario that cannot be tested.** A field with one variant
-cannot be varied through the API; behaviour that does not exist yet cannot be
-covered. Describe what is checkable, or say it is out of scope.
+**Never write a scenario that cannot be tested.** Describe what is checkable, or
+say it is out of scope.
 
-**Read PLAN.md from `origin/main`.** A change was once designed against a §4.3
-that had been rewritten to say the opposite.
+**Read PLAN.md from `origin/main`**, not the branch's copy.
 
-**A green gate can be structurally blind.** `cargo fmt --check` does not follow
-path dependencies, so it never reaches `dialectica-core` — where nearly all the
-logic lives. Anything behind `cfg(logos_scaffold)` is not compiled by
-`cargo test` at all. Say what a gate cannot see rather than reporting it as
-passed; "exit 0" on a gate that measured nothing is worse than no gate.
+**A green gate can be structurally blind, so say what a gate cannot see rather
+than reporting it as passed.** `cargo fmt --check` does not follow path
+dependencies and never reaches `dialectica-core`; anything behind
+`cfg(logos_scaffold)` is not compiled by `cargo test` at all.
 
-**Silent failure is this codebase's house style, and it must be designed
-against.** Basecamp swallows QML errors, so a view that fails to compile, a
-plugin skipped for a missing manifest field, and a binding evaluating to
-`undefined` all present identically as "clicking the app does nothing" — the
-`Theme`/`DTheme` name collision took the entire visual system out this way, with
-every gate green. `qmllint --missing-property error` printed the same class of
-defect as a warning into a green log. CLAUDE.md's "Module contract traps" has
-the full account and the gates it produced
-(`check_qml_names.py`, `check_qml_members.sh`); do not re-derive it from a
-second copy here.
+**Silent failure is this codebase's house style.** Basecamp swallows QML errors,
+so a view that fails to compile, a plugin skipped for a missing manifest field
+and a binding evaluating to `undefined` all present as "clicking the app does
+nothing". CLAUDE.md's "Module contract traps" has the gates that close this.
 
-**Specs get reorganised as concepts generalise**, and two capabilities asserting
-one rule is the failure that prevents — both already live here. See
+**Specs get reorganised as concepts generalise** — two capabilities asserting one
+rule is the failure that prevents. See
 [`docs/OPENSPEC-ARCHIVE.md`](../../docs/OPENSPEC-ARCHIVE.md).

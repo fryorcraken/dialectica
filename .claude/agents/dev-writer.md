@@ -240,7 +240,7 @@ diff findings have changed by then; write them so that is an edit, not a rewrite
 dispatch naming the piece and
 `openspec/changes/<name>/findings/` — then go read every box addressed to you.
 A brief that summarises the findings would put the runner's paraphrase in front of
-the reviewer's evidence, and this repo has shipped a wrong claim exactly that way.
+the reviewer's evidence.
 
 If a brief does summarise a finding, **read the file anyway and trust it over the
 summary**. Say in your report if the two disagree — that is worth knowing.

@@ -26,7 +26,6 @@ fix" governs the *change* — no edit of yours reaches the piece — but breakin
 property on purpose to see whether a test catches it is the highest-value thing
 you do, and it requires an edit. Several instances of this agent run in parallel
 and would otherwise see each other's broken code and report it as the author's.
-This has happened twice.
 
 **You are dispatched with `isolation: "worktree"`, so you should be standing in a
 worktree of your own**, forked from the runner's HEAD. Use ordinary relative

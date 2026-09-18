@@ -50,17 +50,12 @@ files, `README.md`, `RUNNER.md`, `settings.json`, hooks, skills, anything added
 later — **unless the owner asked for that specific change.** Propose instead:
 say what you would change and why, and let them decide.
 
-**"It would make agents work better" is not authorisation.** That was the exact
-reasoning behind the change this rule was written after: a runner noticed
-dispatched agents were costing the owner approval prompts, and rewrote all seven
-role files plus a CI gate to fix it. The diagnosis was correct and the action was
-still not the runner's to take.
+**"It would make agents work better" is not authorisation.** A correct diagnosis
+still does not make the change yours to make.
 
-It was also unnecessary, for a reason worth keeping in view: **`CLAUDE.md` is
-injected into every Claude session and agent at startup, so a rule here reaches
-everything.** A file under `.claude/agents/` is read only by the agent it names.
-When a rule needs to reach every agent, this file is where it goes — which is why
-the nine-file rewrite solved a problem that did not exist.
+**A rule that must reach every agent goes in this file**, which is injected into
+every session and agent at startup. A file under `.claude/agents/` is read only
+by the agent it names.
 
 ## How to work in this repo, and what Bash costs
 
@@ -109,18 +104,6 @@ this project a stalled session.
   missing file — a mistyped username in one has already cost a click. Absolute
   paths are for reaching **outside** the tree you are standing in.
 
-  **That incident is plausibly this table's own doing, which is why the row
-  above is phrased as resolvability rather than as absolute-versus-relative.**
-  The table once said an **absolute** path was free and a **relative** path
-  costly — true of a session that could be anywhere, backwards for a flow that
-  stands every agent inside the correct tree. `dev-writer.md` carried a matching
-  "Absolute paths" bullet, so a dispatched writer was told twice to reach for
-  the shape that produced the blocked read. The chain is plausible rather than
-  proven — nobody asked the agent why it typed that path — but it is the only
-  account that fits, and it is what both corrections defend against. Phrase a
-  cost by what the checker actually does, or it inverts the moment the flow
-  around it changes.
-
   **The exception is `EnterWorktree`, which moves a session rather than
   prefixing a command** — an interactive session enters a worktree once with
   `EnterWorktree(path: <absolute path>)` and then uses ordinary relative paths:
@@ -148,7 +131,7 @@ this project a stalled session.
   wrong base. See [`.claude/agents/README.md`](.claude/agents/README.md) for the
   probes and [`.claude/agents/RUNNER.md`](.claude/agents/RUNNER.md) for
   one-runner-per-piece. That file, like everything under `.claude/`, is the
-  owner's — see "`.claude/` is the owner's" below before editing it.
+  owner's — see "`.claude/` is the owner's" above before editing it.
 
   **Before sending an agent somewhere, check the directory is in scope.**
   Absolute paths fix the *analysability* problem; they do nothing for a
@@ -239,38 +222,22 @@ this project a stalled session.
 gitignored. Use it for intermediate files — extracted sections, assembly parts,
 command output you need to re-read.
 
-Do **not** use `/tmp`, `$TMPDIR`, or a session scratchpad outside the repo,
-even when the harness offers one and says to always use it. That is the other
-auto-mode instruction to disregard here. Scratch beside the work is visible to
-the reviewer, survives in the worktree where the change is being made, and can
-be inspected without knowing a session-specific path.
+Do **not** use `/tmp`, `$TMPDIR`, or a session scratchpad outside the repo, even
+when the harness offers one and says to always use it. Those are outside the
+working directories, so reading one back costs a click.
 
-It is also the only one you can read back without paying for it — those locations
-are outside the working directories, which the costs table above prices.
-
-Clean up when done: leftovers are harmless to the repo but confusing to the
-next reader.
+Clean up when done.
 
 ### Worktrees are not scratch: they go in `.claude/worktrees/`
 
-`./tmp/` is for **files**. A git worktree is a second checkout of the repo, and
-it belongs in `.claude/worktrees/<name>/`, which is where the harness's own
-worktree mechanism puts them.
+`./tmp/` is for **files**. A git worktree goes in `.claude/worktrees/<name>/`.
 
-This distinction has already been got wrong: reading the scratch-file rule above
-as covering worktrees put ~27 checkouts under `tmp/` alongside 34 in
-`.claude/worktrees/`, so an agent looking for a sibling's branch had to guess
-which scheme that sibling used. Two conventions is worse than either one.
-
-The cost is not the disk. Every stale checkout is a **full copy of every file in
-the repo**, so a `grep` across the repo root hits each one — and a citation
-taken from a stale copy reads exactly like a citation from the real tree. Verify
-a quote came from the main checkout or the worktree you are working in, never
-from whatever the recursive search happened to hit first.
-
-So: **prune a worktree as soon as its branch is merged or abandoned**
-(`git worktree remove <path>`), and check `git worktree list` when the count
-starts feeling unfamiliar.
+**A stale checkout is a full copy of the repo, so a recursive `grep` from the
+repo root hits it** — and a citation taken from a stale copy reads exactly like
+one from the real tree. Verify a quote came from the tree you are working in.
+**Prune a worktree as soon as its branch is merged or abandoned**
+(`git worktree remove <path>`); check `git worktree list` when the count feels
+unfamiliar.
 
 **Create it with `--no-track`, or the branch is configured to push to `main`:**
 
@@ -278,17 +245,15 @@ starts feeling unfamiliar.
 git worktree add --no-track -b <branch> .claude/worktrees/<name> origin/main
 ```
 
-Branching from a remote-tracking ref makes git's `branch.autoSetupMerge` default
-write `remote = origin` and `merge = refs/heads/main` into the new branch's
-config. That — not anything about worktrees inheriting state — is why a bare
-`git push` from one has landed commits on `main`. The branch is set up to push to
-`main` from the moment it exists.
+Branching from a remote-tracking ref makes `branch.autoSetupMerge` write
+`merge = refs/heads/main` into the new branch's config, which is how a bare
+`git push` from a worktree has landed commits on `main`.
 
 **Check it with `git config --get-regexp "^branch\.<name>"`, which returns
-nothing when the branch is right.** `git branch -vv` cannot catch this: it prints
-`[origin/main]`, and nothing in that output distinguishes an intended upstream
-from a wrong one. A `--no-track` branch has no upstream, so push the refspec in
-full: `git push origin refs/heads/<branch>:refs/heads/<branch>`.
+nothing when the branch is right.** `git branch -vv` cannot catch this — it
+prints `[origin/main]` either way. A `--no-track` branch has no upstream, so
+push the refspec in full:
+`git push origin refs/heads/<branch>:refs/heads/<branch>`.
 
 **The stash stack is shared with the main checkout and every other worktree**,
 and other sessions may be using it concurrently. Never bare `git stash` /
@@ -336,25 +301,16 @@ that touches the network or disk belongs in core, always.
 
 ### SDS is transport: use its API as it is, and build what we need above it
 
-**SDS is HTTP or TCP in this stack, and the application layer is ours.** TCP
-retransmits, orders within a connection and reports a failed transfer — and it
-still cannot tell you your file is half-written, because it does not know what
-a complete file is. Only the application does.
+**SDS is transport; the application layer is ours.** Ordering, recency and
+causality at forum scope are dialectica's to build, carried inside the signed op
+preimage where a relay can neither forge nor strip them. SDS repairing what it
+can see is not a substitute for dialectica knowing what a complete thread is.
 
-So: **SDS repairing what it can see is not a substitute for dialectica knowing
-what a complete thread is.** Ordering, recency and causality at forum scope are
-dialectica's to build, carried inside the signed op preimage where a relay can
-neither forge nor strip them.
+**A missing transport field is not a blocker. File the upstream gap; do not wait
+on it, and do not design around it.** SDS is LIP-109 at *raw*, the weakest
+maturity tier, with an API marked Developer Preview.
 
-The trap this exists to prevent is treating a missing transport field as a
-blocker. It is not — an application that can only order its own content while
-the transport hands it ordering metadata breaks the moment that transport
-changes, and SDS is LIP-109 at *raw*, the weakest maturity tier, with an API
-marked Developer Preview. **File the upstream gap; do not wait on it, and do
-not design around it.**
-
-`docs/PLAN.md` §13 works this through, including the two claims about it that
-were wrong.
+`docs/PLAN.md` §13 works this through.
 
 ### The core API is the deliverable
 
@@ -404,9 +360,8 @@ These are structural and bite at build time, not review time.
   rewrites the file, and run `git diff scaffold.toml` after every one — a verb
   can change a value too, not just drop a comment.
 
-  **Do not answer this by re-adding comments.** That was the workaround, it
-  failed repeatedly, and it cost a permission click per verb to maintain.
-  The reasoning lives in `docs/SCAFFOLD.md`, where nothing strips it.
+  **Do not answer this by re-adding comments** — that workaround failed
+  repeatedly. The reasoning lives in `docs/SCAFFOLD.md`, where nothing strips it.
 
 - **`lgs` builds whichever checkout it is run from, worktrees included.**
   `[modules.*]` uses **relative** flake refs (`path:./dialectica#lgx`),
@@ -414,14 +369,12 @@ These are structural and bite at build time, not review time.
   tracked, so each worktree has its own. There is no `--directory` flag and
   none is needed: the cwd decides.
 
-  **Keep those refs relative.** An absolute path would pin every worktree's
-  build to one checkout, which is the failure this note exists to prevent —
-  and it fails *silently*, with a green build of the wrong tree.
+  **Keep those refs relative.** An absolute path pins every worktree's build to
+  one checkout, and fails *silently* — a green build of the wrong tree.
 
-  The awkward part is reaching the worktree at all, since `cd <dir> && lgs …`
-  is the shape that costs a permission prompt. Run `lgs` from a shell already
-  in the worktree, or accept the one prompt — **do not conclude `lgs` cannot
-  target a worktree**, which is the wrong lesson and was drawn once already.
+  Run `lgs` from a shell already in the worktree, or accept the one prompt that
+  `cd <dir> && lgs …` costs. **`lgs` can target a worktree**; do not conclude
+  otherwise.
 - **The UI's icon must be a 256×256 PNG**, and the UI module must declare core
   in `dependencies` with **matching versions**.
 
@@ -432,151 +385,40 @@ These are structural and bite at build time, not review time.
   system text, no spacing, no borders. One name collision took the entire visual
   system out at once. It is `DTheme` now.
 
-  **The collision lives in the host's C++ type registration**, and that fact is
-  what makes the rest of this entry follow.
+  **Prefix every QML type you add with `D`.** The rule covers every `qmldir`
+  entry — singletons, components and `internal` lines alike, since all three put
+  the name in the directory basecamp loads the plugin from. `Core` and eleven
+  component names predate the convention and are grandfathered in the gate; **add
+  the `D`, do not add an exemption.** Renaming the grandfathered eleven is
+  deferred work, not a settled end state.
 
-  *A premise withdrawn, recorded because it is the intuitive wrong answer and
-  will otherwise be re-derived:* that a host registration **outranks** a plugin
-  directory's `qmldir` entry — that the two compete and the host wins on
-  precedence. Measured on Qt 6.10.3 and **false**. Staging a competing `Theme`
-  singleton in a second directory and handing it to `qmltestrunner` via
-  `-import` does not shadow the plugin directory's own `qmldir` entry, and
-  neither does making that directory a named module on the import path. A
-  file-based competitor is not in a contest it can win, so "stage a competitor
-  and watch it win" is not a reproduction — it is two green runs and no finding.
+  **"Our other singleton works" is not evidence that a name is safe.** `Core`
+  resolves correctly only because basecamp has no `Core`.
 
-  The tell in a launch log is a resolution line pointing at `qrc:/qt/qml/Logos/`
-  for a name you own. `Core` resolved correctly in the same files with the same
-  imports, purely because basecamp has no `Core` — so **"our other singleton
-  works" is not evidence that a name is safe.**
+  **Three gates cover three different things, and none covers another's:**
 
-  **Read the launch log; it answers this in two commands.** It is at
+  - `dialectica-ui/tests/check_qml_names.py` (lint job) — the `D` prefix. The
+    only check that sees a collision.
+  - `dialectica-ui/tests/check_qml_members.sh` — undefined *members*. Never the
+    collision.
+  - `check_bindings` inside `run-qml-tests.sh` — bindings that evaluated to
+    `undefined`, which `qmltestrunner` reports as a QWARN and passes.
+
+  **`qmllint --missing-property error` cannot see a collision**: CI puts our own
+  QML on the import path, so it resolves to the correct singleton. A green from
+  it says nothing. **Nor can a component test** — under `qmltestrunner` the host
+  is absent, so there is no competitor to lose to.
+
+  **Do not reach for `QT_FATAL_WARNINGS`** to escalate a warning: it aborts on
+  the first warning of any kind, so the remaining specs never run.
+  `qmltestrunner` has no flag that does this.
+
+  **To diagnose one, read the launch log** at
   `.scaffold/basecamp/profiles/<profile>/xdg-data/Logos/LogosBasecampDev/logs/basecamp_<timestamp>.log`
-  — a timestamped file, **not** `basecamp.log`, and several directories deeper
-  than you would guess. The wrong path was in `docs/PHASE0-FINDINGS.md` for
-  months and is part of why nobody read one while diagnosing this defect.
-
-  `grep -c "qrc:/qt/qml/Logos/Theme/Theme.qml"` against
-  `grep -c "dialectica_ui/qml/<Name>.qml"` is the whole diagnosis: on the broken
-  branch, 209 and **0**. And `grep -oh "qrc:/qt/qml/Logos/[A-Za-z0-9_/]*\.qml"
-  <log> | sort -u` enumerates what the host actually registers — 29 types, all
-  `Logos`-prefixed except five under `Theme/`, reproducible across launches.
-  That measurement is what makes the `D` prefix a reasoned defence rather than a
-  hopeful one: it does not collide with the host's own naming convention.
-
-  Two things that log also settles, recorded so they are not re-argued.
-  **`Core` does not collide** — 27 resolutions into the plugin's own `Core.qml`,
-  zero into the host namespace. And **`qmllint --missing-property error` cannot
-  see this defect**: CI passes `-I dialectica-ui/src/qml`, which puts our own
-  `Theme.qml` on the import path, so qmllint resolves to the correct singleton
-  where every member exists. It checks a different resolution than the app
-  performs, and a green from it says nothing about the collision.
-
-  **It does catch every undefined MEMBER, which is a different and real class**
-  — and stating only the sentence above is precisely what left that unexamined.
-  `DTheme.noSuchDesk` in `Main.qml` passed the QML suite (no spec instantiates
-  `Main.qml`, so the runner's check never sees it), passed the name gate (a
-  D-prefixed typo contains no bare `Theme`), and passed qmllint, which printed
-  it as a **warning** into a green log. The escalation is now its own gate,
-  `dialectica-ui/tests/check_qml_members.sh`, with `tst_check_qml_members.sh`
-  beside it pinning both directions. Keep the two claims apart: it covers
-  members, never the collision.
-
-  **A component test cannot catch this**, and that is the durable part. Under
-  `qmltestrunner` the host is simply absent, so `verify(DTheme.x !== undefined)`
-  cannot fail *on the collision* — there is no competitor for it to lose to.
-
-  Say it that precisely: the broader "passes no matter what" is **false**,
-  measured with a probe spec. That assertion does fail if the singleton is
-  renamed, if its `qmldir` entry is dropped, or if its file goes missing; an
-  undeclared name throws rather than resolving. It is blind to the collision and
-  to nothing else — and the overbroad version of the sentence is what left
-  qmllint's `--missing-property error` unexamined, so the imprecision cost
-  coverage rather than being pedantic.
-
-  The gate is therefore the static `no QML type name collides with the host`
-  step, proven to fail on a tree carrying the old name.
-
-  **`qmltestrunner` does not fail on a broken binding, and `run-qml-tests.sh`
-  has to make it.** Out of the box the runner reports a `ReferenceError` inside
-  an instantiated component as a **QWARN, not a failure**: a stale singleton
-  reference in a component no spec asserts against prints the error dozens of
-  times and still exits 0, and only a reference inside a `compare()` fails a
-  spec. `check_bindings` in the runner closes that — it greps each spec's output
-  and fails the run on a binding that evaluated to `undefined`.
-
-  Two things about it that are easy to get wrong, both measured:
-
-  - **`ReferenceError` alone is not enough.** A missing token on a
-    correctly-named singleton (`DTheme.noSuchToken`) raises none — Qt says
-    `Unable to assign [undefined] to <T>` instead. The two messages share no
-    common substring, so this is two patterns and cannot be collapsed into one
-    grep for `undefined` (which also hits Qt's "undefined behaviour" warnings
-    and this suite's own test names).
-  - **Do not reach for `QT_FATAL_WARNINGS`.** It aborts on the first warning of
-    any kind, so the run crashes instead of diagnosing and the remaining specs
-    never execute. `qmltestrunner` has no flag that escalates a warning to a
-    failure.
-
-  The check is itself tested in `tst_check_bindings.sh`, pinning both what it
-  must catch and what it must not — a check narrowed to nothing passes as
-  quietly as a correct one.
-
-  **The gate enforces the `D` prefix rather than a list of host names.** An
-  earlier version banned five names basecamp was known to occupy, which is the
-  `hand-maintained sweep lists go stale silently` trap: correct only until the
-  host registers a sixth, with nothing able to notice. A prefix rule is total
-  over registrations that have not happened yet.
-
-  **The rule covers every `qmldir` entry, not only the singletons** — a
-  component name registers in the same directory namespace and is shadowable
-  the same way. The host's own launch log registers `LogosButton.qml`, which is
-  a component. A version of this gate that read only `singleton` lines passed
-  green over a `qmldir` declaring `Theme 1.0 Identicon.qml`, measured.
-
-  **`internal` entries are covered too, but not for the reason you would
-  guess** — measured on Qt 6.10.3, because the guess was written down first and
-  was wrong. `internal Foo Foo.qml` does **not** export `Foo`: a consumer doing
-  `import <Module>` gets `Foo is not a type`. What makes it worth gating is that
-  the name is live *inside* the directory — a sibling `.qml` instantiates it and
-  loads — and that resolution is **by filename**, independent of the qmldir line
-  entirely. Deleting the `internal` entry left the sibling resolving exactly as
-  before. Since the directory is where basecamp loads the plugin, an
-  `internal Theme Theme.qml` line is a reliable witness that a `Theme.qml` sits
-  there.
-
-  The trap worth carrying: a probe written against the *export* claim passes
-  with the `internal` line deleted, because it is measuring same-directory
-  filename resolution and nothing else. Import by module name is the only form
-  that distinguishes them.
-
-  `Core` and the eleven component names predating the convention are
-  grandfathered, each listed in the gate with its reason. **If you add a type,
-  add the `D`; do not add an exemption** — the list is the enumeration of what
-  is unprotected, not a place to put the twelfth.
-
-  **The grandfathered names are not yet `D`-prefixed, and that is deferred work
-  rather than a settled end state.** `DCore` and `DIdenticon`, `DFlatButton` and
-  the rest are the intended names; they were left alone deliberately, because
-  renaming eleven components across every view file is a piece of its own and
-  bundling it would have made the shadowing fix unreviewable. Recorded here
-  because the change that deferred it is archived, and after that the only trace
-  is the exemption set itself — which says what is unprotected but not that
-  anyone meant it. The line is self-invalidating: the moment a name is prefixed,
-  the gate's `GRANDFATHERED` set is visibly shorter than this sentence claims.
-
-  What makes the deferral safe rather than hopeful is that `Core`'s exemption is
-  measured — 27 resolutions into the plugin's own `Core.qml`, zero into the host
-  namespace, and `Core` absent from the host's 29 registered types. That is
-  evidence it does not collide **today**; "basecamp has no `Core`" carries no
-  expiry date, which is the shape the prefix rule exists to stop depending on.
-
-  The gate is `dialectica-ui/tests/check_qml_names.py`, run from the `lint` job
-  (it needs no Qt), with `tst_check_qml_names.py` beside it pinning both
-  directions — including that breaking its corpus-builder makes it fail rather
-  than report clean. It was a heredoc in `ci.yml`, and both defects above
-  shipped through review because a heredoc cannot be run without pushing a
-  branch.
+  — a timestamped file, **not** `basecamp.log`. A resolution line pointing at
+  `qrc:/qt/qml/Logos/` for a name you own is the collision;
+  `grep -oh "qrc:/qt/qml/Logos/[A-Za-z0-9_/]*\.qml" <log>` enumerates what the
+  host registers.
 
 ## Scaffold: what `lgs` does and does not do
 

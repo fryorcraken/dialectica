@@ -113,11 +113,7 @@ lives nowhere else disappears with the directory.
 A branch cut before a large change landed and never updated carries "the file
 without that change" as an intentional-looking deletion, and a squash merge
 applies it. There is no conflict, because nobody edited the same lines twice.
-Three PRs here each carried ~690-705 deletions of files they never touched —
-seven agent files, `docs/OPENSPEC-ARCHIVE.md`, and three `## Purpose` sections
-without which `openspec archive` aborts and writes nothing.
-
-**`mergeStateStatus` reported `UNKNOWN` for all three.** Not `BEHIND`, not
+**`mergeStateStatus` reports `UNKNOWN` when this happens.** Not `BEHIND`, not
 `DIRTY`. Nothing in the PR view showed it. So do not read a merge-state field
 as a staleness check — run the diff:
 
@@ -193,10 +189,8 @@ are visible from the files; this section does not restate them, because two
 copies drift and the reader who finds the stale one cannot tell. What follows
 is only what is specific to closing.
 
-Run `openspec --version` first. This page once recorded the CLI as absent, the
-absence was real, the sentence outlived it, and "openspec is not installed"
-reached five agents in one day on that basis. Believe the command, not any
-document — this one included.
+Run `openspec --version` first. Believe the command, not any document — this one
+included.
 
 `openspec` walks up from the cwd to the nearest `openspec/`, so it resolves to
 your change — you are standing in the tree that holds it. Check the reported root
@@ -260,9 +254,8 @@ gh run watch <run-id> --exit-status
 ```
 
 `gh run list --branch` returns runs for the branch, including ones on the old
-tip. A shepherd here watched the newest `in_progress` run to a Build LGX
-failure — *"The operation was canceled"* mid-`nix build`, no compile error —
-which was a run its own push had cancelled moments earlier. **Check `headSha`
+tip — which can surface as a Build LGX failure reading *"The operation was
+canceled"* mid-`nix build` with no compile error. **Check `headSha`
 on the run against the branch tip before reading its result.** The workflow
 sets `cancel-in-progress`, so a superseded run is the normal case rather than
 the exception, and `--log-failed` gives no output on a cancelled job, which
