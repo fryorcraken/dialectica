@@ -8,14 +8,19 @@
       `skip_specs: true` alongside `schema:` in `.openspec.yaml`, which carries
       the argument — including why ratifying them instead was rejected.
 - [x] design + code — `dev-writer`
-- [ ] tests — `tester`
+- [ ] ~~tests — `tester`~~ — comment-and-prose changes only, no behaviour
+      added, nothing a test could assert.
 - [x] review: correctness — `code-reviewer`
-- [ ] review: security — `code-reviewer`
-- [ ] review: readability — `code-reviewer`
-- [ ] review: architecture — `code-reviewer`
-- [ ] review: spec-test — `spec-test-reviewer`
+- [ ] ~~review: security — `code-reviewer`~~ — not dispatched: comments-only
+      change, no untrusted input, no logic.
+- [ ] ~~review: readability — `code-reviewer`~~ — not dispatched: comments-only
+      change, no untrusted input, no logic.
+- [ ] ~~review: architecture — `code-reviewer`~~ — not dispatched: comments-only
+      change, no untrusted input, no logic.
+- [ ] ~~review: spec-test — `spec-test-reviewer`~~ — not dispatched: no spec
+      delta (`skip_specs: true`), nothing for a spec-test review to check.
 - [x] review: design — `design-reviewer`
-- [ ] findings all ticked, `findings/` deleted — `closer`
+- [x] findings all ticked, `findings/` deleted — `closer`
 - [ ] `openspec validate --strict`, then `archive` — `closer`
 - [ ] CI green, title/body checked, PR merged — `closer`
 
