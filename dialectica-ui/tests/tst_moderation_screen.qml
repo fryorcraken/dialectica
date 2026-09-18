@@ -285,23 +285,86 @@ TestCase {
     // and `stoa-membership` states that a listed Stoa means the user chose it
     // rather than that the user governs it. A badge here would be the one claim
     // on this screen a user could act on to their cost.
+    // **This asserts a grammatical property, not a phrase list**, and the
+    // difference is the whole of why it was rewritten. The first version held
+    // four hardcoded sentences ("you are a moderator", "your stoa", ...), and a
+    // review measured its gap with a number: rewording the notice to "THIS STOA
+    // IS UNDER YOUR GOVERNANCE" — a plainer claim of authority than any of the
+    // four — passed the full file, 13 of 13. A blocklist fails on a re-word and
+    // not on the claim, which is backwards for a test whose subject is what the
+    // screen asserts.
+    //
+    // What replaces it: a claim of standing has to attach the reader to the
+    // thing governed, and English binds those two **close together** — `your
+    // stoa`, `you are a moderator`, `under your governance`. So the test looks
+    // for a second-person marker and a governance noun within a short window of
+    // each other, and fails on the pair.
+    //
+    // **The window is the load-bearing part, and it was measured rather than
+    // chosen.** Plain co-occurrence anywhere in a string does not work: the
+    // notice body legitimately reads "...publishing a moderation, so every
+    // control here is inert: acting on one changes nothing, for you or for
+    // anyone else", which pairs `moderation` with `you` at a distance of 15
+    // words while claiming the exact opposite of authority. That sentence
+    // failed an unwindowed version of this test. A disclaimer mentions both
+    // halves and keeps them apart; a claim puts them side by side.
+    //
+    // NO SPEC: `moderation-view` forbids the screen claiming a moderator status
+    // but does not say what linguistic form such a claim takes. Both the noun
+    // set and the window are this change's reading of it. If a future screen
+    // needs to place these words together innocently, this test is the thing to
+    // argue with rather than quietly widen.
+    //
+    // The limits, stated rather than left to be discovered: it is blind to a
+    // claim using neither marker ("this peer governs here"), to one split
+    // across two Text elements, and to one that spaces the halves further apart
+    // than the window while still reading as a claim. All three are narrower
+    // holes than a four-string list, and none is reachable by re-wording the
+    // sentences the screen actually has — which the blocklist's gap was.
     function test_the_screen_claims_no_moderator_authority() {
         var screen = screenComponent.createObject(null, {})
         var texts = spec.everyText(screen)
 
-        var joined = ""
-        for (var i = 0; i < texts.length; i++)
-            joined += texts[i].text.toLowerCase() + "\n"
+        // Second person, as the reader-facing half of a claim of standing.
+        var reader = ["you", "your", "yours", "you're"]
+        // What the claim would say the reader holds or governs.
+        var governed = ["moderator", "moderators", "moderate", "moderating",
+                        "moderation", "stoa", "stoas", "govern", "governs",
+                        "governance", "authority", "permission", "permissions",
+                        "privilege", "privileges", "admin", "owner", "own"]
 
-        // NO SPEC: `moderation-view` forbids the screen claiming a moderator
-        // status but does not enumerate the words that would. These are the
-        // phrasings the reference's MODERATOR badge and its neighbours use.
-        var claims = ["you are a moderator", "you moderate", "your stoa",
-                      "as a moderator"]
-        for (var j = 0; j < claims.length; j++)
-            verify(joined.indexOf(claims[j]) < 0,
-                   "the screen must not claim moderator status: '"
-                   + claims[j] + "'")
+        // Words apart, at most, for the two halves to read as one claim.
+        // 3 spans "you are a moderator" (3) and "this stoa is under your
+        // governance" (`stoa`→`your` is 3), and stops short of the notice
+        // body's honest 15.
+        var window = 3
+
+        for (var i = 0; i < texts.length; i++) {
+            // Split on non-letters so a marker matches as a WORD, not as a
+            // substring: "own" must not fire inside "known", nor "you" inside
+            // "your" as a separate hit.
+            var words = texts[i].text.toLowerCase().split(/[^a-z']+/)
+            var lastReader = -1 - window
+            var lastGoverned = -1 - window
+            for (var w = 0; w < words.length; w++) {
+                if (reader.indexOf(words[w]) >= 0) {
+                    verify(w - lastGoverned > window,
+                           "'" + words[w] + "' stands within " + window
+                           + " words of '" + words[lastGoverned]
+                           + "' — that is how a claim of moderator standing "
+                           + "is phrased: " + texts[i].text)
+                    lastReader = w
+                }
+                if (governed.indexOf(words[w]) >= 0) {
+                    verify(w - lastReader > window,
+                           "'" + words[w] + "' stands within " + window
+                           + " words of '" + words[lastReader]
+                           + "' — that is how a claim of moderator standing "
+                           + "is phrased: " + texts[i].text)
+                    lastGoverned = w
+                }
+            }
+        }
         screen.destroy()
     }
 }

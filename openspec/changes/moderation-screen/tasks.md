@@ -79,7 +79,12 @@ is said so rather than ticked.
       `::test_a_name_containing_markup_is_rendered_as_its_characters` driving a
       string the implementation did not choose.
 - [x] No moderator authority is claimed:
-      `::test_the_screen_claims_no_moderator_authority`.
+      `::test_the_screen_claims_no_moderator_authority`. **Rewritten on the
+      findings pass** (D7): it now asserts a grammatical property — a
+      second-person marker within 3 words of a governance noun — in place of
+      the four-phrase blocklist a review measured as passing a plain claim of
+      authority, 13 of 13. Verified against that exact rewording, which now
+      fails, and against the old blocklist's own phrasing, which also fails.
 
 ### The route
 
@@ -123,14 +128,30 @@ test comment says so.
 
 ### Gates run in this worktree
 
-- [x] `check_qml_names.py dialectica-ui` — 46 files, 25 entries. It caught the
+Re-measured after the rebase onto `origin/main`, rather than by adjusting the
+earlier figures — a branch moves, and a quoted delta introduces a second wrong
+claim while fixing the first.
+
+- [x] `check_qml_names.py dialectica-ui` — 49 files, 25 entries. It caught the
       test's `name: "ModerationScreen"` label, which is the rule working on a
       spelling rather than on a location.
-- [x] `check_qml_reachable.py dialectica-ui` — 25 registered, 23 reached.
+- [x] `tst_check_qml_names.py` — 17 cases, both directions.
+- [x] `check_qml_reachable.py dialectica-ui` — 25 registered, 23 reached, 2
+      recorded as deliberately uninstantiated.
 - [x] `tst_check_qml_reachable.py` — 16 cases, both directions.
 - [x] `check_qml_members.sh` — 26 files.
-- [x] `run-qml-tests.sh` — 20 spec files, 0 failed.
+- [x] `tst_check_qml_members.sh` — 5 cases.
+- [x] `tst_check_bindings.sh` — 8 cases, both directions.
+- [x] `tst_check_probe_twins.sh` — 10 passed, 0 failed.
+- [x] `tst_check_every_test_ran.sh` — **new in this pass**, 10 cases: both
+      directions plus two end-to-end through the real runner.
+- [x] `run-qml-tests.sh`, every spec file individually — **21** spec files, 0
+      failed. The new vanished-test check fires on none of them. (The earlier
+      figure of 20 predates this file's own spec; counted with
+      `ls -1 dialectica-ui/tests/tst_*.qml`.)
 - [x] `openspec validate moderation-screen --strict` — valid.
+- [x] `python3 -c "import yaml; yaml.safe_load(...)"` on `.github/workflows/ci.yml`
+      — parses, after adding the vanished-test step.
 
 **What these cannot see**, said rather than left to read as coverage:
 

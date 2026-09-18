@@ -157,6 +157,36 @@ fixtures differing in every quantity a screen could reach for — the number of
 Stoas listed and the number of threads another call answered — and requires the
 rendered string to be identical.
 
+**This diverges from the design bundle, and the divergence is stated here rather
+than left to be discovered.** `tmp/ui-bundle-new/handoff/README.md` line 40 is
+one of the four "rules easiest to break while implementing": *"Never show a count
+of anything global. Every number counts what this machine holds."* The amendment
+that permits this position to be filled reconciles the spec
+(`stoa-navigation-view`) and PLAN.md §9.2, and says nothing about the bundle — so
+a reader holding both documents would not learn from either that they now differ
+on this exact point.
+
+**What the owner reversed, and what they did not.** The reversal was of PLAN.md
+ruling 3, whose subject is the moderation screen: it was reversed so the screen
+could be built and *seen*. Nothing in it addresses counting. So the honest
+statement is that the bundle's rule 3 has **not** been overridden by anyone, and
+this change does not treat it as overridden.
+
+**The reason no conflict arises in fact is that the placeholder is not a count**
+— `counts not yet available` renders no numeral and asserts no quantity, which is
+precisely what D5 chose it for. The bundle forbids showing a count that is not
+this machine's; a string saying a count is unavailable shows no count at all.
+Every rule survives: the bundle's, the spec's permanent prohibition on global
+counts, and PLAN.md's.
+
+**Where it would become a real divergence** is the moment anything renders a
+number in that position. If a future change fills it from a core call, the
+bundle's rule is the one to re-read first, because the spec's amended form
+permits a number that the bundle's rule may still not — and that is a question
+for the owner rather than for whoever writes the call. Recorded here because the
+amendment's own stated goal is that "a reader ... finds the reasoning in the
+requirement itself", and a silent gap is the one way that goal fails.
+
 **The two existing count assertions survive the amendment unchanged**, which is
 the useful confirmation that the narrowing was narrow.
 `::test_no_row_renders_a_count_of_held_posts_or_anything_global` and
@@ -180,6 +210,108 @@ indistinguishably.
 moderate a Stoa.** Offering the route claims nothing; hiding it on a guess would.
 This is the same reasoning `stoa-navigation-view` applies to the create
 affordance, which is likewise offered whatever the keystore's state.
+
+### D7 — The no-authority test asserts a grammatical property, not a phrase list
+
+**Chosen:** a second-person marker within 3 words of a governance noun, over
+every rendered string on the screen.
+
+**What it replaces, with the number that condemned it.** The first version held
+four hardcoded sentences (`you are a moderator`, `you moderate`, `your stoa`,
+`as a moderator`). Code review measured its gap: rewording the notice to *"THIS
+STOA IS UNDER YOUR GOVERNANCE"* — a plainer claim of authority than any of the
+four — passed the full file, **13 of 13**. A blocklist fails on a re-word and
+not on the claim, which is backwards for a test whose subject is what the screen
+asserts about the reader's standing.
+
+**Why a window and not plain co-occurrence**, which was tried first and is the
+obvious form. The notice body legitimately reads *"...publishing a moderation,
+so every control here is inert: acting on one changes nothing, for you or for
+anyone else"* — pairing `moderation` with `you` at 15 words' distance while
+claiming the exact opposite of authority. An unwindowed version failed on it.
+The discriminator is adjacency: a disclaimer mentions both halves and keeps them
+apart, a claim puts them side by side. 3 spans `you are a moderator` and
+`stoa ... is under your` and stops well short of 15.
+
+**What breaks without it.** Reverting to the phrase list turns no test red —
+that is the whole point, and why the guard is worth recording. What proves the
+new form works is the pair of mutations run against it: the review's exact
+rewording now fails with `'your' stands within 3 words of 'stoa'`, and the old
+blocklist's `YOU ARE A MODERATOR HERE` fails with `'moderator' stands within 3
+words of 'you'`. Both were reverted; `git diff` on the screen is empty.
+
+**Rejected: asserting the absence of a predicate**, which is what the review
+suggested and what would be strongest. QML string matching cannot ask whether a
+sentence claims capability over the Stoa. The grammatical pairing is the nearest
+checkable proxy, and its limits are written at the test rather than left to be
+found: it is blind to a claim using neither marker ("this peer governs here"),
+to one split across two `Text` elements, and to one spaced wider than the
+window. All three are narrower holes than four strings, and none is reachable by
+re-wording the sentences the screen actually has — which the blocklist's gap
+was.
+
+### D8 — `rowData` cannot be `required`, and the comment now says why
+
+**Chosen:** a plain `property var rowData` with a default of the shape the
+delegate reads, and a comment stating the constraint rather than asserting the
+opposite.
+
+**The comment was wrong in two ways**, which review caught: it claimed the
+`Loader` supplies a `required property var rowData` when neither delegate
+declares `required`, and credited `setSource`-style initial properties when the
+code does an imperative `onLoaded` assignment.
+
+**`required` is not merely unused here — it cannot work.** A `Loader` builds its
+component first and emits `onLoaded` second, so there is no point at which a
+required property could be supplied. Measured on Qt 6.10.3 by adding `required`
+to the author delegate: `Required property rowData was not initialized` per row,
+and `test_the_two_lists_are_separate_with_their_own_controls` saw **0 rows where
+it expects 2**. So the review's first option (add `required` to both) is not
+available, and correcting the comment is the whole of the fix.
+
+**The trade this records:** `Loader` buys the two lists a shared body and gives
+up the construction-time enforcement that `required property var modelData` has
+two lines above it. An unbound delegate renders blank rather than erroring. That
+is a real cost, stated at the site, and the reason the defaults are the shapes
+the delegates read rather than empty objects.
+
+### D9 — A vanished test is now a failed run, without needing its cause
+
+**Chosen:** `check_every_test_ran` in `run-qml-tests.sh`, comparing the test
+names a spec declares against the names the runner reported.
+
+**The incident it answers had no root cause and still does not.** Two tests were
+written in `tst_stoa_screens.qml`, one never appeared in the run under two
+different names, and folding them together is what resolved it. Review flagged
+leaving that at "cause unknown" as the wrong place to stop, and it is — but the
+useful response is a check that does not depend on the diagnosis. Comparing
+declared names to run names fires on a test lost for *any* reason, including one
+nobody has identified.
+
+**One mechanism is now reproduced, and it is not that incident.** QtTest treats
+`test_foo_data()` as the DATA PROVIDER for `test_foo()`. Declaring both removes
+**both** from the run: the `_data` body is called as a provider, returns
+undefined, and the other is skipped for want of rows. Measured on Qt 6.10.3 as
+`3 passed, 0 failed` with neither executed, the only trace a `WARNING: ... no
+data supplied` line — not a failure, and not something `check_bindings` looks
+for. **No `_data` name appears anywhere in `tst_stoa_screens.qml`'s history**,
+so this is the same defect *shape* rather than the cause, and it is recorded as
+such.
+
+**Two hypotheses tested and ruled out**, written down so the next person does
+not spend the afternoon again: a **duplicate function name** fails loudly at
+compile (`Duplicate method name`), and a **helper sharing a test's prefix or
+taking an argument** runs normally — both measured with probe specs.
+
+**What breaks without the guard.** Deleting `check_every_test_ran` turns the two
+end-to-end cases in `tst_check_every_test_ran.sh` red: the sound spec must still
+be accepted, and the `_data` spec must be rejected. The fixture cases pin the
+regexes either side of two mistakes already made building it — reading any
+`::name()` rather than result lines only (which let the skipped half of the
+`_data` pair read as having run), and a `[^:]*::` name extraction that matched
+nothing because `qmltestrunner::<Case>::` contains colons itself, so every test
+read as missing. A check that reports everything missing is as useless as one
+that reports nothing, and both directions are pinned.
 
 ## Reasoning moved out of `docs/PLAN.md`
 
@@ -216,8 +348,17 @@ built yet, which is what PLAN.md is for — not reasoning this change consumed.
   collision by construction. That is the `D` prefix's job and
   `check_qml_names.py`'s, not a test's.
 - **One test in `tst_stoa_screens.qml` did not appear in the run at two different
-  names, and the cause was not established.** Folding the assertions into a
+  names, and the cause is still not established.** Folding the assertions into a
   function that demonstrably runs is what made them execute. The comment there
   says so rather than naming a cause, after an earlier draft blamed a runner
   enumeration limit on the strength of a miscount — `grep -c "    function
   test_"` reads those words inside a comment as a declaration.
+
+  **A recurrence is no longer silent**, which is the part that changed: D9's
+  `check_every_test_ran` fails any run in which a declared test did not execute,
+  whatever the cause. The file's 76 declared tests all run today, measured. What
+  the gate still cannot do is explain the original loss, and it does not claim
+  to.
+- **The no-authority test checks grammar, not meaning.** D7 states its three
+  blind spots at the test itself. A screen that claimed authority without a
+  second-person marker would pass it.

@@ -23,7 +23,7 @@ behind it.
 
 ## Findings
 
-- [ ] **`dev-writer`** — `openspec/changes/moderation-screen/proposal.md`,
+- [x] **`dev-writer`** — `openspec/changes/moderation-screen/proposal.md`,
       `design.md`, `docs/PLAN.md` §9.2 — **(architecture)** the amendment
       never acknowledges that it diverges from the design bundle's own
       README rule 3 ("Never show a count of anything global. Every number
@@ -45,7 +45,24 @@ behind it.
       itself") is undercut by the one silent gap the reviewer was asked to
       check for.
 
-- [ ] **`dev-writer`** — `dialectica-ui/tests/tst_moderation_screen.qml:288-305`
+      **Fixed** in `design.md` D5, which now carries the divergence in the
+      place a reader of the amendment meets it. The finding is accepted in
+      full: the bundle's rule 3 is quoted verbatim with its line number, and
+      the entry states that the owner's reversal was of PLAN.md ruling 3
+      (whose subject is the screen) and that **nothing in it addresses
+      counting** — so the bundle's rule is recorded as *not* overridden by
+      anyone, rather than as silently superseded.
+
+      The reconciliation the finding's own severity note anticipates is made
+      explicit: no rule is violated in effect because `counts not yet
+      available` renders no numeral and asserts no quantity, so the bundle
+      forbids a count that is not this machine's and the placeholder shows no
+      count at all. D5 also names where this becomes a real divergence — the
+      moment anything renders a number in that position, at which point the
+      bundle's rule is the one to re-read first and the question is the
+      owner's rather than the implementer's.
+
+- [x] **`dev-writer`** — `dialectica-ui/tests/tst_moderation_screen.qml:288-305`
       — **(correctness / security)** `test_the_screen_claims_no_moderator_authority`
       is a four-phrase hardcoded blocklist and a rewording that conveys the
       same forbidden claim passes clean.
@@ -71,7 +88,42 @@ behind it.
       — a plausible reason to accept the weaker form for this MVP, but that
       argument does not currently appear anywhere in the change.
 
-- [ ] **`dev-writer`** — `dialectica-ui/src/qml/DModeratedList.qml:99-100`
+      **Fixed** — the test was strengthened rather than the weaker form
+      accepted, because the measurement made the gap concrete enough to close.
+      `test_the_screen_claims_no_moderator_authority` now asserts a
+      grammatical property over every rendered string: a second-person marker
+      (`you`, `your`, `yours`, `you're`) within **3 words** of a governance
+      noun (`moderator`, `stoa`, `govern`, `authority`, `permission`, ... 19
+      in all), matched as words rather than substrings. Recorded as D7 in
+      `design.md`.
+
+      **Verified against this finding's own mutation.** Setting
+      `inertNoticeHeading` to `"NOTHING ON THIS SCREEN PUBLISHES ANYTHING.
+      THIS STOA IS UNDER YOUR GOVERNANCE."` — the exact string measured here
+      as passing 13 of 13 — now fails: `'your' stands within 3 words of
+      'stoa'`. The old blocklist's own `YOU ARE A MODERATOR HERE` fails too
+      (`'moderator' stands within 3 words of 'you'`), so the rewrite loses no
+      coverage. Both mutations reverted; `git diff` on `DModerationScreen.qml`
+      is empty.
+
+      **The window is the load-bearing part and was measured, not chosen.**
+      Plain co-occurrence anywhere in a string does not work: the notice body
+      honestly reads "...publishing a moderation, so every control here is
+      inert: acting on one changes nothing, for you or for anyone else",
+      pairing `moderation` with `you` at 15 words while claiming the opposite
+      of authority — an unwindowed draft failed on it. A disclaimer keeps the
+      halves apart; a claim puts them side by side.
+
+      **The suggested form was considered and rejected as unreachable.**
+      Asserting the absence of a predicate is stronger, and QML string
+      matching cannot ask whether a sentence claims capability over a Stoa.
+      The pairing is the nearest checkable proxy, and its three blind spots —
+      a claim using neither marker, one split across two `Text` elements, one
+      spaced wider than the window — are now written at the test rather than
+      left to be discovered. The `NO SPEC` marker is kept and widened to cover
+      both the noun set and the window.
+
+- [x] **`dev-writer`** — `dialectica-ui/src/qml/DModeratedList.qml:99-100`
       vs. `DModerationScreen.qml:333,410` — **(readability)** a comment
       overclaims what the code does. The comment says the `Loader`
       "Supplies the delegate's `required property var rowData`", but neither
@@ -95,7 +147,28 @@ behind it.
       render silently blank rather than erroring if a future call site
       forgot to bind a delegate at all.
 
-- [ ] **`dev-writer`** — `dialectica-ui/tests/tst_stoa_screens.qml:2014-2027`
+      **Fixed** by the second of the two options offered (soften the comment),
+      because the first is **not available** — and that turned out to be the
+      more useful half of the finding. Recorded as D8 in `design.md`.
+
+      `required` does not merely go unused here; it cannot work. A `Loader`
+      builds its component first and emits `onLoaded` second, so there is no
+      point at which a required property could be supplied. Measured on Qt
+      6.10.3 by adding `required property var rowData` to the author delegate:
+      `Required property rowData was not initialized` per row, and
+      `test_the_two_lists_are_separate_with_their_own_controls` saw **0 rows
+      where it expects 2**. Reverted.
+
+      The comment was also wrong in a second way the finding does not name: it
+      credited `setSource`-style initial properties, where the code does an
+      imperative `onLoaded` assignment. Both claims are gone. The replacement
+      states the constraint, names the measurement, and records the trade
+      explicitly — `Loader` buys the two lists a shared body and gives up the
+      construction-time enforcement `required property var modelData` has two
+      lines above, so an unbound delegate renders blank rather than erroring.
+      That is why the defaults are the shapes the delegates read.
+
+- [x] **`dev-writer`** — `dialectica-ui/tests/tst_stoa_screens.qml:2014-2027`
       — **(correctness, informational)** the unexplained vanishing-test
       defect this file documents (two tests written, one never appeared in
       the run under two different names, folding them into one function that
@@ -114,6 +187,47 @@ behind it.
       against a two-function reproduction) rather than a blocking finding,
       since the author was transparent about the gap rather than concealing
       it.
+
+      **Fixed** — as a gate rather than as an investigation, which is the part
+      worth arguing. The finding asks whether the same silent loss could recur
+      with the next test added; it now cannot recur *silently*.
+      `check_every_test_ran` in `run-qml-tests.sh` compares the test names a
+      spec declares against the names the runner reported and fails the run on
+      any declared test that did not execute. **It needs no root cause**,
+      which is what makes it the right answer to an incident whose cause was
+      never established. Recorded as D9 in `design.md`.
+
+      **The bisection the finding suggests was performed, and it found a real
+      mechanism — but not this one.** QtTest treats `test_foo_data()` as the
+      DATA PROVIDER for `test_foo()`, so declaring both removes **both** from
+      the run: the `_data` body is called as a provider, returns undefined,
+      and the other is skipped for want of rows. Measured on Qt 6.10.3 as `3
+      passed, 0 failed` with neither executed, the only trace a `WARNING: ...
+      no data supplied` line — not a failure, and not a pattern
+      `check_bindings` greps for. **No `_data` name appears anywhere in
+      `tst_stoa_screens.qml`'s history**, so this is the same defect *shape*,
+      not the cause, and it is written down as such rather than claimed as a
+      diagnosis.
+
+      Two hypotheses were tested and ruled out, recorded in D9 so the next
+      person does not repeat them: a **duplicate function name** fails loudly
+      at compile (`Duplicate method name`), and a **helper sharing a test's
+      prefix or taking an argument** runs normally.
+
+      The gate has its own test, `dialectica-ui/tests/tst_check_every_test_ran.sh`
+      (10 cases, both directions plus two end-to-end), wired into `ci.yml`'s
+      `lint`-adjacent QML job beside `tst_check_bindings.sh`. Two mistakes
+      made while building it are pinned by fixtures, both of which made the
+      check vacuous in opposite ways: reading any `::name()` rather than
+      result lines only, which let the skipped half of a `_data` pair read as
+      having run; and a `[^:]*::` name extraction that matched nothing because
+      `qmltestrunner::<Case>::` contains colons itself, so every test read as
+      missing.
+
+      **Measured on the file this finding names:** 76 declared test functions,
+      78 reported (the two extra being `initTestCase`/`cleanupTestCase`), no
+      test missing. The reviewer's "67 passed" reflects their mutated tree,
+      not a live discrepancy.
 
 ## Clean
 

@@ -2279,9 +2279,25 @@ TestCase {
     // number the claim rested on.
     //
     // The diagnostic that actually works, if a test here stops appearing:
-    // list the declared names and the run names and `comm` them, rather than
+    // list the declared names and the run names and compare them, rather than
     // comparing two totals. Two totals cannot say which one is missing, and one
     // of them is easy to get wrong.
+    //
+    // **That diagnostic is now a gate and runs on every spec.**
+    // `check_every_test_ran` in `run-qml-tests.sh` does exactly this comparison
+    // and fails the run on a declared test that did not execute — so a
+    // recurrence here, or in any sibling file, is now loud rather than silent.
+    // It needs no root cause to work, which is what makes it the right answer
+    // to an incident whose cause was never established.
+    //
+    // ONE mechanism for silent test loss has since been reproduced, though it
+    // is NOT established as the cause of the incident above — no `_data` name
+    // appears anywhere in this file's history. QtTest treats `test_foo_data()`
+    // as the DATA PROVIDER for `test_foo()`, so declaring both removes BOTH
+    // from the run: measured on Qt 6.10.3 as `3 passed, 0 failed` with neither
+    // function executed, the only trace a `WARNING: ... no data supplied` line.
+    // Recorded here because it is the same defect SHAPE, and because the next
+    // person to lose a test in this file should check that name pattern first.
     function test_the_row_count_placeholder_claims_no_measurement() {
         // ---- it does not read as a measurement ---------------------------
         //

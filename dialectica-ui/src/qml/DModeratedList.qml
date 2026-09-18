@@ -96,10 +96,28 @@ ColumnLayout {
                         Layout.topMargin: DTheme.itemGap
                         Layout.bottomMargin: DTheme.itemGap
                         sourceComponent: list.rowDelegate
-                        // Supplies the delegate's `required property var
-                        // rowData`. `setSource`-style initial properties are
-                        // what makes the value visible under its own name
-                        // inside the delegate at any nesting depth.
+                        // Assigns the delegate's own `rowData` property after
+                        // it is instantiated.
+                        //
+                        // **`rowData` is NOT `required`, and cannot be**, which
+                        // is worth stating because the opposite is the obvious
+                        // guess and this comment used to make it. A `Loader`
+                        // builds its component first and emits `onLoaded`
+                        // second, so there is no point at which a required
+                        // property could be supplied: marking it `required`
+                        // makes every row fail to instantiate. Measured on
+                        // Qt 6.10.3 — `Required property rowData was not
+                        // initialized` per row, and
+                        // `test_the_two_lists_are_separate_with_their_own_controls`
+                        // saw 0 rows where it expects 2.
+                        //
+                        // So each delegate declares `rowData` with a default of
+                        // the shape it reads, and an unbound delegate renders
+                        // blank rather than erroring. That is the trade this
+                        // pattern makes, not an oversight: `Loader` buys the
+                        // two lists a shared body, and gives up the
+                        // construction-time enforcement `required property var
+                        // modelData` has two lines above.
                         onLoaded: item.rowData = block.modelData
                     }
 
