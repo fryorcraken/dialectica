@@ -22,6 +22,8 @@ The creator key MUST NOT be a parameter. A call that accepted one would be a cal
 
 The address MUST be returned. A creation reporting only success leaves the caller unable to name, share, or read what it just made.
 
+**The genesis record MUST be returned alongside the address**, per the requirement that every reply naming a Stoa carries the record its address is the hash of. Returning the address alone leaves the caller in the state the previous paragraph exists to prevent — able to name the Stoa and unable to read or share it — because the address is a one-way hash and the caller can invert nothing.
+
 The record MUST be retained, not discarded once the address is computed — the retention requirement below states what that is for. No moderation call exists yet and this requirement does not assert one; what it fixes is that creation leaves the peer holding everything a moderator set would later be derived from, rather than an address it can never invert.
 
 **The creator key recorded in a genesis record is fixed at creation and is never re-checked against the peer's current signing key. This capability MUST NOT claim, in any reply, that the peer can moderate a Stoa it lists.** The two can diverge: the record is immutable and the signing key is not, so a peer whose signing key changes — restored from a different backup, or re-created — holds Stoas it created and can no longer moderate. Every answer this capability gives remains truthful in that state, because none of them is about moderation: a listed Stoa means the user chose it, not that the user governs it.
@@ -33,6 +35,12 @@ Whether that divergence is reportable is deliberately **out of scope here, and t
 - **WHEN** a Stoa is created with a title
 - **THEN** the call returns a Stoa address
 - **AND** the address is the one the genesis record just built verifies against
+
+#### Scenario: Creation returns the record as well as the address
+
+- **WHEN** a Stoa is created with a title
+- **THEN** the reply carries the genesis record it built
+- **AND** the record carries the title the creation was given
 
 #### Scenario: The creator is the caller's own key
 
@@ -286,9 +294,11 @@ A refusal to open MUST be reported as this capability's failure shape and MUST c
 
 ### Requirement: Listing reports the Stoas the peer is in, and no others
 
-The module MUST offer a paginated call listing the Stoas the peer is in — those it created and those it joined — each item carrying the Stoa's address and its founding title.
+The module MUST offer a paginated call listing the Stoas the peer is in — those it created and those it joined — each item carrying the Stoa's address, its founding title, and the genesis record that address is the hash of.
 
 The envelope and the pagination arguments are the `module-wire-contract` capability's; this requirement conforms to them rather than restating them. What it fixes is the contents: exactly the Stoas membership records, and nothing derived from the ops the peer happens to hold.
+
+**The listing is where the record matters most**, and is the reason the requirement above is not satisfied by creation and joining alone. A caller can only remember records for Stoas it created or joined during the current session; a caller that restarts holds none. Without the record on the listing item, every Stoa a peer was already in before the caller started is one it can see, name, and do nothing with.
 
 A listing MUST report each Stoa once. Every Stoa the peer is in MUST be reachable by paging through the listing.
 
@@ -334,6 +344,12 @@ An empty listing MUST report that there are no further pages.
 - **WHEN** a Stoa is listed
 - **THEN** the item carries the Stoa's address
 - **AND** the item carries the founding title from the retained record
+
+#### Scenario: A Stoa is openable from the listing alone
+
+- **WHEN** a peer that retained a Stoa's record across a restart lists its Stoas
+- **THEN** the item carries the genesis record for that Stoa
+- **AND** the caller can read that Stoa's feed using only what the listing reported
 
 ### Requirement: A listed title is a founding title, and is identified as such
 
@@ -412,3 +428,63 @@ The shape itself, and that a failure carries no result alongside it, is the `mod
 - **WHEN** any call in this capability reports a failure
 - **THEN** the set of Stoas the peer is in is unchanged
 - **AND** the retained record of every Stoa it is in is unchanged
+
+### Requirement: A reply naming a Stoa carries the record that Stoa's address is the hash of
+
+Every reply of this capability that names a Stoa address MUST also carry the
+genesis record that address is the hash of, encoded in the same form the calls
+that accept a genesis record require.
+
+**A caller cannot obtain the record any other way.** A Stoa address is a one-way
+hash of the record, so an address is enough to verify a record handed over and
+never enough to reconstruct one. A caller given only an address is therefore
+permanently unable to perform any operation that takes a record — reading a feed,
+reading a thread, joining, or producing a shareable reference — for a Stoa it can
+nonetheless see and name.
+
+The record MUST be the one the accompanying address is the hash of. A reply
+carrying a well-formed record of some other Stoa satisfies "the field decodes"
+and is useless: what makes the field usable is exactly that the pair verifies.
+
+**The encoding MUST be the one those calls accept**, so that a record reported by
+one call is a record another call takes without transformation. Two encodings for
+one record is how a reply and the request that quotes it come to disagree.
+
+Where the record cannot be encoded, the call MUST report the failure in the
+module's failure shape and MUST NOT report success carrying an empty or absent
+record. An empty record is precisely the input that fails to decode as
+"ended mid-field", so emitting one would report a defect as a success and move
+the resulting error to a later call that cannot explain it.
+
+This requirement adds no storage obligation. The requirement "A joined Stoa's
+genesis record is retained, not only its address" already requires the record be
+kept for every Stoa the peer is in; this fixes that the kept record is reported
+rather than withheld.
+
+#### Scenario: A creation reports the record its address names
+
+- **WHEN** a Stoa is created
+- **THEN** the reply carries the genesis record
+- **AND** the record decodes
+- **AND** the address computed from the decoded record equals the address the same
+  reply names
+
+#### Scenario: A listed Stoa carries the record its address names
+
+- **WHEN** a Stoa is listed
+- **THEN** the item carries the genesis record
+- **AND** the address computed from the decoded record equals the address the same
+  item names
+
+#### Scenario: A reported record is one the record-taking calls accept
+
+- **WHEN** a Stoa is listed and the record from that item is supplied to a call
+  that takes an address and its genesis record
+- **THEN** that call accepts the record
+- **AND** it is not refused as malformed or as failing to match the address
+
+#### Scenario: A record that cannot be encoded is a failure, not an empty field
+
+- **WHEN** a reply would name a Stoa whose retained record cannot be encoded
+- **THEN** the call reports a failure
+- **AND** no success reply is emitted carrying an empty or absent record
