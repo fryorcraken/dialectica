@@ -12704,6 +12704,84 @@ mod tests {
         }
     }
 
+    /// The genesis record a reply carries, decoded, with its address checked
+    /// against the address the same reply names.
+    ///
+    /// The check is the relation rather than a pinned literal: a reply could carry
+    /// a well-formed record of some OTHER Stoa and satisfy "the field decodes". The
+    /// only thing that makes the field useful to a view is that it is the record
+    /// THIS address is the hash of, because that is exactly what the view will hand
+    /// back to `join_stoa` and to the share text.
+    fn genesis_of(reply: &serde_json::Value) -> crate::stoa::Genesis {
+        let hex_str = reply["genesis"].as_str().unwrap_or_else(|| {
+            panic!("the reply must carry a `genesis` record for the view to open or share: {reply}")
+        });
+        let bytes = hex::decode(hex_str)
+            .unwrap_or_else(|e| panic!("`genesis` must be hex ({e}): {hex_str}"));
+        let genesis = crate::stoa::Genesis::decode(&bytes)
+            .unwrap_or_else(|e| panic!("`genesis` must decode as a record ({e}): {hex_str}"));
+        assert_eq!(
+            genesis.address().expect("a decoded record has an address").to_hex(),
+            reply["stoa"].as_str().expect("a reply names its address"),
+            "the record must be the one this address is the hash of: {reply}"
+        );
+        genesis
+    }
+
+    #[test]
+    fn a_creation_reports_the_record_its_address_is_the_hash_of() {
+        // The owner's bug: the reply named an address and no record, so the view
+        // had nothing to hand to `read_feed` and sent "" — which hex-decodes to
+        // zero bytes and fails the version-byte take as "genesis record ended
+        // mid-field". An address is a ONE-WAY hash, so a view cannot derive the
+        // record it was denied here; only this reply can carry it.
+        let mut store = a_membership_store();
+        let reply = create(&mut store, "Agora");
+
+        let genesis = genesis_of(&reply);
+        // The decoded record is the one that was created, not merely a valid one.
+        assert_eq!(genesis.title, "Agora", "got {reply}");
+        assert_eq!(genesis.creator, creator_key(), "got {reply}");
+    }
+
+    #[test]
+    fn a_listed_stoa_carries_the_record_its_address_is_the_hash_of() {
+        // The same obligation on the listing, and it is the one that matters on a
+        // RESTART: a view holds records for what it created this session and the
+        // core retains them for everything the peer is in. Without this field a
+        // relaunched app can open nothing it did not just create.
+        let mut store = a_membership_store();
+        create(&mut store, "Agora");
+
+        let rows = listed(&store, 25);
+        assert_eq!(rows.len(), 1, "got {rows:?}");
+        assert_eq!(genesis_of(&rows[0]).title, "Agora");
+    }
+
+    #[test]
+    fn a_listed_record_round_trips_through_the_join_the_view_performs() {
+        // End to end through the ACTUAL pair of calls the owner's click makes: the
+        // listing hands over a record, and that record is accepted by the handler
+        // that decodes a `genesis` hex string. This is what pins the two sides to
+        // one encoding — a reply carrying, say, base64 would pass both tests above
+        // and still leave the view sending something `join_stoa` refuses.
+        let mut store = a_membership_store();
+        create(&mut store, "Agora");
+        let row = listed(&store, 25).remove(0);
+
+        let request = serde_json::json!({
+            "stoa": row["stoa"].as_str().unwrap(),
+            "genesis": row["genesis"].as_str().unwrap(),
+        })
+        .to_string();
+        let out = join_stoa(&request, &mut store);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(
+            v.get("error").is_none(),
+            "the record the listing handed over must be one the core accepts: {out}"
+        );
+    }
+
     #[test]
     fn a_peer_in_no_stoa_lists_nothing_and_reports_no_failure() {
         let store = a_membership_store();
