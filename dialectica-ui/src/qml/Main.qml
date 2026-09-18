@@ -18,11 +18,11 @@ import QtQuick.Layouts
 // what makes that unrepresentable: there is no longer anywhere to put one.
 //
 // The feed carries, behind the posting gate, a composer for a top-level post
-// plus a vote control on each row. There is still no THREAD view, and that is
-// why there is no reply box: this feed lists thread heads, so a reply box under
-// a row would be a thread-view affordance on a screen that is not one.
-// `DComposer.qml` supports replying and is tested in that mode; the
-// instantiation arrives with the thread screen.
+// plus a vote control on each row. A reply box is not among them, and that is
+// still right: this feed lists thread HEADS, so a reply box under a row would be
+// a thread-view affordance on a screen that is not one. The reply composer lives
+// on `DThreadScreen`, which is where a reader has a post in front of them to
+// answer — and that screen is reached from a row's "read the thread".
 Item {
     id: root
 
@@ -132,8 +132,17 @@ Item {
     // returned none — and it goes to the core unchanged. A fabricated or
     // placeholder record would fail verification in the core and surface as a
     // refusal the user cannot act on.
+    // **A row naming no op opens nothing**, rather than opening a thread screen
+    // that immediately asks core about a thread identified by the empty string.
+    // `FeedScreen.threadTarget()` already withholds the affordance from such a
+    // row, so this is the same judgement held a second time at the transition —
+    // a guard is a job, and "is it applied everywhere?" stays a question with an
+    // answer only if the navigator does not depend on every future caller having
+    // remembered it. `thread-view`'s *No thread is rendered before one has been
+    // chosen* requires that no read be made for a thread the user never asked
+    // for, and this is where that is enforced for the route.
     function openThread(rootOp) {
-        if (root.chosen === null)
+        if (root.chosen === null || rootOp === "")
             return
         var from = root.chosen
         root.previewing = null
@@ -361,9 +370,21 @@ Item {
                 id: thread
                 objectName: "thread"
                 visible: root.screenShown === "thread"
+                // Every value comes from `reading`, which `openThread()` filled
+                // from the feed the row was rendered in. There is no property
+                // on the screen holding a usable default — a second source for
+                // the thread it renders is a build shipping a hardcoded one.
+                //
+                // **`threadId`, and it is the ROOT POST's `id`.** The screen
+                // names the property that way rather than `threadRoot` because
+                // what travels is an op id and not a thread handle: `id` does
+                // not move when the post is revised, where `currentVersion`
+                // does, so a route carrying the version would point at a thread
+                // that stops answering to it after an edit.
                 stoaAddress: root.reading !== null ? root.reading.stoa : ""
+                stoaTitle: root.reading !== null ? root.reading.foundingTitle : ""
                 stoaGenesis: root.reading !== null ? root.reading.genesis : ""
-                threadRoot: root.reading !== null ? root.reading.rootOp : ""
+                threadId: root.reading !== null ? root.reading.rootOp : ""
                 Layout.alignment: Qt.AlignHCenter
                 Layout.preferredWidth: Math.min(DTheme.cardWidth, root.width - 2 * DTheme.cardPaddingX)
 

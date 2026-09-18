@@ -317,4 +317,137 @@ TestCase {
         compare(out.value.canPost, false)
         compare(out.value.reason, "no keystore")
     }
+
+    // ---- the shared probe normalisation ----------------------------------
+    //
+    // `capabilityFrom` and `identityFrom` were byte-for-byte copies on
+    // `FeedScreen.qml` and `DThreadScreen.qml`, with NOTHING able to observe them
+    // drifting apart — each copy internally consistent, so every gate stayed
+    // green while a fix to one left the other carrying the defect. These pin the
+    // rule on `Core`, where both screens now read it from.
+    //
+    // The degenerate SHAPES (`"true"`, `1`, `null`) are driven as rendering
+    // fixtures in `tst_gate_affordance.qml` and `tst_vote_and_gate.qml`; what is
+    // pinned here is the normalisation itself, and that both screens get the same
+    // answer from it.
+
+    function test_a_capability_probe_is_normalised_to_both_fields_always_present() {
+        // Input-dependent on purpose: a normaliser that returned a fixed object
+        // would pass an assertion that only checked the fields exist.
+        var open = Core.capabilityFrom({ ok: true, value: { canPost: true, reason: "ignored" } })
+        compare(open.canPost, true)
+        // An open gate carries no reason, even when the probe supplied one.
+        compare(open.reason, "")
+
+        var shut = Core.capabilityFrom({ ok: true, value: { canPost: false, reason: "no keystore found" } })
+        compare(shut.canPost, false)
+        compare(shut.reason, "no keystore found")
+
+        var broken = Core.capabilityFrom({ ok: false, error: "the core module is not reachable" })
+        compare(broken.canPost, false)
+        compare(broken.reason, "the core module is not reachable")
+    }
+
+    function test_only_a_literal_true_opens_the_capability_gate() {
+        // The fail-closed rule. Each of these is truthy-or-falsy in a way that
+        // does not match what it means, and each must reach the SAME state as a
+        // probe reporting "not possible".
+        var looser = ["true", 1, null, undefined, {}, "yes"]
+        for (var i = 0; i < looser.length; i++) {
+            var out = Core.capabilityFrom({ ok: true, value: { canPost: looser[i] } })
+            verify(!out.canPost, "canPost was opened by a non-true value at index " + i)
+            compare(typeof out.reason, "string")
+        }
+    }
+
+    function test_an_identity_probe_is_normalised_to_all_three_fields() {
+        var present = Core.identityFrom({
+            ok: true, value: { hasIdentity: true, publicKey: "ab12cd", reason: "ignored" }
+        })
+        compare(present.hasIdentity, true)
+        compare(present.publicKey, "ab12cd")
+        // A filled chip carries no reason: it would describe a state the reader
+        // is not in.
+        compare(present.reason, "")
+
+        var absent = Core.identityFrom({
+            ok: true, value: { hasIdentity: false, reason: "keystore permissions are too open" }
+        })
+        compare(absent.hasIdentity, false)
+        compare(absent.publicKey, "")
+        compare(absent.reason, "keystore permissions are too open")
+
+        var failed = Core.identityFrom({ ok: false, error: "no keystore found" })
+        compare(failed.hasIdentity, false)
+        compare(failed.publicKey, "")
+        compare(failed.reason, "no keystore found")
+    }
+
+    function test_only_a_literal_true_claims_an_identity() {
+        var looser = ["true", 1, null, undefined, {}, "yes"]
+        for (var i = 0; i < looser.length; i++) {
+            var out = Core.identityFrom({
+                ok: true, value: { hasIdentity: looser[i], publicKey: "ab12cd" }
+            })
+            verify(!out.hasIdentity, "hasIdentity was claimed by a non-true value at index " + i)
+            // No key is named for an identity that was not established — naming
+            // one is the defect the `=== true` rule exists to avert.
+            compare(out.publicKey, "")
+        }
+    }
+
+    // The property that the duplication could not hold: both screens answer
+    // identically because both delegate to the same rule.
+    //
+    // **This fails if either screen re-acquires a private copy that differs.** A
+    // copy that is still identical passes, which is honest — the defect is
+    // divergence, and this is what observes it.
+    function test_both_screens_normalise_a_probe_the_same_way() {
+        var feed = feedScreen.createObject(spec)
+        var thread = threadScreen.createObject(spec)
+
+        // Distinguishing inputs: a closed gate carrying a reason, and a refused
+        // probe. A shared implementation gives one answer for both screens.
+        var probes = [
+            { ok: true, value: { canPost: false, reason: "no keystore found" } },
+            { ok: true, value: { canPost: true, reason: "ignored" } },
+            { ok: false, error: "the core module is not reachable" }
+        ]
+        for (var i = 0; i < probes.length; i++) {
+            var f = feed.capabilityFrom(probes[i])
+            var t = thread.capabilityFrom(probes[i])
+            compare(t.canPost, f.canPost, "capability.canPost diverged at index " + i)
+            compare(t.reason, f.reason, "capability.reason diverged at index " + i)
+            compare(f.reason, Core.capabilityFrom(probes[i]).reason,
+                    "the feed's answer left Core's rule at index " + i)
+        }
+
+        var idProbes = [
+            { ok: true, value: { hasIdentity: true, publicKey: "ab12cd" } },
+            { ok: true, value: { hasIdentity: false, reason: "permissions are too open" } },
+            { ok: false, error: "no keystore found" }
+        ]
+        for (var j = 0; j < idProbes.length; j++) {
+            var fi = feed.identityFrom(idProbes[j])
+            var ti = thread.identityFrom(idProbes[j])
+            compare(ti.hasIdentity, fi.hasIdentity, "identity.hasIdentity diverged at index " + j)
+            compare(ti.publicKey, fi.publicKey, "identity.publicKey diverged at index " + j)
+            compare(ti.reason, fi.reason, "identity.reason diverged at index " + j)
+            compare(fi.reason, Core.identityFrom(idProbes[j]).reason,
+                    "the feed's answer left Core's rule at index " + j)
+        }
+
+        feed.destroy()
+        thread.destroy()
+    }
+
+    Component {
+        id: feedScreen
+        FeedScreen {}
+    }
+
+    Component {
+        id: threadScreen
+        DThreadScreen {}
+    }
 }
