@@ -140,7 +140,7 @@ finding below names its dimension.
       D9's record are both real. Low severity; document-only fix (add the
       line to D9's table) would close it.
 
-      **Fixed** in `4a8f1c2` (document-only, as the finding proposed). The
+      **Fixed** in `af78a63` (document-only, as the finding proposed). The
       guard now has its own row in *What the merge took from each side*,
       attributed to this piece and into navigation's function, so a maintainer
       reading that table to find every place this piece touched `Main.qml`
@@ -180,7 +180,7 @@ finding below names its dimension.
       the ambiguity. Cosmetic; not a functional defect since the code itself
       is internally consistent and correct.
 
-      **Fixed** in `4a8f1c2` (document-only). D9's opening now marks the
+      **Fixed** in `af78a63` (document-only). D9's opening now marks the
       mechanism as **this piece's proposal, superseded by the merge**, and
       states what ships in the same breath — `openThread()` clears `chosen`
       and carries the feed context on `reading`, `closeThread()` rebuilds it —
