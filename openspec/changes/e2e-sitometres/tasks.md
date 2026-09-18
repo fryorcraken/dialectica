@@ -52,14 +52,30 @@
 - [x] A missing report is named as "nothing was proved", not as a missing file
 - [x] Evidence uploaded on failure only
 
-**Not ticked, because no gate available to me can show it:** that the workflow
-*runs green end to end*. It builds a Basecamp from source and needs a runner;
-nothing I can execute here exercises the `Run the spec` step, the inspector
-assertion against a real `#app`, or the matched-pair behaviour. What IS proven
-locally is everything downstream of the report — the adjudicator, its guards,
-and the schema validation — plus that the spec parses against the real schema.
-The first CI run is the first evidence for the rest, and it should be read as
-such rather than assumed.
+### Open: the spec does not yet pass, and why that is not a ticked box
+
+- [ ] **The `sitometres join spec` job is RED.** Three runs; every step up to
+      the run passes — the inspector assertion, the matched pair, and
+      `lgs left scaffold.toml alone` — and then step 1 fails after 120s with
+      `dialectica_ui declares the core module "dialectica", and Basecamp could
+      not load it`. The remaining 18 steps report inconclusive.
+
+What the three runs established, so the next person does not repeat them:
+
+- `with: [dialectica]` was missing and is now present — the header line moved
+  from `resolving` to `staging dialectica_ui, dialectica`, so the staging half
+  is fixed. **It was necessary and not sufficient**: the same message persists.
+- The failure is NOT the variant mismatch D1 warns about, despite presenting
+  identically (app never opens, step 1 times out). Both halves are dev.
+- **The first two runs could not be diagnosed at all**, because sitometres
+  reaps its throwaway user-dir — and the Basecamp log with it — on the clean
+  exit a failing spec produces. `--user-dir` now keeps it (D7a). The next run
+  is the first that can say *why* the module did not load.
+
+The honest reading: everything downstream of the report is proven — the
+adjudicator and its guards, the schema validation, and the evidence upload,
+each exercised for real by these runs. **The suite itself has not yet passed
+once**, so nothing here should be read as saying the view works end to end.
 
 ### Corrections to stale claims
 
