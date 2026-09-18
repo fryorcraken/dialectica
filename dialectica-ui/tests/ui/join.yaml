@@ -130,6 +130,15 @@ steps:
   # hidden here would be hidden on a guess rather than on an answer core gave.
   # What this asserts is that pressing it on a keyless profile surfaces the
   # refusal rather than failing silently or appearing to succeed.
+  #
+  # THIS STEP IS THE ONE THAT WILL BREAK FIRST, and deliberately so. It asserts
+  # a refusal, and a refusal is contingent on the profile having no keystore.
+  # The day the application gains a path that mints one — mounting
+  # DOnboardingScreen is the obvious one, see design.md D4 — creation starts
+  # succeeding and this step fails. That is the intended coupling rather than a
+  # fragility to work around: the suite should notice the day the finding it
+  # records is addressed, and the fix is then to rewrite these four steps into
+  # the successful-creation flow they become.
   - name: type a title to create
     type:
       into: { objectName: "createField" }
