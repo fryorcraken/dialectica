@@ -8,12 +8,17 @@
       `skip_specs: true` alongside `schema:` in `.openspec.yaml`, which carries
       the argument — including why ruling 4 is not contract material.
 - [x] design + code — `dev-writer`
-- [ ] tests — `tester`
+- [ ] ~~tests — `tester`~~ — this change adds no behaviour, so there is nothing
+      a test could assert. See "What no gate can see" below, which explains that
+      every gate in this repo is structurally blind to a prose-only change.
 - [x] review: correctness — `code-reviewer`
-- [ ] review: security — `code-reviewer`
+- [ ] ~~review: security — `code-reviewer`~~ — not dispatched by the runner:
+      no untrusted input and no code in scope for this piece.
 - [x] review: readability — `code-reviewer`
 - [x] review: architecture — `code-reviewer`
-- [ ] review: spec-test — `spec-test-reviewer`
+- [ ] ~~review: spec-test — `spec-test-reviewer`~~ — not dispatched by the
+      runner: no spec delta (`skip_specs: true`), so there are no spec/test
+      pairs to check.
 - [x] review: design — `design-reviewer`
 - [ ] findings all ticked, `findings/` deleted — `closer`
 - [ ] `openspec validate --strict`, then `archive` — `closer`
