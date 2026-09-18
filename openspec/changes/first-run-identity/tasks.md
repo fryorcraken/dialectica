@@ -39,8 +39,8 @@
   it never does, and why it takes no Stoa.
 - [x] 3.2 Adapter forward, supplying the two host-derived values the way
   `keep_identity` does.
-- [ ] 3.3 `lgs basecamp build --variant lgx` — prove the dispatch table still
-  derives from the changed trait.
+- [x] 3.3 `lgs basecamp build --variant lgx` — prove the dispatch table still
+  derives from the changed trait. Both `.lgx` artefacts built.
 
 ## 4. The view
 
@@ -65,8 +65,26 @@
 
 ## 6. Proof by launching
 
-- [ ] 6.1 Rebuild, `lgs basecamp install`, `lgs basecamp launch alice` on a fresh
-  profile.
-- [ ] 6.2 Read the launch log and confirm a fresh profile gets from "no Stoas" to
-  a created Stoa. **A green suite is not this step**: a completely broken bridge
-  shipped here under one.
+- [x] 6.1 Rebuilt, `lgs basecamp install`, `lgs basecamp launch alice` on a
+  profile verified to hold no `identity.key` and no store beforehand.
+- [x] 6.2 **The deadlock is closed, proved against the profile rather than
+  against a reply.** `module_data/dialectica/40c5423a292f/` now holds
+  `identity.key` (35 bytes, mode 0600, protection byte `00` — unencrypted, which
+  is what a first run with no passphrase yields) and `stoas.sqlite` with **one
+  row**. A Stoa exists on a profile that could not previously make one.
+
+  **The two keys are the same key**, which is the claim that matters and is
+  asserted as a relation rather than against a literal: the genesis record's
+  creator is `8fb955ab…a42339`, and opening the minted keystore and taking
+  `identity_public_key()` yields `8fb955ab…a42339`. So the key the mint wrote is
+  the key `create_stoa` named as creator.
+
+  **`chosen_paths` holds 0 rows**, confirming under a real launch what the unit
+  test asserts: the mint writes layer 1 and records no per-Stoa choice, so the
+  placeholder-Stoa shortcut's failure mode was avoided rather than merely
+  argued.
+
+  The log shows the plugin healthy: `DStoaListScreen.qml` resolved 65 times and
+  `DTheme.qml` 72 times into the plugin's own directory, with **zero**
+  `ReferenceError`, `Unable to assign`, `is not a type` or `MODULE_NOT_LOADED`
+  lines, and basecamp exited 0.
