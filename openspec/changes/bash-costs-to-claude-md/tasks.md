@@ -14,7 +14,7 @@
 - [ ] review: correctness — `code-reviewer`
 - [ ] ~~review: security — `code-reviewer`~~ — no untrusted input, no logic, no
       network or storage surface touched.
-- [ ] review: readability — `code-reviewer`
+- [x] review: readability — `code-reviewer`
 - [x] review: architecture — `code-reviewer`
 - [ ] ~~review: spec-test — `spec-test-reviewer`~~ — no spec delta
       (`skip_specs: true`), nothing for a spec-test review to check.
