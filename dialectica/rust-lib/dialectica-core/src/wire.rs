@@ -2105,6 +2105,41 @@ fn thread_page_json(page: &crate::thread::ThreadPage) -> String {
 /// this field rather than redefining it — PLAN.md §9.1's own shape for `getStoa`.
 const FOUNDING_TITLE: &str = "foundingTitle";
 
+/// The genesis record itself, hex-encoded.
+///
+/// # Why an address is not enough, and no caller can make up the difference
+///
+/// A Stoa address is `stoa_address(&genesis.canonical_bytes())` — a one-way hash.
+/// So a view holding an address holds nothing it can turn back into a record, and
+/// every call that needs one ([`read_feed`], [`read_thread`], [`join_stoa`], and
+/// the share text a user pastes elsewhere) needs the record itself. Reporting the
+/// address alone left a view with no honest option but to send an empty string,
+/// which is zero bytes and fails the version-byte take as "genesis record ended
+/// mid-field" — a decode error that reads like a codec bug and is the absence of
+/// this field.
+///
+/// **This costs no network call and no new state.** `stoa-membership` already
+/// requires the peer RETAIN the record for every Stoa it is in, and
+/// [`crate::membership`] stores `canonical_bytes()` verbatim precisely so it can
+/// be handed back. Only the wire shape was omitting it.
+///
+/// # Hex, and the same hex `join_stoa` reads
+///
+/// The field a caller hands BACK is a hex string ([`join_stoa`] hex-decodes it),
+/// so reporting anything else would make the reply and the request disagree about
+/// one record. `a_listed_record_round_trips_through_the_join_the_view_performs`
+/// pins that agreement through both calls rather than trusting this sentence.
+///
+/// # Encoding cannot fail here, and is not silently defaulted
+///
+/// Every record that reaches a reply has already been encoded — a creation hashed
+/// it to get the address, and a stored one was decoded from the bytes this
+/// re-encodes. `canonical_bytes` is still fallible in the type, and a failure is
+/// reported as the error shape rather than as an empty string: an empty `genesis`
+/// is exactly the input that produces the owner's bug, so defaulting to it would
+/// reintroduce the defect as a success reply.
+const GENESIS: &str = "genesis";
+
 /// What a create or a join reports about the Stoa it settled on.
 ///
 /// One function rather than two spellings, because the spec requires both replies
@@ -2113,11 +2148,20 @@ const FOUNDING_TITLE: &str = "foundingTitle";
 /// a list item: the spec fixes a list item as carrying the address and the
 /// founding title, and widening the paginated envelope's item shape is a decision
 /// for whoever needs it.
+///
+/// **[`GENESIS`] is on both shapes**, because the reason for it is not a property
+/// of either call: a view that can open a Stoa it just created but not one it
+/// merely lists is a view that breaks on restart.
 fn stoa_reply(stoa: &crate::identity::Address, genesis: &crate::stoa::Genesis) -> String {
+    let bytes = match genesis.canonical_bytes() {
+        Ok(b) => b,
+        Err(e) => return error_json(&e.to_string()),
+    };
     serde_json::json!({
         "stoa": stoa.to_hex(),
         FOUNDING_TITLE: genesis.title,
         "policy": policy_name(genesis.policy),
+        GENESIS: hex::encode(bytes),
     })
     .to_string()
 }
@@ -2177,7 +2221,8 @@ fn policy_name(policy: crate::stoa::Policy) -> &'static str {
     }
 }
 
-/// Create a Stoa: `{"title":"…"}` -> `{"stoa":…,"foundingTitle":…,"policy":…}`.
+/// Create a Stoa: `{"title":"…"}` ->
+/// `{"stoa":…,"foundingTitle":…,"policy":…,"genesis":…}`.
 ///
 /// # The creator key is not a parameter, and cannot be
 ///
@@ -2779,7 +2824,8 @@ pub fn join_stoa(request: &str, store: &mut crate::membership::MembershipStore) 
 
 /// One page of the Stoas this peer is in.
 ///
-/// `{"page":N,"perPage":N}` -> `{"items":[{"stoa":…,"foundingTitle":…}],"page":N,"hasMore":bool}`.
+/// `{"page":N,"perPage":N}` ->
+/// `{"items":[{"stoa":…,"foundingTitle":…,"genesis":…}],"page":N,"hasMore":bool}`.
 ///
 /// # Exactly what membership records, and nothing derived from ops
 ///
@@ -2915,17 +2961,27 @@ pub fn with_membership_store_read(
 pub use crate::membership::membership_path_in;
 
 /// The pagination shape for a membership listing, built in one place.
+///
+/// **An item carries [`GENESIS`] for the reason that constant gives**, and the
+/// listing is the call where it matters most: a view holds records only for what
+/// it created or joined in the current session, so without this field a relaunched
+/// app can open nothing at all. The core retained the record the whole time.
 fn membership_page_json(page: &crate::membership::MembershipPage) -> String {
-    let items: Vec<serde_json::Value> = page
-        .items
-        .iter()
-        .map(|m| {
-            serde_json::json!({
-                "stoa": m.stoa.to_hex(),
-                FOUNDING_TITLE: m.genesis.title,
-            })
-        })
-        .collect();
+    let mut items: Vec<serde_json::Value> = Vec::with_capacity(page.items.len());
+    for m in &page.items {
+        // Reported as a failure rather than as an item missing its record. A
+        // listing is how a view decides what it can open, so an item silently
+        // short of its record is the owner's bug wearing a success reply.
+        let bytes = match m.genesis.canonical_bytes() {
+            Ok(b) => b,
+            Err(e) => return error_json(&e.to_string()),
+        };
+        items.push(serde_json::json!({
+            "stoa": m.stoa.to_hex(),
+            FOUNDING_TITLE: m.genesis.title,
+            GENESIS: hex::encode(bytes),
+        }));
+    }
     serde_json::json!({
         "items": items,
         "page": page.page,
