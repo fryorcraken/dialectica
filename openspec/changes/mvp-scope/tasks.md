@@ -9,7 +9,7 @@
       the argument — including why ruling 4 is not contract material.
 - [x] design + code — `dev-writer`
 - [ ] tests — `tester`
-- [ ] review: correctness — `code-reviewer`
+- [x] review: correctness — `code-reviewer`
 - [ ] review: security — `code-reviewer`
 - [x] review: readability — `code-reviewer`
 - [ ] review: architecture — `code-reviewer`
