@@ -1,0 +1,211 @@
+# End-to-end UI test, run with sitometres:
+#
+#   npx @paradoxcomputer/sitometres run dialectica-ui/tests/ui/join.yaml \
+#     --app dialectica_ui --app-dir .scaffold/basecamp/lgx \
+#     --basecamp ./result-basecamp/bin/LogosBasecamp --strict
+#
+# See docs/e2e.md for the whole sequence and why each flag is there.
+#
+# Unlike the component tests, this drives the REAL Basecamp host: real clicks
+# through Basecamp's QML inspector, the real transport, and the real
+# `dialectica` core module against a real on-disk store. It proves the wiring
+# the component tests structurally cannot reach — every one of them runs with
+# the host absent, which is how the Theme/DTheme collision took out the entire
+# visual system with every gate green.
+#
+# ---------------------------------------------------------------------------
+# WHAT THIS COVERS, AND WHAT IT DOES NOT
+# ---------------------------------------------------------------------------
+#
+# It covers: the app opens and reaches its starting screen; membership is read
+# (distinguishably from "read and empty"); the create affordance surfaces the
+# core's refusal on a keyless profile; a malformed paste is refused without
+# navigating; a well-formed paste previews without joining; and a join the core
+# refuses is presented as a refusal that enrols nobody.
+#
+# It does NOT cover a SUCCESSFUL join, or the feed screen. Both need a
+# reference whose founding record hashes to its address, which needs either a
+# keystore or an out-of-band seeder. The gap is stated here and in design.md D3
+# rather than approximated, because a specification that appears to cover a
+# successful join while asserting something weaker is worse than an absent one.
+#
+# ---------------------------------------------------------------------------
+# WHY THE JOIN FLOW AND NOT THE CREATE FLOW
+# ---------------------------------------------------------------------------
+#
+# `join_stoa` needs the membership store and nothing else. `create_stoa`
+# resolves its creator through `keystore::creator_key_in`, which answers
+# `NotFound` — "no keystore found; create one before posting" — on a profile
+# that has no keystore, and a run under sitometres has a throwaway $HOME and so
+# a fresh profile every time.
+#
+# That is not a gap in this spec. It is a finding, recorded in design.md D4: the
+# only screen that mints an identity is DOnboardingScreen, which is declared in
+# qmldir and instantiated nowhere, so the ASSEMBLED application has no path that
+# creates a keystore at all. The create step below asserts the failure is
+# PRESENTED, which is the honest assertion against the application as it is —
+# and it is written so that mounting onboarding makes it fail, which is the
+# right way round: the suite notices the day the finding is addressed.
+#
+# ---------------------------------------------------------------------------
+# WHAT IS ASSERTED, AND WHAT IS DELIBERATELY NOT
+# ---------------------------------------------------------------------------
+#
+# `state:` throughout, never `text:`. `text:` reads QML properties rather than
+# pixels, so it also matches items that are loaded but hidden — and this view
+# mounts all three screens at once and hides the inactive ones, so a control on
+# a hidden screen is still in the tree to be matched.
+#
+# No `calls:` anywhere. QML dispatches to core through the module transport and
+# that hop is not logged as a LogosAPIClient invocation, so sitometres would
+# report "no backend calls at all" while the data plainly arrives. The state
+# assertions prove the round trip happened, which is the part that matters.
+#
+# No assertion pins the WORDING of a core-supplied failure. The wording is not
+# part of any contract the view holds; pinning it would fail on a reworded
+# diagnostic while passing on a view that showed the wrong message entirely.
+
+app: dialectica_ui
+timeout: 30s
+
+steps:
+  # A step carries exactly one action, so opening and waiting are separate.
+  - name: the app opens
+    open: dialectica_ui
+
+  # The list is the starting screen: `screenShown` is "list" whenever neither
+  # `chosen` nor `previewing` is set, and a fresh run has set neither.
+  - name: it starts on the Stoa list
+    wait_for:
+      state: "root.screenShown === 'list'"
+    timeout: 45s
+
+  # Membership read WITHOUT error is the precondition for everything below.
+  # "in no Stoas" and "could not be read" are the pair this screen exists to
+  # keep apart, so asserting the read state is not the same as asserting the
+  # count — a failed read also reports zero rows.
+  - name: membership was read, not merely empty
+    wait_for:
+      state: "root.listReadState === 'ok'"
+    timeout: 30s
+
+  - name: this profile starts in no Stoas
+    expect:
+      state: "root.stoaCount === 0"
+
+  # ---- creating, on a profile with no keystore ---------------------------
+  #
+  # The create affordance is ALWAYS offered, deliberately: the posting probe
+  # takes a Stoa address and there is no Stoa yet at creation, so a button
+  # hidden here would be hidden on a guess rather than on an answer core gave.
+  # What this asserts is that pressing it on a keyless profile surfaces the
+  # refusal rather than failing silently or appearing to succeed.
+  - name: type a title to create
+    type:
+      into: { objectName: "createField" }
+      text: "a stoa this run will not manage to create"
+
+  - name: press Create
+    click: { objectName: "createStoaButton" }
+
+  # Presence and non-emptiness, never the wording — the reason is in the header.
+  # `createState === 'failed'` is the view's own verdict; the non-empty failure
+  # is that it has something to show for it. Asserting only the state would pass
+  # against a screen that reported failure and rendered a blank panel.
+  - name: creation is refused, and the refusal is presented
+    wait_for:
+      state:
+        - "root.createState === 'failed'"
+        - "root.createFailure.length > 0"
+    timeout: 30s
+
+  - name: a refused creation joins nothing
+    expect:
+      state: "root.stoaCount === 0"
+
+  # ---- pasting something malformed ---------------------------------------
+  #
+  # Before the happy path, because it proves the paste field is genuinely
+  # parsed rather than accepted: a run where every paste "worked" would pass
+  # the join step below while proving nothing about validation.
+  - name: paste something that is not a reference
+    type:
+      into: { objectName: "pasteField" }
+      text: "not a stoa reference"
+
+  - name: ask to look at it
+    click: { objectName: "previewButton" }
+
+  # A malformed paste must NOT navigate. Staying on the list is the assertion:
+  # a preview screen rendered from unparsed input is the failure this checks.
+  - name: it is refused and the list is still up
+    expect:
+      state:
+        - "root.pasteFailure.length > 0"
+        - "root.screenShown === 'list'"
+
+  # ---- a well-formed reference the core cannot verify ---------------------
+  #
+  # WHY NOT A REFERENCE THAT ACTUALLY JOINS. A reference joins only when its
+  # founding record hashes to its address, and the core verifies exactly that.
+  # Minting such a pair needs either a keystore (which this profile cannot have
+  # — see the header) or a seeder that builds one out of band, which is its own
+  # piece of work. This spec therefore covers the navigation and the refusal,
+  # and does NOT claim to cover a successful join.
+  #
+  # That gap is stated rather than papered over. It is recorded in design.md
+  # D3, and it is the thing to close first when this suite is extended. The
+  # controls those steps would drive are already named — `openStoaButton` on
+  # each row, `feedBackButton` on the feed — so closing it is a seeder plus
+  # spec steps, with no further view change.
+  #
+  # What this DOES prove, and the component suite cannot: the paste field, the
+  # preview transition, the join button and the refusal rendering are wired to
+  # a real core over the real transport in the assembled application.
+  - name: paste a well-formed reference
+    type:
+      into: { objectName: "pasteField" }
+      text: '{"stoa":"0000000000000000000000000000000000000000000000000000000000000000","genesis":"00ff"}'
+
+  - name: ask to look at it
+    click: { objectName: "previewButton" }
+
+  # Acting on a pasted reference reaches a PREVIEW and joins nothing. An
+  # interface that joined here would enrol a user in a Stoa they never chose,
+  # so this asserts the transition happened AND that nothing was joined by it.
+  - name: it previews rather than joining
+    wait_for:
+      state: "root.screenShown === 'join'"
+    timeout: 30s
+
+  - name: previewing has joined nothing
+    expect:
+      state: "root.stoaCount === 0"
+
+  # A well-formed paste reaches the join screen in the `previewing` state: the
+  # core has not been asked about it yet. Asserting this before the click is
+  # what makes the click's outcome attributable to the click.
+  - name: nothing has been decided about it yet
+    expect:
+      state: "root.joinState === 'previewing'"
+
+  - name: try to join it
+    click: { objectName: "joinButton" }
+
+  # The core refuses, because the record does not hash to the address — and the
+  # view presents that refusal. Presence and non-emptiness, never the wording:
+  # pinning the words would fail on a reworded diagnostic while passing on a
+  # view that showed the wrong message entirely.
+  - name: the refusal is presented
+    wait_for:
+      state:
+        - "root.joinState === 'failed'"
+        - "root.joinFailure.length > 0"
+    timeout: 45s
+
+  # A refused join must not enrol anybody. This is the assertion that makes the
+  # refusal mean something: a view that reported failure while joining anyway
+  # would pass every step above and fail this one.
+  - name: a refused join joined nothing
+    expect:
+      state: "root.stoaCount === 0"

@@ -9,10 +9,11 @@ name: CI
 #   * radicle's UI has a C++ backend; dialectica's has none — every screen
 #     forwards to core. The old form of this line said dialectica's UI was ONE
 #     QML file with four buttons, which stopped being true without anyone
-#     noticing: `dialectica-ui/src/qml/` holds 22 QML types plus `qmldir`, and
-#     `dialectica-ui/tests/` holds 18 spec files. Both counts are `ls` and
-#     `grep -c "function test_"` away, so re-measure rather than trusting this
-#     sentence.
+#     noticing. Deliberately NOT restated as numbers: the two that stood here
+#     ("22 QML types", "18 spec files") were already off by one the next time
+#     anyone measured, which is the same failure one level down.
+#     `ls dialectica-ui/src/qml/` and `ls dialectica-ui/tests/tst_*.qml`
+#     answer it, and cannot go stale.
 #   * both repos have a sitometres e2e suite. Dialectica's lives in its own
 #     workflow, for the same reason radicle's does: it builds a Basecamp, so it
 #     costs minutes where these jobs cost seconds. The cheap half — validating
@@ -1049,6 +1050,49 @@ jobs:
           fi
           echo "ok: all $on_disk QML spec file(s) ran"
 
+  # ─── ui-specs ────────────────────────────────────────────────────────────
+  # The cheap half of the end-to-end suite.
+  #
+  # The expensive half lives in `.github/workflows/ui-tests.yml`, because it
+  # builds a Basecamp from source — the QML inspector sitometres drives is a
+  # compile-time feature, off in every shipping build. Parsing a spec needs
+  # none of that and costs seconds, so a malformed spec is caught on every PR
+  # rather than after a Basecamp build. Same mistake, far earlier.
+  #
+  # The file list is GLOBBED from the directory by the script, never
+  # maintained beside it, and the script fails on an empty directory — a
+  # validator that reports success over zero files is a gate that cannot fail.
+  ui-specs:
+    name: UI spec validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      # The same pinned version ui-tests.yml runs the specs with. A different
+      # version here would validate against a schema that is not the one the
+      # expensive job enforces, which is a gate measuring the wrong thing.
+      - name: Specs parse against the sitometres schema
+        run: |
+          set -eu
+          npm install --no-save --silent @paradoxcomputer/sitometres@0.1.2 yaml
+          node dialectica-ui/tests/validate-ui-specs.mjs
+
+      # The adjudicator is what decides whether an end-to-end run proved
+      # anything, so its own guards are checked here — cheaply, on every PR,
+      # rather than only being exercised by the expensive workflow. It is a
+      # checked-in script rather than a heredoc for exactly this reason: both
+      # of the QML gates' defects shipped through review because a heredoc
+      # cannot be run without pushing a branch.
+      - name: The run adjudicator catches what it claims to
+        run: |
+          set -eu
+          python3 -c 'import yaml' 2>/dev/null || pip install --quiet pyyaml
+          python3 dialectica-ui/tests/tst_adjudicate_ui_run.py
+
   # ─── rust ────────────────────────────────────────────────────────────────
   # The core module's whole decision surface. `src/core.rs` holds every
   # decision and `src/lib.rs` holds none, and that shape is FORCED rather than
@@ -1340,8 +1384,16 @@ jobs:
       # rev for TWO flags: `setup --inspector` and `build --print-output`.
       #
       #   * `--inspector` builds a Basecamp with the QML inspector compiled in,
-      #     which sitometres needs to drive the UI. Dialectica has no e2e
-      #     harness, so no job here calls `setup` at all.
+      #     which sitometres needs to drive the UI. Dialectica now HAS an e2e
+      #     harness — `.github/workflows/ui-tests.yml` — and the pin survives
+      #     anyway, for a better reason than the one that expired. That
+      #     workflow builds the dev `#app`, which already carries the
+      #     inspector, with a raw `nix build`; it calls no `setup` and wants no
+      #     `--inspector` flag. So the premise moved from "we have no harness"
+      #     to "the harness does not need that flag", and the conclusion is
+      #     unchanged. No job in EITHER workflow calls `setup` — which matters
+      #     beyond this pin, because any `lgs basecamp` verb rewrites
+      #     scaffold.toml and strips its comments.
       #   * `build --print-output` really is absent from v0.3.1 (checked in the
       #     scaffold checkout: at that tag only `install` carries the flag).
       #     And the reason that does not matter is NOT that the env var

@@ -417,6 +417,13 @@ ScreenFrame {
             }
 
             FlatButton {
+                // One per row, so a spec addresses it with `nth:`. The name is
+                // on the FlatButton rather than on this RowLayout deliberately:
+                // the harness walks from a matched node to the nearest
+                // enclosing container holding a mouse handler, and naming the
+                // row — which also contains the share button's handler — would
+                // let that walk pick the wrong control.
+                objectName: "openStoaButton"
                 text: "Open"
                 kind: "secondary"
                 onClicked: screen.stoaChosen(row.rowStoa, row.rowTitle,
@@ -486,6 +493,13 @@ ScreenFrame {
 
                 TextInput {
                     id: createField
+                    // On the TextInput, NOT on the Rectangle wrapping it. An
+                    // `id` is private to this file, so nothing outside can
+                    // select by it — and the end-to-end harness resolves a
+                    // typing target by requiring the matched node itself to be
+                    // an editable type, so a name on the wrapper would resolve
+                    // to a Rectangle that cannot accept text.
+                    objectName: "createField"
                     anchors.fill: parent
                     anchors.margins: 5
                     text: screen.createTitle
@@ -597,6 +611,8 @@ ScreenFrame {
 
                 TextInput {
                     id: pasteField
+                    // On the TextInput itself — see `createField` above.
+                    objectName: "pasteField"
                     anchors.fill: parent
                     anchors.margins: 5
                     text: screen.pasted
@@ -612,6 +628,11 @@ ScreenFrame {
                 // NOTHING: an address inside a post is attacker-supplied content
                 // and an interface that joined on paste would enrol a user in a
                 // Stoa they never chose.
+                //
+                // Named because an end-to-end spec drives it, and selecting it
+                // by its label would make every rewording of this button a test
+                // failure.
+                objectName: "previewButton"
                 text: "Look at it first"
                 kind: "secondary"
                 onClicked: screen.preview()
