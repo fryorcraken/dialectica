@@ -256,6 +256,30 @@ QtObject {
     // from a success is the caller's job and is done once, in
     // DOnboardingScreen, where the three outcomes become three phases.
 
+    // `{}` -> `{"publicKey":hex,"encrypted":bool,"wasNew":bool}`.
+    //
+    // **The only call here that takes no Stoa, and that is why it exists.** Every
+    // other identity call above takes one, and a fresh install has none — so
+    // creating a Stoa needed a key, minting a key needed a Stoa, and a fresh
+    // profile could reach neither. A "Create it" on an empty Stoa list answered
+    // the keystore's `no keystore found; create one before posting` with nothing
+    // anywhere able to create one.
+    //
+    // **It has ONE success shape**, unlike `keepIdentity` and `whoAmI` above: it
+    // cannot answer no and still succeed. Either a master key is on disk when
+    // this returns, or `ok` is false. So a caller reads `publicKey`
+    // unconditionally and `wasNew` only to decide what to say.
+    //
+    // **Calling it again is safe.** Core reports an existing key with
+    // `wasNew:false` and never replaces it — a master key exists in exactly one
+    // place, and replacing it discards every identity derived from it.
+    //
+    // It records no per-Stoa choice, so `generateIdentitySlate` and
+    // `keepIdentity` are untouched and remain the only route to one.
+    function createIdentity() {
+        return root.call("create_identity", [JSON.stringify({})])
+    }
+
     // `{"stoa":hex}` -> `{"slate":hex,"count":N,"candidates":[…]}`.
     // No count parameter: a caller-supplied count is a number deciding how much
     // key derivation the module performs, so the module fixes it and reports it.
