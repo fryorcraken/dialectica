@@ -176,7 +176,32 @@ Rectangle {
         }
         FlatButton {
             visible: !root.hasIdentity
-            text: "Create an identity"        // copy.json common.createIdentity
+
+            // DELIBERATELY NOT copy.json `common.createIdentity`, which is
+            // "Create an identity". That string names the wrong layer, and the
+            // divergence is the point — do not "restore" it to the bundle.
+            //
+            // Identity here is two layers, and a user meets both:
+            //
+            //   * LAYER 1, the master key. One per install, Stoa-independent,
+            //     created once via core's `create_identity`.
+            //   * LAYER 2, the chosen path for THIS Stoa. Generated as a slate
+            //     of candidates and kept. This button performs layer 2.
+            //
+            // The chip renders this arm on `hasIdentity === false`, which is
+            // layer 2's absence — so a user who has done layer 1 and no layer 2
+            // was being offered a button captioned with the step they had just
+            // completed. Reported from the running app: "'create identity'
+            // button still here despite having already created a key for the
+            // machine".
+            //
+            // "Choose" and "for this Stoa" each carry one half of the fix: the
+            // verb is `DOnboardingScreen`'s own ("Choose the identity you will
+            // keep here.", copy.json `identity.title`), so the button and the
+            // screen it opens read as one action rather than two; and the scope
+            // phrase is what layer 1 has no version of, since a master key
+            // belongs to the machine and not to any Stoa.
+            text: "Choose an identity for this Stoa"
             kind: "primary"
             onClicked: root.createRequested()
         }
