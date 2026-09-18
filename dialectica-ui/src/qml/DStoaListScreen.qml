@@ -64,6 +64,57 @@ ScreenFrame {
     // widen the listing item to carry the retained record.
     property var genesisByStoa: ({})
 
+    // ---- this peer's master key -----------------------------------------
+    //
+    // A FIRST-RUN step, and it is a step rather than something folded into
+    // creation on the owner's decision. `wire.rs` states the invariant creation
+    // rests on — "Creation fails without a key rather than inventing one. There
+    // is no path from here to `Keystore::generate()`" — and minting inside
+    // `create_stoa` would overturn it. So the key is made here, explicitly, and
+    // `create_stoa` keeps refusing without one.
+    //
+    // "" | "minting" | "ready" | "failed"
+    property string keyState: ""
+    property string keyFailure: ""
+    // `{publicKey, encrypted, wasNew}` from the reply, or `null`.
+    property var keyHeld: null
+
+    // Mint this peer's master key, or report the one it already has.
+    //
+    // **Safe to press twice**, and the safety is core's rather than a guard
+    // here: an existing key comes back with `wasNew:false` and is never
+    // replaced. A disabled-button guard in this file would be a second copy of a
+    // rule core already enforces, and the copy is the one that gets forgotten.
+    function createIdentity() {
+        screen.keyState = "minting"
+        screen.keyFailure = ""
+
+        var reply = Core.createIdentity()
+
+        if (!reply.ok) {
+            screen.keyState = "failed"
+            screen.keyFailure = reply.error
+            screen.keyHeld = null
+            return
+        }
+
+        // A success MUST name the key. Without this the screen would report a
+        // key that was made on the strength of `ok` alone, which is the shape
+        // `Core.qml` warns about at its `ok: true` return — and here the user
+        // would then press "Create it" and meet the deadlock's error again with
+        // nothing explaining it.
+        if (typeof reply.value.publicKey !== "string" || reply.value.publicKey === "") {
+            screen.keyState = "failed"
+            screen.keyFailure = "The core module answered without a key, so there "
+                              + "is nothing to create a Stoa with."
+            screen.keyHeld = null
+            return
+        }
+
+        screen.keyHeld = reply.value
+        screen.keyState = "ready"
+    }
+
     // ---- creation -------------------------------------------------------
     property string createTitle: ""
     // "" | "creating" | "created" | "failed"
@@ -447,6 +498,145 @@ ScreenFrame {
         }
 
         Item { Layout.fillWidth: true }
+    }
+
+    // ---- this peer's identity, before anything can be created ------------
+    //
+    // **The first-run step, and the reason a fresh profile was stuck.** Creating
+    // a Stoa needs a creator key and mints none; the only thing that writes one
+    // is per-Stoa onboarding, which refuses a request naming no Stoa. So a fresh
+    // install could reach neither, and "Create it" answered the keystore's own
+    // `no keystore found; create one before posting` with nothing anywhere able
+    // to create one.
+    //
+    // **Always shown, in every read state.** It is not conditional on the
+    // listing: a peer whose membership could not be READ may still have no key,
+    // and hiding the one affordance that unblocks them behind a successful read
+    // is how the deadlock would come back for exactly the users least able to
+    // diagnose it.
+    //
+    // **Nothing here is a claim about whether a key exists.** The screen does not
+    // probe — `who_am_i` and `get_capabilities` both take a Stoa and there is no
+    // Stoa yet, which is the same reason "Create it" is always offered. So this
+    // renders what the LAST press reported and asserts nothing before one.
+    ColumnLayout {
+        Layout.fillWidth: true
+        spacing: DTheme.itemGap
+
+        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: DTheme.hairline; color: DTheme.ink }
+
+        // **The word "identity" is deliberately absent from every string in
+        // this block**, and it is a requirement rather than a style choice.
+        // `test_neither_the_list_nor_the_creation_outcome_claims_moderation_or_
+        // identity` bans it on this screen: one key signs in every Stoa in this
+        // release, so raising "identity" here would offer an unlinkability
+        // property the software does not have.
+        //
+        // The honest word is what this actually is — a key, belonging to this
+        // machine, used everywhere. `DOnboardingScreen` is where a per-Stoa
+        // identity is chosen, and that screen may say so because there the claim
+        // is true.
+        Text {
+            text: "THIS MACHINE'S KEY"
+            font: DTheme.label
+            color: DTheme.inkMuted
+            textFormat: Text.PlainText
+        }
+
+        Text {
+            text: "A Stoa records its creator's key, so this machine needs one "
+                + "before it can create or post. Making it writes a key here and "
+                + "tells nobody. The same key signs in every Stoa you hold."
+            font: DTheme.bodySmall
+            color: DTheme.inkSoft
+            wrapMode: Text.WordWrap
+            lineHeight: 1.55
+            textFormat: Text.PlainText
+            Layout.fillWidth: true
+        }
+
+        FlatButton {
+            objectName: "createIdentityButton"
+            text: "Create this machine's key"
+            kind: "primary"
+            onClicked: screen.createIdentity()
+        }
+
+        // What the last press reported. `wasNew` distinguishes a key just made
+        // from one that was already there — both are successes, and saying which
+        // is what stops a second press reading as a failure.
+        ColumnLayout {
+            visible: screen.keyState === "ready" && screen.keyHeld !== null
+            Layout.fillWidth: true
+            spacing: 4
+
+            Text {
+                objectName: "identityOutcomeText"
+                text: screen.keyHeld !== null && screen.keyHeld.wasNew === true
+                    ? "A key was created for this machine."
+                    : "This machine already had a key. Nothing was replaced."
+                font: DTheme.body
+                color: DTheme.ink
+                wrapMode: Text.WordWrap
+                textFormat: Text.PlainText
+                Layout.fillWidth: true
+            }
+
+            AddressLabel {
+                objectName: "identityKeyLabel"
+                address: screen.keyHeld !== null && typeof screen.keyHeld.publicKey === "string"
+                       ? screen.keyHeld.publicKey : ""
+                Layout.fillWidth: true
+                onCopyRequested: {
+                    if (screen.clipboard)
+                        screen.clipboard.copy(address)
+                }
+            }
+
+            // **Stated plainly when it is true, and this is the first run's
+            // normal case.** With no passphrase set, core stores the key in the
+            // clear and says so in `encrypted`. A user whose key is unprotected
+            // should learn it from the interface rather than from a file. There
+            // is no passphrase flow here to offer instead — saying the true
+            // thing is a smaller claim than a control that does not exist.
+            Text {
+                objectName: "identityUnencryptedWarning"
+                visible: screen.keyHeld !== null && screen.keyHeld.encrypted === false
+                text: "This key is stored unencrypted on this machine. Anyone who "
+                    + "can read the file can post as you."
+                font: DTheme.bodySmall
+                color: DTheme.accent
+                wrapMode: Text.WordWrap
+                lineHeight: 1.55
+                textFormat: Text.PlainText
+                Layout.fillWidth: true
+            }
+        }
+
+        // The core's reason, unreworded — the keystore's own vocabulary, which
+        // names a fix and reads like the one a failed creation gives.
+        ColumnLayout {
+            visible: screen.keyState === "failed"
+            Layout.fillWidth: true
+            spacing: 4
+
+            Text {
+                text: "No key was created."
+                font: DTheme.body
+                color: DTheme.accent
+                textFormat: Text.PlainText
+            }
+
+            Text {
+                objectName: "identityFailureText"
+                text: screen.keyFailure
+                font: DTheme.address
+                color: DTheme.ink
+                wrapMode: Text.WrapAnywhere
+                textFormat: Text.PlainText
+                Layout.fillWidth: true
+            }
+        }
     }
 
     // ---- create ---------------------------------------------------------

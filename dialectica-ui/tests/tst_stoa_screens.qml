@@ -2372,5 +2372,211 @@ TestCase {
         compare(spec.callsTo(bridge, "join_stoa"), 1)
         verify(String(spec.lastArgsTo(bridge, "join_stoa")).indexOf('"genesis":"00ff"') >= 0,
                "both halves must reach the core")
+
+        Core.bridge = bridgeFor({
+            "create_identity": '{"publicKey":"aa","encrypted":false,"wasNew":true}'
+        })
+        bridge = Core.bridge
+        var minted = Core.createIdentity()
+        compare(spec.callsTo(bridge, "create_identity"), 1)
+        compare(minted.ok, true)
+    }
+
+    // ---- first run: the identity step -------------------------------------
+    //
+    // The deadlock this closes: creating a Stoa needs a creator key and mints
+    // none, and the only thing that writes one is per-Stoa onboarding, which
+    // refuses a request naming no Stoa. A fresh profile could reach neither, so
+    // "Create it" answered `no keystore found` with nothing able to create one.
+
+    /// A key hex of the right length, so `AddressLabel` renders it as it would a
+    /// real one rather than falling into a short-string path.
+    function aKeyHex() {
+        return "7f3c19d84ba2e05c6178fd4390ab2ec5518d7a6f30b94c2e81df05a7c63e14b2"
+    }
+
+    function test_the_identity_step_is_offered_before_any_stoa_exists() {
+        // The affordance the deadlock needed and did not have. Offered on the
+        // EMPTY membership, which is the state a fresh profile is in.
+        var screen = makeList({ "list_stoas": '{"items":[],"page":0,"hasMore":false}' })
+
+        var buttons = spec.visibleNamed(screen, "createIdentityButton")
+        compare(buttons.length, 1,
+                "a fresh profile must be able to make a key without a Stoa in hand")
+        compare(buttons[0].enabled, true)
+        screen.destroy()
+    }
+
+    function test_the_identity_step_is_offered_even_when_the_membership_cannot_be_read() {
+        // Not conditional on the listing. A peer whose membership failed to read
+        // may still have no key, and hiding the one affordance that unblocks
+        // them behind a successful read brings the deadlock back for exactly the
+        // users least able to diagnose it.
+        //
+        // WATCHED TO FAIL: binding the block's `visible` to
+        // `screen.readState === "ok"` turns this red while leaving the test
+        // above green — which is why both directions are here.
+        var screen = makeList({ "list_stoas": '{"error":"the membership store is locked"}' })
+
+        compare(screen.readState, "failed", "the fixture must be in the failed state")
+        compare(spec.visibleNamed(screen, "createIdentityButton").length, 1,
+                "a failed listing says nothing about whether a key exists")
+        screen.destroy()
+    }
+
+    function test_no_identity_probe_is_made_before_the_user_asks() {
+        // The screen asserts nothing about whether a key exists, and CANNOT:
+        // `who_am_i` and `get_capabilities` both take a Stoa and there is no
+        // Stoa yet. So it must not call them — a screen that probed would be
+        // sending a request core refuses and rendering the refusal as an answer.
+        var screen = makeList({ "list_stoas": '{"items":[],"page":0,"hasMore":false}' })
+        var bridge = Core.bridge
+
+        compare(spec.callsTo(bridge, "who_am_i"), 0)
+        compare(spec.callsTo(bridge, "get_capabilities"), 0)
+        compare(spec.callsTo(bridge, "create_identity"), 0,
+                "and nothing may be minted before the user presses the button")
+        screen.destroy()
+    }
+
+    function test_a_minted_identity_is_reported_as_new_and_names_its_key() {
+        var screen = makeList({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "create_identity": '{"publicKey":"' + aKeyHex()
+                             + '","encrypted":false,"wasNew":true}'
+        })
+        var bridge = Core.bridge
+        screen.createIdentity()
+
+        compare(spec.callsTo(bridge, "create_identity"), 1)
+        compare(screen.keyState, "ready")
+
+        var labels = spec.visibleNamed(screen, "identityKeyLabel")
+        compare(labels.length, 1, "the key this machine now holds must be nameable")
+        compare(labels[0].address, aKeyHex(), "the key the core returned")
+
+        verify(spec.visibleText(screen).indexOf("was created") >= 0,
+               "a first run must read as a creation")
+
+        // **And it must not have said "identity" to do it.** This screen is
+        // banned from that word by
+        // `test_neither_the_list_nor_the_creation_outcome_claims_moderation_or_
+        // identity`: one key signs in every Stoa in this release, so raising
+        // identity here offers an unlinkability property the software lacks.
+        // Asserted HERE too, because that sibling drives creation rather than
+        // the mint, so the copy this test renders is a corpus it never scans.
+        verify(!/\bidentity\b/i.test(spec.visibleText(screen)),
+               "the mint's own copy must not raise identity either")
+        screen.destroy()
+    }
+
+    function test_a_second_press_reports_the_existing_key_rather_than_a_failure() {
+        // `wasNew:false` is a SUCCESS: the peer has a key, which is what was
+        // asked for. A screen that rendered it as a failure would tell a user
+        // their identity is broken at the moment it is working, and — worse —
+        // invite them to look for a way to replace it.
+        //
+        // WATCHED TO FAIL: rendering the outcome text unconditionally as "An
+        // identity was created" turns this red on the second assertion.
+        var screen = makeList({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "create_identity": '{"publicKey":"' + aKeyHex()
+                             + '","encrypted":false,"wasNew":false}'
+        })
+        screen.createIdentity()
+
+        compare(screen.keyState, "ready", "an existing key is not a failure")
+        var text = spec.visibleText(screen)
+        verify(text.indexOf("already had a key") >= 0,
+               "the screen must say the key was already there")
+        verify(text.indexOf("Nothing was replaced") >= 0,
+               "and that nothing was destroyed — the reassurance is the point")
+        screen.destroy()
+    }
+
+    function test_an_unencrypted_key_is_said_to_be_unencrypted() {
+        // The honesty requirement, and the first run's normal case: with no
+        // passphrase set core stores the key in the clear and reports it. A user
+        // should learn that from the interface, not from the file.
+        //
+        // WATCHED TO FAIL: deleting the warning Text turns this red.
+        var screen = makeList({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "create_identity": '{"publicKey":"' + aKeyHex()
+                             + '","encrypted":false,"wasNew":true}'
+        })
+        screen.createIdentity()
+
+        compare(spec.visibleNamed(screen, "identityUnencryptedWarning").length, 1,
+                "a key stored in the clear must say so")
+        verify(spec.visibleText(screen).indexOf("stored unencrypted") >= 0)
+        screen.destroy()
+    }
+
+    function test_an_encrypted_key_carries_no_unencrypted_warning() {
+        // The other direction, and the reason the test above proves anything: a
+        // warning shown unconditionally would satisfy it while telling every user
+        // with a protected key something false.
+        var screen = makeList({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "create_identity": '{"publicKey":"' + aKeyHex()
+                             + '","encrypted":true,"wasNew":true}'
+        })
+        screen.createIdentity()
+
+        compare(spec.visibleNamed(screen, "identityUnencryptedWarning").length, 0,
+                "a protected key must not be reported as stored in the clear")
+        screen.destroy()
+    }
+
+    function test_a_refused_mint_renders_the_cores_reason_and_claims_no_key() {
+        var screen = makeList({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "create_identity": '{"error":"the keystore directory is not writable"}'
+        })
+        screen.createIdentity()
+
+        compare(screen.keyState, "failed")
+        compare(screen.keyHeld, null, "nothing may be reported as held")
+        compare(spec.visibleNamed(screen, "identityKeyLabel").length, 0,
+                "and no key may be on screen")
+        verify(spec.visibleText(screen).indexOf("not writable") >= 0,
+               "the core's own reason, unreworded")
+        screen.destroy()
+    }
+
+    function test_a_success_without_a_key_is_treated_as_a_failure() {
+        // `ok:true` means the module ANSWERED, not that a key exists — the
+        // warning `Core.qml` carries at its `ok: true` return. A screen stopping
+        // at `ok` would report an identity that was never made, and the user
+        // would then meet the deadlock's error again with nothing explaining it.
+        var screen = makeList({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "create_identity": '{"encrypted":false,"wasNew":true}'
+        })
+        screen.createIdentity()
+
+        compare(screen.keyState, "failed",
+                "a reply naming no key is not an identity, whatever `ok` says")
+        compare(screen.keyHeld, null)
+        screen.destroy()
+    }
+
+    function test_the_mint_request_names_no_stoa() {
+        // The whole of why this method exists. A request carrying a Stoa would
+        // be a request only a peer that already has one can make, which is the
+        // deadlock restated.
+        var screen = makeList({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "create_identity": '{"publicKey":"' + aKeyHex()
+                             + '","encrypted":false,"wasNew":true}'
+        })
+        var bridge = Core.bridge
+        screen.createIdentity()
+
+        var sent = String(spec.lastArgsTo(bridge, "create_identity"))
+        verify(sent.indexOf("stoa") < 0,
+               "the mint must name no Stoa — a fresh install has none: " + sent)
+        screen.destroy()
     }
 }

@@ -210,6 +210,32 @@ pub trait DialecticaModule: Send + 'static {
     /// checked.
     fn list_stoas(&mut self, request: String) -> String;
 
+    /// Mint this peer's master key if it has none.
+    ///
+    /// Takes `{}` and returns
+    /// `{"publicKey":"<hex>","encrypted":bool,"wasNew":bool}` or the error shape.
+    ///
+    /// **It takes no Stoa, and that is the whole point of it.** Every other
+    /// identity-touching method here takes one, and a fresh install has none — so
+    /// creating a Stoa needed a key, minting a key needed a Stoa, and a fresh
+    /// profile could reach neither. This is the one way in.
+    ///
+    /// **It writes the master key only.** No per-Stoa choice is recorded, so
+    /// `generateIdentitySlate` and `keepIdentity` are unchanged and remain the
+    /// only things that record one. Minting under a placeholder Stoa instead
+    /// would let creation succeed while posting stayed refused.
+    ///
+    /// **Idempotent and never destructive.** Where a master key already exists it
+    /// is reported with `wasNew:false` and is never replaced — a master key exists
+    /// in exactly one place and replacing it discards every identity derived from
+    /// it. A repeat is a success rather than a refusal, because having a key is
+    /// the expected state on every run after the first.
+    ///
+    /// `encrypted` reports whether the key is protected at rest, so that a key
+    /// stored in the clear — which is what no passphrase yields — is a state a
+    /// view can name rather than a silent default.
+    fn create_identity(&mut self, request: String) -> String;
+
     /// A slate of candidate identities for a Stoa.
     ///
     /// Takes `{"stoa":"<hex>"}` and returns
@@ -900,6 +926,20 @@ impl DialecticaModule for Dialectica {
         core::with_membership_store_read(&core::membership_path_in(&dir), |store| {
             core::list_stoas(&request, store)
         })
+    }
+
+    fn create_identity(&mut self, request: String) -> String {
+        let dir = match self.storage_dir() {
+            Ok(d) => d,
+            Err(e) => return e,
+        };
+        // The same two host-derived values `keep_identity` below supplies, and
+        // they are supplied the same way for the same reason: `core` cannot know
+        // the host's directory, and `protection_from_env` owns the byte handling
+        // and the decision that there is no fallback constant. Spelling either
+        // one here would be the second copy CLAUDE.md's guard rule is about.
+        let unlock = core::keystore::protection_from_env();
+        core::create_identity(&request, &core::keystore::default_path_in(&dir), &unlock)
     }
 
     fn generate_identity_slate(&mut self, request: String) -> String {

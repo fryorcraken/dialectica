@@ -1177,6 +1177,168 @@ pub fn whoami_for(
     }
 }
 
+// ─── First run: the master key ─────────────────────────────────────────────
+
+/// What a mint did, or did not have to do.
+///
+/// **One shape, not two.** Every other identity reply here is a pair of exclusive
+/// shapes — `{"kept":true,…}` / `{"kept":false,"reason":…}` — because each of
+/// those asks a question whose answer can be no. This one cannot answer no and
+/// still succeed: either a master key is on disk when this returns, or the call
+/// failed and the error shape says why. So a caller reads `publicKey`
+/// unconditionally on success, and `wasNew` only to decide what to *say*.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Minted {
+    /// The master key's public half, hex. **The same value whether or not this
+    /// call wrote anything** — which is what makes the reply usable by a caller
+    /// that did not check `wasNew`.
+    pub public_key: String,
+    /// Whether the key on disk is protected by a passphrase.
+    ///
+    /// Reported for the reason [`Kept`]'s field of the same name is: an
+    /// unencrypted keystore must be a state an interface can *name* rather than
+    /// a silent default. `protection_from_env` stores in the clear where no
+    /// passphrase is set, and a first-run caller is exactly the one who has not
+    /// set one.
+    pub encrypted: bool,
+    /// Whether this call created the file, as opposed to finding one.
+    ///
+    /// **Not a success flag.** `false` is a success: the peer has a master key,
+    /// which is what was asked for. It exists so a caller can tell a first run
+    /// from a repeat and word itself accordingly, and for nothing else.
+    pub was_new: bool,
+}
+
+impl Minted {
+    /// The wire form.
+    pub fn to_json(&self) -> String {
+        serde_json::json!({
+            "publicKey": self.public_key,
+            "encrypted": self.encrypted,
+            "wasNew": self.was_new,
+        })
+        .to_string()
+    }
+}
+
+/// `{}` -> this peer's master key, minting one if there is none.
+///
+/// # Why this method exists: nothing else could mint a key on a fresh install
+///
+/// Every other identity-touching method on the contract takes a Stoa, and a fresh
+/// install has none. `create_stoa` needs a creator key and *"there is no path from
+/// here to `Keystore::generate()`"* by design; the only line in this crate that
+/// writes the keystore file is [`keep_selection`]'s `keystore.create`, reached
+/// only through `generate_identity_slate` and `keep_identity`, both of which
+/// `parse_stoa` refuses without a Stoa. So creating a Stoa needed a key, minting a
+/// key needed a Stoa, and a fresh profile could reach neither. Measured: "Create
+/// it" on an empty Stoa list answered `no keystore found; create one before
+/// posting`, with no interface anywhere able to create one.
+///
+/// **It takes no Stoa, and that is the whole of what makes it the way out.** A
+/// Stoa parameter is what every other method's deadlock is made of.
+///
+/// # It writes LAYER 1 ONLY, and the layering is why a placeholder Stoa was not
+/// the fix
+///
+/// Identity here is two layers. The **master key** (`identity.key`) is one per
+/// install and stoa-independent — `Keystore::identity_key` signs with the root
+/// directly, the MVP's one-identity shortcut (PLAN.md §9.2). The **chosen path**
+/// (`chosen_paths`) is strictly per-Stoa. Creating a Stoa needs layer 1 alone
+/// (`creator_key_in` → `identity_public_key`); posting needs layer 2
+/// (`publishing_key` → `path_for(stoa)`, else [`NO_CHOICE_FOR_THIS_STOA`]).
+///
+/// So minting under a placeholder Stoa — the obvious shortcut, since
+/// `keep_identity` already mints — would record a path for a Stoa that does not
+/// exist. Creation would then succeed and **posting into the real Stoa would
+/// still be refused**, which is a worse failure than the deadlock: it looks
+/// fixed. This handler touches `chosen_paths` not at all, so per-Stoa onboarding
+/// is exactly as it was and `keep_identity` remains the only thing that records a
+/// choice.
+///
+/// # Idempotent, and never destructive
+///
+/// `identity-onboarding`: *"A master key exists in exactly one place. Replacing it
+/// silently discards every identity derived from it."* An existing keystore is
+/// therefore reported with `wasNew:false` and is **not** rewritten — not refused
+/// either, because "you already have a key" is the expected state on every run
+/// after the first and a first-run step that errors on a repeat is a step a caller
+/// must guard.
+///
+/// The guard is the `exists()` branch below rather than `Keystore::create`'s own
+/// `AlreadyExists`. Two reasons, and the second is the load-bearing one:
+/// `AlreadyExists` is an *error*, so leaning on it would make the repeat case the
+/// failure shape; and this call must not generate a fresh root at all when a file
+/// is present, because a generated-then-discarded root is key material this
+/// process held for no reason. The existing file's protection is read off the
+/// file, which is the only truthful source for a branch that wrote nothing —
+/// the same split [`keep_selection`] documents.
+pub fn create_identity(
+    request: &str,
+    keystore_path: &std::path::Path,
+    unlock: &crate::keystore::Unlock,
+) -> String {
+    guarded("create_identity", || {
+        // Through the envelope like every other method, even though no field is
+        // read: the cap, the `invalid JSON` message and `REQUEST_NOT_AN_OBJECT`
+        // are obligations of the SURFACE, not of the fields a method happens to
+        // want. A method that skipped the parse because it needs nothing would be
+        // the one method on which `[]` and a 64 MiB request are served.
+        if let Err(e) = Request::parse(request) {
+            return e;
+        }
+        match mint_master_key(keystore_path, unlock) {
+            Ok(m) => m.to_json(),
+            Err(e) => error_json(&e),
+        }
+    })
+}
+
+/// The mint's decision, separated from its JSON and its guard.
+///
+/// Split out for the reason [`whoami_for`] is: the branch that decides is
+/// testable without going through a string, and the tests that assert on the
+/// *file* can assert on this.
+pub fn mint_master_key(
+    keystore_path: &std::path::Path,
+    unlock: &crate::keystore::Unlock,
+) -> Result<Minted, String> {
+    // THE ORDER, and it is the non-destructiveness. `exists()` is asked FIRST and
+    // nothing is generated on the `true` branch: no `Keystore::generate`, no
+    // `create`, no `write_to`. Deleting this branch is what a test must be able
+    // to catch, because what it would cost is not an error — it is the user's
+    // every derived identity, silently.
+    if keystore_path.exists() {
+        // The file predates this call, so the protection that is TRUE is the
+        // file's and reading it is the only way to know. The key is read back
+        // through the same open every other method uses, so the reported
+        // `publicKey` is the one a later `create_stoa` will name as creator
+        // rather than a second derivation that could disagree.
+        let existing = crate::keystore::open_from_env(keystore_path).map_err(|e| e.to_string())?;
+        let encrypted =
+            crate::keystore::Keystore::is_encrypted(keystore_path).map_err(|e| e.to_string())?;
+        return Ok(Minted {
+            public_key: existing.identity_public_key().to_hex(),
+            encrypted,
+            was_new: false,
+        });
+    }
+
+    let fresh = crate::keystore::Keystore::generate().map_err(|e| e.to_string())?;
+    fresh
+        .create(keystore_path, unlock)
+        .map_err(|e| e.to_string())?;
+    Ok(Minted {
+        public_key: fresh.identity_public_key().to_hex(),
+        // Taken from the unlock this call USED, not from re-reading the file —
+        // `keep_selection` records why: re-reading reports the protection of
+        // whatever is at the path now, which on a directory an attacker can write
+        // to is not necessarily the file just written.
+        encrypted: matches!(unlock, crate::keystore::Unlock::Passphrase(_)),
+        was_new: true,
+    })
+}
+
 // ─── The feed ─────────────────────────────────────────────────────────────
 
 /// `{"stoa":"…", "page":N, "perPage":N, "includeHidden":bool}` -> one page.
@@ -4832,6 +4994,264 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert!(v.get("error").is_some(), "got {out}");
         assert!(v.get("hasIdentity").is_none());
+    }
+
+    // ─── First run: minting the master key ────────────────────────────────
+    //
+    // The deadlock these cover: `create_stoa` needs a creator key and mints
+    // none, and the only line that writes the keystore is reached through two
+    // handlers that refuse a request naming no Stoa. A fresh profile could reach
+    // neither, and "Create it" answered `no keystore found; create one before
+    // posting` with nothing anywhere able to create one.
+
+    /// The bytes of the keystore file, as an opaque blob to compare against
+    /// itself.
+    ///
+    /// Compared rather than the reported public key, because a re-encrypt under a
+    /// fresh salt writes DIFFERENT BYTES for the SAME root — so a test asserting
+    /// only that the key is unchanged would pass over a call that rewrote the
+    /// file, and rewriting is half of what "never destructive" forbids.
+    fn keystore_bytes(path: &std::path::Path) -> Vec<u8> {
+        std::fs::read(path).expect("the keystore file is readable")
+    }
+
+    #[test]
+    fn a_first_run_mint_writes_a_master_key_and_reports_it_as_new() {
+        // The deadlock's exit, asserted at the level that matters: after this
+        // call a keystore FILE exists where there was none, and the reply names
+        // the key it holds.
+        let dir = OnboardingDir::new("mint-first");
+        let path = dir.keystore_path();
+        assert!(!path.exists(), "the fixture must start with no keystore");
+
+        let out = create_identity("{}", &path, &Unlock::Unencrypted);
+        let v: serde_json::Value = serde_json::from_str(&out)
+            .unwrap_or_else(|e| panic!("the mint reply must be valid JSON ({e}): {out}"));
+
+        assert!(v.get("error").is_none(), "got {out}");
+        assert_eq!(v["wasNew"], serde_json::json!(true), "got {out}");
+        assert!(path.exists(), "a mint must leave a keystore on disk");
+
+        // The reported key is the one ON DISK, not one this call held and threw
+        // away. Derived independently, by opening the file the way every other
+        // method opens it — which is what makes this an assertion about the
+        // install rather than an echo of the reply.
+        let on_disk = crate::keystore::Keystore::open(&path, &Unlock::Unencrypted)
+            .expect("the freshly written keystore opens");
+        assert_eq!(
+            v["publicKey"],
+            serde_json::json!(on_disk.identity_public_key().to_hex()),
+            "the reply must name the key that was written: {out}"
+        );
+    }
+
+    #[test]
+    fn a_mint_over_an_existing_keystore_replaces_nothing_and_reports_it_as_not_new() {
+        // THE REGRESSION TEST FOR THE DESTRUCTIVE CASE, and the reason this
+        // method needed one at all. `identity-onboarding`: "A master key exists
+        // in exactly one place. Replacing it silently discards every identity
+        // derived from it." A mint that overwrote would be a SECOND way to do
+        // that, reachable from a first-run button.
+        //
+        // PROVED TO FAIL: deleting the `keystore_path.exists()` branch from
+        // `mint_master_key` — the guard — turns this red. The `create` call
+        // beneath it returns `AlreadyExists`, so the assertion that fires is the
+        // `error.is_none()` one, naming the mint as refused. Restoring the branch
+        // turns it green. A guard whose removal no test notices is not a guard.
+        let dir = OnboardingDir::new("mint-twice");
+        let path = dir.keystore_path();
+
+        let first = create_identity("{}", &path, &Unlock::Unencrypted);
+        let first_v: serde_json::Value = serde_json::from_str(&first).unwrap();
+        assert_eq!(first_v["wasNew"], serde_json::json!(true), "got {first}");
+        let before = keystore_bytes(&path);
+
+        let second = create_identity("{}", &path, &Unlock::Unencrypted);
+        let second_v: serde_json::Value = serde_json::from_str(&second)
+            .unwrap_or_else(|e| panic!("the second reply must be valid JSON ({e}): {second}"));
+
+        // A repeat is a SUCCESS, not a refusal. A first-run step that errored on
+        // every run after the first is a step every caller must guard, and the
+        // guard is what gets forgotten.
+        assert!(second_v.get("error").is_none(), "got {second}");
+        assert_eq!(
+            second_v["wasNew"],
+            serde_json::json!(false),
+            "a keystore already on disk is not new: {second}"
+        );
+
+        // The two halves of "never destructive": the same key is reported, AND
+        // the file was not rewritten. The byte comparison is the half that
+        // catches a re-encrypt of the same root under a fresh salt.
+        assert_eq!(
+            second_v["publicKey"], first_v["publicKey"],
+            "the second call must report the SAME key: {second}"
+        );
+        assert_eq!(
+            keystore_bytes(&path),
+            before,
+            "the second call must not have rewritten the keystore file"
+        );
+    }
+
+    #[test]
+    fn a_mint_with_no_passphrase_reports_the_key_as_unencrypted() {
+        // The honesty requirement, and the one a first-run user needs: with no
+        // `DIALECTICA_PASSPHRASE` set, `protection_from_env` yields
+        // `Unlock::Unencrypted` and the key is stored in the clear. A reply that
+        // omitted this would leave an unencrypted keystore as a silent default
+        // rather than a state the interface can name.
+        let dir = OnboardingDir::new("mint-clear");
+        let out = create_identity("{}", &dir.keystore_path(), &Unlock::Unencrypted);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["encrypted"], serde_json::json!(false), "got {out}");
+    }
+
+    #[test]
+    fn a_mint_under_a_passphrase_reports_the_key_as_encrypted() {
+        // The other direction, so the field is pinned as a REPORT of what
+        // happened rather than a constant. A test asserting only `false` passes
+        // against `"encrypted": false` hardcoded in the reply.
+        let dir = OnboardingDir::new("mint-encrypted");
+        let path = dir.keystore_path();
+        let unlock = Unlock::Passphrase(crate::keystore::Passphrase::new(b"a passphrase"));
+
+        let out = create_identity("{}", &path, &unlock);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["encrypted"], serde_json::json!(true), "got {out}");
+
+        // Against the FILE, not only the reply: the claim is about the key at
+        // rest, and a reply can say `true` over a file written in the clear.
+        assert!(
+            crate::keystore::Keystore::is_encrypted(&path).expect("the written keystore parses"),
+            "the file itself must record the protection the reply claims"
+        );
+    }
+
+    #[test]
+    fn an_existing_keystores_protection_is_read_off_the_file_and_not_off_the_argument() {
+        // The branch that reads protection off the FILE. `mint_master_key`'s
+        // `exists()` arm wrote nothing, so the only truthful source is the file —
+        // and taking it from the `unlock` argument instead would report the
+        // protection the CALLER currently has configured rather than the one the
+        // key on disk actually has.
+        //
+        // The direction is deliberate: an UNENCRYPTED file re-minted while a
+        // passphrase IS supplied. The opposite direction — an encrypted file with
+        // no passphrase — cannot assert anything, because `open_from_env` fails
+        // first and the reply is legitimately the error shape. A test written
+        // that way passes whatever the branch does, which is the "gate the defect
+        // satisfies" shape; it was written, measured vacuous, and replaced by
+        // this.
+        //
+        // PROVED TO FAIL: replacing the `is_encrypted(...)` read in the exists
+        // branch with `matches!(unlock, Unlock::Passphrase(_))` turns this red,
+        // claiming `encrypted: true` over a file stored in the clear — which is
+        // the dangerous direction, since it tells a user their key is protected
+        // when it is not.
+        let dir = OnboardingDir::new("mint-existing-clear");
+        let path = dir.keystore_path();
+
+        let first = create_identity("{}", &path, &Unlock::Unencrypted);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&first).unwrap()["encrypted"],
+            serde_json::json!(false),
+            "the fixture must start with a key stored in the clear: {first}"
+        );
+
+        // Second call WITH a passphrase, as the same install behaves once
+        // `DIALECTICA_PASSPHRASE` is set. Nothing is rewritten, so the key is
+        // still in the clear and the reply must say so.
+        let unlock = Unlock::Passphrase(crate::keystore::Passphrase::new(b"a passphrase"));
+        let out = create_identity("{}", &path, &unlock);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v.get("error").is_none(), "got {out}");
+        assert_eq!(
+            v["encrypted"],
+            serde_json::json!(false),
+            "the file is still in the clear, so the reply must not claim protection: {out}"
+        );
+        assert_eq!(v["wasNew"], serde_json::json!(false), "got {out}");
+    }
+
+    #[test]
+    fn a_mint_records_no_per_stoa_choice() {
+        // The layering, pinned. Minting writes LAYER 1 (the master key) and must
+        // leave LAYER 2 (`chosen_paths`) untouched, so per-Stoa onboarding is
+        // unchanged and `keep_identity` stays the only thing that records a
+        // choice.
+        //
+        // This is what rules out the tempting shortcut of minting under a
+        // placeholder Stoa: that would record a path, creation would succeed, and
+        // posting into the REAL Stoa would still be refused for
+        // NO_CHOICE_FOR_THIS_STOA — a failure that looks fixed.
+        let dir = OnboardingDir::new("mint-no-paths");
+        create_identity("{}", &dir.keystore_path(), &Unlock::Unencrypted);
+
+        let paths = dir.paths();
+        assert_eq!(
+            paths.path_for(&a_stoa()).expect("the record reads"),
+            None,
+            "a mint must record no choice for any Stoa"
+        );
+    }
+
+    #[test]
+    fn a_minted_key_is_the_one_a_stoa_creation_names_as_creator() {
+        // THE DEADLOCK, closed end to end and in one test — which is the claim
+        // the owner is waiting on. The two sides are derived through the two
+        // functions the real path uses, so this fails if the mint writes
+        // somewhere `creator_key_in` does not look.
+        //
+        // Asserted as a relation rather than against a pinned literal: the root
+        // is generated, so there is no fixed value to hardcode, and the property
+        // that matters is that the two agree.
+        let dir = OnboardingDir::new("mint-then-create");
+        let out = create_identity("{}", &dir.keystore_path(), &Unlock::Unencrypted);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+
+        let creator = crate::keystore::creator_key_in(&dir.0)
+            .expect("after a mint, the creator key resolves — this is the deadlock's exit");
+        assert_eq!(
+            v["publicKey"],
+            serde_json::json!(creator.to_hex()),
+            "the minted key must be the one create_stoa names as creator: {out}"
+        );
+
+        // And the creation itself goes through, which is the state the owner
+        // could not reach: a title, the creator closure the adapter supplies, and
+        // a membership store.
+        let created = create_stoa(
+            r#"{"title":"first"}"#,
+            || crate::keystore::creator_key_in(&dir.0),
+            &mut a_membership_store(),
+        );
+        let c: serde_json::Value = serde_json::from_str(&created).unwrap();
+        assert!(
+            c.get("error").is_none(),
+            "creation must succeed once a key exists: {created}"
+        );
+        assert!(c["stoa"].is_string(), "got {created}");
+    }
+
+    #[test]
+    fn creation_still_fails_before_a_mint() {
+        // The other half of the pair, and the reason the test above proves
+        // anything: without it, a `create_stoa` that succeeded regardless of the
+        // keystore would satisfy the assertion above and this fix would be
+        // unnecessary. Two explanations, distinguished — which is this repo's one
+        // test-defect family.
+        let dir = OnboardingDir::new("create-before-mint");
+        let created = create_stoa(
+            r#"{"title":"first"}"#,
+            || crate::keystore::creator_key_in(&dir.0),
+            &mut a_membership_store(),
+        );
+        let c: serde_json::Value = serde_json::from_str(&created).unwrap();
+        assert!(
+            c.get("error").is_some(),
+            "creation must still be refused with no key: {created}"
+        );
     }
 
     // ─── Onboarding: the tester's independent coverage ─────────────────────
@@ -9609,12 +10029,18 @@ mod tests {
     ///
     /// # Why this is a list and not a branch inside each sweep
     ///
-    /// `list_stoas` is the surface's first method whose every field is optional:
+    /// `list_stoas` was the surface's first method whose every field is optional:
     /// `{}` is a *served* request for it, answering page 0 of the peer's Stoas. Two
     /// sweeps — `the_three_refusals_a_caller_can_earn_are_three_different_messages`
     /// and `an_empty_object_is_refused_for_its_missing_field_and_never_for_its_shape`
-    /// — read `{}` as the third caller mistake, which it is for every other listed
-    /// method and is not for that one.
+    /// — read `{}` as the third caller mistake, which it is for most listed methods
+    /// and is not for that one.
+    ///
+    /// **`create_identity` is the second, and it is a stronger case than the
+    /// first**: `list_stoas` has fields that happen to default, and
+    /// `create_identity` has no field at all. Taking no Stoa is the whole of why
+    /// that method exists, so `{}` is not a degenerate request for it — `{}` is
+    /// its request.
     ///
     /// The alternative was `if name != "list_stoas"` inside each sweep, rejected for
     /// CLAUDE.md's reason: two call sites that have to agree about which methods are
@@ -9626,11 +10052,53 @@ mod tests {
     /// size sweep still run over every method in
     /// [`every_request_taking_method`] — `list_stoas` included, and both of them
     /// caught it bypassing `Request::parse`.
+    /// The methods `{}` is a SERVED request for, each with the reason it is one.
+    ///
+    /// Two of them now, which is why this is a named set rather than the single
+    /// `!= "list_stoas"` it started as. The reason travels with the name, so a
+    /// third entry has to state its own rather than joining a bare list.
+    const NO_REQUIRED_FIELD: &[(&str, &str)] = &[
+        // Every field optional: `{}` answers page 0 of the peer's Stoas.
+        ("list_stoas", "page and perPage both default"),
+        // No field AT ALL. Taking no Stoa is the whole point of the method —
+        // every other identity method takes one, and a fresh install has none —
+        // so there is nothing for `{}` to be missing.
+        ("create_identity", "the request carries no field to omit"),
+    ];
+
     fn every_method_with_a_required_field() -> Vec<NamedMethod> {
         every_request_taking_method()
             .into_iter()
-            .filter(|(name, _)| *name != "list_stoas")
+            .filter(|(name, _)| !NO_REQUIRED_FIELD.iter().any(|(n, _)| n == name))
             .collect()
+    }
+
+    #[test]
+    fn a_method_with_no_required_field_serves_an_empty_object() {
+        // The half of the envelope claim the exclusion above would otherwise
+        // remove. Without this, adding a name to `NO_REQUIRED_FIELD` would take
+        // that method out of the `{}` claim ENTIRELY — and a `Request::parse`
+        // that refused every empty object would then pass every sweep that
+        // remains. So the exclusion changes which refusal is expected, never
+        // whether `{}` is examined.
+        //
+        // Swept over the set rather than asserted on one method, because the
+        // previous shape asserted on `list_stoas` by name and a second exempt
+        // method inherited no coverage at all.
+        for (name, why) in NO_REQUIRED_FIELD {
+            let method = every_request_taking_method()
+                .into_iter()
+                .find(|(n, _)| n == name)
+                .unwrap_or_else(|| panic!("{name} is exempt but not on the surface"))
+                .1;
+            let out = method("{}");
+            let v: serde_json::Value = serde_json::from_str(&out)
+                .unwrap_or_else(|e| panic!("{name}: reply must be JSON ({e}): {out}"));
+            assert!(
+                v.get("error").is_none(),
+                "{name} has no required field ({why}), so `{{}}` must be served: {out}"
+            );
+        }
     }
 
     /// A named field, the request that supplies it, and the call that reads it.
@@ -9768,6 +10236,20 @@ mod tests {
                 },
             )
         }
+        // `first-run-identity`'s one method. It reads NO field — the request is
+        // `{}` — and it is listed anyway, which is the case worth stating: the
+        // envelope's obligations are the SURFACE's, not the fields a method
+        // happens to want. An unlisted method is silently unswept, and a method
+        // that skipped `Request::parse` because it needs nothing would be the one
+        // method on which `[]` and a 64 MiB request are served.
+        //
+        // A fresh directory per call, for the reason the two above take one: the
+        // sweeps call these repeatedly, and a keystore left behind by one sweep
+        // would make the next take the `exists` branch.
+        fn mint_m(r: &str) -> String {
+            let dir = OnboardingDir::new(&sweep_dir_name("mint"));
+            create_identity(r, &dir.keystore_path(), &Unlock::Unencrypted)
+        }
         fn whoami_m(r: &str) -> String {
             // The `paths` opener is `impl Fn`, called once per handler call but
             // typed as re-callable, so it opens the record rather than moving one
@@ -9855,6 +10337,7 @@ mod tests {
             ("parse_channel_id", channel_m),
             ("generate_identity_slate", slate_m),
             ("keep_identity", keep_m),
+            ("create_identity", mint_m),
             ("who_am_i", whoami_m),
             ("create_stoa", create_m),
             ("join_stoa", join_m),
@@ -10441,6 +10924,13 @@ mod tests {
                 join_request(&genesis, &genesis.address().unwrap())
             }
             "list_stoas" => "{}".to_string(),
+            // `create_identity` reads NO field: `{}` is its whole request, and it
+            // is listed here rather than left to the fall-through panic so that
+            // "has no required fields" is a recorded fact about the method rather
+            // than an omission. It IS served — a fresh sweep directory holds no
+            // keystore, so the mint takes the writing branch and answers
+            // `{"publicKey":…,"wasNew":true}`.
+            "create_identity" => "{}".to_string(),
             // The three publish handlers. `publish_post` needs only a body; the
             // other two also name an op that must EXIST in the log their
             // wrapper seeds, which `a_seeded_root_id` supplies.
@@ -10547,8 +11037,11 @@ mod tests {
         //
         // Over the methods that have a required field, because the assertion is that
         // `{}` earns the MISSING-FIELD refusal — a method with no required field has
-        // none to miss, and `list_stoas` serves `{}`. The "never for its shape" half
-        // still holds for it and is covered below.
+        // none to miss. The "never for its shape" half still holds for those, and is
+        // covered for ALL of them by `a_method_with_no_required_field_serves_an_
+        // empty_object`, which sweeps `NO_REQUIRED_FIELD` rather than naming one
+        // method. This tail used to assert on `list_stoas` by name, so the second
+        // exempt method would have inherited no coverage at all.
         for (name, method) in every_method_with_a_required_field() {
             let message = error_message(&method("{}"));
             assert_ne!(
@@ -10558,12 +11051,11 @@ mod tests {
             assert!(message.contains("missing field"), "{name}: got {message:?}");
         }
 
-        // And the half that holds for a method with NO required field: `{}` must be
-        // SERVED, not refused for its shape. Without this, excluding `list_stoas`
-        // from the loop above would have excluded it from the envelope claim
-        // entirely — which is the failure mode the exclusion has to avoid, since a
-        // `Request::parse` that refused every empty object would pass every sweep
-        // that remains.
+        // What this tail still owns after the sweep above was generalised: that
+        // `list_stoas`'s omitted `page` DEFAULTS to 0 rather than merely being
+        // tolerated. That is a claim about one method's optional field, not about
+        // the envelope, so it cannot move into the `NO_REQUIRED_FIELD` sweep —
+        // `create_identity` has no field to default.
         let out = list_stoas("{}", &a_membership_store());
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert!(
