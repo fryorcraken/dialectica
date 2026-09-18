@@ -152,25 +152,40 @@ QtObject {
         return root.call("list_threads", [JSON.stringify(request)])
     }
 
-    function getCapabilities(stoa) {
-        return root.call("get_capabilities", [JSON.stringify({ stoa: stoa })])
-    }
-
-    // One thread, as a flat list of posts each naming its parent.
+    // One page of a thread: the root, then its replies, flat and each naming its
+    // parent.
     //
-    // `thread` is the ROOT POST's op id, which never moves when the post is
-    // edited — an identifier that changed under a revision would leave a caller
-    // holding one that no longer answers to anything.
+    // **`thread` is the ROOT POST's op id — its `id`, never its
+    // `currentVersion`.** The two differ the moment the post is edited, and only
+    // the id is stable across a revision, so a caller passing the version asks
+    // for a thread that stops existing when its root is edited.
+    //
+    // The genesis record travels for the same reason it travels to
+    // `listThreads`: moderation cannot be resolved for a Stoa whose record this
+    // peer does not hold, and core re-derives the address from the record and
+    // refuses a mismatch — so passing it from here is safe rather than a hole.
     //
     // **Nesting is not in this reply and must not be looked for.** The items are
     // flat and carry no depth or indentation level; depth is a count of parents
-    // and the caller holds the parents. That is deliberate: which posts are in
-    // the thread is computed from the parent chain, never from the `thread`
-    // field an op carries, because that field is its author's claim and a reader
-    // placing posts by the claim would render one inside a conversation it was
-    // never part of.
+    // and the caller holds the parents. A depth reported from core would be a
+    // second answer to a question the parent field already settles, and the two
+    // could disagree on a partial set of ops.
+    //
+    // That flatness is deliberate rather than incidental: which posts are in the
+    // thread is computed from the parent chain, never from the `thread` field an
+    // op carries, because that field is its author's claim and a reader placing
+    // posts by the claim would render one inside a conversation it was never
+    // part of.
+    //
+    // No `perPage`: the screen takes core's default rather than naming a number
+    // here, for the reason `listStoas` records — a page size buried in this
+    // wrapper is one two screens would silently share.
     function readThread(request) {
         return root.call("read_thread", [JSON.stringify(request)])
+    }
+
+    function getCapabilities(stoa) {
+        return root.call("get_capabilities", [JSON.stringify({ stoa: stoa })])
     }
 
     // Create a Stoa. A title and nothing else, because there is no creator

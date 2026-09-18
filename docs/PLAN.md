@@ -2941,14 +2941,11 @@ deciding op, and that a hidden reply is omitted by default while a hidden root
 is returned marked. Restating either here would give the rule two copies that
 drift, and a reader finding the stale one cannot tell.
 
-**What remains live is a gap the spec cannot close**, because it is a
-divergence between two reads rather than a property of one: **the feed reports
-moderation as a boolean and the thread read reports the three-valued object.**
-Both are built from the same resolver, so a view must currently branch on which
-call produced an item — which §2.5's "JSON shapes are source-independent"
-forbids. The thread read's shape is the correct one; the feed's is the older.
-Until the feed is brought to it, `restored` is a state the feed cannot express
-at all.
+**What remains live is a gap the spec cannot close**: the feed and the thread
+read report moderation in two different shapes, so a view must branch on which
+call produced an item. Still open, and now measured at the first screen that had
+to render the other shape — the reasoning and the measurement are in
+`ui-thread-view`'s `design.md` D7.
 
 ~~**And one obligation the core does not meet**: a view must not render a hidden
 post indistinguishably from a visible one in the show-hidden view. A reader who
@@ -2959,16 +2956,12 @@ render as a moderation outcome rather than as a blank post, and requires the two
 to be distinguishable on screen.
 
 **The bidi obligation is wider than §11.1 currently states it, and that is a
-third thing for that list.** §11.1 frames Unicode and bidi rendering around
-*metadata titles*, because that is where it was found: the metadata op
-deliberately does not sanitise, since normalising would break op-id agreement
-between peers. The same reasoning applies unchanged to **every** attacker-
-supplied string this section renders — post bodies above all, which are the
-largest and least constrained of them, and also the abbreviated **public key** a
-view renders beside an author (~~author addresses~~ — issue #80 deleted the
-author address). `op.rs` preserves display text exactly and never normalises it,
-by design and with a test pinning that; so the obligation follows the text
-everywhere it goes, not only to the field where it was first noticed.
+third thing for that list.** It reaches every attacker-supplied string, not only
+the metadata titles §11.1 frames it around. Insofar as it reaches post bodies it
+is now discharged on the view side — `thread-view`'s *Every string rendered from
+an item is rendered as the read supplied it*, with the reasoning in
+`ui-thread-view`'s `design.md` D8. What is still open here is the obligation's
+reach beyond post bodies.
 
 **Edit history is deliberately not in this call.** §5.7 keeps superseded
 versions in the op log, and a thread view that returned every version of every
@@ -3619,7 +3612,24 @@ core grows to serve it** rather than leaving it to be disproved.
    `revision.rs` states that superseded versions stay in the op log; the trait
    exposes no method reading them, `read_thread` being the thread read. So "read
    the earlier versions" is a case 2 control.
-5. **No moderation-publishing method**, per ruling 3 — the case 2 entry with the
+
+   **Built inert on the thread screen**, as `DThreadScreen.qml` renders it:
+   present beside a revised post, offering no action, and reaching no call. It
+   is static text rather than a button with an empty handler, so there is no
+   route to a call at all rather than a route that happens to go nowhere.
+5. **The thread screen's vote control is inert, and this entry is narrower than
+   entry 1.** Entry 1 says no score is rendered anywhere; this says the arrows on
+   a thread item do not *act* either. `publish_vote` exists, so the control could
+   be wired — but voting is out of the MVP by ruling 1, and a working vote
+   control on one screen would be the one place in the interface where a ruling
+   is contradicted by a live affordance. So `DThreadScreen.qml` renders it
+   `interactive: false`.
+
+   **The feed's control is wired and this one is not**, which is a real
+   inconsistency rather than an oversight: the feed's predates the ruling. Making
+   the two agree is a decision about which way, not a gap in core, so it does not
+   come off this list by a core change.
+6. **No moderation-publishing method**, per ruling 3 — the case 2 entry with the
    simplest resolution, since ruling 3 also removes the screen that would carry
    the control.
 6. **The DELIVERY lamp has no source and is left unbound.** `DStatusBar` renders

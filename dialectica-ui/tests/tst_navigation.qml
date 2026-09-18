@@ -333,11 +333,29 @@ TestCase {
     // ---- the thread route -----------------------------------------------
 
     function test_a_feed_row_opens_its_thread_with_the_stoa_and_the_root_op() {
+        // **A REVISED row: the two identifiers differ, and that is the point.**
+        //
+        // This fixture used to carry `currentVersion` alone, which is a row core
+        // never sends — `wire.rs:6015-6027` pins the feed row's whole key set as
+        // a SET (`attachments, author, body, currentVersion, isHidden,
+        // isRevised, thread`), so a row is never short of `thread` and never
+        // carries an `id`. With one identifier present the test could not tell
+        // the two apart, and the route was built on the wrong one.
+        //
+        // Giving them DIFFERENT values is what makes the assertion below
+        // discriminating: opening by `currentVersion` now fails it rather than
+        // passing by coincidence. `feed.rs:130-140` is the contract — `thread`
+        // is the root post's op id and "never changes across edits", where
+        // `current_version` is "different from `thread` the moment the post has
+        // been edited".
         var op = "cc" + "11".repeat(31)
+        var editedVersion = "dd" + "22".repeat(31)
         Core.bridge = spec.bridgeFor({
             "list_stoas": spec.oneStoa,
-            "list_threads": '{"items":[{"currentVersion":"' + op
-                + '","author":"' + spec.keyA + '","body":{"text":"hi"}}],'
+            "list_threads": '{"items":[{"thread":"' + op
+                + '","currentVersion":"' + editedVersion
+                + '","author":"' + spec.keyA + '","body":{"text":"hi"},'
+                + '"attachments":[],"isRevised":true,"isHidden":false}],'
                 + '"page":0,"hasMore":false}',
             "read_thread": '{"items":[],"page":0,"hasMore":false}',
             "who_am_i": '{"hasIdentity":false,"reason":"none"}',
@@ -350,8 +368,17 @@ TestCase {
         var link = spec.visibleNamed(view, "readThreadLink")
         compare(link.length, 1, "the row offers a route into its thread")
 
+        // **What the ROW resolved, not a value the test chose.** Raising
+        // `feed.threadOpened(op)` with the op in hand would assert the
+        // navigator's plumbing while proving nothing about which field the row
+        // read — and the field is the whole question here. So the row's own
+        // target is asserted, and it is that value which is then sent.
+        compare(link[0].target, op,
+                "the row opens its thread by the ROOT POST's id, not by the "
+                + "version — these differ because this post was revised")
+
         var feed = spec.namedAnywhere(view, "feed")[0]
-        feed.threadOpened(op)
+        feed.threadOpened(link[0].target)
 
         compare(view.screenShown, "thread")
         var args = String(spec.lastArgsTo(bridge, "read_thread"))
@@ -360,6 +387,10 @@ TestCase {
         verify(args.indexOf('"thread":"' + op + '"') >= 0,
                "and the ROOT POST's identifier, which does not move when the "
                + "post is edited")
+        verify(args.indexOf(editedVersion) < 0,
+               "and NOT the current version, which moves under an edit and "
+               + "would leave the route pointing at a thread that stops "
+               + "answering to it: " + args)
         verify(args.indexOf('"genesis":"beef"') >= 0,
                "and the founding record the view holds for that Stoa")
         view.destroy()

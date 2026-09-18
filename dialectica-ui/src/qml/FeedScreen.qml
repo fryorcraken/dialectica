@@ -389,11 +389,57 @@ ScreenFrame {
 
     // A row's thread was opened.
     //
-    // **Carries the root post's identifier**, which does not move when the post
-    // is edited — an identifier that changed under a revision would leave the
-    // return route pointing at a thread that no longer answers to it. The Stoa
-    // and its record are the navigator's already, so they are not repeated here.
+    // **Carries the ROOT POST's op id — `id`, not `currentVersion`** — because
+    // the id does not move when the post is revised, so a route carrying the
+    // version would point at a thread that stops answering to it after an edit.
+    // The Stoa and its record are the navigator's already, so they are not
+    // repeated here.
+    //
+    // A signal rather than a direct write, for the same reason `closed` is one:
+    // this screen does not know what is above it, and the caller decides what
+    // opening a thread means.
     signal threadOpened(string rootOp)
+
+    // The op id a row's thread is opened by, or "" where the row names none.
+    //
+    // **A separate judgement from `voteTarget`, reading a DIFFERENT field**, and
+    // that is the whole reason it exists rather than being folded into it: a
+    // vote names the version it was cast on, where a thread is named by the root
+    // post's stable id. Opening a thread by `currentVersion` would point the read
+    // at an identifier that moves the moment the root is edited.
+    //
+    // **The field is `thread`, and it is measured rather than assumed.** Both
+    // pieces that reached this line independently got it wrong, in opposite
+    // directions, and each was plausible:
+    //
+    //   - `currentVersion` is present on the row but is the version id —
+    //     `feed.rs:135-140`, "different from `thread` the moment the post has
+    //     been edited", and it is the field a MODERATOR acts on.
+    //   - `id` is what a THREAD item carries (`wire.rs:1837`) and is not a field
+    //     of a feed row at all. `wire.rs:6015-6027` pins the feed row's whole
+    //     key set — `attachments, author, body, currentVersion, isHidden,
+    //     isRevised, thread` — as a SET, so an added field fails it too. Reading
+    //     `id` here yields `undefined` on every row core sends, which renders as
+    //     no thread link anywhere in the feed.
+    //
+    // `FeedRow::thread` is documented as "the thread's id, which is the root
+    // post's op id" and "**never changes across edits**, which is what makes it
+    // the thing a reply names as its parent and the thing a view uses as a
+    // stable row key" (`feed.rs:130-134`). That is exactly the identifier
+    // `view-navigation` requires to travel.
+    //
+    // The guard is made in one place for the reason `voteTarget`'s is: a row
+    // naming no thread would otherwise open one identified by the JavaScript
+    // value `undefined`, which `JSON.stringify` omits entirely — so the request
+    // reaching core would carry no thread at all, and the screen would render
+    // core's refusal of a question the user never asked.
+    function threadTarget(rowData) {
+        if (rowData === null || rowData === undefined)
+            return ""
+        return typeof rowData.thread === "string" && rowData.thread !== ""
+            ? rowData.thread
+            : ""
+    }
 
     // ---- header ---------------------------------------------------------
 
@@ -788,10 +834,16 @@ ScreenFrame {
                 // ---- the row's actions, as the design lays them out ------
                 //
                 // "read the thread" is the affordance that opens this row's
-                // thread. It is offered on every row and NOT gated on the
-                // posting probe: reading needs no identity, and gating it would
-                // withhold the thread from exactly the reader the feed is
-                // otherwise happy to serve.
+                // thread, and **the only route into one** — which is what makes
+                // the thread screen reachable at all. `view-navigation`
+                // contracts the transition and what travels across it; what
+                // travels is this row's `id`, the Stoa the feed was rendered
+                // for, and that Stoa's founding record where the view holds one.
+                //
+                // It is offered on every row and NOT gated on the posting probe:
+                // reading needs no identity, and gating it would withhold the
+                // thread from exactly the reader the feed is otherwise happy to
+                // serve.
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: 16
@@ -799,11 +851,15 @@ ScreenFrame {
                     Text {
                         objectName: "readThreadLink"
 
-                        // "" when the row names no op — the same guard the vote
-                        // control goes through, and for the same reason: a row
-                        // with no usable identifier offers no press rather than
-                        // a press that opens nothing.
-                        readonly property string target: screen.voteTarget(row.modelData)
+                        // "" when the row names no op — see `threadTarget`. A
+                        // row with no target offers no press rather than a press
+                        // that reaches core with no thread named.
+                        //
+                        // **`threadTarget` and not `voteTarget`**: a thread is
+                        // opened by the post's stable `id`, where a vote names
+                        // the `currentVersion` it was cast on. The two guards
+                        // read different fields, so they are two functions.
+                        readonly property string target: screen.threadTarget(row.modelData)
 
                         visible: target !== ""
                         text: "read the thread"
