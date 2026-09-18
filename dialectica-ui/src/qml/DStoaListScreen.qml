@@ -550,7 +550,15 @@ ScreenFrame {
             // The separator under every row, the last included. The reference
             // draws it that way so the list reads as a bounded block rather
             // than as rows trailing off into the page.
+            //
+            // **Named, because the spec requires it and a test has to find it.**
+            // `stoa-navigation-view`'s "Where one listed Stoa ends and the next
+            // begins is rendered" contracts one boundary per row; a test keyed
+            // on geometry instead would match whatever else happened to be a
+            // 1px-high Rectangle, and would go on passing if this element were
+            // deleted and some unrelated rule took its place in the walk.
             Rectangle {
+                objectName: "rowSeparator"
                 Layout.fillWidth: true
                 Layout.preferredHeight: DTheme.hairline
                 color: DTheme.rule

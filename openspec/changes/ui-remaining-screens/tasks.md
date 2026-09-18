@@ -17,15 +17,43 @@
 
 **The spec stage did not run for this piece.** It was dispatched straight to
 implementation under a speed-to-visible-app instruction, so `proposal.md` and
-`design.md` were written alongside the code rather than from a spec. The row is
-left unticked rather than struck: what this change renders is genuinely
-unspecified, and the two `NO SPEC:` markers below are what a spec-writer would
-need to pick up.
+`design.md` were written alongside the code rather than from a spec.
+
+**A delta now exists, and the row stays unticked anyway.** `openspec validate
+--strict` was failing for want of one; `specs/stoa-navigation-view/spec.md` adds
+a single requirement covering the row boundary, written by the `dev-writer` to
+unblock validation and argued in design.md D5b — including why it contracts the
+boundary and deliberately not the type, and why `skip_specs: true` would have
+been the false answer. **That is a dev's minimal delta, not the spec stage**: no
+`spec-writer` has read PLAN.md against this piece or reviewed what else the
+screen should contract, so the row is left for the agent that owns it. Ticking it
+would claim a review that did not happen.
+
+**The `tests` row is likewise not ticked.** Four tests now cover the row
+treatment (design.md D5c), each proved able to fail by mutation, but they were
+written by the `dev-writer` alongside the code. The `tester` stage — writing from
+the spec, blind to the implementation — has not run.
 
 ## Implementation
 
 - [x] `DStoaListScreen` — the reference's row separator under every row, and the
-      19px serif row title (`DTheme.rowTitle`, new token).
+      19px serif row title (`DTheme.rowTitle`, new token). Verified against the
+      reference itself rather than against the earlier description of it: screen
+      08 draws `border-bottom:1px solid #d8d0bf` on all three rows, the last
+      included, and sets each title at `font-size:19px`. `#d8d0bf` is
+      `DTheme.rule`.
+- [x] `DStoaListScreen` — the delegate's inner `RowLayout` reindented to its
+      actual nesting level. Wrapping the row in a `ColumnLayout` left ~97 lines
+      at the old indent, reading as though the row and the separator were
+      siblings of the delegate rather than its children. **Its own commit**,
+      changing no behaviour, so the separator work stayed reviewable: `git diff
+      -w` over it shows comment reflow and nothing else.
+- [x] `DStoaListScreen` — `objectName: "rowSeparator"` on the separator, so the
+      tests key on intent rather than on a geometry a stray 1px `Rectangle`
+      would also match.
+- [x] `openspec/changes/ui-remaining-screens/specs/stoa-navigation-view/spec.md`
+      — the missing delta. One `## ADDED` requirement, the row boundary only.
+      `openspec validate ui-remaining-screens --strict` now passes.
 - [x] `DStoaListScreen` — the recorded reason this screen carries no identity
       chip (`stoa-navigation-view` R13), rewritten on rebase so it no longer
       refers to a feed footer that was withdrawn.
@@ -56,12 +84,25 @@ need to pick up.
       had found a real defect on the way (the degenerate-author shared slot),
       which is why the removal is a scope decision rather than a retreat: the
       code was correct and out of scope, not broken.
-- [ ] **Nothing tests what this piece now ships.** The row separator and the
-      `rowTitle` font are presentation; `tst_stoa_screens.qml` asserts on the
-      list's behaviour rather than its geometry, and no test here covers either.
-      Left unticked rather than struck: this is a real gap for the `tester`
-      stage, not a stage that does not apply. design.md's "What no test here can
-      see" states it.
+- [x] **The row treatment is covered, by count and by relation.** Four tests in
+      `tst_stoa_screens.qml`: three asserting the number of boundaries against
+      the number of rows (three rows, one-versus-four, and the empty list), and
+      one asserting the title's type against the `DTheme` tokens rather than
+      against a hardcoded 19. design.md D5c has what each covers and why three
+      separator tests rather than one.
+- [x] **Each proved able to fail, by the two mutations that are the two real
+      defects.** Dropping the separator on the last row — the convention the
+      requirement rules out — turns the two count tests red (3 rows → 2 found,
+      1 row → 0 found) and correctly leaves the empty-list test green. Hoisting
+      the separator out of the delegate turns **all three** red, the empty-list
+      one included, which is why it is a third test rather than folded in.
+      Reverting `font: DTheme.rowTitle` to `DTheme.body` — exactly the line this
+      piece changed — fails the type test with `Actual 15, Expected 19`.
+- [x] `tst_render_probe.qml` **does not already cover this**, checked rather
+      than assumed. It probes `DStoaListScreen`, but asserts only that the
+      content area is not one flat colour; a screen with no separator at all
+      still paints a title, an address, an identicon and two buttons, so it
+      passes that probe unchanged.
 
 ## Not done, and why
 
@@ -102,7 +143,23 @@ unspecified behaviour that stops being visible rather than stops existing:
   own `NO SPEC:` on that default, and navigation's bar is now a second consumer
   of it.
 
-**Unspecified behaviour this piece ships and nothing marks:** whether a Stoa row
-carries a separator, and at what weight its title renders. Neither is in any
-spec; both were taken from the design reference. A `spec-writer` picking this up
-would need to decide whether the reference is contract or suggestion.
+**One marker is now live in the tree**, and it is the half of the row treatment
+the delta deliberately does not contract:
+
+- `tst_stoa_screens.qml`'s
+  `test_a_row_title_is_set_apart_from_body_prose_without_reaching_a_heading` —
+  **the type a row title is set at is contracted nowhere.**
+  `stoa-navigation-view`'s Purpose puts "colours, type, metrics, the mark"
+  outside that capability by name, so a requirement pinning the size would
+  contradict the capability's own scoping sentence. The test therefore pins the
+  **relation** the reference establishes — `rowTitle` above `body`, below
+  `heading` — rather than the literal 19. design.md D5b has the argument.
+
+  What a `spec-writer` still has to decide: whether the design reference is
+  contract or suggestion, and if contract, which capability owns the view's type
+  scale — because `stoa-navigation-view` says in its own text that it does not.
+
+**The separator is no longer unspecified.** It is contracted by this change's
+delta, for the reason in design.md D5b: it resolves which Stoa a rendered address
+belongs to, on a screen whose capability is about not misattributing
+peer-supplied strings.

@@ -22,7 +22,8 @@ and render nowhere**.
 **That gap is now closed by `piece/ui-navigation` rather than by this piece**,
 and D1 below records why this branch withdrew its own answer to it on rebase.
 What survives here is the Stoa list's row treatment (D5) and the `rowTitle`
-token it needs.
+token it needs, with the spec delta that contracts half of it (D5b) and the tests
+that pin it (D5c).
 
 ## Decisions
 
@@ -181,6 +182,108 @@ does. The comment was rewritten on rebase: its original form said "that is why
 `FeedScreen` has a footer and this screen does not", which stopped being true
 when the footer was withdrawn.
 
+### D5b — The delta contracts the row BOUNDARY and declines to contract the type
+
+**The spec stage never ran for this piece, and `openspec validate --strict`
+failed for want of a delta. Rather than declaring `skip_specs: true`, this change
+adds one requirement to `stoa-navigation-view` — and deliberately covers only
+half of what the code does.**
+
+**What earns a requirement: the separator.** It is not decoration. The list can
+hold two Stoas whose founding titles are byte-identical — the capability already
+contracts that case, and `test_two_stoas_with_the_same_title_render_differently`
+exists for it — and a row stacks a title over an address with buttons beside
+them. Where one row's group ends and the next begins is therefore the same
+concern as "a listed Stoa is rendered with its address, never with its title
+alone", read one level out: that requirement makes the row carry the half an
+attacker does not control, and this one makes it unambiguous **which row that
+half belongs to**. A reader who attributes one row's address to the next row's
+title has been misled about which Stoa they are opening, and the content cannot
+correct them. Whitespace alone does not carry the division, because the gap
+between two rows and the gap between a title and its own address are both gap.
+
+**What does NOT earn one: the 19px title.** `stoa-navigation-view`'s Purpose puts
+the visual system outside itself **by name** — "colours, type, metrics, the mark,
+the 8-8-6 address abbreviation … requirements below say which component owns a
+rendering decision and never restate what it renders". A requirement pinning the
+row title's size would contradict the capability's own scoping sentence. So the
+delta says a boundary is rendered per row and stops; it fixes neither the
+boundary's thickness nor its colour nor the element that draws it, and says so in
+its own text, so a later treatment that divides rows differently still satisfies
+it.
+
+**Considered and rejected: `skip_specs: true`.** It was the cheaper answer and it
+would have been a false one. The marker means "this change modifies no specs
+(pure refactor, tooling, docs)", and a row boundary that resolves which Stoa a
+rendered address belongs to is observable behaviour on a screen whose whole
+capability is about not misattributing peer-supplied strings. The previous agent
+declined to paper over the gap for that reason and was right.
+
+**What breaks without the requirement:** nothing red — which is the point. The
+separator survived a rebase that deleted everything else this piece built, and
+without a requirement naming it, the next person to touch this delegate has
+`tst_stoa_screens.qml` telling them the count must hold and nothing telling them
+why the last row is included.
+
+### D5c — The row treatment is tested by COUNT, and the type by RELATION
+
+**Answering "nothing tests the 62 lines this piece ships", which `tasks.md` left
+as an unticked row.**
+
+**`tst_render_probe.qml` does not cover it.** It probes `DStoaListScreen`
+(`test_a_populated_stoa_list_screen_paints_content`), but its assertion is that
+the content area is not a single flat colour. A screen with no separator at all
+paints a title, an address, an identicon and two buttons, so it passes that probe
+unchanged. The probe is a floor against a screen that never reached the scene
+graph, and its own spec says so; it cannot see this.
+
+**Three separator tests, because one cannot distinguish the failures.** The
+assertions are on the **count of boundaries against the count of rows**, never on
+how one is drawn — matching what the delta contracts and what the capability
+declines to contract:
+
+- `test_every_rendered_row_is_separated_from_the_next` — three rows, three
+  boundaries. Three rather than one deliberately: a screen drawing a single rule
+  for the whole list satisfies any assertion phrased as "a separator exists".
+- `test_the_row_count_and_the_separator_count_move_together` — one row then four,
+  asserting the difference is three. This is the relation, established by varying
+  the input rather than by trusting one fixture.
+- `test_an_empty_list_draws_no_row_boundary` — the other direction, and **not a
+  formality**. A separator hoisted to the list container renders on the empty
+  state, where it is a rule belonging to a row that is not there. Both count
+  tests are blind to that, because neither instantiates an empty list.
+
+**Each was proved able to fail, by two mutations that are the two real defects:**
+
+| Mutation | What fails |
+|---|---|
+| `visible: index < visibleRows.length - 1` — the drop-it-on-the-last-row convention the requirement rules out | the two count tests (3 rows → 2 found; 1 row → 0 found). The empty-list test correctly stays green |
+| the separator hoisted out of the delegate to the list container | **all three** — 3 rows → 1 found, 4 rows → 1 found, and the empty list → 1 found |
+
+That the second mutation is the only one the empty-list test catches is the
+argument for keeping it as a third test rather than folding it in.
+
+**The title is tested against the TOKENS, not against 19.** `DTheme.rowTitle` is
+compared to the element's `pixelSize`, and then `rowTitle > body` and
+`rowTitle < heading` are asserted as the relation the reference establishes — a
+row title outweighs the prose around it without competing with the screen's own
+heading. A test hardcoding 19 would fail on a reference revision that kept the
+ordering, and — the worse direction — would **pass** on a `DTheme` where `body`
+had been raised to 19 and the distinction collapsed. Proved able to fail by
+reverting `font: DTheme.rowTitle` to `DTheme.body`, which is exactly the line
+this piece changed: `Actual 15, Expected 19`.
+
+It carries a `NO SPEC:` marker, because by D5b the type is contracted nowhere.
+
+**The separator is given `objectName: "rowSeparator"`** so the test keys on
+intent. A walker keyed on geometry would match anything else that happened to be
+a 1px-high `Rectangle`, and would go on passing if this element were deleted and
+an unrelated rule took its place in the walk.
+
+**What no test here can still see:** whether any of it renders under basecamp.
+`qmltestrunner` instantiates with the host absent, so a layout correct in a spec
+and colliding at launch is indistinguishable from one that works.
+
 ### D6 — ~~The delivery sweep excludes lamp LABELS~~ — withdrawn on rebase
 
 `tst_composer_claims.qml` gained an exclusion dropping any line that *is*
@@ -225,11 +328,10 @@ here; the short form:
 
 ## What no test here can see
 
-**Nothing in the tree tests the row treatment this piece ships.** The separator
-and the `rowTitle` font are presentation, `tst_stoa_screens.qml` asserts on the
-list's behaviour rather than its geometry, and this change added no test for
-either. That is stated rather than left implied: the QML suite passing says
-nothing about whether the separator renders under the last row.
+**The row treatment is now covered** — four tests in `tst_stoa_screens.qml`, each
+proved able to fail by mutation. D5c has what they assert and what they do not.
+This section previously said nothing tested it, which was true of the tree the
+rebase produced and is no longer true.
 
 **The component suite cannot see whether any of this renders under basecamp.**
 `qmltestrunner` instantiates components with the host absent, so a layout that

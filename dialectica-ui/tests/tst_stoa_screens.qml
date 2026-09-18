@@ -517,6 +517,130 @@ TestCase {
         return found
     }
 
+    // ---- the row treatment ------------------------------------------------
+    //
+    // `stoa-navigation-view`: "Where one listed Stoa ends and the next begins is
+    // rendered, not left to spacing". The requirement is about which half of a
+    // row belongs to which Stoa — the same concern as "a row carries the address
+    // as well as the title", read one level out — so these assertions are about
+    // the COUNT of boundaries against the count of rows, never about how a
+    // boundary is drawn. The capability's Purpose puts "colours, type, metrics"
+    // outside itself by name, and pinning the hairline's thickness or colour
+    // here would contract something that spec declines to.
+
+    function test_every_rendered_row_is_separated_from_the_next() {
+        // THREE rows, not one. A screen that drew a single separator for the
+        // whole list — or one that dropped it on the last row, which is the
+        // common convention and the thing the requirement rules out — passes any
+        // assertion phrased as "a separator exists". Only the count against the
+        // row count distinguishes those, so that is what is asserted: N rows
+        // produce N boundaries, and adding a row adds one.
+        var screen = makeList({
+            "list_stoas": '{"items":['
+                        + '{"stoa":"7f3a91c4' + "11".repeat(28) + '","foundingTitle":"Nym Research"},'
+                        + '{"stoa":"b02d5e77' + "22".repeat(28) + '","foundingTitle":"Transport Notes"},'
+                        + '{"stoa":"1ce0aa38' + "33".repeat(28) + '","foundingTitle":"Keystore Notes"}'
+                        + '],"page":0,"hasMore":false}'
+        })
+
+        compare(screen.readState, "ok", "the fixture's own precondition")
+        compare(screen.visibleRows.length, 3, "all three rows must be rendered")
+
+        var rules = spec.visibleNamed(screen, "rowSeparator")
+        compare(rules.length, 3,
+                "each of the 3 rows must carry a boundary, the last included; "
+                + "found " + rules.length)
+        screen.destroy()
+    }
+
+    function test_the_row_count_and_the_separator_count_move_together() {
+        // The relation, asserted by varying the input rather than by trusting
+        // one fixture. A screen with the separator hoisted out of the delegate
+        // renders a fixed number of them and satisfies the test above at
+        // whatever row count that number happens to equal; it cannot satisfy
+        // both of these.
+        var one = makeList({
+            "list_stoas": '{"items":[{"stoa":"' + "aa".repeat(32) + '","foundingTitle":"One"}],'
+                        + '"page":0,"hasMore":false}'
+        })
+        compare(one.visibleRows.length, 1)
+        var afterOne = spec.visibleNamed(one, "rowSeparator").length
+        one.destroy()
+
+        var four = makeList({
+            "list_stoas": '{"items":['
+                        + '{"stoa":"' + "a1".repeat(32) + '","foundingTitle":"One"},'
+                        + '{"stoa":"' + "a2".repeat(32) + '","foundingTitle":"Two"},'
+                        + '{"stoa":"' + "a3".repeat(32) + '","foundingTitle":"Three"},'
+                        + '{"stoa":"' + "a4".repeat(32) + '","foundingTitle":"Four"}'
+                        + '],"page":0,"hasMore":false}'
+        })
+        compare(four.visibleRows.length, 4)
+        var afterFour = spec.visibleNamed(four, "rowSeparator").length
+        four.destroy()
+
+        compare(afterOne, 1, "one row must draw exactly one boundary")
+        compare(afterFour, 4, "four rows must draw exactly four boundaries")
+        compare(afterFour - afterOne, 3,
+                "three further rows must add three further boundaries, got "
+                + (afterFour - afterOne))
+    }
+
+    function test_an_empty_list_draws_no_row_boundary() {
+        // The other direction, and not a formality: a separator hoisted to the
+        // list container rather than into the delegate renders on the empty
+        // state too, where it is a rule belonging to a row that is not there.
+        // Both count assertions above are blind to that — neither instantiates
+        // an empty list.
+        var screen = makeList({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}'
+        })
+
+        compare(screen.readState, "ok",
+                "an empty membership is the ok state, not a failure")
+        compare(screen.visibleRows.length, 0, "the fixture's own precondition")
+        compare(spec.visibleNamed(screen, "rowSeparator").length, 0,
+                "an empty list must draw no row boundary")
+        screen.destroy()
+    }
+
+    // NO SPEC: the type a row title is set at is NOT contracted anywhere.
+    // `stoa-navigation-view`'s Purpose puts the visual system — "colours, type,
+    // metrics, the mark" — outside that capability by name, so the delta this
+    // change adds deliberately covers the row boundary and stops there. The
+    // design reference sets a row title at 19px against body's 15px, and this
+    // pins the RELATION that establishes — a row title outweighs the prose
+    // around it without reaching the screen's own heading — rather than the
+    // literal 19, which a reword of the reference may legitimately change and
+    // which no requirement makes binding.
+    function test_a_row_title_is_set_apart_from_body_prose_without_reaching_a_heading() {
+        var screen = makeList({
+            "list_stoas": '{"items":[{"stoa":"' + "7f3a91c4" + "00".repeat(28)
+                        + '","foundingTitle":"Nym Research"}],"page":0,"hasMore":false}'
+        })
+
+        // Found by its rendered content, so a title element that vanished or was
+        // renamed fails here rather than trivially satisfying the assertion.
+        var titles = spec.titleElementsFor(screen, "Nym Research")
+        compare(titles.length, 1, "the title element must be found by its content")
+
+        // Against the TOKENS, not against a hardcoded 19. The claim under test
+        // is the ordering between three roles in the type scale; a suite that
+        // pinned the number would fail on a reference revision that kept the
+        // ordering, and would pass on a DTheme where body had been raised to 19
+        // and the distinction collapsed.
+        compare(titles[0].font.pixelSize, DTheme.rowTitle.pixelSize,
+                "the row title must be set at the rowTitle token")
+        verify(DTheme.rowTitle.pixelSize > DTheme.body.pixelSize,
+               "a row title must outweigh the prose around it: rowTitle "
+               + DTheme.rowTitle.pixelSize + " vs body " + DTheme.body.pixelSize)
+        verify(DTheme.rowTitle.pixelSize < DTheme.heading.pixelSize,
+               "a row title must not compete with the screen's own heading: "
+               + "rowTitle " + DTheme.rowTitle.pixelSize + " vs heading "
+               + DTheme.heading.pixelSize)
+        screen.destroy()
+    }
+
     function test_no_row_renders_a_count_of_held_posts_or_anything_global() {
         // A thread listing is answered too, so a screen tempted to render some
         // other call's page length in the row's margin has one available.
