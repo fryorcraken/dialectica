@@ -87,7 +87,7 @@ passed).
 
 ## Findings
 
-- [ ] **`spec-writer`** — `openspec/changes/genesis-in-replies/tasks.md` —
+- [x] **`spec-writer`** — `openspec/changes/genesis-in-replies/tasks.md` —
       no stage block. This `tasks.md` was written by the `spec-writer` commit
       (`7b0d5e6`) without the roster block README.md §"Two files carry the
       state of a change" describes (`spec-writer.md`'s roster, one row per
@@ -105,7 +105,39 @@ passed).
       ticking a nonexistent row is preferable to fabricating one; the `closer`
       or runner should reconcile this before merge.
 
-- [ ] **`dev-writer`** — `dialectica-ui/tests/tst_stoa_screens.qml:626-651`
+      **Fixed**, and your refusal to fabricate a row was the right call — all
+      four reviewers made it independently, which is what surfaced the gap
+      rather than burying it under four invented rosters.
+
+      The block is now at the top of `tasks.md`, copied from
+      `.claude/agents/spec-writer.md`'s roster. Confirmed absent before writing
+      it (`grep -c "^## Stages" …/tasks.md` → 0) rather than assumed. It opens
+      with a note that it was added late and why, so a later reader does not
+      read the ticks as contemporaneous with the work.
+
+      Ticked: `spec`, `design + code`, and the four reviews that actually ran —
+      correctness, security, spec-test, design — **each against its findings
+      file**, which is the evidence the review happened rather than anyone's
+      recollection. Left unticked: `review: readability` and `review:
+      architecture`, which have no findings file, so by the block's own logic
+      they are stages nobody did; and the three `closer` rows. Struck through:
+      `tests — tester`, with its reason — no separate `tester` was dispatched,
+      the tests came from the `dev-writer` alongside the code. Struck rather
+      than ticked, and kept rather than deleted, per the README: a deleted row
+      and a skipped stage look identical.
+
+      One refinement to the finding's premise, offered because it changes
+      where the gap came from rather than whether it exists. You read the
+      omission as a `spec-writer` commit that skipped the block, which is what
+      `7b0d5e6` looks like from the outside — it does create `tasks.md`, 76
+      lines, beside `proposal.md` and the spec delta. The runner's account is
+      that no `spec-writer` was dispatched at all: the change folder was
+      created directly, so there was never a roster to omit. The commit cannot
+      distinguish the two by itself; recorded as the runner's account rather
+      than as something I verified, since the difference is process history and
+      not tree state. Either way the fix and the lesson are the same.
+
+- [x] **`dev-writer`** — `dialectica-ui/tests/tst_stoa_screens.qml:626-651`
       (`test_an_item_short_of_its_record_is_not_recorded_as_an_empty_one`) and
       `dialectica-ui/src/qml/DStoaListScreen.qml:72-91` (`rememberGenesis`) —
       the "guard direction" of the fourth QML spec is vacuous for the
@@ -131,6 +163,28 @@ passed).
       bug through a visible, clickable share button). **Measured:** 81/81 pass
       under this mutation, where the docstring's own stated purpose implies it
       should not.
+
+      **Fixed.** The test now asserts
+      `!screen.genesisByStoa.hasOwnProperty(...)` for both the missing-field
+      and the empty-field row — the only accessor that separates "key never
+      written" from "key written as `""`". The `genesisFor`/`canShare`
+      assertions are kept alongside: they pin the outward effect, which is
+      real; what was missing was anything able to witness the write itself.
+
+      **Proved by re-running your exact mutation** — dropping the `genesis ===
+      ""` half and keeping the `typeof` check now gives **80 passed, 1
+      failed**, the failure being this test by name, where it was 81/81 before.
+      Mutation reverted; `DStoaListScreen.qml` is unmodified in `git status
+      --short`.
+
+      Your reading of which direction mattered is the one I acted on: the
+      explicit-empty-string direction is the one that reproduces the owner's
+      bug behind a *visible* share button, and it was the untested one.
+      `tasks.md` 4.5's "holds in both directions by design" is struck through
+      rather than silently corrected, since that sentence is what made the gap
+      look covered. The general rule — an assertion routed through a lossy
+      accessor cannot witness what the guard does — is in `design.md`, so the
+      next test of this shape is not written the same way.
 
 ## Areas reviewed and clean
 

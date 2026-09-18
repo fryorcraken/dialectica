@@ -637,6 +637,19 @@ TestCase {
                         + '],"page":0,"hasMore":false}'
         })
 
+        // **Asserted against the map's own keys, not against `genesisFor`.**
+        // `genesisFor` returns "" both when the key is absent and when it holds
+        // an explicit "", so every assertion phrased through it passes whichever
+        // branch `rememberGenesis` takes — measured: removing the `genesis === ""`
+        // half of the guard left 81/81 green. `hasOwnProperty` is the only
+        // accessor that tells "never written" from "written as empty", which is
+        // the distinction the guard exists to make.
+        verify(!screen.genesisByStoa.hasOwnProperty(missing),
+               "an absent field must leave NO key behind, not a key holding ''")
+        verify(!screen.genesisByStoa.hasOwnProperty(empty),
+               "an empty field must leave no key either — writing '' in is the "
+               + "regression this guard prevents, and it is invisible to genesisFor")
+
         compare(screen.genesisFor(missing), "", "an absent field records nothing")
         compare(screen.genesisFor(empty), "", "and an empty one is not a record either")
         compare(screen.canShare(missing), false,

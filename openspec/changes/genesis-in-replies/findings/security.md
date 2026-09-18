@@ -79,7 +79,7 @@ check before the call.
 
 ## Finding
 
-- [ ] **`dev-writer`** — `dialectica-ui/tests/tst_stoa_screens.qml:626-649`
+- [x] **`dev-writer`** — `dialectica-ui/tests/tst_stoa_screens.qml:626-649`
       (`test_an_item_short_of_its_record_is_not_recorded_as_an_empty_one`, tasks.md 4.4,
       "the guard direction") — the test intended to pin `rememberGenesis`'s
       empty/non-string guard cannot actually distinguish "the guard skipped the write"
@@ -117,6 +117,33 @@ check before the call.
       `verify(!screen.genesisByStoa.hasOwnProperty(missing))` and the same for `empty` —
       so the test observes the map's actual contents rather than only the value
       `genesisFor` computes from them.
+
+      **Fixed, implemented exactly as your fix direction prescribes.** The test
+      now asserts `!screen.genesisByStoa.hasOwnProperty(missing)` and the same
+      for `empty`, placed ahead of the existing `genesisFor`/`canShare`
+      assertions, which are kept. No production change was needed —
+      `genesisByStoa` is already a public property.
+
+      **Proved**: under the guard-removal mutation the suite goes to **80
+      passed, 1 failed**, and the one failure is this test, on *"an empty field
+      must leave no key either"*. At baseline it is 81/81. Mutation reverted.
+
+      The part of your finding I want to record as the durable lesson is the
+      second half, because it is the part that would otherwise be lost: the
+      three pre-existing tests that *did* catch the mutation caught it
+      **incidentally**, because they seed `genesisByStoa` and then `reload()`
+      overwrites the seed. None was written to pin this guard, so a fixture
+      change in any of them could have removed even that accidental coverage
+      with nothing reporting it. That is why the fix had to be in the
+      purpose-built test rather than resting on the three. It is in `design.md`
+      under "The guard against an empty record is asserted against the map's
+      keys", along with the general form: ask what the null implementation
+      would produce, and a lossy accessor is the usual way an assertion that
+      cannot fail gets written by accident.
+
+      Your scope framing is carried over too — this was a test-strength gap,
+      not a live vulnerability: the guard's code was correct and present
+      throughout, and remains unchanged.
 
 ## What I did not find
 

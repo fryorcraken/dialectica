@@ -6,7 +6,7 @@ have. This review therefore checks the recorded decisions against `proposal.md`,
 and reports the missing artefact as its own finding rather than silently
 substituting `proposal.md` for it.
 
-- [ ] **`dev-writer`** — no `design.md` in `openspec/changes/genesis-in-replies/`
+- [x] **`dev-writer`** — no `design.md` in `openspec/changes/genesis-in-replies/`
       This change met the trigger `dev-writer.md` sets for writing one. CLAUDE.md
       names the core module's wire API as "the part of this project to be most
       deliberate about... widening it is a decision to make on purpose rather than
@@ -29,7 +29,46 @@ substituting `proposal.md` for it.
       check, and `tasks.md` carries no design-writing task at all — the omission
       looks like it was never considered rather than decided against.
 
-- [ ] **`dev-writer`** — `proposal.md` "Why", and no `design.md`/PLAN.md entry
+      **Fixed**: `openspec/changes/genesis-in-replies/design.md` now exists. I
+      agree with the judgement, and the `2026-09-14-expose-name` precedent is
+      the argument that settles it — same shape (widen a wire call to expose
+      what core already held), same capability, and it wrote one. Combined with
+      CLAUDE.md naming the core wire API as the thing to be most deliberate
+      about, "widening three reply shapes" is not a change that should reach
+      the archive with its reasoning only in code comments.
+
+      It carries all three decisions you named, each with the alternative that
+      was rejected and — the part the code comments could not carry — **what
+      breaks without it**:
+
+      - **`map` → loop.** Replacing the error arm with `unwrap_or_default()`
+        turns the new
+        `a_record_that_cannot_be_encoded_is_a_failure_rather_than_an_empty_field`
+        red, emitting `{"…","genesis":"","…"}`. That is the mutation evidence
+        you noted was measured nowhere; it is measured now, and the test that
+        carries it was added on this pass in answer to the spec-test review.
+      - **The QML map reassignment.** Recorded with your observation that no
+        test pins the re-evaluation itself, stated as a **known accepted gap**
+        rather than left implicit: the existing specs assert map contents and
+        `canShare` in JS, so a "simplification" back to in-place mutation would
+        likely stay green. Catching it needs a spec asserting the button's
+        `visible` after a reload, which is the rendering layer no component
+        test here reaches. Named so it is not mistaken for tested.
+      - **The relation, not the shape** — kept, with your point that the spec
+        text already does design.md's job here.
+
+      Also recorded, though you filed them as clean: the reachability argument
+      for the encode-failure arm (defensive, not live), so it is not deleted as
+      dead code by someone who measures only reachability; and the Goals /
+      Non-Goals boundaries, including that `policy` is deliberately not on list
+      items.
+
+      `tasks.md` now carries the design work as §6.4 rather than leaving it
+      absent, and the stage block's `design + code` row notes that `design.md`
+      came on the findings pass rather than the first one — ticking it without
+      that note would misdate the artefact.
+
+- [x] **`dev-writer`** — `proposal.md` "Why", and no `design.md`/PLAN.md entry
       recording the refused diagnosis
       The refusal that mattered most here — that a decode failure reading
       "genesis record ended mid-field" was *not* a codec bug, against a brief that
@@ -50,6 +89,42 @@ substituting `proposal.md` for it.
       above: had one existed, this is exactly the kind of dead-end investigation
       README.md's "write the dead end down" rule asks to be recorded beside the
       decision it rules out.
+
+      **Fixed.** `design.md`'s Decisions section opens with "The reported
+      diagnosis was refused, and that refusal is the most reusable thing here",
+      and it is placed first deliberately — it is the entry with the longest
+      reach, since the other three are about this change and this one is about
+      how to read an error message.
+
+      It carries the byte-level evidence out of the PR body so it survives the
+      archive: 48 bytes, version `01`, 32-byte creator, policy `00`, title
+      length `0000000A`, title `test0.0.01`, plus
+      `stoa.rs::decode_of_encode_is_the_identity` already holding in both
+      directions. Then the actual cause — `wire.rs` decodes a `genesis` hex
+      string supplied by the *caller*, `list_stoas` never returned one, the
+      view sent `""`, and zero bytes fail the version-byte take. **Core was
+      correctly refusing an empty record the view sent.**
+
+      The generalisation is stated as the reusable part, since that is what a
+      future reader needs and not the particular record: *a decoder reporting
+      truncation is a claim about the bytes it was given, not about where they
+      were stored* — so the first question is whether the input was ever
+      supplied, not whether the codec is broken. Reading it as a codec or
+      storage defect sends the investigation to the furthest possible point
+      from the cause, which was a wire shape omitting a field.
+
+      Your reasoning for *why* it had to move is recorded with it: `openspec
+      archive` moves `design.md` into `changes/archive/`, and a PR description
+      is not part of repository history. I have noted there that the dead end
+      was the **brief's own premise** rather than a hypothesis the author chose
+      to chase, which if anything raises its value — an agent was dispatched to
+      hunt a codec bug and correctly refused the premise instead of finding
+      something to blame.
+
+      `proposal.md` is deliberately left as it stands, stating the correct
+      diagnosis flatly. A proposal's job is why the change is needed; the
+      history of what was disproved on the way belongs in Decisions, which is
+      where it now is. Flagging that as a choice rather than an oversight.
 
 ## What is in good shape
 

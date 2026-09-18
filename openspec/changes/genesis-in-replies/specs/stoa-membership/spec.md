@@ -27,9 +27,10 @@ record. An empty record is precisely the input that fails to decode as
 "ended mid-field", so emitting one would report a defect as a success and move
 the resulting error to a later call that cannot explain it.
 
-This requirement adds no storage obligation. The retention requirement above
-already requires the record be kept for every Stoa the peer is in; this fixes
-that the kept record is reported rather than withheld.
+This requirement adds no storage obligation. The requirement "A joined Stoa's
+genesis record is retained, not only its address" already requires the record be
+kept for every Stoa the peer is in; this fixes that the kept record is reported
+rather than withheld.
 
 #### Scenario: A creation reports the record its address names
 

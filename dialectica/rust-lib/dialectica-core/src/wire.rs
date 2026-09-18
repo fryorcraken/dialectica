@@ -12818,6 +12818,58 @@ mod tests {
     }
 
     #[test]
+    fn a_record_that_cannot_be_encoded_is_a_failure_rather_than_an_empty_field() {
+        // The spec's sibling guarantee to the three tests above: where the record
+        // cannot be encoded, the call reports the failure shape and MUST NOT
+        // report success carrying an empty or absent record.
+        //
+        // **An empty `genesis` is exactly the input that produced the owner's
+        // bug** — zero bytes, failing the version-byte take as "ended mid-field" —
+        // so a success reply defaulting to one would reintroduce the defect
+        // wearing a success, and move the error to a later call that cannot
+        // explain it. That is the failure this pins, and it is why the assertion
+        // is not merely "an error came back": it also denies the success shape.
+        //
+        // The branch is unreachable through `create_stoa` and `list_stoas` today —
+        // every record reaching a reply has been encoded once already (hashed for
+        // its address, or decoded out of storage). It is a defensive arm, so it is
+        // exercised at `stoa_reply` directly with a record built to exceed the
+        // title cap. Reaching for the handler instead would need a store holding
+        // bytes the encoder refuses, which is a state `decode_row` rejects.
+        let over_cap = crate::stoa::Genesis {
+            creator: creator_key(),
+            policy: crate::stoa::Policy::Open,
+            title: "x".repeat(crate::stoa::MAX_CANONICAL_BYTES),
+        };
+        // The premise: this record genuinely cannot be encoded. Without this the
+        // test would pass against a record that encodes fine and a reply that
+        // simply happened to carry no error.
+        assert!(
+            over_cap.canonical_bytes().is_err(),
+            "the fixture must be a record the encoder refuses, or this test proves nothing"
+        );
+
+        let address = crate::identity::Address::from_bytes([0u8; 32]);
+        let out = stoa_reply(&address, &over_cap);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+
+        assert!(
+            v.get("error").is_some(),
+            "an unencodable record must be reported as the failure shape: {out}"
+        );
+        // Not a partial success: the module has ONE failure shape, and a reply
+        // carrying both an error and a half-built record would be neither.
+        assert!(
+            v.get(GENESIS).is_none(),
+            "a failure must not also carry a `genesis` field, empty or otherwise: {out}"
+        );
+        assert!(
+            v.get("stoa").is_none(),
+            "a failure must not be a success shape with an error bolted on: {out}"
+        );
+    }
+
+    #[test]
     fn a_listed_record_round_trips_through_the_join_the_view_performs() {
         // End to end through the ACTUAL pair of calls the owner's click makes: the
         // listing hands over a record, and that record is accepted by the handler

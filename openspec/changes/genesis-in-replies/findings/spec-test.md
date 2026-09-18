@@ -22,7 +22,7 @@ the record as well as the address", "A Stoa is openable from the listing alone")
 have a covering test. One is a partial match, flagged below; everything else is
 clean.
 
-- [ ] **`tester`** — `dialectica/rust-lib/dialectica-core/src/wire.rs`,
+- [x] **`tester`** — `dialectica/rust-lib/dialectica-core/src/wire.rs`,
       `a_stoa_is_openable_from_the_listing_after_a_restart`
       **Scenario:** "A Stoa is openable from the listing alone" says *"the
       caller can read that Stoa's feed using only what the listing reported."*
@@ -37,7 +37,38 @@ clean.
       input contract instead of a specific call, so the test-to-scenario
       mapping is exact rather than "close enough."
 
-- [ ] **`spec-writer`** — `specs/stoa-membership/spec.md:30` ("A reply naming a
+      **Rejected**, on the narrow question of changing the test or the spec;
+      the observation is correct and is recorded rather than dismissed.
+
+      The substitution is sound for a reason stronger than "same input shape",
+      and **measured rather than inferred**: `grep -n "genesis_for"` over
+      `wire.rs` returns exactly three call sites — `list_threads_from_request`
+      (the feed path, :1571), `read_thread_from_request` (:1935) and
+      `join_stoa` (:2814). All three decode the caller's `(stoa, genesis)` pair
+      through **the same** `genesis_for`, which returns an already-verified
+      `Membership`. `join_stoa` therefore does not approximate the feed path's
+      check; it performs the identical one, and the code says so at :2804 —
+      *"`genesis_for` is the feed path's decoder and it returns the VERIFIED
+      pair… a second decoder would be a second place for the verification to be
+      forgotten."* A record `join_stoa` accepts is one the feed path accepts,
+      because there is one decoder and one verification between them.
+
+      A correction to the finding's premise worth recording: there is no
+      `read_feed` function anywhere in the Rust tree — `grep -rn "fn read_feed"
+      dialectica/rust-lib/` returns nothing, and `readFeed` returns nothing
+      either. The spec's "read that Stoa's feed" is discharged by
+      `list_threads_from_request`. So the scenario does not name a call that a
+      test silently swapped; it names a capability, and no single function
+      bears that name to call.
+
+      Rewording the scenario to name the shared input contract was considered
+      and rejected for a different reason: the scenario's value is that it is
+      phrased in the user's terms ("can read that Stoa's feed"), and a spec
+      that named an internal contract instead would be harder to check a test
+      against, not easier. The requirement is about the caller's capability;
+      which call demonstrates it is a test-design question.
+
+- [x] **`spec-writer`** — `specs/stoa-membership/spec.md:30` ("A reply naming a
       Stoa carries the record..." requirement)
       **Scenario:** "This requirement adds no storage obligation. The retention
       requirement **above** already requires the record be kept..." — but
@@ -66,6 +97,21 @@ clean.
       since the reader can find the named requirement's actual text — but the
       directional claim itself may end up false. Cite the requirement by name
       instead of by position.
+
+      **Fixed** in this pass, exactly as the finding directs. The sentence now
+      reads *"The requirement 'A joined Stoa's genesis record is retained, not
+      only its address' already requires the record be kept…"*, with no
+      positional word. The name is verified against the live spec rather than
+      transcribed from memory: `grep -n "^### Requirement"
+      openspec/specs/stoa-membership/spec.md` lists it at :188, spelled as
+      quoted.
+
+      This is the same class the README names for PLAN section numbers — a
+      reference whose target position the referring document does not control.
+      The two other above/below references at :76 and :117 are left alone, for
+      the reason the finding gives: they sit inside MODIFIED blocks that keep
+      their position, so their direction is fixed by the merge rather than
+      undetermined by it.
 
 ## 2. Can each test actually fail?
 
@@ -109,7 +155,7 @@ empty-string mismatch (`Actual (): ` vs. a hex record). The fourth,
 passed at that commit — matching the claim. Restored the test file and
 verified the full suite is green at HEAD: 81 passed, 0 failed.
 
-- [ ] **`tester`** — `dialectica-ui/tests/tst_stoa_screens.qml:632-654`
+- [x] **`tester`** — `dialectica-ui/tests/tst_stoa_screens.qml:632-654`
       (`test_an_item_short_of_its_record_is_not_recorded_as_an_empty_one`)
       **Scenario:** claimed as a "both-directions guard... holds in both
       directions by design," pinning that `rememberGenesis` does not write an
@@ -141,6 +187,30 @@ verified the full suite is green at HEAD: 81 passed, 0 failed.
       `genesisByStoa` and checking the key is truly absent (`stoa in
       screen.genesisByStoa === false`) rather than checking `genesisFor`'s
       lossy projection.
+
+      **Fixed**, by the second of the two routes suggested. The test now
+      asserts `!screen.genesisByStoa.hasOwnProperty(missing)` and the same for
+      the empty-field row, ahead of the existing `genesisFor`/`canShare`
+      assertions, which are kept — they pin the outward effect, and the new
+      ones pin the write. `genesisByStoa` is already a public property, so this
+      needed no production change to make it observable.
+
+      **Proved by re-running your mutation.** Removed the `|| genesis === ""`
+      half of `rememberGenesis`'s guard, exactly as you did, and ran `sh
+      dialectica-ui/tests/run-qml-tests.sh dialectica-ui/tests/tst_stoa_screens.qml`:
+      **80 passed, 1 failed**, the failure being this test by name, on *"an
+      empty field must leave no key either — writing '' in is the regression
+      this guard prevents, and it is invisible to genesisFor"*. Before the
+      change the same mutation was 81/81 green. Mutation reverted; `git status
+      --short` shows `DStoaListScreen.qml` unmodified.
+
+      The diagnosis was right and is worth keeping as the general rule, so it
+      is recorded in `design.md` under "The guard against an empty record is
+      asserted against the map's keys": an assertion phrased through a lossy
+      accessor cannot witness the distinction the guarded code exists to make.
+      `tasks.md` 4.5's claim that "4.4 holds in both directions by design" is
+      struck through there rather than quietly corrected, since it was the
+      claim that made this look covered.
 
 **Restart test uses a real file and a genuinely reopened store**, verified.
 `a_stoa_is_openable_from_the_listing_after_a_restart` (`wire.rs`) creates a
@@ -175,7 +245,7 @@ Not applicable — the delta has no `REMOVED Requirements` section, only
 
 ## 5. Spec soundness
 
-- [ ] **`tester`** — spec scenario "A record that cannot be encoded is a
+- [x] **`tester`** — spec scenario "A record that cannot be encoded is a
       failure, not an empty field" (ADDED requirement, `stoa-membership`)
       **Scenario:** no test in the diff exercises this. Grepped `wire.rs` at
       piece HEAD for anything constructing an unencodable retained record or
@@ -195,6 +265,35 @@ Not applicable — the delta has no `REMOVED Requirements` section, only
       silently reported as success) is the one this whole piece exists to
       fix, the absence of a test for the sibling failure-shape guarantee is
       worth closing before merge.
+
+      **Fixed.** Added
+      `a_record_that_cannot_be_encoded_is_a_failure_rather_than_an_empty_field`
+      in `wire.rs`, beside the other three. It builds a `Genesis` whose title
+      exceeds the cap, asserts the premise first (`canonical_bytes().is_err()`
+      — without which the test could pass against a record that encodes fine),
+      then calls `stoa_reply` and asserts all three halves of the requirement:
+      an `error` is present, no `genesis` field is present, and no `stoa` field
+      is present. The last two are what make it a test of the *shape* rather
+      than only of the error — "MUST NOT report success carrying an empty or
+      absent record" is not satisfied by an error bolted onto a success shape,
+      and this repo's contract is one failure shape, never a partial success.
+
+      **Proved to fail first**, against the mutation the requirement exists to
+      forbid: replacing `stoa_reply`'s error arm with
+      `genesis.canonical_bytes().unwrap_or_default()` turns it red, and the
+      panic output is the forbidden reply verbatim —
+      `{"foundingTitle":"xxx…","genesis":"","policy":"open","stoa":"0000…"}`.
+      That is the owner's original bug reproduced as a *successful* call, which
+      is precisely why the scenario is in the spec. Mutation reverted; full
+      suite 1023 core + 30 end-to-end, 0 failed, `cargo fmt --check` clean.
+
+      On your scope note: the branch is confirmed **defensive rather than
+      reachable** through `create_stoa`/`list_stoas` today, matching what the
+      security review found independently. The test reaches it by calling
+      `stoa_reply` directly, because forcing it through a handler would need a
+      store holding bytes the encoder refuses — a state `decode_row` rejects on
+      the way in. That reasoning is recorded in `design.md` so the arm is not
+      later deleted as dead code.
 
 - Self-consistency and staleness against PLAN.md (`origin/main`): no
   contradiction found within the delta beyond the above/below fragility
