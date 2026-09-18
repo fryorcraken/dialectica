@@ -12777,7 +12777,10 @@ mod tests {
         let genesis = crate::stoa::Genesis::decode(&bytes)
             .unwrap_or_else(|e| panic!("`genesis` must decode as a record ({e}): {hex_str}"));
         assert_eq!(
-            genesis.address().expect("a decoded record has an address").to_hex(),
+            genesis
+                .address()
+                .expect("a decoded record has an address")
+                .to_hex(),
             reply["stoa"].as_str().expect("a reply names its address"),
             "the record must be the one this address is the hash of: {reply}"
         );
