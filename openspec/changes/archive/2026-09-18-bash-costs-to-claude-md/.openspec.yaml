@@ -1,0 +1,21 @@
+# `schema` is REQUIRED for this file to be valid change metadata, and without it
+# `skip_specs` is silently NOT HONOURED — `openspec validate --strict` reports
+# the marker as ignored and then fails for having no deltas, which reads as two
+# problems rather than one. It must name a known schema; this project's is the
+# built-in `spec-driven`, set in `openspec/config.yaml`.
+schema: spec-driven
+
+# No spec delta: this change reverts agent-instruction and CI-gate files to their
+# previous state and edits `CLAUDE.md` prose. It adds no requirement, withdraws
+# none, and changes no module behaviour — no logic, no wire shapes, no renames.
+#
+# The distinction that makes `skip_specs` correct here rather than convenient:
+# `openspec/specs/` contracts dialectica's observable behaviour. Agent
+# instructions and permission-cost guidance are about how the work gets done,
+# not about what the forum does; nothing in the spec suite mentions either, so
+# there is no contract to delta in any direction.
+#
+# The change being reverted (#119) declared `skip_specs: true` for the same
+# reason. Undoing it cannot introduce a spec delta that the original did not
+# create.
+skip_specs: true

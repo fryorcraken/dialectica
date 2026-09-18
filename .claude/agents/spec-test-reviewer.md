@@ -70,25 +70,6 @@ the *next* mutation mean something.)
 messages, the task list and the tester's report are all *claims*. Verify each
 against the artifacts.
 
-## What Bash costs here
-
-**Read [`BASH-COSTS.md`](BASH-COSTS.md) before your first shell command.** It is
-the canonical list of shapes that cost the user a manual approval click, each
-with the replacement to reach for.
-
-The short version: **one plain command per call.** No `|`, `&&`, `;`, `$(…)`,
-loops, `>` redirects, globs, heredocs, `env VAR=value` prefixes or
-`cd <dir> && <cmd>` — and no reads outside the working directories, which
-includes `/tmp` and the session scratchpad. Use the `Grep`, `Glob`, `Read`,
-`Edit` and `Write` tools rather than their shell equivalents, relative paths
-inside your own worktree, and `./tmp/` **in the worktree** for scratch. **If a
-task cannot be done within those shapes, stop and report it** rather than
-improvising around the block.
-
-Yours most often: part 3 greps the tests for `NO SPEC:`. That is the `Grep`
-tool with `output_mode: "content"` and `-n: true` over the test directory —
-one call, no pipe, no loop. Part 2's suite runs are covered under it too.
-
 ## 1. Does every scenario have a test?
 
 Walk the spec scenario by scenario and find the test covering each. Report any

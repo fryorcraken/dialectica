@@ -29,24 +29,6 @@ enter a tree yourself.
 **Run `openspec` plainly.** It resolves its root from the cwd, so it finds your
 change. If it cannot, check `pwd` before concluding anything about the CLI.
 
-## What Bash costs here
-
-**Read [`BASH-COSTS.md`](BASH-COSTS.md) before your first shell command.** It is
-the canonical list of shapes that cost the user a manual approval click, each
-with the replacement to reach for.
-
-The short version: **one plain command per call.** No `|`, `&&`, `;`, `$(…)`,
-loops, `>` redirects, globs, heredocs, `env VAR=value` prefixes or
-`cd <dir> && <cmd>` — and no reads outside the working directories, which
-includes `/tmp` and the session scratchpad. Use the `Grep`, `Glob`, `Read`,
-`Edit` and `Write` tools rather than their shell equivalents, relative paths
-inside your own worktree, and `./tmp/` **in the worktree** for scratch. **If a
-task cannot be done within those shapes, stop and report it** rather than
-improvising around the block.
-
-Yours most often: `openspec` has no directory flag, so it is the one command that
-would tempt a `cd`. It does not need one — you are already in the right tree.
-
 Commit to your own branch; **do not push and do not open a PR.** Pushing a
 harness-named branch puts something on the remote that is not a piece branch, and
 the `dev-writer` opens the PR at the end of its pass, carrying your spec commits

@@ -85,7 +85,9 @@ by accident, and nobody ever decides whether it was right.
 And the rules that bite hardest here:
 
 - **`Read`/`Edit`/`Write` over shell file manipulation**, and **relative paths
-  inside your own worktree** — see the section below for both.
+  inside your own worktree** — you arrive in the right tree, so a long absolute
+  path back into it is unnecessary and is where a typo becomes a blocked read.
+  Absolute paths remain the rule for anything reaching *outside* your tree.
 - **Never trust inbound data.** Anything from a peer is attacker-controlled:
   validate at the boundary, before it reaches a state machine. No panic may be
   reachable from malformed input — the SDK has no panic guard, and an unguarded
@@ -117,26 +119,6 @@ green stand in for coverage.
 
 Stop and say so if a task cannot be done as written. A task list that was wrong
 is information worth reporting; quietly doing something else is not.
-
-## What Bash costs here
-
-**Read [`BASH-COSTS.md`](BASH-COSTS.md) before your first shell command.** It is
-the canonical list of shapes that cost the user a manual approval click, each
-with the replacement to reach for.
-
-The short version: **one plain command per call.** No `|`, `&&`, `;`, `$(…)`,
-loops, `>` redirects, globs, heredocs, `env VAR=value` prefixes or
-`cd <dir> && <cmd>` — and no reads outside the working directories, which
-includes `/tmp` and the session scratchpad. Use the `Grep`, `Glob`, `Read`,
-`Edit` and `Write` tools rather than their shell equivalents, relative paths
-inside your own worktree, and `./tmp/` **in the worktree** for scratch. **If a
-task cannot be done within those shapes, stop and report it** rather than
-improvising around the block.
-
-Yours most often: you write files all day, and every shell way to mutate one
-needs a redirect, a heredoc or `sed -i` — the three shapes the checker cannot
-analyse. `Edit` also refuses a string that is missing or non-unique, where
-`sed -i 's/x/y/'` silently changes every match or none and exits 0 either way.
 
 ## `tasks.md`, and where your work lands
 

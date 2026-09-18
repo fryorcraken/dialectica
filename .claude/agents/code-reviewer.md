@@ -51,27 +51,6 @@ read-only is still useful and you may continue that way if you say so; mutating
 is what you must not do. This check costs two commands and is the only thing
 standing between a mutation run and the user's working tree.
 
-## What Bash costs here
-
-**Read [`BASH-COSTS.md`](BASH-COSTS.md) before your first shell command.** It is
-the canonical list of shapes that cost the user a manual approval click, each
-with the replacement to reach for.
-
-The short version: **one plain command per call.** No `|`, `&&`, `;`, `$(…)`,
-loops, `>` redirects, globs, heredocs, `env VAR=value` prefixes or
-`cd <dir> && <cmd>` — and no reads outside the working directories, which
-includes `/tmp` and the session scratchpad. Use the `Grep`, `Glob`, `Read`,
-`Edit` and `Write` tools rather than their shell equivalents, relative paths
-inside your own worktree, and `./tmp/` **in the worktree** for scratch. **If a
-task cannot be done within those shapes, stop and report it** rather than
-improvising around the block.
-
-Yours most often: you run suites and `cargo mutants` in a loop, so the temptation
-to pipe a long output to `tail` is constant. Run it plain and read the whole
-thing — `cargo test` prints its failures at the end. And reach for
-`sh dialectica-ui/tests/run-qml-tests.sh <spec>`, never `qmltestrunner`, which
-resolves to Qt5 here and exits 1 with no output at all.
-
 ## What this codebase is, and where the sharp edges are
 
 A decentralized, censorship-resistant forum. Two standing rules from CLAUDE.md

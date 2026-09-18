@@ -1,5 +1,11 @@
 # Give every role file the forbidden Bash shapes and their replacements
 
+> **Reverted by PR #131.** The diagnosis below stands; the action was the
+> runner's own initiative and `.claude/` is the owner's. Nothing this proposal
+> describes — `BASH-COSTS.md`, the per-role-file gate, its `ci.yml` steps — is
+> present in the tree. The rules live in `CLAUDE.md` instead. The record is kept
+> because a reverted change is still something that happened.
+
 ## Why
 
 In one session, four dispatched agents cost the user manual approval prompts by

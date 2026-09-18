@@ -67,26 +67,6 @@ assuming it:
 git rev-parse --abbrev-ref HEAD
 ```
 
-## What Bash costs here
-
-**Read [`BASH-COSTS.md`](BASH-COSTS.md) before your first shell command.** It is
-the canonical list of shapes that cost the user a manual approval click, each
-with the replacement to reach for.
-
-The short version: **one plain command per call.** No `|`, `&&`, `;`, `$(…)`,
-loops, `>` redirects, globs, heredocs, `env VAR=value` prefixes or
-`cd <dir> && <cmd>` — and no reads outside the working directories, which
-includes `/tmp` and the session scratchpad. Use the `Grep`, `Glob`, `Read`,
-`Edit` and `Write` tools rather than their shell equivalents, relative paths
-inside your own worktree, and `./tmp/` **in the worktree** for scratch. **If a
-task cannot be done within those shapes, stop and report it** rather than
-improvising around the block.
-
-Yours most often: `gh` is free until you filter it, and you live in `gh`. A plain
-`gh pr view <n>` or `gh run list` costs nothing; appending `--jq` costs a click
-on a call you will make many times while watching CI. Run it plain and read the
-JSON.
-
 ## Step 1 — is the piece finished?
 
 Two files answer this, and both are greppable rather than a matter of opinion.
