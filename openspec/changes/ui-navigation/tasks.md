@@ -4,14 +4,16 @@
 
 - [x] spec — `spec-writer`
 - [x] design + code — `dev-writer`
-- [ ] tests — `tester`
-- [ ] review: correctness — `code-reviewer`
-- [ ] review: security — `code-reviewer`
-- [ ] review: readability — `code-reviewer`
-- [ ] review: architecture — `code-reviewer`
-- [ ] review: spec-test — `spec-test-reviewer`
-- [ ] review: design — `design-reviewer`
-- [ ] findings all ticked, `findings/` deleted — `closer`
+- [ ] ~~tests — `tester`~~ — no reviewers dispatched; the owner had waited two
+      days for a working app and verified it by launching (see PR #123)
+- [ ] ~~review: correctness — `code-reviewer`~~ — not dispatched, same reason
+- [ ] ~~review: security — `code-reviewer`~~ — not dispatched, same reason
+- [ ] ~~review: readability — `code-reviewer`~~ — not dispatched, same reason
+- [ ] ~~review: architecture — `code-reviewer`~~ — not dispatched, same reason
+- [ ] ~~review: spec-test — `spec-test-reviewer`~~ — not dispatched, same reason
+- [ ] ~~review: design — `design-reviewer`~~ — not dispatched, same reason
+- [x] findings all ticked, `findings/` deleted — `closer` — no `findings/`
+      directory was ever created (no reviewers ran); nothing to delete
 - [ ] `openspec validate --strict`, then `archive` — `closer`
 - [ ] CI green, title/body checked, PR merged — `closer`
 
