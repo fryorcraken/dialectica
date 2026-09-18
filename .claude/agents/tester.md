@@ -11,6 +11,26 @@ code.
 Work scenario by scenario. One scenario may need several tests, and one test may
 cover several scenarios; do not force one-to-one.
 
+## What Bash costs here
+
+**Read [`BASH-COSTS.md`](BASH-COSTS.md) before your first shell command.** It is
+the canonical list of shapes that cost the user a manual approval click, each
+with the replacement to reach for.
+
+The short version: **one plain command per call.** No `|`, `&&`, `;`, `$(…)`,
+loops, `>` redirects, globs, heredocs, `env VAR=value` prefixes or
+`cd <dir> && <cmd>` — and no reads outside the working directories, which
+includes `/tmp` and the session scratchpad. Use the `Grep`, `Glob`, `Read`,
+`Edit` and `Write` tools rather than their shell equivalents, relative paths
+inside your own worktree, and `./tmp/` **in the worktree** for scratch. **If a
+task cannot be done within those shapes, stop and report it** rather than
+improvising around the block.
+
+Yours most often: the QML suite. Run
+`sh dialectica-ui/tests/run-qml-tests.sh <spec>` — never `qmltestrunner`
+directly, and never with a `QT_QPA_PLATFORM=offscreen` prefix, which the script
+already sets and which costs a click on its own.
+
 ## Pick the layer that can actually see the behaviour
 
 | Layer | Sees |
