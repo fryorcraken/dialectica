@@ -65,13 +65,10 @@ The archive row sits **above** the merge row on purpose: the archive is a commit
 the piece branch that rides the same PR, so it happens before CI and the merge, not
 after. [`closer.md`](closer.md) says why.
 
-**The five review rows are the maximum, not the fixture. Strike the ones your
-piece's tier does not run**, with the reason, the same way any other inapplicable
-row is struck — [`RUNNER.md`](RUNNER.md)'s tier table is the authority on which.
-A piece with no code strikes `security`; one with no spec delta strikes
-`spec-test`. Leaving them unticked instead is the worse failure of the two: an
-unticked row with nobody running is the signal that a stage was forgotten, and a
-row that was never going to run spends that signal on noise.
+**The five review rows are the maximum. Strike the ones your piece's tier does
+not run**, with the reason — no code strikes `security`, no spec delta strikes
+`spec-test`. [`RUNNER.md`](RUNNER.md)'s tier table says which. Strike them rather
+than leaving them unticked: an unticked row means a stage nobody is doing.
 
 Tick your own row when the spec is done. **Strike a row through with its reason
 rather than deleting it** if it genuinely does not apply — a missing row reads as an

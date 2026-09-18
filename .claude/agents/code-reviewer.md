@@ -1,6 +1,6 @@
 ---
 name: code-reviewer
-description: Reviews the implementation along ONE named lane - correctness+readability, security, or architecture. Launch once per lane and name which in the prompt; readability rides with correctness because its findings were measured to be largely the same ones, while architecture stays separate because it asks whether the NEXT call site will be right. Use before merge, alongside the spec-test and design reviewers. Do not skip it for a change with no source diff - agent instructions, config and prose are reviewable material.
+description: Reviews the implementation along ONE named lane - correctness+readability, security, or architecture. Launch once per lane and name which in the prompt. Use before merge, alongside the spec-test and design reviewers. Do not skip it for a change with no source diff - agent instructions, config and prose are reviewable material.
 model: sonnet
 effort: high
 ---

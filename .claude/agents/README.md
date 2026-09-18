@@ -267,11 +267,10 @@ catches a missing reviewer is absent exactly where it is easiest to skip one.
 The first such piece here reached review with no `openspec/changes/<name>/` at
 all, so a reviewer had no row to tick and said so.
 
-**`findings/<lane>.md`**, one file per reviewer — `correctness-readability`,
-`security`, `architecture`, `spec-test`, `design-review`, less whichever lanes
-the piece's tier drops. The combined lane is written with a hyphen in the
-filename and a `+` in prose and in its stage-block row; it is one file either
-way. **Every finding is a checkbox**, written unticked by the reviewer:
+**`findings/<lane>.md`**, one file per reviewer — `correctness-readability`
+(hyphen in the filename, `+` in its stage-block row), `security`,
+`architecture`, `spec-test`, `design-review`, less whichever lanes the tier
+drops. **Every finding is a checkbox**, written unticked by the reviewer:
 
 ```markdown
 - [ ] **`dev-writer`** — `wire.rs:96` — what is wrong
@@ -470,13 +469,9 @@ The reviewers run in parallel and ask different questions:
   were the decisions worth recording recorded?**
 
 **Launch `code-reviewer` once per lane** — correctness+readability, security,
-architecture — naming which in the prompt. Scanning for a reachable panic is a
-different reading of a file from scanning for a function doing two jobs, and one
-agent holding both becomes whichever it started with. Readability rides with
-correctness because its findings were measured to be largely the ones correctness
-already files; architecture stays alone because it asks a question neither of the
-others does — whether the *next* call site will be right.
-[`RUNNER.md`](RUNNER.md)'s tier table has the count and the measurements.
+architecture — naming which in the prompt. One agent holding two becomes
+whichever it started with. [`RUNNER.md`](RUNNER.md)'s tier table says how many
+lanes a given change gets.
 
 **`spec-test-reviewer` is blind to the implementation.** Someone who has read the
 code judges tests by what the code does — exactly the failure a spec exists to
