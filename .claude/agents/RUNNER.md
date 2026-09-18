@@ -210,7 +210,7 @@ there is no conflict, because the two agents were never in the same tree. The
 sequence per agent is: hand-back → cherry-pick onto `piece/<name>` → remove the
 agent's tree → dispatch the next.
 
-Reviewers are the exception that proves it: six run concurrently precisely
+Reviewers are the exception that proves it: they run concurrently precisely
 because they only *read* the code, so forking them all from the same HEAD is
 correct. It is writers that must be serialised.
 
@@ -257,33 +257,43 @@ not arise on it; and the setting is global, applying to every
 | Stage | How many |
 |---|---|
 | `spec-writer` / `dev-writer` / `tester` | **one in total**, not one each — cherry-pick and commit before dispatching the next, or it forks from a HEAD without the previous one's work |
-| reviewers | **six, in parallel** — a tree and a findings file each |
+| reviewers | **three to five, in parallel** — see the tier table below — a tree and a findings file each |
 | `closer` | one, never beside a writer |
 
-A full review is six agents of three types, one per stage-block row:
+The reviewers are three types, one stage-block row each:
 
 | Dispatch | Reads | Writes |
 |---|---|---|
-| `code-reviewer` × 4 — correctness, security, readability, architecture, named in the prompt | the code | `findings/<dimension>.md` |
+| `code-reviewer` × N — correctness+readability, security, architecture, named in the prompt | the code | `findings/<lane>.md` |
 | `spec-test-reviewer` | **spec and tests only — never the implementation** | `findings/spec-test.md` |
 | `design-reviewer` | code, `design.md`, PLAN.md | `findings/design-review.md` |
 
-The last two are not smaller `code-reviewer`s:
+### How many reviewers: read it off what the change contains
 
-- **`spec-test-reviewer` is blind to the implementation on purpose** — someone
-  who has read the code judges tests by what the code does, which is the defect
-  a spec exists to catch. Do not hand it the code to "give it context".
-- **`design-reviewer`** asks whether the recorded decisions were the ones taken.
-  A gap it finds is a missing `design.md` entry, not a code defect.
+| The change holds | Lanes | Which |
+|---|---|---|
+| Rust or QML **and** a spec delta | **five** | correctness+readability, security, architecture, spec-test, design-review |
+| code, no new contract | **four** | the same, less spec-test |
+| prose, config, agent files — no source diff | **three** | correctness+readability, architecture, design-review |
 
-**Name the dimension** when launching a `code-reviewer`: one agent asked to hold
-two becomes whichever it started with. A small change can take one covering all
-four — but the other two are still separate dispatches, because what
-distinguishes them is what they may read.
+**Read the tier off what the change holds, not off how big it feels.** A lane is
+dropped only when the material it reads is absent: no spec delta drops
+`spec-test`, no source diff drops `security`.
 
-**A change with no source diff still gets all six.** Agent files, prose and
-config are reviewable material; treating "no code" as an exemption is how this
-flow's own adopting change nearly shipped with `code-reviewer` skipped.
+**Never merge `spec-test-reviewer` or `design-reviewer` into a `code-reviewer`**,
+and do not hand `spec-test-reviewer` the implementation to "give it context" —
+its blindness to the code is the point.
+
+**Name the lane** in every `code-reviewer` dispatch. One agent given two lanes
+becomes whichever it started with.
+
+**A change with no source diff still gets its three.** Agent files, prose and
+config are reviewable material. The tier drops lanes with nothing to read; it
+never drops review.
+
+The measurements behind the tier and the readability merge are in the PR that
+introduced them (`git log --grep "Tier the reviewer count"`) — not repeated here,
+because every agent dispatched pays for this file in context.
 
 **Two concurrent authors across pieces is the ceiling.** Fanning agents across
 sequential work moves dependency discovery to collision time.
@@ -295,30 +305,18 @@ git worktree add --no-track -b piece/<name> .claude/worktrees/piece-<name> origi
 ```
 
 **The flag is what stops the piece branch being configured to push to `main`.**
-Without it, `git worktree add <path> -b piece/<name> origin/main` branches from a
-remote-tracking ref, and git's `branch.autoSetupMerge` default then writes
-`remote = origin` and `merge = refs/heads/main` into the new branch's config. The
-branch is set up to push to `main` from the moment it exists.
-
-This is the cause of the bare-`git push`-lands-on-`main` warning that this file
-and `CLAUDE.md` both carry. Measured: a branch created without the flag has
-`merge refs/heads/main` in its config, and `git push origin piece/<name>` from it
-was **rejected by branch protection for `refs/heads/main`**, going through only
-with a fully-qualified refspec. The lesson is about branch creation, not about
-the push form.
-
-**Check it with `git config`, not `git branch -vv`.** `branch -vv` cannot catch
-this: it prints `[origin/main]`, and nothing in that output tells an intended
-upstream from a wrong one. The positive signal is:
+Verify it right after creating the worktree:
 
 ```
 git config --get-regexp "^branch\.<name>"
 ```
 
-**returning nothing.**
-
-A branch created this way has no upstream, so a push names the refspec in full:
+**returning nothing** is the positive signal. A branch created this way has no
+upstream, so a push names the refspec in full:
 `git push origin refs/heads/piece/<name>:refs/heads/piece/<name>`.
+
+CLAUDE.md's "Worktrees are not scratch" has the mechanism, and why
+`git branch -vv` is not the check.
 
 ## Prune worktrees at merge time
 

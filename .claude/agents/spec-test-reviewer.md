@@ -94,14 +94,11 @@ The highest-value check in this file.
 **Read first, mutate selectively.** Most tests can be judged by reading against
 the one invariant: **a test must assert against something the implementation did
 not produce.** A test that asks the implementation what it wrote and then agrees
-cannot fail. Three tests in this repo shipped with exactly that shape:
-
-- Comparing `"ab"` with `"abc"` to prove a length prefix mattered —
-  different-length inputs differ either way.
-- Mutating a byte and asserting a hash moved — a property of SHA-256, not of the
-  encoding.
-- `assert_eq!(bytes[0], VERSION_1)` — pinning position while never checking
-  value.
+cannot fail. Three tests in this repo shipped with exactly that shape: a
+length-prefix test comparing `"ab"` with `"abc"` (different-length inputs differ
+either way), a hash-moved assertion that only tested SHA-256, and
+`assert_eq!(bytes[0], VERSION_1)` pinning position while never checking value.
+CLAUDE.md's "Tests are part of the change" has each in full.
 
 Also watch for a test whose name promises more than its body checks (varying
 field A while named for field B), and a constant assumed invalid that is not
@@ -173,7 +170,7 @@ have to have moved.
 
 - **Self-consistency.** `openspec validate --strict` checks heading structure
   only and will pass a spec whose requirements contradict each other. Read the
-  whole file. This has happened here.
+  whole file.
 - **Testability.** A scenario asserting something no test could check is a spec
   defect, not a coverage gap — say which it is.
 - **Staleness against `docs/PLAN.md` on `origin/main`**, not the branch's copy.

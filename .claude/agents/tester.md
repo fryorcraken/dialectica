@@ -67,7 +67,7 @@ A hardcoded expectation, or one derived independently. Anything else is a
 self-consistency check wearing a test's name. `identity.rs`'s
 `the_wire_constants_are_pinned_to_known_answers` is the pattern for a
 consensus-critical constant — hardcoded hex, and an instruction not to update it
-to match.
+to match. (CLAUDE.md states this rule too; the detail here is yours to apply.)
 
 You do not need to mutation-test every test — that is the reviewer's sampling
 job and it costs real time. Apply the invariant while writing, and reach for a
