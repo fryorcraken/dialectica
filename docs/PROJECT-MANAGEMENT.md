@@ -56,6 +56,24 @@ per PLAN.md's own preamble ("the user's wishes and the actual implementation
 ALWAYS override this document"), and the issue tracker should be updated
 immediately rather than left to drift from a conversation nobody wrote down.
 
+## Standing policy: dead buttons and mock data are fine, if tracked
+
+Across every `0.0.x` milestone, a control that doesn't yet do anything real —
+a button with no wired effect, a screen showing mock or placeholder data — is
+an acceptable thing to ship, **as long as an issue exists, assigned to a
+milestone, that finishes it.** The owner has confirmed this explicitly: it is
+not a failure of a milestone's scope for a feature to ship ahead of what
+consumes it (the clearest example is 0.0.1's vote control, which publishes
+real votes with no ranking yet consuming them — see the vote-driven-ranking
+issue tracked for 0.0.2).
+
+What this does NOT license: shipping something incomplete with no issue at
+all. The tracked issue is what keeps "ships ahead of its consumer" from
+becoming "silently incomplete forever." When scoping a milestone, check for
+exactly this shape — a feature whose visible half ships now and whose
+functional half is scoped later — and make sure the later half has its own
+issue before calling the earlier milestone's scope settled.
+
 ## What this role actually does
 
 1. **Turn a scope decision into issues under a milestone.** One issue per
