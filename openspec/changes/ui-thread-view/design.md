@@ -231,14 +231,26 @@ string into a plausible one.
 non-null. A fourth screen holds to it: `reading` joins `chosen` and `previewing`,
 and `screenShown` gains one arm.
 
-`reading` is set only through `openThread()`, which does not clear `chosen` — the
-feed must stay live underneath so leaving the thread returns to the feed the user
-opened it from, with its page and its scroll intact. That is the one asymmetry
-against the existing setters, and it is deliberate: `preview` and `open` are
-alternatives to each other, where a thread is a screen *above* a feed.
+`reading` is set only through `openThread()`.
 
-`closeThread()` sets `reading = null` and nothing else, which is why the return
-needs no state to restore.
+**This piece proposed that `openThread()` leave `chosen` set** — the feed staying
+live underneath, so leaving the thread returned to the feed the user opened it
+from with its page and its scroll intact, on the reasoning that `preview` and
+`open` are alternatives to each other where a thread is a screen *above* a feed.
+**That mechanism was superseded by the merge and is not what ships**, along with
+the `closeThread()` that followed from it. Navigation's version clears `chosen`
+and rebuilds the feed from what `reading` carries, and it is the one in the tree;
+see *What the merge took from each side* below for why it won. The paragraph is
+kept rather than deleted because the rejected alternative is the part worth
+reading — a later change reaching for "keep the feed alive underneath" should
+know it was proposed, and what displaced it.
+
+What ships, and what the rest of this section is written against:
+`openThread()` clears `chosen` and carries the whole feed context on `reading`;
+`closeThread()` rebuilds `chosen` from it. One state, one property — the
+invariant holds because no two of the navigator's properties are ever both set,
+which is what makes `screenShown`'s ternary a rendering of the state rather than
+a resolution of a conflict (`Main.qml:64-101`).
 
 **The transition is `piece/ui-navigation`'s, and this piece owns the
 destination.** `view-navigation`'s *A thread is opened from a feed row and can be
@@ -301,6 +313,62 @@ of `thread` violates the key set `wire.rs` pins. The assertion was not weakened
 to accommodate the code — it was strengthened, and the code was changed to meet
 it.
 
+### D11 — The empty-`rootOp` guard is held at the transition as well as at the affordance
+
+`openThread()` returns without setting `reading` when `rootOp` is `""`, and this
+is deliberately the *second* place that judgement is made: `FeedScreen`'s
+`threadTarget()` already withholds the link from a row naming no op
+(`visible: target !== ""`).
+
+**It is currently unreachable through the live UI, and it is kept anyway.** That
+is the honest description — reachability today is a property of the one caller
+that exists, not of the function. `thread-view`'s *No thread is rendered before
+one has been chosen* is a requirement about the navigator, and a guard living
+only in the caller is one every future caller has to remember. CLAUDE.md's rule
+is the one being applied: a guard is a job, and "is it applied everywhere?" stays
+a question with an answer only where the answer does not depend on each new call
+site.
+
+**What breaks without it**: nothing in the suite today, and saying otherwise
+would be the false claim worth avoiding. What it prevents is a second caller —
+a deep link, a notification, a restored session — opening the thread screen on
+the empty string, which then asks core to read a thread identified by `""`. The
+cost of keeping it is one comparison; the cost of removing it is discovered by
+whoever adds that caller.
+
+### D12 — One probe normalisation, on `Core`, rather than a copy per screen
+
+`capabilityFrom` and `identityFrom` turn a probe reply into a fixed shape with
+every field present. They were byte-for-byte identical on `FeedScreen.qml` and
+`DThreadScreen.qml`.
+
+They now live on `Core`, which is where the reply is produced: `call()`
+normalises the envelope, and these normalise the two probe answers, beside it.
+Both screens delegate.
+
+Rejected: leaving the copies with a comment saying they must agree. The failure
+is not that two copies exist, it is that **nothing can observe them diverging** —
+each copy is internally consistent, so a fix to the `=== true` strictness applied
+to one and not the other leaves the unfixed screen claiming an identity the
+machine does not have, with every gate green. A comment is a rule someone has to
+remember; the shared function is one the data enforces.
+
+Also rejected: a small imported JS module. `Core` is already imported by both
+screens and is already the boundary the reply crosses, so a second mechanism
+would add a file without adding an invariant.
+
+**What breaks without this**:
+`test_both_screens_normalise_a_probe_the_same_way` in `tst_core_call.qml` — the
+one assertion the duplication could not hold — plus the four strictness and
+shape tests beside it. The strictness fixtures discriminate rather than decorate:
+measured, four of the six (`"true"`, `1`, `{}`, `"yes"`) give a different answer
+under a loose `!!v` than under `=== true`.
+
+A consequence worth knowing: `DIdentityChip.qml`'s header named `FeedScreen.qml`
+as *the* normalising boundary, which stopped being true the moment a second
+screen normalised too. It now names `Core`, and that sentence stays true as
+screens are added, which is the property the extraction buys.
+
 ## What the merge took from each side
 
 `cc37f2e` and this piece each built a thread screen. The resolution is not
@@ -310,6 +378,7 @@ per-file: each side won where its capability owns the question.
 |---|---|---|
 | `DThreadScreen.qml` — nesting, states, composer, inert control | **this piece** | `thread-view` contracts all of it. Navigation's screen was built opportunistically and asserts none of these requirements. |
 | `Main.qml` — the whole navigator | **navigation** | Five screens, onboarding, the shared status bar and the both-probes routing. `view-navigation` contracts it and `tst_navigation.qml` holds it. |
+| `Main.qml` — `openThread()`'s `rootOp === ""` guard | **this piece**, into navigation's function | The one line this piece added to a file it does not otherwise own. `thread-view`'s *No thread is rendered before one has been chosen* requires that no read be made for a thread the user never asked for, and the transition is where that holds for the route. Recorded here because the table is what a maintainer reads to find every place this piece touched `Main.qml`, and a cross-piece edit missing from it is one nobody can find. |
 | `FeedScreen.qml` — identity chip, footer, `createIdentityRequested`, the reading-is-free line | **navigation** | Contracted by `view-navigation`; this piece's screen predates all of it. |
 | `FeedScreen.qml` — `threadTarget()` | **neither, see D10** | Both were wrong. The field is `thread`. |
 | `Core.qml`, `tst_core_call.qml` — the bridge unwrap | **navigation** | The host double-encodes replies; every core call depends on it. Taken wholesale. |

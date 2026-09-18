@@ -66,7 +66,7 @@ finding below names its dimension.
 
 ## Findings
 
-- [ ] **`dev-writer`** — `dialectica-ui/src/qml/DThreadScreen.qml:59-101` vs
+- [x] **`dev-writer`** — `dialectica-ui/src/qml/DThreadScreen.qml:59-101` vs
       `dialectica-ui/src/qml/FeedScreen.qml:83-155` — **[architecture]**
       `capabilityFrom(probe)` and `identityFrom(probe)` are byte-for-byte
       identical between the two files (verified by direct comparison, not
@@ -88,7 +88,38 @@ finding below names its dimension.
       occurrence, which is the point at which duplication stops being
       coincidence.
 
-- [ ] **`dev-writer`** — `dialectica-ui/src/qml/Main.qml:144-146` —
+      **Fixed** in `285fea2`, as its own behaviour-preserving commit. Both
+      helpers moved to `Core.qml` — the singleton both screens already import,
+      and where the probe reply is produced: `call()` normalises the envelope,
+      these normalise the two probe answers beside it. Both screens now
+      delegate. Recorded as design.md **D12**, with the rejected alternatives
+      (a comment asserting the copies must agree; a separate JS module).
+
+      The sequencing risk was checked rather than assumed:
+      `git diff origin/main...origin/piece/ui-remaining-screens --
+      FeedScreen.qml` touches lines ~640 and ~928 only, nowhere near the
+      helpers at 83-155, so the extraction creates no conflict for that
+      branch.
+
+      **The test that fails without it**:
+      `test_both_screens_normalise_a_probe_the_same_way` in
+      `tst_core_call.qml` — the property the duplication could not hold, since
+      each copy was internally consistent — plus four tests pinning the shape
+      and the `=== true` strictness. Fixtures are input-dependent: measured,
+      four of the six strictness fixtures (`"true"`, `1`, `{}`, `"yes"`) give
+      a different answer under a loose `!!v` than under `=== true`, so the
+      assertions discriminate rather than decorate.
+
+      One thing the finding did not mention, found while fixing it and worth
+      flagging: `DIdentityChip.qml:65-67` asserted "`FeedScreen.qml`
+      normalises both at the boundary", which had already stopped being true
+      when this piece added a second normalising screen. It now names `Core`.
+
+      Verified after: 24 spec files / 0 failures, and
+      `check_qml_names.py`, `check_qml_members.sh`, `check_qml_reachable.py`
+      all green — the same measurements this review recorded as clean.
+
+- [x] **`dev-writer`** — `dialectica-ui/src/qml/Main.qml:144-146` —
       **[architecture]** This piece's commit (`4e13bf5`) added
       `rootOp === ""` to `openThread()`'s guard, a function `Main.qml` (owned
       by `piece/ui-navigation`, per design.md's own "What the merge took from
@@ -109,7 +140,28 @@ finding below names its dimension.
       D9's record are both real. Low severity; document-only fix (add the
       line to D9's table) would close it.
 
-- [ ] **`dev-writer`** — `openspec/changes/ui-thread-view/design.md:64-70`
+      **Fixed** in `4a8f1c2` (document-only, as the finding proposed). The
+      guard now has its own row in *What the merge took from each side*,
+      attributed to this piece and into navigation's function, so a maintainer
+      reading that table to find every place this piece touched `Main.qml`
+      finds it.
+
+      Added more than the row, on CLAUDE.md's "where the decision is a guard,
+      record what breaks without it" — an unreachable guard with no recorded
+      reason is exactly what gets deleted later by someone who cannot see what
+      it was for. design.md **D11** records that it is a second holding of a
+      judgement `FeedScreen.threadTarget()` already makes, that it is
+      **currently unreachable through the live UI** (stated plainly rather
+      than implied — reachability today is a property of the one caller that
+      exists, not of the function), and what it prevents: a second caller, a
+      deep link or a restored session, opening the screen on `""` and asking
+      core to read a thread identified by the empty string.
+
+      No code changed, so no test moved. Saying "what breaks without it:
+      nothing in the suite today" is the honest form, and D11 says exactly
+      that rather than claiming a test that does not exist.
+
+- [x] **`dev-writer`** — `openspec/changes/ui-thread-view/design.md:64-70`
       (D9, first paragraph) — **[readability]** States "`reading` is set only
       through `openThread()`, which does not clear `chosen`" as the current
       design, but the "What the merge took from each side" section further
@@ -127,6 +179,22 @@ finding below names its dimension.
       forward-reference ("superseded by the merge — see below") would remove
       the ambiguity. Cosmetic; not a functional defect since the code itself
       is internally consistent and correct.
+
+      **Fixed** in `4a8f1c2` (document-only). D9's opening now marks the
+      mechanism as **this piece's proposal, superseded by the merge**, and
+      states what ships in the same breath — `openThread()` clears `chosen`
+      and carries the feed context on `reading`, `closeThread()` rebuilds it —
+      citing `Main.qml:64-101`. A reader who stops at the first paragraph now
+      comes away with the shipped behaviour rather than its opposite.
+
+      Went slightly further than the suggested forward-reference: the
+      paragraph is **kept rather than rewritten away**, because the rejected
+      alternative is the part worth reading. A later change reaching for "keep
+      the feed alive underneath" should find that it was proposed here and
+      what displaced it, which is what design.md's Decisions section is for.
+      The detail of *why* navigation's version won stays where it already was,
+      in *What the merge took from each side*, rather than being duplicated —
+      two copies drift.
 
 ## What this review did not re-litigate
 

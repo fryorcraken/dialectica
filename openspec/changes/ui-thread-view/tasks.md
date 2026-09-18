@@ -86,10 +86,19 @@ unticked one.
       screens across 27 conflict regions. The split, the two places navigation's
       version was kept, and the field-name defect BOTH pieces shipped are
       recorded in design.md D10 and *What the merge took from each side*.
-- [x] Gates: `check_qml_reachable.py` (24 registered, 21 reached from `Main.qml`,
-      the thread screen among them), `check_qml_names.py`, `check_qml_members.sh`,
-      `check_probe_twins.sh`, and the full QML suite — 24 spec files, 453 tests,
-      0 failures.
+- [x] Gates: `check_qml_reachable.py` (23 registered, 21 reached from `Main.qml`,
+      the thread screen among them), `check_qml_names.py` (23 qmldir entries),
+      `check_qml_members.sh`, `check_probe_twins.sh`, and the full QML suite —
+      24 spec files, 420 test functions, 0 failures.
+
+      Re-measured on the findings pass rather than carried over. Two figures
+      moved and neither is a test regression: the registration count fell from
+      24 to 23 because `qmldir` declared `DThreadScreen` twice (a merge
+      artefact, dropped in its own commit), and the suite figure was restated
+      as 420 test functions — `grep -c "PASS   : qmltestrunner::[A-Za-z]*::test_"`
+      over the run — the earlier 453 having been counted by a convention this
+      tree does not reproduce. Five tests were added by the shared-helper
+      commit.
 - [x] **The security property re-proved after the merge.** Mutating
       `resolveDepth`'s unresolvable-parent branch from `-1` to `depth + 1` turns
       `test_an_item_whose_parent_is_absent_is_not_re_parented_to_the_root` red on
