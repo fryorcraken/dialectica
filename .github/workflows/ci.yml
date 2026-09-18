@@ -304,6 +304,28 @@ jobs:
       - name: every agent role file carries the Bash-costs rules
         run: sh .claude/agents/tests/check_agent_bash_costs.sh .claude/agents
 
+      # Five registered types were instantiated nowhere, and 92 test functions
+      # passed over four of them — including `DOnboardingScreen`, the view's only
+      # route to acquiring an identity, so a fresh install could not obtain a key
+      # while a green suite reported the screen works.
+      #
+      # **No component-level test can catch this**, which is why it is a static
+      # gate rather than a spec: a component suite instantiates the component it
+      # tests and so supplies exactly the reachability whose absence is the
+      # defect. This reads `qmldir` and the view's sources together instead.
+      #
+      # It needs no Qt, so it runs here with the other static gates. Its own
+      # tests run first, for the reason every gate here has them: a gate narrowed
+      # until it matches nothing passes exactly as quietly as a correct one, and
+      # the case that earns that file — a type reachable only THROUGH an
+      # unreachable type — is the one that distinguishes the transitive walk from
+      # the mention-based grep somebody will otherwise reach for.
+      - name: the QML reachability gate's own tests
+        run: dialectica-ui/tests/tst_check_qml_reachable.py
+
+      - name: every registered QML type is reachable or says why not
+        run: dialectica-ui/tests/check_qml_reachable.py dialectica-ui
+
       # `sed` strips `//` comments before matching, for the same reason the
       # `ToolTip` step below does it: a gate that fires on its own
       # documentation gets deleted. This one learned it the expensive way —

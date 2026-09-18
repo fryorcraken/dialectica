@@ -1,9 +1,30 @@
+# Every type declared here is either instantiated somewhere the view's root
+# (Main.qml) reaches, or carries an `# UNINSTANTIATED:` line saying why it is
+# not. `dialectica-ui/tests/check_qml_reachable.py` enforces that, and it
+# computes reachability TRANSITIVELY from Main.qml rather than asking whether a
+# name appears somewhere — a type instantiated only by an unreachable type is
+# not reachable, and a check that could not tell those apart would have passed
+# the whole unmounted island this rule exists to catch.
+#
+# A record is not an exemption list. It states WHY, because a type held back by
+# a scope decision and a type nobody noticed present identically from the
+# registration alone, and the reason is the only thing that tells them apart.
+
 singleton DTheme 1.0 DTheme.qml
 singleton Core 1.0 Core.qml
 singleton DStoaReference 1.0 DStoaReference.qml
 Identicon 1.0 Identicon.qml
 AddressLabel 1.0 AddressLabel.qml
+
+# UNINSTANTIATED: the name-disjointness gate's measurement apparatus, and it
+# MUST stay uninstantiated. `tst_identicon.qml` asserts it exposes no renderer
+# at all — no `render`, `name`, `text`, `words` or wordlist — on the ground that
+# a renderer would move it under `Malformed key material is refused rather than
+# crashed on`, at which point its zero-padding of a short key becomes the defect
+# that requirement names: a name attributable to nobody rendered as one
+# attributable to somebody. Wiring this breaks the gate.
 DKeyNameWindow 1.0 DKeyNameWindow.qml
+
 VoteControl 1.0 VoteControl.qml
 PostHeader 1.0 PostHeader.qml
 FlatButton 1.0 FlatButton.qml
@@ -12,11 +33,18 @@ SanitisedText 1.0 SanitisedText.qml
 DPublishOutcome 1.0 DPublishOutcome.qml
 DComposer 1.0 DComposer.qml
 FeedScreen 1.0 FeedScreen.qml
+DThreadScreen 1.0 DThreadScreen.qml
 DClipboardSink 1.0 DClipboardSink.qml
 DStoaListScreen 1.0 DStoaListScreen.qml
 DJoinScreen 1.0 DJoinScreen.qml
 DOnboardingScreen 1.0 DOnboardingScreen.qml
 DStatusBar 1.0 DStatusBar.qml
+
+# UNINSTANTIATED: voting is out of the MVP by owner ruling 1 (PLAN.md §9.2), so
+# nothing on a feed or thread row offers a vouch. This is a scope decision
+# rather than an oversight: the component is built and tested, and the ruling
+# decides when it ships, not whether it works.
 DVouchStamp 1.0 DVouchStamp.qml
+
 DIdentityChip 1.0 DIdentityChip.qml
 DTip 1.0 DTip.qml

@@ -49,17 +49,26 @@ import QtQuick.Layouts
 // loses it and nothing fails.
 //
 // NO TEST CHECKS THE SIX STRINGS AGAINST THE BUNDLE. `tst_status_bar.qml`
-// asserts only the negative — an unset explanation shows none. Whether the
-// verbatim obligation belongs in a spec is an open question for a spec-writer,
-// recorded at findings/spec-test.md.
+// asserts only the negative — an unset explanation shows none. `Main.qml` mounts
+// this bar with all three unset, so no explanation is shown and none is wrong;
+// the obligation only bites when someone fills them in. Whether the verbatim
+// obligation belongs in a spec is open, and `ui-navigation`'s design.md D8
+// records why it was neither adopted nor dropped there: a requirement pinning
+// six strings is a rendering requirement, and no capability owns this
+// component's rendering.
 //
 // **The DELIVERY lamp has no honest source today**, and that is invisible from
 // here: this component is otherwise complete, and nothing about it says one of
-// its three lamps cannot currently be told the truth. `docs/PLAN.md:3471-3481`
-// records that the delivery outcome arrives asynchronously via delivery's
-// channel events, after the publish call has returned, so no synchronous call
-// produces a signal to bind. Do not invent a heuristic to fill it; design.md
-// D11 carries the argument.
+// its three lamps cannot currently be told the truth. The delivery outcome
+// arrives asynchronously through delivery's channel events, AFTER the publish
+// call has returned, so no synchronous call produces a signal to bind — see
+// `docs/PLAN.md` §9.2's case 2 entry 6, cited by name because a line range into
+// that file goes stale as PLAN.md sheds.
+//
+// **Do not invent a heuristic to fill it.** A lamp bound to "the publish call
+// returned" would report that the transport took an op, which says nothing about
+// whether any peer received it — publishing and delivering are two events at two
+// times. `ui-navigation`'s design.md D7 carries the argument.
 RowLayout {
     id: root
 

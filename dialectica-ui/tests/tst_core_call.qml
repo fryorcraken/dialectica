@@ -29,9 +29,46 @@ TestCase {
         Core.bridge = spec.savedBridge
     }
 
-    // A bridge whose callModule returns `reply` verbatim, and which records
-    // what it was asked for.
+    // A bridge that answers the way BASECAMP answers, and which records what it
+    // was asked for.
+    //
+    // **The double encoding is the point, and this fake got it wrong for the
+    // whole life of the suite.** Core returns a JSON string;
+    // `LogosQmlBridge::callModule` then "serialize[s] QVariant result to JSON"
+    // (logos-basecamp `docs/project.md`), and serialising a QString that already
+    // holds JSON wraps the entire reply in a JSON string literal. So what
+    // reaches QML is the reply ESCAPED INSIDE QUOTES, not the reply.
+    //
+    // Measured in a real launch: `list_stoas` arrived as the 45-character
+    //   "{\"hasMore\":false,\"items\":[],\"page\":0}"
+    // whose `typeof` after ONE `JSON.parse` is `string`.
+    //
+    // A fake that returned the reply verbatim modelled a host that does not
+    // exist, so every test here passed against a bridge that could never have
+    // worked — 22 spec files green over a view where every core call failed.
+    // `JSON.stringify(reply)` is the whole correction: it is exactly the extra
+    // encoding layer the host applies.
     function fakeBridge(reply) {
+        return {
+            lastModule: "",
+            lastMethod: "",
+            lastArgs: null,
+            callModule: function (module, method, args) {
+                this.lastModule = module
+                this.lastMethod = method
+                this.lastArgs = args
+                return JSON.stringify(reply)
+            }
+        }
+    }
+
+    // The host WITHOUT the extra encoding layer — the reply verbatim.
+    //
+    // This exists because the unwrap must not be a bet on one host's quirk. If
+    // basecamp stops double-encoding, `call()` has to keep working, and a suite
+    // that only ever sees the wrapped form could not tell a correct unwrap from
+    // one that happens to match today's host. Both shapes are pinned.
+    function fakeBridgeVerbatim(reply) {
         return {
             lastModule: "",
             lastMethod: "",
@@ -43,6 +80,49 @@ TestCase {
                 return reply
             }
         }
+    }
+
+    // ---- the double encoding itself --------------------------------------
+
+    function test_a_double_encoded_reply_is_unwrapped_to_the_object() {
+        // The regression this file exists to pin. Written against the measured
+        // bytes from a real launch rather than a guess at them: with the unwrap
+        // removed, `JSON.parse` yields a string and `call()` reports "not a
+        // reply" — which is exactly what every screen showed.
+        Core.bridge = fakeBridge('{"hasMore":false,"items":[],"page":0}')
+        var out = Core.call("list_stoas", ["{}"])
+
+        compare(out.ok, true, "a double-encoded success must be unwrapped, not "
+                + "reported as 'not a reply'")
+        compare(out.value.hasMore, false)
+        compare(out.value.page, 0)
+        compare(out.value.items.length, 0)
+    }
+
+    function test_a_double_encoded_error_reaches_the_caller_as_an_error() {
+        // The measured `create_stoa` reply. Without the unwrap this is reported
+        // as a malformed-reply failure, so the user is told the module answered
+        // nonsense rather than being told WHY the Stoa was not created — the
+        // error shape exists precisely so that reason survives.
+        Core.bridge = fakeBridge('{"error":"no keystore found; create one before posting"}')
+        var out = Core.call("create_stoa", ["{}"])
+
+        compare(out.ok, false)
+        compare(out.error, "no keystore found; create one before posting",
+                "core's own reason must reach the caller, not a generic "
+                + "malformed-reply message")
+    }
+
+    function test_a_reply_that_is_not_double_encoded_still_works() {
+        // The unwrap is conditional on there being a layer to unwrap, so a host
+        // that hands back the reply verbatim must keep working. Without this the
+        // suite could not distinguish a correct unwrap from one hardcoded to
+        // today's host.
+        Core.bridge = fakeBridgeVerbatim('{"items":[],"page":0,"hasMore":false}')
+        var out = Core.call("list_stoas", ["{}"])
+
+        compare(out.ok, true, "a single-encoded reply must still parse")
+        compare(out.value.page, 0)
     }
 
     // ---- a successful reply ---------------------------------------------
@@ -120,13 +200,35 @@ TestCase {
         // `JSON.parse("7")` succeeds and yields a number. A check that only
         // caught parse errors would hand a caller `value.items` on a number and
         // get `undefined` — which renders as an empty feed.
-        var notObjects = ['7', '"a string"', 'null', 'true']
+        //
+        // **The unwrap must not turn any of these into a success.** `'7'`
+        // double-encodes to `"7"`, which parses to the STRING "7", and the
+        // conditional re-parse then yields the number 7 — still not an object,
+        // so still a failure. That is the case most likely to be got wrong by a
+        // second parse written without this test watching.
+        var notObjects = ['7', 'null', 'true']
         for (var i = 0; i < notObjects.length; i++) {
             Core.bridge = fakeBridge(notObjects[i])
             var out = Core.call("version", [])
             compare(out.ok, false, "reply " + notObjects[i] + " must not be ok")
             compare(out.value, undefined)
         }
+    }
+
+    function test_a_string_that_is_not_json_underneath_is_a_failure() {
+        // A bare string reply, once unwrapped, is not JSON at all. The unwrap
+        // must report that rather than swallowing it — a string that fails the
+        // second parse is a transport answer, not content.
+        //
+        // Split out from the loop above because it exercises the OTHER branch:
+        // there the re-parse succeeds and the guard rejects the value; here the
+        // re-parse itself throws.
+        Core.bridge = fakeBridge("a string")
+        var out = Core.call("version", [])
+
+        compare(out.ok, false)
+        compare(out.value, undefined)
+        verify(out.error.length > 0, "a failure must name itself")
     }
 
     function test_a_throwing_bridge_is_a_failure_and_not_a_crash() {

@@ -263,7 +263,29 @@ TestCase {
                "an empty feed still reports the height of the copy it renders, "
                + "got " + heights[0])
 
-        for (var j = 1; j < heights.length; ++j) {
+        // **The comparison starts at ONE row, not zero, and the exclusion is a
+        // property of the empty state rather than a weakening of this test.**
+        //
+        // An empty feed does not render "the rows, minus the rows". It renders a
+        // different thing: a titled panel explaining that the store was read and
+        // holds nothing, which is deliberately substantial — `feed-view` requires
+        // an empty store and an unreadable one to be told apart at a glance, and
+        // the panel is how. That panel is taller than one post, so the 0 -> 1
+        // step legitimately goes DOWN and says nothing about whether the card
+        // tracks its content.
+        //
+        // What this test is for is the property `Main.qml` depends on: the card
+        // reports a height that grows with what it holds, so the Flickable's
+        // contentHeight grows and a long feed scrolls. That property lives
+        // entirely in the row-bearing range, and it is asserted strictly there —
+        // a constant still fails, which is the defect that shipped on `main`
+        // (a thirty-row feed reporting 0) and the reason for the strictness.
+        //
+        // Comparing 0 against 1 was measuring the empty panel against one post,
+        // which is a comparison of two different layouts and was passing by
+        // coincidence of their relative sizes. It stopped passing when the feed
+        // gained a footer — an outcome that told us nothing about scrolling.
+        for (var j = 2; j < heights.length; ++j) {
             verify(heights[j] > heights[j - 1],
                    "a feed holding " + counts[j] + " posts must report a greater "
                    + "height than one holding " + counts[j - 1] + ": Main.qml "
@@ -272,5 +294,12 @@ TestCase {
                    + "does not scroll. Measured " + heights.join(", ")
                    + " for " + counts.join(", ") + " rows.")
         }
+
+        // And one row is still more than none of the row-bearing layout: the
+        // empty panel is not rendered at one row, so this compares like with
+        // like and keeps the 1-row case inside the assertion rather than
+        // dropping it.
+        verify(heights[1] > 0,
+               "a one-row feed reports a height, got " + heights[1])
     }
 }

@@ -43,17 +43,42 @@ Item {
     // **Set it through `preview()` rather than by assignment.** See below.
     property var previewing: null
 
-    // A three-screen navigator, and it still needs no StackView: its entire
-    // state is which of these two properties is non-null, and a push/pop
+    // The Stoa an identity is being acquired for, or `null`. `{stoa,
+    // foundingTitle, genesis}` — the same shape `chosen` carries, and carrying
+    // the whole thing rather than a bare address is what lets the return land
+    // back on the feed the user left.
+    //
+    // **Not a bool plus a separate "which Stoa".** Two values that can disagree
+    // — one set, the other stale — is the unrepresentable-state problem that
+    // produced `chosen` and `previewing` in the first place. One object, or
+    // null. (design.md D5.)
+    property var onboarding: null
+
+    // The thread being read, or `null`. `{stoa, foundingTitle, genesis,
+    // rootOp}` — the feed it was opened from, plus the root post's identifier.
+    //
+    // **The whole feed context travels, not just the root op**, because the way
+    // back is "the feed for the Stoa the thread was opened from" and
+    // reconstructing that from an op id is not something the view can do.
+    //
+    // **`chosen` is CLEARED while a thread is open**, and the feed context lives
+    // here instead. The alternative — leaving `chosen` set so the feed is
+    // "still there underneath" — would make two properties non-null at once and
+    // turn the ternary below from a rendering of the state into a resolution of
+    // a conflict, which is the exact shape the ordering of these properties
+    // exists to make unconstructible. One state, one property.
+    property var reading: null
+
+    // A five-screen navigator, and it still needs no StackView: its entire
+    // state is which of these properties is non-null, and a push/pop
     // lifecycle alongside that is a second source of truth that can disagree
     // with it. One `visible:` binding each cannot. (design.md D5.)
     //
-    // **`chosen` and `previewing` are never both set**, which is what makes the
-    // ternary below a rendering of the state rather than a resolution of a
-    // conflict. The two setters each clear the other, so the state
-    // `(chosen ≠ null, previewing ≠ null)` — which has no rendering and which an
-    // ordered ternary would silently resolve by accident of which test came
-    // first — cannot be constructed.
+    // **No two of them are ever both set**, which is what makes the ternary
+    // below a rendering of the state rather than a resolution of a conflict.
+    // Every setter clears the others, so a state with two set — which has no
+    // rendering, and which an ordered ternary would silently resolve by accident
+    // of which test came first — cannot be constructed.
     //
     // That mattered as a latent trap rather than a live one: nothing on the feed
     // emits a preview request today, so the swallowed-preview case was
@@ -61,12 +86,21 @@ Item {
     // an affordance a reader acts on, and a post lives on the feed — so the
     // piece that adds that affordance would have set `previewing` from the feed
     // and got silence. Now it gets the preview.
+    //
+    // **Identity is not in this expression, and must not be put in it.** The
+    // routing to onboarding happens on a SIGNAL — an event — never on a retained
+    // "does this user have an identity" answer. A navigation layer holding that
+    // boolean is wrong for every screen at once the moment a keystore changes
+    // under it, which is `FeedScreen`'s own no-caching rule one level up.
+    // (design.md D4.)
     readonly property string screenShown:
-        root.chosen !== null ? "feed"
+        root.onboarding !== null ? "onboarding"
+      : root.reading !== null ? "thread"
+      : root.chosen !== null ? "feed"
       : root.previewing !== null ? "join"
       : "list"
 
-    // The two transitions, each clearing what the other owns.
+    // The transitions, each clearing what the others own.
     //
     // Functions rather than bare assignment because the clearing is the point:
     // a caller that assigns `previewing` directly re-creates the impossible
@@ -74,12 +108,64 @@ Item {
     // CLAUDE.md says to replace with one the data enforces.
     function preview(stoa, genesis) {
         root.chosen = null
+        root.onboarding = null
+        root.reading = null
         root.previewing = { stoa: stoa, genesis: genesis }
     }
 
     function open(stoa, foundingTitle, genesis) {
         root.previewing = null
+        root.onboarding = null
+        root.reading = null
         root.chosen = { stoa: stoa, foundingTitle: foundingTitle, genesis: genesis }
+    }
+
+    // Into a thread, from the feed row that heads it.
+    //
+    // **What travels is the Stoa, that Stoa's founding record where the view
+    // holds one, and the ROOT POST's identifier.** The record travels for the
+    // same reason it travels to the feed: moderation cannot be resolved for a
+    // Stoa whose record this peer does not hold.
+    //
+    // **Nothing is invented for a Stoa the view holds no record for.** The
+    // genesis passed here is whatever `chosen` carries — "" where the listing
+    // returned none — and it goes to the core unchanged. A fabricated or
+    // placeholder record would fail verification in the core and surface as a
+    // refusal the user cannot act on.
+    function openThread(rootOp) {
+        if (root.chosen === null)
+            return
+        var from = root.chosen
+        root.previewing = null
+        root.onboarding = null
+        root.chosen = null
+        root.reading = { stoa: from.stoa, foundingTitle: from.foundingTitle,
+                         genesis: from.genesis, rootOp: rootOp }
+    }
+
+    // Out of the thread, back to the feed it was opened from — without the view
+    // being restarted, which is what makes this a return rather than a reset.
+    function closeThread() {
+        var was = root.reading
+        root.reading = null
+        if (was !== null)
+            root.chosen = { stoa: was.stoa, foundingTitle: was.foundingTitle,
+                            genesis: was.genesis }
+    }
+
+    // Into identity acquisition, from the feed of the Stoa the identity is for.
+    //
+    // **The Stoa is not optional and cannot be defaulted.** `who_am_i`,
+    // `get_capabilities`, `generate_identity_slate` and `keep_identity` all take
+    // `{"stoa":"<hex>"}` and `wire.rs`'s `parse_stoa` refuses a missing or
+    // unparseable one — there is no "am I anybody in general" call on the trait.
+    // So onboarding is reachable only from a state that holds a Stoa, which is
+    // the feed. (design.md D2.)
+    function createIdentityFor(stoa, foundingTitle, genesis) {
+        root.previewing = null
+        root.chosen = null
+        root.reading = null
+        root.onboarding = { stoa: stoa, foundingTitle: foundingTitle, genesis: genesis }
     }
 
     // The way out of each screen. `closeFeed` is the counterpart of the
@@ -87,6 +173,35 @@ Item {
     // a user on the first Stoa they opened.
     function closeFeed() {
         root.chosen = null
+    }
+
+    // Out of onboarding, back to the feed it was entered from.
+    //
+    // **Unconditional on what happened there**, which is the requirement rather
+    // than a convenience: a user who decided against a key, or whose keep
+    // failed, is in a state they entered and must be able to leave it. A route
+    // out offered only on success is a route absent in exactly the cases where
+    // the user is stuck. Nothing in this function reads a phase, and the
+    // affordance that calls it is declared where no phase is in scope.
+    function closeOnboarding() {
+        var was = root.onboarding
+        root.onboarding = null
+        if (was !== null)
+            root.chosen = { stoa: was.stoa, foundingTitle: was.foundingTitle,
+                            genesis: was.genesis }
+    }
+
+    // A keep reported that something was stored.
+    //
+    // The signal carries NO identity by design — `DOnboardingScreen`'s
+    // `identityKept()` is "an operation completed", not "the store now holds
+    // X" — so this re-asks the module rather than treating the signal as the
+    // answer. `closeOnboarding()` returns to the feed and `feed.reload()` is
+    // what re-reads `who_am_i` and `get_capabilities`, so the identity that then
+    // appears in the footer came from a fresh reply.
+    function identityWasKept() {
+        root.closeOnboarding()
+        feed.reload()
     }
 
     Rectangle {
@@ -182,6 +297,137 @@ Item {
                 // here, so reopening a Stoa is as complete as the first open and
                 // the return costs the user nothing.
                 onClosed: root.closeFeed()
+
+                // The route INTO identity acquisition, from the one state that
+                // holds a Stoa to probe with. The feed's footer chip raises this
+                // when the identity report says there is nobody here.
+                onCreateIdentityRequested: root.createIdentityFor(
+                    root.chosen !== null ? root.chosen.stoa : "",
+                    root.chosen !== null ? root.chosen.foundingTitle : "",
+                    root.chosen !== null ? root.chosen.genesis : "")
+
+                // The route into a thread. The root op travels with the signal;
+                // the Stoa and its record come from `chosen`, which the
+                // navigator already holds.
+                onThreadOpened: (rootOp) => root.openThread(rootOp)
+            }
+
+            // ---- the onboarding route ------------------------------------
+            //
+            // The way out is rendered HERE rather than inside the screen, and
+            // that placement is the requirement rather than a layout choice.
+            // `view-identity-onboarding` contracts that the screen "SHALL NOT
+            // navigate anywhere itself" and that its only outward signal is
+            // `identityKept()`. A `showBack` property on the screen would be a
+            // navigation concern inside a screen contracted not to have one, and
+            // a screen author could bind it to a phase without anything failing.
+            //
+            // Declared outside the card, so there is no phase in scope at the
+            // point the affordance exists: "always offered" holds by
+            // construction rather than by a binding somebody has to keep right.
+            // (design.md D6.)
+            ColumnLayout {
+                visible: root.screenShown === "onboarding"
+                Layout.alignment: Qt.AlignHCenter
+                Layout.preferredWidth: Math.min(DTheme.cardWidth, root.width - 2 * DTheme.cardPaddingX)
+                spacing: DTheme.itemGap
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: DTheme.itemGap
+
+                    FlatButton {
+                        objectName: "onboardingBackButton"
+                        text: "Back"
+                        kind: "secondary"
+                        onClicked: root.closeOnboarding()
+                    }
+
+                    Item { Layout.fillWidth: true }
+                }
+
+                DOnboardingScreen {
+                    id: onboarding
+                    objectName: "onboarding"
+                    stoaAddress: root.onboarding !== null ? root.onboarding.stoa : ""
+                    Layout.fillWidth: true
+
+                    onIdentityKept: root.identityWasKept()
+                }
+            }
+
+            // ---- the thread screen -----------------------------------------
+            DThreadScreen {
+                id: thread
+                objectName: "thread"
+                visible: root.screenShown === "thread"
+                stoaAddress: root.reading !== null ? root.reading.stoa : ""
+                stoaGenesis: root.reading !== null ? root.reading.genesis : ""
+                threadRoot: root.reading !== null ? root.reading.rootOp : ""
+                Layout.alignment: Qt.AlignHCenter
+                Layout.preferredWidth: Math.min(DTheme.cardWidth, root.width - 2 * DTheme.cardPaddingX)
+
+                onClosed: root.closeThread()
+            }
+
+            // ---- shared chrome: the three lamps ---------------------------
+            //
+            // **On EVERY main-area screen, not a subset**, which is the
+            // requirement rather than a placement preference. A status indicator
+            // absent from a screen is an indicator whose absence a user reads as
+            // "nothing to report" — and chrome reporting the machine's condition
+            // is most needed exactly where something has gone wrong. A
+            // per-screen subset is what makes its absence ambiguous: a user
+            // cannot tell a screen that omits the lamps from a machine with
+            // nothing to report.
+            //
+            // So it is declared HERE, outside every `visible:` binding above,
+            // and there is no state in which it is withheld. That it accompanies
+            // every screen holds by construction: there is no per-screen
+            // condition in scope at this point in the file.
+            //
+            // **Rendered before its values arrive, and least-claiming while they
+            // have not.** Every screen passes through the unbound state between
+            // appearing and core answering, so withholding the bar would hide it
+            // exactly during the window in which the machine's condition is
+            // least known. `DStatusBar` defaults every lamp to `degraded` rather
+            // than `ok` and maps every unrecognised state to `degraded` too, so
+            // an unbound lamp claims nothing — which is what makes leaving a
+            // lamp unbound honest rather than negligent.
+            //
+            // **DELIVERY IS DELIBERATELY UNBOUND.** It has no honest source: the
+            // outcome arrives asynchronously through delivery's channel events,
+            // after the publish call has returned, so no synchronous call
+            // produces a signal to bind. It is a documented §9.2 case-2
+            // placeholder — see PLAN.md case 2 entry 6 and design.md D7. Do not
+            // invent a heuristic to fill it.
+            //
+            // The tooltip strings are likewise unset. `DStatusBar` invents
+            // nothing when they are, so no explanation is shown and none is
+            // wrong — a strictly smaller claim than a sentence nobody checked.
+            DStatusBar {
+                objectName: "statusBar"
+                Layout.alignment: Qt.AlignHCenter
+                Layout.topMargin: DTheme.blockGap
+
+                // MOCK, and marked as one. Nothing in the contract reports
+                // whether the store is readable as a machine-wide condition —
+                // each read reports its own outcome — so this lamp reads the one
+                // honest signal the view holds: whether the screen that last
+                // read the store succeeded. PLAN.md case 2 entry 7.
+                storageState: root.screenShown === "list"
+                    ? (list.readState === "failed" ? "failed"
+                       : list.readState === "ok" ? "ok" : "degraded")
+                    : root.screenShown === "feed"
+                    ? (feed.readState === "failed" ? "failed"
+                       : feed.readState === "ok" ? "ok" : "degraded")
+                    : "degraded"
+
+                // Whether this machine is in a Stoa at all. The one lamp with a
+                // genuine source: the membership listing answers it.
+                zoneState: list.readState === "ok"
+                    ? (list.visibleRows.length > 0 ? "ok" : "degraded")
+                    : "degraded"
             }
 
             Item { Layout.preferredHeight: DTheme.cardPaddingY }
