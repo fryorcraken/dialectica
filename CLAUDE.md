@@ -260,6 +260,12 @@ and other sessions may be using it concurrently. Never bare `git stash` /
 `git stash pop`. Prefer a throwaway WIP commit to set work aside — it is local to
 your branch and cannot be popped by anyone else.
 
+**Never `git add -A`** — commit named paths. Sweeping up another agent's
+half-finished edit is silent: the commit looks like yours, and the agent whose
+work you took cannot see that it left. A worktree also collects build output that
+is not yours to commit — `.scaffold/`, `target/`, `result-*` out-links, `./tmp/`
+scratch, a gitignored SDK symlink.
+
 **Agent worktrees are the runner's to remove, and they arrive faster than piece
 worktrees** — one per dispatch rather than one per piece. An agent cannot remove
 its own: it is standing in it, and `git worktree remove` refuses the directory
@@ -490,6 +496,21 @@ code. **A regression test that has never failed proves nothing.**
 
 This is not a request for exhaustive coverage. It is a request that the change
 which introduces behaviour is the change that pins it down.
+
+**A test must assert against something the implementation did not produce.** One
+that asks the implementation what it wrote and then agrees cannot fail. Three
+shipped here with that shape:
+
+- comparing `"ab"` with `"abc"` to prove a length prefix mattered —
+  different-length inputs differ either way, so it passed with the prefix
+  deleted;
+- mutating a byte and asserting a hash moved — a property of SHA-256, not of the
+  encoding; passed with the field removed entirely;
+- `assert_eq!(bytes[0], VERSION_1)` — pinning position while never checking
+  value; passed when the constant changed.
+
+Hardcode the expectation, or derive it independently. See
+`identity.rs::the_wire_constants_are_pinned_to_known_answers`.
 
 ## Before anything else, make the failure visible
 

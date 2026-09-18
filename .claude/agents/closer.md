@@ -220,12 +220,10 @@ deleted in Step 1 is the one real deletion, so say so in the commit message, or
 the diff reads as though it is removing review evidence.
 
 **Then push it** — check `git config --get-regexp "^branch\.piece"` first and
-expect **nothing** back, because the branch is created with `git worktree add
---no-track` and has no upstream. `merge refs/heads/main` coming back means it was
-made without the flag and is configured to push to `main`; stop and say so. `git
-branch -vv` is not the check — it prints `[origin/main]` either way, which is how
-a bare `git push` has landed commits on `main` here more than once. With no
-upstream, name the refspec in full:
+expect **nothing** back. `merge refs/heads/main` coming back means the branch is
+configured to push to `main`; stop and say so. (CLAUDE.md's "Worktrees are not
+scratch" has why, and why `git branch -vv` is not the check.) Name the refspec in
+full:
 
 ```
 git push origin HEAD:refs/heads/piece/<name>

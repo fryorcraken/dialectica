@@ -186,39 +186,10 @@ closer tried it.
 Cherry-pick rather than merge, so the task branch reads as a flat sequence rather
 than six merge commits carrying six branches.
 
-**Never `git add -A`** — commit named paths. Two reasons, and they are not the
-same rule:
-
-- **Sweeping up another agent's half-finished edit corrupts the branch you were
-  working on.** This is the one that matters, because it is silent: the commit
-  looks like yours, and the agent whose work you took has no way to see that it
-  left.
-- **A worktree collects build output that is not yours to commit** —
-  `.scaffold/`, `target/`, `result-*` out-links, `./tmp/` scratch, a gitignored
-  SDK symlink, and whatever is added to that list next. Noise, which a reviewer
-  spots.
-
-**This is the canonical copy of the artefact list**; each agent file states the
-rule and points here rather than repeating the list, which is the part that
-changes.
-
-**Check `git config --get-regexp "^branch\.<name>"` before any git write, and
-expect it to return nothing.** A bare `git push` has landed commits directly on
-`main` here more than once, and the cause is the creation command: `git worktree
-add <path> -b piece/<name> origin/main` branches from a remote-tracking ref, so
-`branch.autoSetupMerge` writes `merge = refs/heads/main` into the new branch's
-config. `git worktree add --no-track` is the fix and `RUNNER.md` carries it; a
-branch made with the flag returns nothing from that `git config` call.
-
-**`git branch -vv` does not catch this**, so do not reach for it as the check: it
-prints `[origin/main]`, and nothing in that output distinguishes an intended
-upstream from a wrong one.
-
-A `--no-track` branch has no upstream, so push the refspec in full:
-`git push origin refs/heads/piece/<name>:refs/heads/piece/<name>`.
-
-CLAUDE.md's "Worktrees are not scratch" has the rest — in particular that the
-stash stack is shared with every other worktree, so never bare `git stash pop`.
+**The git rules every agent follows are in CLAUDE.md's "Worktrees are not
+scratch"** — never `git add -A`, check the branch with `git config` and not
+`git branch -vv`, push the refspec in full, and never bare `git stash pop`. They
+live there because CLAUDE.md reaches every agent and this file does not.
 
 ## Two files carry the state of a change
 

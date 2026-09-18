@@ -305,30 +305,18 @@ git worktree add --no-track -b piece/<name> .claude/worktrees/piece-<name> origi
 ```
 
 **The flag is what stops the piece branch being configured to push to `main`.**
-Without it, `git worktree add <path> -b piece/<name> origin/main` branches from a
-remote-tracking ref, and git's `branch.autoSetupMerge` default then writes
-`remote = origin` and `merge = refs/heads/main` into the new branch's config. The
-branch is set up to push to `main` from the moment it exists.
-
-This is the cause of the bare-`git push`-lands-on-`main` warning that this file
-and `CLAUDE.md` both carry. Measured: a branch created without the flag has
-`merge refs/heads/main` in its config, and `git push origin piece/<name>` from it
-was **rejected by branch protection for `refs/heads/main`**, going through only
-with a fully-qualified refspec. The lesson is about branch creation, not about
-the push form.
-
-**Check it with `git config`, not `git branch -vv`.** `branch -vv` cannot catch
-this: it prints `[origin/main]`, and nothing in that output tells an intended
-upstream from a wrong one. The positive signal is:
+Verify it right after creating the worktree:
 
 ```
 git config --get-regexp "^branch\.<name>"
 ```
 
-**returning nothing.**
-
-A branch created this way has no upstream, so a push names the refspec in full:
+**returning nothing** is the positive signal. A branch created this way has no
+upstream, so a push names the refspec in full:
 `git push origin refs/heads/piece/<name>:refs/heads/piece/<name>`.
+
+CLAUDE.md's "Worktrees are not scratch" has the mechanism, and why
+`git branch -vv` is not the check.
 
 ## Prune worktrees at merge time
 

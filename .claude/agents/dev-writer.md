@@ -220,12 +220,11 @@ Two reasons this cannot wait for review time:
   a row back means the PR exists and you push to it instead. On the findings
   pass it always does: commit, push, never open a second.
 
-**That `git config --get-regexp "^branch\.piece"` check expects nothing back.**
-The piece branch is created with `git worktree add --no-track`, so no upstream is
-the positive signal. `git branch -vv` is *not* the check — it prints
-`[origin/main]` either way, which is how a bare `git push` has landed commits on
-`main` here more than once. That is also why the push above names both sides of
-the refspec, with `HEAD` on the left as the ref carrying your commits.
+**That `git config --get-regexp "^branch\.piece"` check expects nothing back** —
+no upstream is the positive signal. CLAUDE.md's "Worktrees are not scratch" has
+why, and why `git branch -vv` is not the check. It is also why the push above
+names both sides of the refspec, with `HEAD` on the left as the ref carrying your
+commits.
 
 The title says what the change does, not which stage produced it; the body says
 why it exists and names every `NO SPEC:` you left. Do not narrate your commits —
