@@ -39,10 +39,11 @@ import "../src/qml"
 //     the joined panel — the text a user actually reads — left that assertion
 //     PASSING, because the panel was not rendered in the state being scanned.
 //
-// The last one generalises the rule: an absence assertion is only as strong as
-// its corpus, and a corpus with no candidate in it proves nothing. So every
-// absence assertion below states what it IS scanning before saying what is not
-// there, and `test_the_absence_assertions_scan_the_body_and_not_only_the_apparatus`
+// What the last one shows is that an absence assertion is only as strong as its
+// corpus: one with no candidate in it proves nothing. The absence assertions in
+// this file are written accordingly — each states what it IS scanning before
+// saying what is not there — and
+// `test_the_absence_assertions_scan_the_body_and_not_only_the_apparatus`
 // pins that corpus so it cannot silently shrink.
 //
 // One reason it can shrink is already scheduled: the APPARATUS column is

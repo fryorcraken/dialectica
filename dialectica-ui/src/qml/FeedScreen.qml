@@ -342,12 +342,11 @@ ScreenFrame {
         // The row is a Repeater over a model, which is what SPEC.md requires:
         // an ordering must be able to disappear without the layout changing.
         //
-        // There is deliberately NO click handler. With one ordering there is
-        // nothing to select, and `reload()` does not read `ordering` — so a
-        // handler that set it and re-read the feed was code that ran and
-        // changed nothing, which is worse than absent: it reads as a working
-        // control. It arrives with the second ordering, which is the change
-        // that gives it something to do.
+        // There is NO click handler, and the local reason is that there is
+        // nothing for one to do: with a single ordering there is nothing to
+        // select, and `reload()` does not read `ordering`, so a handler that
+        // set it and re-read the feed would run and change nothing. It arrives
+        // with the second ordering, which is the change that gives it work.
         Repeater {
             model: screen.orderings
             delegate: Text {

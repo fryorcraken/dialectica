@@ -12,12 +12,28 @@ import QtQuick.Layouts
 // POSITION ALONE (see Identicon.qml). The obligation attached to that decision
 // is that a placement the context does not disambiguate must label itself — and
 // a footer chip is such a placement, since a reader arriving at it cold has no
-// surrounding post to say whose mark this is. `CURRENT IDENTITY` is that label.
-// It is not decoration and should not be dropped to save a row.
+// surrounding post to say whose mark this is. `CURRENT IDENTITY` is that label,
+// and it carries that disambiguation rather than being decoration.
 //
-// The address is on screen and not one click away, which is the standing rule
-// wherever an identity is named: the mark is a recognition aid and a second
-// forgeable channel, never an identifier.
+// The address is on screen here and not one click away. What is grounded, and
+// what is not, kept apart deliberately:
+//
+//   * GROUNDED — what the mark is not. `docs/IDENTICON.md` records that the
+//     public key is the identity and the mark only a recognition aid, "a second
+//     forgeable channel, and a second forgeable channel is still forgeable",
+//     and that uniqueness is unachievable by pigeonhole. `generated-names`
+//     contracts the same of a name: "A display name SHALL NOT be treated as
+//     unique, SHALL NOT be accepted anywhere an identity is named".
+//
+//   * NOT GROUNDED — any requirement to put an address beside a mark. No spec
+//     pairs the two. `IDENTICON.md` says the identifying value must be on
+//     screen "wherever recognition carries weight — above all wherever a
+//     moderator is named", but sources that to a `SPEC.md` no longer in this
+//     repo; and `op-format`'s "show the Stoa address alongside any name" is
+//     scoped to STOAS, with the spec saying in terms that it must not be cited
+//     as authority for an author address.
+//
+// So this placement is a local judgement, not a rule inherited from elsewhere.
 //
 // ---- FOR WHOEVER PLACES THIS CHIP IN A FOOTER ---------------------------
 //

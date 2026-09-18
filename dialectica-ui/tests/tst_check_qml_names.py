@@ -278,8 +278,9 @@ with tempfile.TemporaryDirectory() as tmp:
     # check in the gate runs over a corpus something else builds: the file walk
     # and `qmldir_entries`. If either silently returns nothing, every check
     # passes vacuously and the gate reports `ok` — a green that measured
-    # nothing, which this repo rates as worse than no gate, because it closes
-    # the question. So breaking each corpus-builder must produce a FAILURE.
+    # nothing. PLAN.md §10 (CI), under "Anti-false-green", takes from Radicle's
+    # CI the observation that such a gate is worse than no gate, and says to
+    # copy the habit. So breaking each corpus-builder must produce a FAILURE.
     empty = tmp / "no_qml"
     (empty / "src" / "qml").mkdir(parents=True)
     expect_reject("a module with no QML files at all", empty,

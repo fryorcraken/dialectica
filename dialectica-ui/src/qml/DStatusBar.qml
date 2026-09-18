@@ -10,9 +10,10 @@ import QtQuick.Layouts
 // have to know, where a lamp asserts one of three states and puts the sentence
 // in a tooltip where it is read on demand.
 //
-// The lamp colours are the only green and orange THE INTERFACE uses — see
-// DTheme. Spending them anywhere else spends the signal reserved for "is this
-// machine working" on something that is not that.
+// The lamp colours are, as things stand, the only green and orange THE
+// INTERFACE uses — see DTheme. That exclusivity is what gives the colour half
+// of a lamp's meaning: wherever else they were spent, they would draw on the
+// signal currently reserved for "is this machine working".
 //
 // The qualifier is load-bearing rather than pedantic: `DTheme`'s mark palette
 // carries `markGreen` and `markSage`, and a reader who checks an unqualified

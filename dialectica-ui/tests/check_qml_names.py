@@ -33,8 +33,8 @@ WHAT A RED FROM THIS GATE MEANS, which is the part a reader of a failure needs:
     stale reference left by a rename, which resolves to the host's object (or
     to nothing) and reads `undefined` at runtime.
 
-WHAT IT CANNOT SEE, stated because a gate that measured nothing is worse than
-none: it proves a NAME absent, not that resolution is correct. Whether
+WHAT IT CANNOT SEE, stated because of the anti-false-green problem PLAN.md §10
+(CI) describes: it proves a NAME absent, not that resolution is correct. Whether
 basecamp actually registers any given name is invisible from the checkout —
 that half is a real basecamp launch, and the `D` prefix is what makes the
 question not need asking.
