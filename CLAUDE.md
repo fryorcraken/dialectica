@@ -43,6 +43,25 @@ the pin changes, the sentence is visibly about a pin someone can check.
 longer hold, fix them in the same change. Do not append a changelog of what
 landed — that is the failure mode this section exists to prevent.
 
+## `.claude/` is the owner's
+
+**Do not add, edit, delete or restructure anything under `.claude/`** — role
+files, `README.md`, `RUNNER.md`, `settings.json`, hooks, skills, anything added
+later — **unless the owner asked for that specific change.** Propose instead:
+say what you would change and why, and let them decide.
+
+**"It would make agents work better" is not authorisation.** That was the exact
+reasoning behind the change this rule was written after: a runner noticed
+dispatched agents were costing the owner approval prompts, and rewrote all seven
+role files plus a CI gate to fix it. The diagnosis was correct and the action was
+still not the runner's to take.
+
+It was also unnecessary, for a reason worth keeping in view: **`CLAUDE.md` is
+injected into every Claude session and agent at startup, so a rule here reaches
+everything.** A file under `.claude/agents/` is read only by the agent it names.
+When a rule needs to reach every agent, this file is where it goes — which is why
+the nine-file rewrite solved a problem that did not exist.
+
 ## How to work in this repo, and what Bash costs
 
 This is the most important section in this file. Read it before your first
@@ -56,20 +75,22 @@ it is to avoid the *shapes* that defeat the analyser.
 |---|---|
 | the `Read` tool, for any file | `cat`, `head`, `tail`, `ls` |
 | the `Edit` / `Write` tools | `sed -i`, `>` / `>>`, a `<<'EOF'` heredoc |
-| the `Grep` and `Glob` tools | a shell glob, a loop, a `VAR=value` prefix |
+| the `Grep` and `Glob` tools | a shell glob, `for`/`while`, a `VAR=value` or `env VAR=` prefix |
 | one plain command per call | `\|`, `&&`, `;`, `$(…)`, `<(…)` |
-| an **absolute** path as an argument | a **relative** path, or any path after `cd` |
+| a path inside a working directory | a read outside them — `/tmp`, the session scratchpad, an unpacked package |
+| a path the checker can resolve **before** the command runs | any path after `cd` |
 | `git …`, `nix build …`, `lgs …` | the same with `--jq` or a pipe appended |
 | `gh api …`, `gh pr …`, `gh run …` | `sh <relative-path>` |
 
-Five that catch people repeatedly. The first two have each already cost this
-project a stalled session.
+The ones that catch people repeatedly. The first two have each already cost
+this project a stalled session.
 
 - **Never `cd <dir> && <command> <relative-path>`.** This is the single
   biggest source of prompts. `blockReadsOutsideWorkingDirectories` is on, and a
   path that only resolves *after* a `cd` cannot be checked before the command
   runs — so the checker gives up and asks the user, even when the target is a
-  perfectly allowed directory. Absolute paths are checked and run silently.
+  perfectly allowed directory. A path that resolves against the cwd the command
+  actually starts in is checked, and runs silently.
 
   ```
   BAD:   cd /home/me/src/foo && grep -rn "bar" src/
@@ -79,6 +100,13 @@ project a stalled session.
   This applies to every tool that takes a path, and to subagent prompts: when
   you spawn an agent, tell it this rule explicitly, or it will inherit the
   habit and stall on its first sweep.
+
+  **Inside your own worktree, prefer plain relative paths.** You are already
+  standing in the right tree, so `dialectica-ui/tests/run-qml-tests.sh`
+  resolves and the checker can read it. A long absolute path back into your own
+  tree buys nothing and is where a typo becomes a *blocked read* rather than a
+  missing file — a mistyped username in one has already cost a click. Absolute
+  paths are for reaching **outside** the tree you are standing in.
 
   **The exception is `EnterWorktree`, which moves a session rather than
   prefixing a command** — an interactive session enters a worktree once with
@@ -106,8 +134,8 @@ project a stalled session.
   was ignored nothing failed when it was absent; agents were simply cut from the
   wrong base. See [`.claude/agents/README.md`](.claude/agents/README.md) for the
   probes and [`.claude/agents/RUNNER.md`](.claude/agents/RUNNER.md) for
-  one-runner-per-piece. **Settings are the user's — do not write that file on
-  your own initiative.**
+  one-runner-per-piece. That file, like everything under `.claude/`, is the
+  owner's — see "`.claude/` is the owner's" below before editing it.
 
   **Before sending an agent somewhere, check the directory is in scope.**
   Absolute paths fix the *analysability* problem; they do nothing for a
@@ -121,6 +149,12 @@ project a stalled session.
   extraction, `Glob` for finding files, `grep -c` for counting, and **hand
   arithmetic with the working shown** for anything numeric. Hand working is
   also more reviewable than a one-liner whose output nobody can check.
+
+  **A loop that builds a corpus file to grep is a `Grep` that was never run.**
+  The `Grep` tool searches the whole set in one call; `Glob` finds the files
+  when you need them one at a time. Reach for those rather than a `for` over
+  `$(…)` writing to a `>` redirect — that shape stacks three forbidden
+  constructions to reach an answer one tool call already had.
 
   And tell them the fallback: **if a task cannot be done within those shapes,
   stop and report it.** A blocked agent someone can unblock costs far less
@@ -167,6 +201,12 @@ project a stalled session.
   failure. Passing it one file is the supported shape and needs no approval
   click.
 
+  In particular, do not reach for `QT_QPA_PLATFORM=offscreen qmltestrunner …`:
+  the prefix costs a click on its own, and the script already sets that
+  variable. A `VAR=value` prefix is never the answer here — where a command
+  needs an environment, the wrapper that sets it is the supported shape, and
+  for scaffold-gated Rust code that wrapper is `nix build .#lgx`.
+
 - **Never `readlink` or `ls` a `/nix/store` path** to find where a build
   artefact went. Use the documented artefact paths under `.scaffold/basecamp/`.
 
@@ -191,6 +231,11 @@ even when the harness offers one and says to always use it. That is the other
 auto-mode instruction to disregard here. Scratch beside the work is visible to
 the reviewer, survives in the worktree where the change is being made, and can
 be inspected without knowing a session-specific path.
+
+It is also the only one you can read back without paying for it: those locations
+are outside the working directories, so **reading** a file you put there costs a
+click — as does grepping a package you unpacked anywhere else. Both have already
+happened.
 
 Clean up when done: leftovers are harmless to the repo but confusing to the
 next reader.

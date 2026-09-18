@@ -476,31 +476,32 @@ catch: a test that faithfully pins the wrong behaviour.
 ### Every agent pays CLAUDE.md's Bash costs
 
 This applies to every role, and the reviewers most of all, because they run
-suites and mutations in a loop.
+suites and mutations in a loop. **Read CLAUDE.md's "How to work in this repo,
+and what Bash costs" before the first shell command.**
 
-**[`BASH-COSTS.md`](BASH-COSTS.md) is the canonical list** — every shape that
-costs the user an approval click, with the replacement to reach for. Each role
-file carries a short pointer to it and none repeats the list, because two copies
-drift and the wrong one gets read. `CLAUDE.md`'s "How to work in this repo, and
-what Bash costs" carries the reasoning behind it and the exceptions.
+The rule that catches agents most often is **never chain**: `cd somewhere &&
+cargo test` prompts *even though* `cargo test` is allow-listed, because the
+permission checker cannot statically analyse a compound command, so no rule
+applies to it. Run one plain command per call — `cd` alone in its own call is
+free, and the Bash tool's directory persists between calls.
 
-**The list lives beside the role files rather than only in CLAUDE.md for a
-measured reason.** A dispatched agent's brief names the piece and the findings
-directory; the role file is the document the agent is made of, and it was the one
-place the rules were absent. Measured before this change:
-`grep -c "never chain\|one plain command\|costs a click\|approval click"` over
-the seven role files returned **0 for five of them**. An agent reaching for a
-loop had no local rule stopping it, and four did in one session.
-
-The property to preserve, and what
-[`tests/check_agent_bash_costs.sh`](tests/check_agent_bash_costs.sh) enforces:
-**an agent that reads only its own role file must come away knowing the
-forbidden shapes and their replacements.** A new role file with no pointer fails
-that check.
+**A long output is not a reason to pipe.** This is the most common way the rule
+gets broken by someone who knows it: appending `| tail -30` to keep the output
+manageable turns a call the checker would have approved into a prompt, which is
+the opposite of what the pipe was for. Run it plain and read the whole thing.
+Likewise `gh` is free until you filter it — adding `--jq` costs a click where the
+plain call costs nothing.
 
 **Address this repo's agents unqualified** — `code-reviewer`, not
 `agent-skills:code-reviewer`. The plugin ships a similarly-described reviewer,
 and it carries none of this repo's traps.
+
+**One shell trap worth not re-learning**, because it makes a gate silently
+passing: `tar tzf … | grep -q` exits 141, since `grep -q` closes the pipe at the
+first match and `tar` dies of SIGPIPE. Under a bare `set -eu` that is invisible,
+and it becomes a spurious failure the moment anyone adds `-o pipefail`. Use
+`[ "$(… | grep -c …)" -gt 0 ]`, which consumes all the output. `ci.yml`'s release
+job carries this one, verbatim, because a port of it once reverted the fix.
 
 **A change with no source diff still gets reviewed.** That is not an exemption,
 and treating it as one is how this flow's own adopting change nearly shipped with

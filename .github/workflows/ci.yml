@@ -285,25 +285,6 @@ jobs:
       - name: the render probe's twins differ by exactly one line
         run: dialectica-ui/tests/check_probe_twins.sh
 
-      # An agent that reads only its own role file must come away knowing the
-      # forbidden Bash shapes and their replacements. That property was absent:
-      # measured before the gate existed, five of seven role files carried no
-      # such rule, and four dispatched agents cost the user approval prompts in
-      # a single session.
-      #
-      # The gate enumerates `.claude/agents/` rather than checking a list of
-      # known files, so the eighth role file added later fails it. A
-      # hand-maintained list of which files have been done goes stale silently
-      # — this repo has the scar for that one.
-      #
-      # Role files are identified by `name:` frontmatter, so README.md and
-      # RUNNER.md are exempt by what they are rather than by being named.
-      - name: the agent Bash-costs gate's own tests
-        run: sh .claude/agents/tests/tst_check_agent_bash_costs.sh
-
-      - name: every agent role file carries the Bash-costs rules
-        run: sh .claude/agents/tests/check_agent_bash_costs.sh .claude/agents
-
       # Five registered types were instantiated nowhere, and 92 test functions
       # passed over four of them — including `DOnboardingScreen`, the view's only
       # route to acquiring an identity, so a fresh install could not obtain a key
