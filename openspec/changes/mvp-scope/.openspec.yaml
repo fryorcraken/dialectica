@@ -1,0 +1,40 @@
+# `schema` is REQUIRED for this file to be valid change metadata, and without it
+# `skip_specs` is silently NOT HONOURED — `openspec validate --strict` reports
+# the marker as ignored and then fails for having no deltas, which reads as two
+# problems rather than one. It must name a known schema; this project's is the
+# built-in `spec-driven`, set in `openspec/config.yaml`.
+schema: spec-driven
+
+# No spec delta: this change records four owner scope rulings in `docs/PLAN.md`.
+# It withdraws nothing, deletes nothing, and alters no behaviour.
+#
+# The distinction that makes `skip_specs` correct here rather than convenient:
+# every design these rulings touch is ALREADY contracted, and each contract
+# stays exactly as it is. What changes is MVP membership, which is a staging
+# fact and has never been a spec-level fact in this project — `openspec/specs/`
+# contracts what the system does, not which release it does it in.
+#
+# Measured rather than assumed. The four subjects:
+#
+#   - Voting. `content-authoring` contracts publishing a vote and `composer-view`
+#     contracts the control. Both stay. Neither says "MVP".
+#   - Unread counts. Nothing in `openspec/specs/` contracts an `unread` concept;
+#     it lives in PLAN.md §9.1 as an open question, which is prose.
+#   - Moderation. `moderation-resolution` contracts the read path and stays
+#     merged and tested. The publishing half was never contracted, which is
+#     precisely the fact ruling 3 records.
+#   - The core-contract-is-authority rule, and the wired/placeholder rule that
+#     follows from it. Both are rules about how future work is JUDGED — which of
+#     two documents yields when they disagree, and what an incomplete control
+#     owes. Neither has a fixed subject a test could enumerate.
+#
+# The tempting alternative, rejected: promoting ruling 4's wired-or-documented
+# rule into a view capability. It fails the testability test. "A control whose
+# core call exists MUST be wired" has no fixed subject — the set of such
+# controls changes with every trait method added — and `hand-maintained sweep
+# lists go stale silently` is a trap this repo has already paid for. The
+# condition on the other half, that a placeholder be documented in PLAN.md, is a
+# requirement on a document outside `openspec/specs/` entirely, which no
+# requirement in this tree can hold. Ruling 4 therefore lands where it is
+# checkable by reading: PLAN.md §9.2, with the list of placeholders beside it.
+skip_specs: true
