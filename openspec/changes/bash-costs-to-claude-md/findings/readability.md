@@ -7,7 +7,7 @@ is a readability-of-the-record question, not a design or correctness one).
 
 ## Findings
 
-- [ ] **`dev-writer`** — `CLAUDE.md:80` and `CLAUDE.md:234-237` — the
+- [x] **`dev-writer`** — `CLAUDE.md:80` and `CLAUDE.md:234-237` — the
       "reads outside the working directories cost a click" fact is now stated
       twice, in prose that doesn't cross-reference either occurrence.
       **Scenario:** the costs table's new row (`CLAUDE.md:80`, added by this
@@ -34,7 +34,20 @@ is a readability-of-the-record question, not a design or correctness one).
       and it was introduced by the very change whose stated purpose was
       consolidating this material into one place.
 
-- [ ] **`dev-writer`** — `openspec/changes/bash-costs-to-claude-md/tasks.md:54-56`
+      **Fixed.** The scratch-files paragraph no longer restates the claim; it
+      says `./tmp/` is the only scratch location you can read back without paying
+      for it, and points at the costs table as the thing that prices it. The
+      table row stays canonical because a cost belongs with the other costs,
+      where an agent checks a command against it.
+
+      Nothing was lost in the collapse, which was the thing to get right: the
+      three measured instances the paragraph named — `/tmp`, the session
+      scratchpad, an unpacked package — are all present in the table row itself
+      (`grep -n "unpacked\|scratchpad" CLAUDE.md` returns the row and the
+      paragraph's unrelated "do not use" sentence, and no third site). So the
+      deletion removed a second copy rather than the only copy of anything.
+
+- [x] **`dev-writer`** — `openspec/changes/bash-costs-to-claude-md/tasks.md:54-56`
       — the claim "Everything else in `BASH-COSTS.md` was checked against
       that section and found to be a duplicate; it is not re-added" is not
       accurate — at least one non-duplicate item was dropped, not folded.
@@ -59,6 +72,24 @@ is a readability-of-the-record question, not a design or correctness one).
       "Write down only what a command cannot tell you" principle is meant to
       keep out, and here the checkable claim ("checked line by line") does
       not hold up against a checkable fact (`grep` for the dropped content).
+
+      **Fixed, both halves** — the finding offered either, and the false
+      completeness claim was the more important defect, so correcting it alone
+      would have left the useful row lost on purpose.
+
+      The row is folded in: `CLAUDE.md`'s costs table now carries `git diff
+      origin/main -- <path>` to read an old version, against materialising one to
+      a scratch file first. Verified absent before the fix, against both the
+      pre-#119 file (`git show 51ab7f8^:CLAUDE.md`, no hit for `diff
+      origin/main`) and the branch tip — so this was a drop, not a duplicate, as
+      the finding measured.
+
+      The claim is corrected rather than deleted: `tasks.md`'s fold section now
+      says the first pass missed one row and that the review found it, and names
+      `git show 51ab7f8:.claude/agents/BASH-COSTS.md` as the source to re-check
+      against. That is the part that answers the finding's real point — a reader
+      who wants to trust the sweep now has the command that re-runs it, instead
+      of an assertion that it was done.
 
 ## What was clean
 

@@ -79,6 +79,7 @@ it is to avoid the *shapes* that defeat the analyser.
 | one plain command per call | `\|`, `&&`, `;`, `$(…)`, `<(…)` |
 | a path inside a working directory | a read outside them — `/tmp`, the session scratchpad, an unpacked package |
 | a path the checker can resolve **before** the command runs | any path after `cd` |
+| `git diff origin/main -- <path>` to read an old version | materialising one to a scratch file first |
 | `git …`, `nix build …`, `lgs …` | the same with `--jq` or a pipe appended |
 | `gh api …`, `gh pr …`, `gh run …` | `sh <relative-path>` |
 
@@ -107,6 +108,18 @@ this project a stalled session.
   tree buys nothing and is where a typo becomes a *blocked read* rather than a
   missing file — a mistyped username in one has already cost a click. Absolute
   paths are for reaching **outside** the tree you are standing in.
+
+  **That incident is plausibly this table's own doing, which is why the row
+  above is phrased as resolvability rather than as absolute-versus-relative.**
+  The table once said an **absolute** path was free and a **relative** path
+  costly — true of a session that could be anywhere, backwards for a flow that
+  stands every agent inside the correct tree. `dev-writer.md` carried a matching
+  "Absolute paths" bullet, so a dispatched writer was told twice to reach for
+  the shape that produced the blocked read. The chain is plausible rather than
+  proven — nobody asked the agent why it typed that path — but it is the only
+  account that fits, and it is what both corrections defend against. Phrase a
+  cost by what the checker actually does, or it inverts the moment the flow
+  around it changes.
 
   **The exception is `EnterWorktree`, which moves a session rather than
   prefixing a command** — an interactive session enters a worktree once with
@@ -232,10 +245,8 @@ auto-mode instruction to disregard here. Scratch beside the work is visible to
 the reviewer, survives in the worktree where the change is being made, and can
 be inspected without knowing a session-specific path.
 
-It is also the only one you can read back without paying for it: those locations
-are outside the working directories, so **reading** a file you put there costs a
-click — as does grepping a package you unpacked anywhere else. Both have already
-happened.
+It is also the only one you can read back without paying for it — those locations
+are outside the working directories, which the costs table above prices.
 
 Clean up when done: leftovers are harmless to the repo but confusing to the
 next reader.

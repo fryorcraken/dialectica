@@ -55,7 +55,7 @@ error of assuming per-change `.openspec.yaml` files don't exist.
 
 ## Findings
 
-- [ ] **`dev-writer`** — `openspec/changes/bash-costs-to-claude-md/proposal.md:45-49`
+- [x] **`dev-writer`** — `openspec/changes/bash-costs-to-claude-md/proposal.md:45-49`
       (and `CLAUDE.md`, `tasks.md:104-108`) — the causal link between two
       recorded facts is stated only in the commit message, not in any file a
       future reader will open.
@@ -89,6 +89,26 @@ error of assuming per-change `.openspec.yaml` files don't exist.
       cannot judge whether the two are related or coincidental, and cannot
       confirm the CLAUDE.md table fix was sufficient to prevent a recurrence,
       because the file never says the table was the origin.
+
+      **Fixed in `CLAUDE.md`, not `proposal.md`** — the finding left the
+      placement to be judged, and the two archive differently. `proposal.md` goes
+      to `changes/archive/`, which is where someone investigating a past decision
+      looks; this is not a past decision, it is a live reason the corrected row
+      is worded as it is, and a reader meets it at the incident rather than by
+      going looking. So it sits directly under the typo-incident sentence in the
+      relative-paths bullet: the backwards table, `dev-writer.md`'s matching
+      bullet, the blocked read, and the note that the corrected row and bullet
+      are what defend against a recurrence.
+
+      **Labelled plausible, not proven**, which is the part worth keeping: nobody
+      asked the agent why it typed that path, so the chain is the only account
+      that fits rather than a measured cause. Writing it as established would
+      have manufactured support for a claim that is inferred — and a reader who
+      later finds a different cause needs to see that this one was an inference.
+
+      `tasks.md` gains a matching item under "Correction carried across the
+      revert", so the change's own record says the chain was written down
+      somewhere durable rather than left in `4a9d70a`'s message.
 
 This is the change's one real gap. Everything else — the revert's completeness,
 the recorded exception, the archive restoration, the owner-authorisation

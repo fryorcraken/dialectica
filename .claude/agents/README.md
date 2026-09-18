@@ -371,8 +371,11 @@ agents were silently cut from `origin/main` and no error said so. If an agent
 reports a fork point that is not your HEAD, check this file before looking
 anywhere else.
 
-It is the **user's** file. Do not edit it on your own initiative; machine-local
-settings belong in `settings.local.json`, which stays ignored.
+Like everything under `.claude/`, it is the owner's — CLAUDE.md's "`.claude/` is
+the owner's" carries the rule, and this line points rather than restating it,
+because a second copy is what invited reading the rest of the directory as fair
+game. What is local to this section: machine-local settings belong in
+`settings.local.json`, which stays ignored.
 
 #### What the agent's own branch means for getting work back
 

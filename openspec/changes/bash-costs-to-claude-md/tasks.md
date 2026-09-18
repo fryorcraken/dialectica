@@ -54,6 +54,11 @@ Bash costs" section did **not** already carry. Everything else in
 `BASH-COSTS.md` was checked against that section and found to be a duplicate; it
 is not re-added.
 
+The first pass of that check missed one row, found by the readability review and
+folded in below: the claim of completeness was made before it held. `git show
+51ab7f8:.claude/agents/BASH-COSTS.md` is the source to re-check against, which is
+the point of naming it rather than asking the next reader to trust the sweep.
+
 - [x] **`for`/`while` named in the costs table.** The row said "a loop", which
       does not read as a ban on the specific construction an agent reaches for.
       Now `for`/`while` by name, with the `env VAR=` prefix added beside the
@@ -70,6 +75,11 @@ is not re-added.
       plain relative paths inside your own worktree, naming the measured
       incident where a typo'd username in a long absolute path became a blocked
       read rather than a missing file.
+- [x] **Reading an old version of a file is a costs-table row.** `git diff
+      origin/main -- <path>` is one plain command; materialising the old version
+      to a scratch file first is the shape it replaces. This row was in
+      `BASH-COSTS.md`, had no counterpart in the pre-#119 `CLAUDE.md`, and was
+      dropped rather than folded on the first pass.
 - [x] **`Grep`/`Glob` named as the replacement for a corpus file.** CLAUDE.md
       insists a ban with no named replacement redirects the habit, and the
       loop-that-builds-a-file-to-grep case had no replacement named. Added to
@@ -105,3 +115,9 @@ is not re-added.
       predates #119 and is not part of the unauthorised restructure, so it is
       corrected rather than restored verbatim — narrowly, without reintroducing
       the "What Bash costs here" section #119 added.
+- [x] **The causal chain is recorded in `CLAUDE.md`, not only in a commit
+      message.** The backwards absolute/relative table plausibly put the wrong
+      rule in `dev-writer.md`, which plausibly produced the measured typo'd-path
+      incident. It sits beside the incident it explains, where a reader meets the
+      fact, and is labelled plausible rather than proven — nobody asked the agent
+      why it typed that path.

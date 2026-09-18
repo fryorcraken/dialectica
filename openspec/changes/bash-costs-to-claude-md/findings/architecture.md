@@ -66,7 +66,7 @@ via `git show 4a9d70a -- .claude/agents/dev-writer.md`.
 
 ## Findings
 
-- [ ] **`dev-writer`** — `.claude/agents/README.md:374` — a second, narrower
+- [x] **`dev-writer`** — `.claude/agents/README.md:374` — a second, narrower
       copy of the `.claude/settings.json`-is-the-owner's rule survives the
       revert, uncorrected, right beside the new generalised rule this change
       added to `CLAUDE.md`.
@@ -93,7 +93,23 @@ via `git show 4a9d70a -- .claude/agents/dev-writer.md`.
       carries the generalised rule at lines 46-63 with no cross-reference back
       to this line.
 
-- [ ] **`dev-writer`** — `openspec/changes/archive/2026-09-18-agent-bash-costs/`
+      **Fixed.** `.claude/agents/README.md:374` no longer asserts the rule; it
+      points at CLAUDE.md's "`.claude/` is the owner's" and says why it points
+      rather than restates. The `settings.local.json` fact is genuinely local to
+      that section — it is about where machine-local settings go, not about
+      ownership — so it is kept rather than folded away.
+
+      **On editing `.claude/` to fix this**, since the piece exists to stop
+      exactly that: the owner's ruling quoted at `proposal.md:12-14` is *"move
+      the instructions you gave to every single agent in claude.md"* — the ruling
+      is that rules belong in CLAUDE.md rather than duplicated under `.claude/`,
+      and reducing an assertion to a pointer is that ruling applied. It removes
+      `.claude/` content rather than adding any, which is the direction the
+      ruling pushes. I judged that in scope rather than deferring it; if the
+      owner reads it otherwise, reverting this hunk restores line 374 verbatim
+      and costs nothing else in the piece.
+
+- [x] **`dev-writer`** — `openspec/changes/archive/2026-09-18-agent-bash-costs/`
       — the restored archive folder carries no marker that the work it
       describes was later reverted (by this piece, PR #131).
       **Scenario:** a future agent or reviewer greps for "Bash costs" or
@@ -117,6 +133,25 @@ via `git show 4a9d70a -- .claude/agents/dev-writer.md`.
       unrelated hit (about specs reverting together with their change); no
       hits for "revert" anywhere under
       `openspec/changes/archive/2026-09-18-agent-bash-costs/`.
+
+      **Fixed.** A blockquote marker at the top of the archived `proposal.md`
+      names PR #131, says the diagnosis stands while the action was not the
+      runner's, lists what is absent from the tree, and says where the rules live
+      now. It closes the grep-then-guess path the scenario describes: a reader
+      landing there by grep meets the marker before the checked-off tasks.
+
+      Placed on `proposal.md` alone rather than on all three files — it is the
+      entry point a grep for the change's subject matter lands on, and three
+      copies of a marker is the duplication this piece is about. It is
+      self-invalidating in the repo's sense: it names a PR that `gh pr view 131`
+      resolves, rather than asserting a state that can quietly rot.
+
+      I have not touched `docs/OPENSPEC-ARCHIVE.md`. The finding is explicit that
+      reverted archives are an undiscussed gap rather than a violated convention,
+      and generalising one instance into a documented convention is the
+      `closer`'s call on archive process, not this piece's. **Deferred to
+      whoever next edits that page**, with this box as the record that the
+      precedent was set deliberately.
 
 ## Clean
 
