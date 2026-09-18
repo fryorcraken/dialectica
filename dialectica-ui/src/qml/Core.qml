@@ -125,6 +125,23 @@ QtObject {
         return root.call("get_capabilities", [JSON.stringify({ stoa: stoa })])
     }
 
+    // One thread, as a flat list of posts each naming its parent.
+    //
+    // `thread` is the ROOT POST's op id, which never moves when the post is
+    // edited — an identifier that changed under a revision would leave a caller
+    // holding one that no longer answers to anything.
+    //
+    // **Nesting is not in this reply and must not be looked for.** The items are
+    // flat and carry no depth or indentation level; depth is a count of parents
+    // and the caller holds the parents. That is deliberate: which posts are in
+    // the thread is computed from the parent chain, never from the `thread`
+    // field an op carries, because that field is its author's claim and a reader
+    // placing posts by the claim would render one inside a conversation it was
+    // never part of.
+    function readThread(request) {
+        return root.call("read_thread", [JSON.stringify(request)])
+    }
+
     // Create a Stoa. A title and nothing else, because there is no creator
     // argument and there cannot be: the creator key is fixed inside the address
     // preimage forever, so a call accepting one would mint a Stoa nobody can

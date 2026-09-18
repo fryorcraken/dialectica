@@ -3618,6 +3618,39 @@ core grows to serve it** rather than leaving it to be disproved.
 5. **No moderation-publishing method**, per ruling 3 — the case 2 entry with the
    simplest resolution, since ruling 3 also removes the screen that would carry
    the control.
+6. **The DELIVERY lamp has no source and is left unbound.** `DStatusBar` renders
+   three lamps — delivery, storage, zone — and nothing can tell it the truth
+   about the first. `delivery_module.lidl` carries the outcome as three channel
+   events (`channelMessageSent`, `channelMessageError`, `messagePropagated`),
+   which arrive **asynchronously, after the publish call has returned**, so no
+   synchronous call on the trait produces a signal to bind. This is a missing
+   call rather than a decision, which is what puts it on this list: core growing
+   one removes the entry.
+
+   **Unbound is the honest rendering, not a gap.** `DStatusBar` defaults every
+   lamp to `degraded` rather than `ok`, and maps every unrecognised state to
+   `degraded` too, so an unbound lamp claims nothing — green is a claim the
+   software cannot back. `Main.qml` therefore binds storage and zone and leaves
+   delivery alone deliberately. **Do not invent a heuristic to fill it**: a lamp
+   guessing from "the publish call returned" would report the transport took an
+   op, which says nothing about whether any peer received it.
+
+   The six tooltip strings are likewise unset. `DStatusBar` invents nothing when
+   they are, so no explanation is shown and none is wrong.
+7. **The STORAGE lamp reads the last screen's read, which is a mock.** Nothing in
+   the contract reports whether the store is readable as a machine-wide
+   condition — each read reports its own outcome — so `Main.qml` binds the lamp
+   to whether the screen that last read the store succeeded. It is honest about
+   the read it describes and is not the machine-wide claim the lamp's position
+   implies. Marked as a mock in `Main.qml`.
+8. **No fonts are shipped, so the design does not render at its intended
+   density.** `DTheme` names Spectral and IBM Plex Mono — matching the design
+   bundle's `Theme.qml` exactly — but `dialectica-ui/src/` contains no font
+   files, so Qt silently falls back to a system font. The bundle's README warns
+   that shipping them matters "or the density of the design changes", and this is
+   the repo's silent-failure house style: nothing errors, the app just looks
+   wrong. Closing it is a binary-asset change (both families are OFL) and is a
+   piece of its own rather than something to bundle into a navigation change.
 
 ~~`derive_stoa_key` is built and simply is not called~~ — **this was false when
 written.** The adapter called it twice, and a Stoa's `creator` was derived under a
@@ -3699,11 +3732,9 @@ not the decision.
 **asynchronously, after the publish call has returned**. A return value could not
 carry it even if we wanted it to.
 
-That also makes the return value a *worse* signal than the events, not merely a
-missing one: a sink that accepts an op tells you the transport took it, which is
-`channelMessageSent` and says nothing about whether any peer received it.
-`messagePropagated` is the fact a user cares about. Publishing and delivering are
-two events at two times, and this decision stops the API pretending they are one.
+*Why the return value is a worse signal than the events rather than merely a
+missing one, and what that means for the view's delivery lamp, is recorded in
+`ui-navigation`'s `design.md` decision D7, beside the decision it justifies.*
 
 **The obligation lands on `op-transport`**: an op that reaches
 `channelMessageError`, or that never reaches `messagePropagated` within some

@@ -95,6 +95,65 @@ ScreenFrame {
         }
     }
 
+    // The identity report, as `who_am_i` answered it THIS render.
+    //
+    // **A different question from the capability probe, and the two can honestly
+    // disagree** — `lib.rs:258`: "a stored identity whose keystore permissions
+    // are too open is a real identity that cannot currently be used. A view with
+    // only the posting probe would have to render 'you are nobody' to a user who
+    // has an identity and a fixable problem."
+    //
+    // That disagreement is why the footer chip binds THIS and not
+    // `capability.canPost`. Routing on the posting probe alone collapses "no
+    // identity" and "an identity that cannot be used" into one state and offers
+    // identity CREATION to the second — which for an existing identity is the
+    // one irreversible wrong answer available, since `keep_identity` refuses
+    // where an identity already exists and replacing one discards every identity
+    // derived from it. The user who most needs to be told what is wrong is
+    // instead offered a new key. (design.md D3.)
+    //
+    // **Held for one render, written by `reload()` and by nothing else.** Same
+    // lifetime as `capability` and subject to the same rule for the same reason:
+    // it reads a store the view cannot see, so a previous run's answer is not
+    // evidence about this one.
+    property var identity: ({ hasIdentity: false, publicKey: "", reason: "" })
+
+    // `hasIdentity` as the design bundle names it — `examples/FeedScreen.qml`
+    // gates on `property bool hasIdentity` and SPEC.md:21 makes screens 03 and
+    // 05 one screen with that one flag.
+    //
+    // **Derived, never stored.** The bundle's shape is a bool, and this is that
+    // bool — but it is a `readonly` expression over the answer `reload()` most
+    // recently received rather than a settable property anything can write. So
+    // the bundle's interface is honoured and nothing can hold it across a
+    // keystore change: there is no setter for a stale value to be written
+    // through. (design.md D4.)
+    readonly property bool hasIdentity: screen.identity.hasIdentity === true
+
+    // One `who_am_i` reply, normalised into one shape.
+    //
+    // `hasIdentity === true` and nothing looser, for the reason `DIdentityChip`
+    // states in its own header: `"true"`, `1`, `null` and `undefined` are all
+    // not-`true`, and each is truthy-or-falsy in a way that does not match what
+    // it means. A chip handed any of them under a looser test renders the
+    // IDENTITY PRESENT arm, claiming an identity the machine does not have, with
+    // every gate green.
+    function identityFrom(probe) {
+        var present = probe.ok && probe.value.hasIdentity === true
+        return {
+            hasIdentity: present,
+            publicKey: present && typeof probe.value.publicKey === "string"
+                ? probe.value.publicKey : "",
+            // The reason a user is nobody here, as core wrote it. Empty where
+            // there is an identity: a leftover reason beside a filled chip would
+            // describe a state the reader is not in.
+            reason: !present && probe.ok
+                    && typeof probe.value.reason === "string"
+                ? probe.value.reason
+                : (probe.ok ? "" : probe.error)
+        }
+    }
+
     // Whether the closed gate's guidance is revealed. A view-local disclosure,
     // reset on nothing — it says nothing about the world, so there is nothing
     // for it to go stale against.
@@ -225,6 +284,21 @@ ScreenFrame {
 
     Component.onCompleted: screen.reload()
 
+    // **A different Stoa is a different read.** This screen is mounted once and
+    // re-pointed at whichever Stoa the navigator chose, so without this the
+    // first Stoa opened would be the only one ever read: `reload()` ran at
+    // construction, when the address was still empty, and nothing asked again.
+    //
+    // It is `stoaAddress` that triggers rather than `stoaGenesis`, and the pair
+    // is not arbitrary — the address is what identifies the Stoa, and the record
+    // travels with it. A genesis arriving separately for the same address is the
+    // same Stoa, so re-reading on it would issue a second identical call.
+    //
+    // This is also what re-probes BOTH identity answers on arrival at a feed,
+    // which is the rule `reload()` carries: neither is answered from a value
+    // retained across the transition.
+    onStoaAddressChanged: screen.reload()
+
     function reload() {
         if (screen.stoaAddress === "") {
             screen.readState = "failed"
@@ -246,6 +320,12 @@ ScreenFrame {
         // `undefined`, `"true"`, `1` and `null` are all not-`true`.
         screen.capability = screen.capabilityFrom(
             Core.getCapabilities(screen.stoaAddress))
+
+        // BOTH probes, every render, neither cached. They answer different
+        // questions and the routing needs both: three outcomes — no identity, an
+        // identity that cannot be used, and a user who can act — and a routing
+        // that renders only two of them is silently merging a pair.
+        screen.identity = screen.identityFrom(Core.whoAmI(screen.stoaAddress))
 
         var reply = Core.listThreads({
             stoa: screen.stoaAddress,
@@ -297,6 +377,23 @@ ScreenFrame {
     // no `StackView` is needed — the navigator still holds one nullable property
     // per screen, as design.md D5 argues.
     signal closed()
+
+    // The user wants an identity for this Stoa.
+    //
+    // A signal rather than a direct write, for the reason `closed()` is one:
+    // this screen does not know what is above it, and the caller decides where
+    // identity acquisition lives. It carries no Stoa — the navigator already
+    // knows which Stoa's feed is up, and a screen telling its parent something
+    // the parent set is a second source for one value.
+    signal createIdentityRequested()
+
+    // A row's thread was opened.
+    //
+    // **Carries the root post's identifier**, which does not move when the post
+    // is edited — an identifier that changed under a revision would leave the
+    // return route pointing at a thread that no longer answers to it. The Stoa
+    // and its record are the navigator's already, so they are not repeated here.
+    signal threadOpened(string rootOp)
 
     // ---- header ---------------------------------------------------------
 
@@ -688,6 +785,54 @@ ScreenFrame {
                     }
                 }
 
+                // ---- the row's actions, as the design lays them out ------
+                //
+                // "read the thread" is the affordance that opens this row's
+                // thread. It is offered on every row and NOT gated on the
+                // posting probe: reading needs no identity, and gating it would
+                // withhold the thread from exactly the reader the feed is
+                // otherwise happy to serve.
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 16
+
+                    Text {
+                        objectName: "readThreadLink"
+
+                        // "" when the row names no op — the same guard the vote
+                        // control goes through, and for the same reason: a row
+                        // with no usable identifier offers no press rather than
+                        // a press that opens nothing.
+                        readonly property string target: screen.voteTarget(row.modelData)
+
+                        visible: target !== ""
+                        text: "read the thread"
+                        font: DTheme.bodySmall
+                        color: DTheme.ink
+                        textFormat: Text.PlainText
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: screen.threadOpened(parent.target)
+                        }
+                    }
+
+                    // The reading-is-free statement the design carries under a
+                    // row when there is no identity. It names what an identity
+                    // is FOR rather than asserting a restriction — reading needs
+                    // nothing, and the sentence says so by omission.
+                    Text {
+                        visible: !screen.hasIdentity
+                        text: "voting and replying need an identity"
+                        font: DTheme.note
+                        color: DTheme.inkFaint
+                        textFormat: Text.PlainText
+                    }
+
+                    Item { Layout.fillWidth: true }
+                }
+
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.preferredHeight: DTheme.hairline
@@ -913,5 +1058,43 @@ ScreenFrame {
             textFormat: Text.PlainText
             Layout.fillWidth: true
         }
+    }
+
+    // ---- the footer: who you are acting as -------------------------------
+    //
+    // The design's footer is "pagination left, identity chip centred, the three
+    // lamps right" (SPEC.md:152). Pagination is above, where the rows it pages
+    // are; the lamps are shared chrome and live in `Main.qml`, because they must
+    // appear on EVERY main-area screen and this is one screen. What is here is
+    // the half that is Stoa-scoped: the chip answers "who am I posting as in
+    // THIS Stoa", and there is no such answer without a Stoa.
+    //
+    // **Bound to the identity report, NOT to `capability.canPost`.** The chip's
+    // own header says to bind `canPost === true`, which was right while the chip
+    // was the posting gate's indicator and is wrong for this placement: binding
+    // it here shows "Create an identity" to a user who HAS one and cannot
+    // currently use it, and routing them to creation is irreversible. The header
+    // is updated to state both bindings and which placement takes which.
+    // (design.md D3.)
+    RowLayout {
+        Layout.fillWidth: true
+        spacing: 16
+
+        Item { Layout.fillWidth: true }
+
+        DIdentityChip {
+            objectName: "identityChip"
+            hasIdentity: screen.hasIdentity
+            // No generated name is derivable in the sandbox — the QML engine
+            // holds no wordlists, and `generated-names` records the derivation
+            // as reachable by no caller until an entry point exists. `""` is
+            // what the existing consumer passes and is correct until it does.
+            generatedName: ""
+            identityAddress: screen.identity.publicKey
+
+            onCreateRequested: screen.createIdentityRequested()
+        }
+
+        Item { Layout.fillWidth: true }
     }
 }

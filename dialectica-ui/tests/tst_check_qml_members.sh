@@ -12,10 +12,16 @@
 # WHAT THE REJECTION CASE IS, and why it is the shape it is. The defect that
 # motivated the gate is a D-PREFIXED typo — `DTheme.noSuchDesk` where
 # `DTheme.desk` was meant. That spelling contains no bare `Theme`, so the static
-# name gate cannot see it; and it sits in `Main.qml`, which no spec
-# instantiates, so `check_bindings` cannot see it either. Measured: with that
+# name gate cannot see it; and at the time it sat in `Main.qml`, which no spec
+# instantiated, so `check_bindings` could not see it either. Measured: with that
 # one character sequence changed, the QML suite, the static name gate AND
 # qmllint as previously configured were all green.
+#
+# **Main.qml is instantiated by a spec now** (`tst_stoa_screens.qml` and
+# `tst_navigation.qml`), so the second half of that account is history. The gate
+# is not thereby redundant: which files a spec constructs is hand-maintained and
+# nothing enforces it, so `check_bindings`' reach is a property that can silently
+# narrow, while this gate reaches every file in `src/qml` unconditionally.
 #
 # Run directly: dialectica-ui/tests/tst_check_qml_members.sh
 set -eu

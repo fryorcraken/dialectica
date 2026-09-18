@@ -9,11 +9,22 @@
 # the binding that paints the whole screen's ground — every existing gate
 # passed:
 #
-#   * the QML suite          exit 0, 41 passed. No spec instantiates Main.qml,
-#                            so `check_bindings` never sees it. The suite's
-#                            claim to fail on any undefined binding is true
-#                            only of components a spec instantiates, and
-#                            Main.qml is not one.
+#   * the QML suite          exit 0, 41 passed. At the time, no spec
+#                            instantiated Main.qml, so `check_bindings` never
+#                            saw it.
+#
+#                            **Main.qml IS instantiated by a spec now** —
+#                            `tst_stoa_screens.qml` and `tst_navigation.qml`
+#                            both drive it — so that particular blind spot is
+#                            closed and this account is history rather than
+#                            current state. The REASON this gate exists is
+#                            unchanged and does not depend on it: the suite's
+#                            claim to fail on any undefined binding is true only
+#                            of components some spec instantiates, which is a
+#                            hand-maintained property nothing enforces. A file
+#                            no spec constructs is one `check_bindings` cannot
+#                            see, and this gate reaches every file in src/qml
+#                            whether or not a spec happens to build it.
 #   * the static name gate   exit 0, 17 files. A D-PREFIXED typo contains no
 #                            bare `Theme`; the gate checks names, not members.
 #   * qmllint as configured  exit 0 — while PRINTING

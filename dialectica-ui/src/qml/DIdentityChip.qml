@@ -37,18 +37,36 @@ import QtQuick.Layouts
 //
 // ---- FOR WHOEVER PLACES THIS CHIP IN A FOOTER ---------------------------
 //
-// **Bind `hasIdentity: <capability>.canPost === true`, never a raw probe
-// field.** The `=== true` is not cosmetic. `"true"`, `1`, `null` and
+// **Never bind a raw probe field. Always `=== true`.** That part is not
+// cosmetic and holds for either binding below: `"true"`, `1`, `null` and
 // `undefined` are all not-`true`, and each is truthy-or-falsy in a way that
-// does not match what it means: a chip handed any of them under a looser test
+// does not match what it means. A chip handed any of them under a looser test
 // renders the IDENTITY PRESENT arm, claiming an identity the machine does not
 // have, with every gate green.
 //
-// `FeedScreen.qml` establishes the `capability` shape this binds to and
-// normalises at the boundary (`probe.ok && probe.value.canPost === true`), so
-// a screen that routes through it inherits the rule. One that reads a probe
-// reply directly does not. The three degenerate shapes are driven as fixtures
-// in `tst_gate_affordance.qml` and `tst_vote_and_gate.qml`.
+// **WHICH answer to bind depends on what the chip is for, and the two are not
+// interchangeable.** `who_am_i` and `get_capabilities` answer different
+// questions and `lib.rs:258` contracts that they can honestly disagree — a
+// stored identity whose keystore permissions are too open is a real identity
+// that cannot currently be used.
+//
+//   * **Bind `<whoAmI>.hasIdentity === true` where the chip offers the route to
+//     CREATING an identity** — which is every placement that renders the
+//     `createRequested()` arm, the feed footer included. Binding `canPost` there
+//     collapses "no identity" and "an identity that cannot be used" into one
+//     state and offers key creation to the second. That is the one irreversible
+//     wrong answer available: `keep_identity` is refused where an identity
+//     already exists, and replacing one discards every identity derived from it
+//     while the ops they signed stay published. The user who most needs to be
+//     told what is wrong is instead offered a new key.
+//   * **Bind `<capability>.canPost === true` only where the chip reports whether
+//     the user can ACT** and no creation route is offered from it.
+//
+// `FeedScreen.qml` normalises both at the boundary — `identityFrom()` and
+// `capabilityFrom()` — so a screen that routes through either inherits the
+// `=== true` rule. One that reads a probe reply directly does not. The three
+// degenerate shapes are driven as fixtures in `tst_gate_affordance.qml` and
+// `tst_vote_and_gate.qml`.
 //
 // **`generatedName` cannot be filled by any caller yet.** The QML sandbox
 // holds no wordlists and cannot derive a name for itself; `generated-names`'
