@@ -74,9 +74,14 @@ read as a stylistic choice about indentation.
 
 The root is **not** a missing-parent case. The root is the item reporting no
 parent at all, and `wire.rs:1864` omits `parent` for exactly it. The two are
-distinguished by `parent === undefined` (the root) versus `parent` present but
-unmatched (unresolvable), which is why the wire's omit-rather-than-null rule is
+distinguished by `parent` absent (the root) versus `parent` present but unmatched
+(unresolvable), which is why the wire's omit-rather-than-null rule is
 load-bearing here rather than a detail.
+
+**This paragraph described the intent, and the first implementation did not honour
+it** — `parentOf` collapsed a present-but-unusable `parent` to the same `""` the
+root reports, so the distinction it names existed only in the prose. D13 records
+the second route that opened, and the reshaping that closed it.
 
 ### D2 — Depth is computed by walking the parent chain with a visited set, bounded for rendering only
 
@@ -368,6 +373,97 @@ A consequence worth knowing: `DIdentityChip.qml`'s header named `FeedScreen.qml`
 as *the* normalising boundary, which stopped being true the moment a second
 screen normalised too. It now names `Core`, and that sentence stays true as
 screens are added, which is the property the extraction buys.
+
+### D13 — `parentOf` answers with a KIND, because a guard proved by mutation along one route was bypassed along another
+
+D1 and D2 are the security property of this screen, and both were verified by
+mutation: flip `resolveDepth`'s `-1` branches to `depth + 1` and tests go red. Two
+agents ran that mutation and both concluded the property held. It did hold — **along
+the route they mutated.** The `tester` found a second route that never reaches those
+branches at all, and it is worth recording as a finding about *how guards are
+proved*, not only as a bug that was fixed.
+
+The original `parentOf` returned a plain string, `""` meaning "no parent". But it
+produced that `""` for **any** `parent` that was not a non-empty string — `null`, a
+number, an object — not only for an absent field. `resolveDepth`'s first line read
+`parent === ""` as "this item IS the root" and returned `0` **unconditionally**,
+before the visited set, before the walk, before either `-1`. So an item whose
+`parent` was present but unusable rendered at the root's own depth with no "answers
+a post not shown" notice — precisely the outcome D1 forbids and `thread.rs` refuses,
+reached by a path where mutating D1's guard changes nothing.
+
+**The lesson to carry:** a mutation test proves the guard it mutates is *reached and
+load-bearing on the paths the fixtures take*. It says nothing about a path that
+returns before the guard. "Two agents mutated it and it held" was a true statement
+about an incomplete question.
+
+**The fix is a shape, not a fourth guard.** CLAUDE.md's "complexity in the data
+structure, not the logic": the defect existed because two different facts shared one
+value, so no amount of care at the call site could keep them apart — the caller had
+nothing to branch on. `parentOf` now returns `{ kind, id }` over three kinds:
+
+| `kind` | means | `resolveDepth` |
+|---|---|---|
+| `parentRoot` | no `parent` field at all | `0` — this is the root |
+| `parentNamed` | a usable, non-empty op id | walk the chain |
+| `parentUnusable` | present but not a usable string, or no item at all | `-1` |
+
+There is now no value the root case and the malformed case share, so a caller
+cannot read one as the other by omission — it must name the kind it means. A future
+call site added by someone who has not read this entry gets the distinction for
+free, which a `""` sentinel or a fourth `if` at each call site would not give.
+
+Rejected: **a distinguishable sentinel string** (the `tester`'s suggested shape,
+e.g. returning `" unusable"`). It fixes this instance, and it keeps the
+property that a caller comparing against `""` still compiles and still silently
+takes the root branch — the same failure mode one value later. Rejected too: leaving
+`parentOf` alone and adding a `typeof` check in `resolveDepth`, which is the fourth
+slightly-different guard CLAUDE.md names as the signal to reshape.
+
+Note a null/undefined *item* now classifies as `parentUnusable` rather than
+`parentRoot`. That is deliberate and is a behaviour change in its own right: an
+absent item is not a root, and the previous `""` return made it one.
+
+**`itemId` does NOT have the same defect, and was deliberately left alone.** It
+looks analogous — same `typeof` test, same `""` fallback — but its `""` is
+single-valued. Both call sites treat it as a *refusal*: `itemsById` skips the item
+rather than keying it, and `resolveDepth` skips seeding `visited`. Neither reads
+`itemId(x) === ""` as an affirmative fact about the item the way `resolveDepth` read
+`parentOf(x) === ""` as "this is the root". So there is no second meaning to
+collide with, and reshaping it would add a kind nobody branches on. Recorded because
+"the sibling function has the same shape" is the obvious next question, and the
+answer is not symmetric.
+
+**Is this reachable today? No — and it is still boundary defence, not dead code.**
+`wire.rs:7041` and the `read_thread` response builder at `wire.rs:2027` only ever
+omit `parent` (root) or serialise it as a hex op-id string. The current core cannot
+produce a malformed `parent`. This guard defends the view against a shape its own
+contract does not currently produce, which is CLAUDE.md's "Never trust an inbound
+message... Validate at the boundary" applied where peer-supplied items are not
+validated element-by-element anywhere upstream of this screen. **"Core is honest
+today" is a different claim from "the view cannot be handed this shape"**, and it
+expires the moment core changes, another producer appears, or an item reaches this
+screen by a path that did not come through `read_thread`. Do not delete this as
+unreachable — the whole point is that nothing in the view can tell.
+
+**What breaks without this**:
+`test_an_item_reporting_a_non_string_parent_is_not_rendered_as_the_root` in
+`tst_thread_nesting.qml` goes red (`resolveDepth` returns `0`, expected `-1`), and
+it is the only one that does — measured by replacing the `parentUnusable` branch's
+`-1` with `0`: 15 passed, 1 failed. The two guards are independently pinned, which
+is the property that says the routes really are distinct: the *original* mutation
+(`-1` → `depth + 1` on the not-on-this-page branch) was re-run after this change and
+still turns `test_an_item_whose_parent_is_absent_is_not_re_parented_to_the_root`,
+`test_items_carrying_no_id_do_not_share_a_parent_slot` and
+`test_the_unresolved_parent_notice_is_visible_only_where_it_must_be` red — while
+leaving the new test green. So the reshaping extends D1's guard rather than routing
+around it.
+
+One incidental simplification: the walk's `while (cursor !== "")` became
+`while (true)`. The loop condition was never the terminating one — `parentNamed`
+guarantees a non-empty cursor, and termination comes from the visited set over a
+finite `itemsById`, exactly as D2 says. Keeping the string test would have implied a
+fourth thing `cursor` could be.
 
 ## What the merge took from each side
 

@@ -121,17 +121,38 @@ ScreenFrame {
         return typeof item.id === "string" && item.id !== "" ? item.id : ""
     }
 
-    // An item's reported parent, or "" where it reports none.
+    // ---- the three things an item's `parent` field can be ------------------
     //
     // **`parent` is OMITTED on the root** rather than sent as null (`wire.rs`),
-    // so "reports no parent" and "reports a parent we cannot find" are different
+    // so "reports no parent" and "reports a parent we cannot use" are different
     // facts here, and the whole of `resolveDepth` depends on keeping them apart.
+    //
+    // They were kept apart by CONVENTION before — both answered `""`, and
+    // `resolveDepth` read that `""` as "this is the root". Anything that was not
+    // a non-empty string therefore rendered at the root's own depth with no
+    // notice: `parent: null`, a number, an object. That is the placement
+    // `thread.rs` refuses, handed back at the last step, and mutating the `-1`
+    // guards below does not reveal it because this route never reaches them.
+    //
+    // The fix is a shape rather than a fourth guard. `parentOf` now answers with
+    // a KIND, and there is no longer a value the two cases share, so a caller
+    // cannot read one as the other by omission — it has to name which kind it
+    // means. See design.md D13.
+    readonly property string parentRoot: "root"           // no `parent` field
+    readonly property string parentNamed: "named"         // a usable op id
+    readonly property string parentUnusable: "unusable"   // present, not usable
+
+    // `{ kind, id }`. `id` is meaningful only when `kind === parentNamed`; it is
+    // "" for the other two so that a caller reaching for it anyway gets a value
+    // that resolves nothing rather than one that resolves something wrong.
     function parentOf(item) {
         if (item === null || item === undefined)
-            return ""
-        return typeof item.parent === "string" && item.parent !== ""
-            ? item.parent
-            : ""
+            return { kind: screen.parentUnusable, id: "" }
+        if (!("parent" in Object(item)) || item.parent === undefined)
+            return { kind: screen.parentRoot, id: "" }
+        if (typeof item.parent === "string" && item.parent !== "")
+            return { kind: screen.parentNamed, id: item.parent }
+        return { kind: screen.parentUnusable, id: "" }
     }
 
     // A map from op id to the item holding it, for the page in hand.
@@ -167,10 +188,18 @@ ScreenFrame {
     function resolveDepth(item) {
         var parent = screen.parentOf(item)
 
-        // No parent reported at all: this is the ROOT, which is not a
-        // missing-parent case. It is the outermost depth.
-        if (parent === "")
+        // NO `parent` FIELD AT ALL: this is the ROOT, which is not a
+        // missing-parent case. It is the outermost depth. Only this kind takes
+        // this branch — a present-but-unusable `parent` falls through to -1
+        // below, which is the whole point of the kinds.
+        if (parent.kind === screen.parentRoot)
             return 0
+
+        // Present but not a usable op id. The item claims to answer something,
+        // and the claim names nothing we can follow, so no depth can be
+        // established. Same answer as a parent that is off the page.
+        if (parent.kind !== screen.parentNamed)
+            return -1
 
         var visited = ({})
         var id = screen.itemId(item)
@@ -178,9 +207,9 @@ ScreenFrame {
             visited[id] = true
 
         var depth = 0
-        var cursor = parent
+        var cursor = parent.id
 
-        while (cursor !== "") {
+        while (true) {
             if (visited[cursor] === true)
                 return -1               // a cycle: no depth can be established
 
@@ -192,13 +221,13 @@ ScreenFrame {
             depth += 1
 
             var nextParent = screen.parentOf(next)
-            if (nextParent === "")
+            if (nextParent.kind === screen.parentRoot)
                 return depth            // reached the root: the chain completes
+            if (nextParent.kind !== screen.parentNamed)
+                return -1               // the chain breaks on an unusable claim
 
-            cursor = nextParent
+            cursor = nextParent.id
         }
-
-        return -1
     }
 
     // The indent in pixels for a computed depth. An unresolvable item (-1)
