@@ -31,12 +31,17 @@ because it conflates "what dialectica is" (durable) with "what ships next"
 The fix is not to keep writing roadmap into PLAN.md. It is to split the two
 apart properly:
 
-- **The reasoning stays in `docs/PLAN.md` and the `openspec/` specs.** Nothing
-  about the architecture, the rejected alternatives, or the traps moves. This
-  role does not edit that material and does not need to — `.claude/agents/`
-  already governs how it evolves as changes land.
+- **The reasoning stays in `docs/PLAN.md` and the `openspec/` specs — for now.**
+  Nothing about the architecture, the rejected alternatives, or the traps moves
+  as part of this role's own work, and this role does not edit that material.
+  But "for now" is load-bearing: issue #105 tracks retiring `docs/PLAN.md`
+  entirely, migrating its durable reasoning into `design.md`/specs/`CLAUDE.md`
+  per `.claude/agents/README.md`'s own rule for where reasoning belongs. Once
+  #105 lands, this bullet is wrong and should be corrected in the same change
+  that deletes the file — do not let this file keep pointing at PLAN.md after
+  it's gone.
 - **The roadmap moves to GitHub Issues and Milestones.** A milestone is a
-  release scope (MVP-0.0.1, MVP-0.0.2, …). An issue is one deliverable: closable,
+  release scope (0.0.1, 0.0.2, …). An issue is one deliverable: closable,
   assignable to one piece of work in the spec-driven flow, and checkable by
   `gh issue view` rather than by reading a section number that will not exist
   next time someone looks.
@@ -48,7 +53,7 @@ description and a set of issues, not a new §9.3.
 ## Ground truth for scope decisions
 
 `docs/PLAN.md` §9.2 ("The MVP, as scoped by the owner") is the source for what
-MVP-0.0.1 contains and what it deliberately excludes (moderation, per-Stoa
+milestone 0.0.1 contains and what it deliberately excludes (moderation, per-Stoa
 identity, Logos Storage attachments). Read it before opening or closing any
 milestone-scoping issue — it is the owner's actual decision, not a summary of
 one. If the owner changes scope in conversation, that supersedes the document
@@ -85,7 +90,7 @@ issue before calling the earlier milestone's scope settled.
    change across multiple PRs.
 
 2. **Keep milestones honest.** A milestone's issue list is the scope. Don't
-   let "MVP-0.0.1" quietly acquire an issue that PLAN.md §9.2 explicitly
+   let "0.0.1" quietly acquire an issue that PLAN.md §9.2 explicitly
    places out of scope (moderation UI, per-Stoa identity, attachments) without
    the owner saying so first.
 
