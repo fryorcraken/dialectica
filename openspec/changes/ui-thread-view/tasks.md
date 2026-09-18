@@ -4,7 +4,7 @@
 
 - [x] spec — `spec-writer`
 - [x] design + code — `dev-writer`
-- [ ] tests — `tester`
+- [x] tests — `tester`
 - [x] review: correctness — `code-reviewer`
 - [x] review: security — `code-reviewer`
 - [x] review: readability — `code-reviewer`
@@ -108,3 +108,48 @@ unticked one.
 - [x] **PLAN.md reasoning migrated** — §9.1's moderation-shape divergence to
       `design.md` D7 and its bidi paragraph to D8, each left as a pointer rather
       than a second copy.
+- [x] **`tester` pass.** Kept all four dev-written spec files and the five
+      shared-helper tests in `tst_core_call.qml` unchanged — each already
+      asserts against a hardcoded or independently-derived expectation, and
+      none was found to pass for the wrong reason. Added seven tests, each
+      proved able to fail by mutation and restored afterward (`git diff --stat`
+      showed test files only before commit):
+      - `test_an_item_reporting_a_non_string_parent_is_not_rendered_as_the_root`
+        (`tst_thread_nesting.qml`) — a SECOND, structurally distinct route to
+        the security defect D1 protects against, found while re-proving D1:
+        `parentOf` collapses any non-string `parent` (not only an absent one)
+        to `""`, which `resolveDepth` treats as "this item IS the root"
+        without ever reaching the `-1` guards. **Currently failing against the
+        live code** — see `findings/tester.md`, addressed to `dev-writer`,
+        which blocks the findings-all-ticked gate until resolved.
+      - `test_the_unresolved_parent_notice_is_visible_only_where_it_must_be`
+        (`tst_thread_nesting.qml`) — pins the RENDERED notice's `visible`
+        state via `findChild`, not just `resolveDepth`'s return value; proved
+        it can fail independently of the existing security tests by setting
+        the binding to `visible: false` (a binding-vs-logic drift the
+        existing tests could not see).
+      - `test_a_revised_item_is_marked`, `test_an_unrevised_item_carries_no_marker`,
+        `test_the_marker_follows_isRevised_not_the_identifiers`
+        (`tst_thread_states.qml`) — the spec's "marker follows the reported
+        field and not the identifiers" scenario had no render-level pin at
+        all. Proved by mutating `edited` to `id !== currentVersion`: the
+        discriminating third test (identifiers disagree, `isRevised: false`)
+        catches it; the other two do not, confirming it is the one doing the
+        work.
+      - `test_the_withheld_notice_is_visible_only_for_the_withheld_item`,
+        `test_the_withheld_notice_is_not_visible_for_a_cleared_body`
+        (`tst_thread_states.qml`) — the existing withheld/cleared tests only
+        asserted on `screen.items[0].body` (model data), never on what
+        renders. Proved by mutating the notice's `visible` condition to
+        `!body || !body.text` (the exact `body.text || ""` collapse the spec
+        names) — the existing model-level tests stayed green; only the new
+        rendering test caught it.
+      - Also proved `test_both_screens_normalise_a_probe_the_same_way`
+        (`tst_core_call.qml`) can fail via a `Core`-only mutation (made
+        `capabilityFrom` non-deterministic across calls), closing the gap its
+        author flagged as unwitnessed. Reverted; only this test in the
+        22-test file caught it.
+      - Re-confirmed the security property's two known mutations
+        (`-1` → `depth + 1`) independently: 12 passed / 2 failed, same two
+        named tests, cycle tests unaffected — matching the code-reviewer's
+        prior measurement exactly.

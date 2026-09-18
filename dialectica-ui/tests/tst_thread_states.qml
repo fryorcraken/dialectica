@@ -239,6 +239,42 @@ TestCase {
         screen.destroy()
     }
 
+    // The scenario above pins the MODEL-level distinction; this pins that it
+    // actually reaches the screen. `findChild` walks the whole descendant
+    // tree, including instantiated Repeater delegates, so this checks the
+    // notice's `visible` state directly rather than inferring it from the
+    // fixture.
+    function test_the_withheld_notice_is_visible_only_for_the_withheld_item() {
+        var withheld = rootItem()
+        delete withheld.body
+
+        var screen = makeScreen({
+            "get_capabilities": '{"canPost":false,"reason":"no keystore"}',
+            "read_thread": threadOf([withheld])
+        })
+
+        var notice = findChild(screen, "withheldNotice")
+        verify(notice !== null, "the notice element is reachable in the tree")
+        verify(notice.visible, "a withheld body renders the withheld notice")
+        screen.destroy()
+    }
+
+    function test_the_withheld_notice_is_not_visible_for_a_cleared_body() {
+        var cleared = rootItem()
+        cleared.body = { text: "", removed: 0, marked: 0 }
+
+        var screen = makeScreen({
+            "get_capabilities": '{"canPost":false,"reason":"no keystore"}',
+            "read_thread": threadOf([cleared])
+        })
+
+        var notice = findChild(screen, "withheldNotice")
+        verify(notice !== null)
+        verify(!notice.visible,
+               "an empty-but-present body must not render as withheld")
+        screen.destroy()
+    }
+
     // ---- moderation is three-valued on a thread item ---------------------
     //
     // A thread item carries NO `isHidden` field — the feed does. Copying a feed
@@ -270,6 +306,86 @@ TestCase {
             compare(screen.readState, "ok")
             screen.destroy()
         }
+    }
+
+    // ---- the revised marker: from the reported field, never the identifiers ---
+    //
+    // `thread-view`'s "The marker follows the reported field and not the
+    // identifiers" requires the marker to come from `isRevised` alone, and
+    // forbids inferring it by comparing `id` with `currentVersion`. Nothing
+    // in this file exercised the RENDERED marker before this — only the raw
+    // `isRevised` field on the fixture — so a regression that wired `edited`
+    // from `id !== currentVersion` instead of `isRevised` would have shipped
+    // with every test in this suite still green.
+    //
+    // Reached via the Repeater's delegate tree rather than an objectName,
+    // since PostHeader carries none: the same "search children for a type"
+    // idiom `tst_thread_reply.qml` already uses to find a MouseArea.
+    function postHeaderIn(delegateItem) {
+        for (var i = 0; i < delegateItem.children.length; i++) {
+            var child = delegateItem.children[i]
+            if (child.toString().indexOf("PostHeader") !== -1)
+                return child
+            var nested = postHeaderIn(child)
+            if (nested !== null)
+                return nested
+        }
+        return null
+    }
+
+    function firstPostHeader(screen) {
+        var repeater = findChild(screen, "threadItems")
+        verify(repeater !== null)
+        var delegateItem = repeater.itemAt(0)
+        verify(delegateItem !== null)
+        var header = postHeaderIn(delegateItem)
+        verify(header !== null, "the delegate renders a PostHeader")
+        return header
+    }
+
+    function test_a_revised_item_is_marked() {
+        var revised = rootItem()
+        revised.isRevised = true
+
+        var screen = makeScreen({
+            "get_capabilities": '{"canPost":false,"reason":"no keystore"}',
+            "read_thread": threadOf([revised])
+        })
+
+        compare(firstPostHeader(screen).edited, true,
+                "an item reporting isRevised is rendered with the edited marker")
+        screen.destroy()
+    }
+
+    function test_an_unrevised_item_carries_no_marker() {
+        var screen = makeScreen({
+            "get_capabilities": '{"canPost":false,"reason":"no keystore"}',
+            "read_thread": threadOf([rootItem()])   // isRevised: false
+        })
+
+        compare(firstPostHeader(screen).edited, false,
+                "an item reporting no revision renders no edited marker")
+        screen.destroy()
+    }
+
+    // THE discriminating case: identifiers disagree, but `isRevised` says no.
+    // An implementation that inferred the marker from `id !== currentVersion`
+    // would mark this item; the spec requires it not to.
+    function test_the_marker_follows_isRevised_not_the_identifiers() {
+        var item = rootItem()
+        item.id = "root1"
+        item.currentVersion = "rev9"     // identifiers DISAGREE
+        item.isRevised = false           // but the report says NOT revised
+
+        var screen = makeScreen({
+            "get_capabilities": '{"canPost":false,"reason":"no keystore"}',
+            "read_thread": threadOf([item])
+        })
+
+        compare(firstPostHeader(screen).edited, false,
+                "differing identifiers must not be read as a revision when "
+                + "isRevised itself says otherwise")
+        screen.destroy()
     }
 
     // ---- the read request ------------------------------------------------

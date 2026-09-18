@@ -157,6 +157,51 @@ TestCase {
         screen.destroy()
     }
 
+    // The scenario above pins `resolveDepth`'s return value; this pins that
+    // the value actually reaches the screen as the required notice, and that
+    // an ordinary resolvable reply does NOT carry it. `resolveDepth` could be
+    // correct while the binding that reads it drifted (e.g. inverted, or
+    // wired to the wrong property) with nothing here noticing — this is what
+    // notices.
+    function test_the_unresolved_parent_notice_is_visible_only_where_it_must_be() {
+        var screen = makeScreen({
+            "get_capabilities": '{"canPost":false,"reason":"no keystore"}',
+            "read_thread": threadOf([rootItem("root1"),
+                                     replyItem("orphan", "ghost", "1"),
+                                     replyItem("ordinary", "root1", "2")])
+        })
+
+        var repeater = findChild(screen, "threadItems")
+        verify(repeater !== null)
+
+        var orphanDelegate = repeater.itemAt(1)
+        var ordinaryDelegate = repeater.itemAt(2)
+        verify(orphanDelegate !== null && ordinaryDelegate !== null)
+
+        function noticeIn(delegateItem) {
+            for (var i = 0; i < delegateItem.children.length; i++) {
+                var child = delegateItem.children[i]
+                if (child.objectName === "unresolvedParentNotice")
+                    return child
+                var nested = noticeIn(child)
+                if (nested !== null)
+                    return nested
+            }
+            return null
+        }
+
+        var orphanNotice = noticeIn(orphanDelegate)
+        var ordinaryNotice = noticeIn(ordinaryDelegate)
+        verify(orphanNotice !== null && ordinaryNotice !== null,
+               "the notice element is present in both delegates, inert or not")
+
+        verify(orphanNotice.visible,
+               "an item whose parent cannot be resolved renders the notice")
+        verify(!ordinaryNotice.visible,
+               "an item whose parent resolves normally renders no such notice")
+        screen.destroy()
+    }
+
     function test_the_other_items_still_render_when_one_parent_is_unresolvable() {
         var screen = makeScreen({
             "get_capabilities": '{"canPost":false,"reason":"no keystore"}',
@@ -304,6 +349,37 @@ TestCase {
                 "an item with no id yields no key rather than the string 'undefined'")
         compare(screen.resolveDepth(screen.items[1]), -1)
         compare(screen.resolveDepth(screen.items[2]), -1)
+        screen.destroy()
+    }
+
+    // ---- a malformed parent is a second route to the same bad state --------
+    //
+    // `resolveDepth` reaches the security property's `-1` branches only when
+    // `parentOf(item)` returns a non-empty string. `parentOf` collapses ANY
+    // non-string `parent` — not just an absent one — to `""`, which is the
+    // same value a genuine root reports. That routes a non-root item straight
+    // into `resolveDepth`'s `parent === ""` branch, which returns depth 0
+    // UNCONDITIONALLY, bypassing the visited-set walk and its `-1` guard
+    // entirely. This is a structurally different path from the "parent not on
+    // this page" and "parent cycle" routes tst_thread_nesting.qml already
+    // covers — mutating either of those branches does not touch this one.
+    //
+    // `wire.rs` never sends a malformed `parent` today (it is either omitted or
+    // a hex op id), so this is defence at the view's boundary rather than a
+    // condition the current core is known to produce — the same posture this
+    // file already takes toward an item missing `id`.
+    function test_an_item_reporting_a_non_string_parent_is_not_rendered_as_the_root() {
+        var malformed = replyItem("m", "ghost", "1")
+        malformed.parent = null    // present, but not the hex string the wire sends
+
+        var screen = makeScreen({
+            "get_capabilities": '{"canPost":false,"reason":"no keystore"}',
+            "read_thread": threadOf([rootItem("root1"), malformed])
+        })
+
+        compare(screen.resolveDepth(screen.items[1]), -1,
+                "a parent field that is present but not a usable string must not "
+                + "collapse to the root's own 'no parent' case")
         screen.destroy()
     }
 }
