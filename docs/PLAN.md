@@ -2784,11 +2784,22 @@ no moderating, no joining. This is a usable forum for a reader, and it is the
 stage that proves the projection and both resolvers reach a screen.
 
 **Stage A′ — acquire an identity.** ~~Unplaced: the staging below never said
-where onboarding goes.~~ **Built — see the `view-identity-onboarding` spec**,
-which carries the slate states, what the screen must not claim, and that an
-identity gates participation rather than launch or browsing. It sits beside
-Stage A rather than before it, and the reason is the dependency direction: a
-reader needs no key, so A does not need it, while B cannot begin without it.
+where onboarding goes.~~ **The screen is built — see the
+`view-identity-onboarding` spec**, which carries the slate states, what the
+screen must not claim, and that an identity gates participation rather than
+launch or browsing. It sits beside Stage A rather than before it, and the reason
+is the dependency direction: a reader needs no key, so A does not need it, while
+B cannot begin without it.
+
+~~**Built.**~~ **The screen was built and nothing reached it**, which is not the
+same thing and read identically here for as long as this line said "built". The
+type was registered, its component suite passed over it, and no sequence of user
+actions opened it — so a fresh install could not obtain a key at all. Count the
+suite with `grep -c "function test_"` against
+`dialectica-ui/tests/tst_onboarding_states.qml` rather than trusting a number
+here. The
+**route** is the `view-navigation` capability; the stage is complete when a
+registered screen with no route is a reported failure rather than a green suite.
 
 **Stage B — compose.** A compose affordance gated on `getCapabilities()`, a
 reply affordance in a thread, and an edit affordance on the reader's own posts.
