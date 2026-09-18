@@ -11,7 +11,7 @@
       executable claim (that `ci.yml` still parses and the surviving gates still
       run) is verified below rather than by a new test; adding a test file under
       `.claude/` is the precise thing this change exists to stop doing.
-- [ ] review: correctness — `code-reviewer`
+- [x] review: correctness — `code-reviewer`
 - [ ] ~~review: security — `code-reviewer`~~ — no untrusted input, no logic, no
       network or storage surface touched.
 - [x] review: readability — `code-reviewer`
