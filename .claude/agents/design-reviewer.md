@@ -17,6 +17,26 @@ complexity, and legitimately skips it otherwise. A missing `design.md` is a
 finding only when the change met one of those triggers; then report *that*,
 rather than reviewing against a file that does not exist.
 
+## What Bash costs here
+
+**Read [`BASH-COSTS.md`](BASH-COSTS.md) before your first shell command.** It is
+the canonical list of shapes that cost the user a manual approval click, each
+with the replacement to reach for.
+
+The short version: **one plain command per call.** No `|`, `&&`, `;`, `$(…)`,
+loops, `>` redirects, globs, heredocs, `env VAR=value` prefixes or
+`cd <dir> && <cmd>` — and no reads outside the working directories, which
+includes `/tmp` and the session scratchpad. Use the `Grep`, `Glob`, `Read`,
+`Edit` and `Write` tools rather than their shell equivalents, relative paths
+inside your own worktree, and `./tmp/` **in the worktree** for scratch. **If a
+task cannot be done within those shapes, stop and report it** rather than
+improvising around the block.
+
+Yours most often: you read PLAN.md from `origin/main` and compare it against the
+branch. That is `git show origin/main:docs/PLAN.md` or
+`git diff origin/main -- docs/PLAN.md` as one plain command — never materialising
+a copy with a redirect first.
+
 ## 1. Did the code take the decisions that were recorded?
 
 For each entry under Decisions, find where the code implements it and confirm it
