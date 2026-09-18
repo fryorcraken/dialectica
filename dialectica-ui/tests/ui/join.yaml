@@ -80,7 +80,22 @@ app: dialectica_ui
 #
 # — after 120s on step 1, with the remaining 18 steps reported inconclusive.
 # Radicle's browse.yaml declares `with: [radicle]` for this same reason.
-with: [dialectica]
+#
+# `delivery_module` IS THE SECOND HALF, and it is easy to miss because nothing
+# in the view mentions it. `dialectica/metadata.json` declares
+# `"dependencies": ["delivery_module"]`, and the core does not load without it
+# — ci.yml's "Not yet a job" section records the same trap from the install
+# side: install "never reads the dependencies array in metadata.json, so
+# without it delivery_module is absent at runtime and the core fails to load —
+# while the build stays green". sitometres resolves the UI's declared
+# dependency (`dialectica`) and stops there; it does not walk the chain a
+# second hop. `scaffold.toml` builds all three into one APP_DIR, so both are
+# present to be staged — they just have to be named.
+#
+# The symptom is identical to the missing-`dialectica` case and to a variant
+# mismatch: the app never opens and step 1 times out. Three different causes,
+# one presentation.
+with: [dialectica, delivery_module]
 timeout: 30s
 
 steps:

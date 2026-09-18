@@ -214,6 +214,26 @@ Two things worth keeping from that run beyond the fix:
   18 downstream steps came back `inconclusive` rather than `fail` — which is
   the distinction `--strict` exists to stop being read as a pass.
 
+**`delivery_module` is the second half, and naming only `dialectica` was still
+not enough.** `dialectica/metadata.json` declares
+`"dependencies": ["delivery_module"]`, and the core does not load without it.
+sitometres resolves the *UI's* declared dependency and stops there — it does not
+walk the chain a second hop — so the run staged two of the three modules the
+application needs.
+
+This repo already knew the failure from the other side. `ci.yml`'s "Not yet a
+job" section records that `lgs basecamp install` "never reads the
+`dependencies` array in metadata.json, so without it `delivery_module` is
+absent at runtime and the core fails to load — while the build stays green".
+The same gap, reached through the harness instead of the installer.
+
+**Three distinct causes, one presentation.** A missing `dialectica`, a missing
+`delivery_module`, and the variant mismatch of D1 all present as *the app never
+opens and step 1 times out after 120s*. That is the single most useful thing to
+carry out of this piece: the timeout does not identify the cause, so read the
+harness's own message and then Basecamp's log (D7a), rather than reasoning from
+the symptom.
+
 The general lesson, and the reason this is not quietly rewritten: **a
 divergence from a working reference deserves more evidence than a plausible
 argument.** Every other divergence below (D8, D9, D10) rests on a measured
