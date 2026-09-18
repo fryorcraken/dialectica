@@ -43,7 +43,12 @@ repo can see this piece — see the note under "What no gate can see" below.
       `grep -c "teaches users the app is broken" docs/PLAN.md` returns 1, in the
       strike-and-point passage that names what was resolved
 - [x] Every citation re-read against this tree rather than relayed from the
-      proposal (see the report's verification list)
+      proposal. **No list of what was checked is kept here**, because the
+      citations themselves are the checkable artefact: each names a file and a
+      line, so a reader re-runs the check by reading them. A verification list
+      would be a second copy going stale against the citations it describes —
+      and the earlier version of this line pointed at "the report", which
+      returns to the runner and is never persisted anywhere a reader can open.
 
 ### What no gate can see
 

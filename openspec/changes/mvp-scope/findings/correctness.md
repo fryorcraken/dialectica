@@ -18,7 +18,7 @@ citation is correct). Cross-checked the 13-method trait table against
 
 ## Findings
 
-- [ ] **`dev-writer`** — `docs/PLAN.md:3587-3590` — case-2 list item 3 cites
+- [x] **`dev-writer`** — `docs/PLAN.md:3587-3590` — case-2 list item 3 cites
       `DStoaListScreen.qml` as establishing "no post count on a Stoa row, **and
       no unread count**", but the cited passage only supports the post-count
       half.
@@ -51,6 +51,31 @@ citation is correct). Cross-checked the 13-method trait table against
       establishes the absence" so the set is checkable by reading. A reader
       checking item 3's citation would not find what the bullet claims it
       finds.
+
+      **Fixed.** Item 3 is now "No post count on a Stoa row" and claims only
+      what `DStoaListScreen.qml:390-399` establishes — the "and no unread
+      count" clause and the word "either" are gone, so the citation and the
+      claim match. The same edit landed in `proposal.md`'s "Where core cannot
+      serve" section, which carried the identical conflation.
+
+      The diagnosis was right about more than the citation, and the fix takes
+      that further: unread was not merely miscited on this list, it does not
+      belong on the list at all. Every other entry names a call core does not
+      have, so core growing that call is what removes the entry; unread is
+      excluded by ruling 2, a decision, which no core change works off. Item 3
+      now carries a paragraph saying exactly that and pointing at ruling 2, so
+      a reader using the list as a "what's left" checklist cannot read unread
+      as a gap waiting to be closed. The rest of the reviewer's account is
+      accepted as measured — re-checked here: `grep -n -i "unread"
+      dialectica-ui/src/qml/DStoaListScreen.qml` returns lines 18 and 21 only,
+      both the `readState` load-state enum, nothing near 390-399.
+
+      Ruling 2 itself is untouched — it was never what this finding
+      challenged, and it remains cited to §9.1 question 8.
+
+      **No test.** This change alters no behaviour and no gate in this repo
+      reads prose; the check is the citation itself, which a reader re-runs by
+      opening the file.
 
 ## Verified clean
 

@@ -9,7 +9,7 @@ clarity).
 
 ## Findings
 
-- [ ] **`dev-writer`** — `openspec/changes/mvp-scope/proposal.md:91-108` — a
+- [x] **`dev-writer`** — `openspec/changes/mvp-scope/proposal.md:91-108` — a
       13-row, line-number-pinned table of `Dialectica` trait methods sits one
       sentence after an instruction to read the trait "**rather than from any
       list**," and reproduces exactly the shape `design.md` (Decision 3,
@@ -32,7 +32,24 @@ clarity).
       trait changes, in a file this project's own convention treats as
       permanently archived once merged.
 
-- [ ] **`dev-writer`** — `docs/PLAN.md:1692-1694` — the new sentence "it is
+      **Fixed.** The table now carries a caveat immediately above it saying it
+      is a snapshot, naming the trap by the same name the surrounding prose
+      uses, and directing the reader to the trait for the current surface. It
+      also states why the table is in `proposal.md` and deliberately not in
+      `docs/PLAN.md` — it exists to show case 1 already has a substantial
+      subject, which is the argument that section is making, and PLAN.md
+      states the rule against such a list and keeps none.
+
+      **Kept rather than deleted, which is a judgement call worth naming.**
+      Deleting it would have removed the contradiction outright. The table is
+      load-bearing for the section's argument, and `proposal.md` archives
+      rather than staying live, so the staleness has a fixed endpoint: nobody
+      is expected to maintain it, and the caveat tells a reader who finds it
+      later not to trust it. The architecture reviewer filed the same table
+      independently and asked for "at minimum... the same one-line caveat
+      PLAN.md carries"; this is that, and it is recorded in both files.
+
+- [x] **`dev-writer`** — `docs/PLAN.md:1692-1694` — the new sentence "it is
       restated because §9.2's MVP list is where a screen author looks **and it
       did not say so**" is falsified by this same diff: §9.2 (`docs/PLAN.md:3497`)
       is edited in this very change to add "moderation (§6) — **including any
@@ -48,7 +65,20 @@ clarity).
       the fact it justifies, which is avoidable by past-tensing it ("did not
       say so, before this change").
 
-- [ ] **`dev-writer`** — `docs/PLAN.md:3587-3593` (mirrored in
+      **Fixed**, by past-tensing as suggested, plus one clause the suggestion
+      did not include. §6 now reads: "§9.2's MVP list is where a screen author
+      looks and, before the change that added this note, it did not say so.
+      §9.2 now says it too; both sites are kept because each is reached from a
+      different direction."
+
+      The added second sentence is the part worth flagging: past-tensing alone
+      fixes the false clause but leaves a reader who checks §9.2 wondering
+      whether the duplication is an oversight. Saying both sites are
+      deliberate closes that, and it is Decision 1's access-pattern argument
+      (a reader arrives at one section and never scrolls to the other) applied
+      at the one site where the two notes could read as redundant.
+
+- [x] **`dev-writer`** — `docs/PLAN.md:3587-3593` (mirrored in
       `openspec/changes/mvp-scope/proposal.md:159-162`) — case-2 list entry 3,
       "No post count on a Stoa row, and no unread count," folds two different
       categories into one bullet. A Stoa post count is a genuine case-2 item
@@ -75,7 +105,25 @@ clarity).
       one list entry, present identically in both `proposal.md` and
       `docs/PLAN.md`.
 
-- [ ] **`dev-writer`** — `openspec/changes/mvp-scope/tasks.md:46` — "Every
+      **Fixed**, and this reading is what shaped the fix rather than merely
+      being satisfied by it. The correctness reviewer reached the same entry
+      from the citation side (the cited passage supports only the post-count
+      half); this finding names why the citation could not have supported the
+      other half — unread is a third category, excluded by decision rather
+      than by a missing call, so no citation to a core file could establish
+      it.
+
+      Entry 3 is now "No post count on a Stoa row" alone, in both
+      `docs/PLAN.md` and `proposal.md`. Rather than dropping unread silently —
+      which is scenario (b), losing the pointer that it was ever considered —
+      the entry carries a following paragraph stating that unread is not on
+      this list, that it belongs to ruling 2, and the operational
+      consequence: every entry here is removed by core growing a call, and
+      unread is not, so reopening it is a fresh scope ruling. That is aimed
+      directly at scenario (a), the reader who starts wiring an `unread` field
+      into `listThreads`.
+
+- [x] **`dev-writer`** — `openspec/changes/mvp-scope/tasks.md:46` — "Every
       citation re-read against this tree rather than relayed from the
       proposal (see the report's verification list)" points at "the report,"
       which per `.claude/agents/README.md` ("What does not reach you is its
@@ -92,6 +140,21 @@ clarity).
       review (`lib.rs:600`, `feed.rs`, spec line numbers all verified
       accurate), so nothing false is asserted; the pointer itself is simply
       dead on arrival.
+
+      **Fixed by removing the pointer, not by writing the list it pointed
+      at.** The line now says no verification list is kept, and why: the
+      citations are themselves the checkable artefact — each names a file and
+      a line, so a reader re-runs the check by reading them, where a separate
+      list would be a second copy drifting against the citations it describes.
+      The dead "see the report" reference is named in the replacement text as
+      what it was, with the reason it could never have resolved.
+
+      **Writing the list was considered and rejected.** It would have made
+      the pointer followable and is the more obvious fix. It fails on this
+      repo's own rule about second copies, and on the same trap as finding 1
+      above: a hand-written list of thirteen-plus citations goes stale against
+      the tree with nothing able to notice, which is a worse artefact than no
+      list at all.
 
 ## Areas checked and found clean
 

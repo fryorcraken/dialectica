@@ -91,6 +91,14 @@ acceptable shortcut where the call exists; an unwired control is a defect rather
 than a phase. The methods that exist today, read from the `Dialectica` trait in
 `dialectica/rust-lib/src/lib.rs` rather than from any list:
 
+**This table is a snapshot taken while writing this proposal, and it is the
+`hand-maintained sweep lists go stale silently` trap in miniature — read the
+trait for the current surface.** It is reproduced here only to show that case 1
+already has a substantial subject, which is the argument this section makes. It
+is deliberately **not** carried into `docs/PLAN.md`, which states the rule
+against such a list and keeps none; `proposal.md` archives rather than being
+maintained, so this copy stops being read once the change lands.
+
 | Method | Line |
 |---|---|
 | `get_capabilities` | `lib.rs:105` |
@@ -156,10 +164,12 @@ computes exactly one ordering and an accepted-but-degraded parameter would be a
 method telling its caller a falsehood."* **So "by relevance" is not
 implementable**, which is ruling 1 seen from the contract side.
 
-**No post count and no unread count.** `DStoaListScreen.qml:390-399` records that
-nothing computes it: *"no call answers how many posts this peer holds for a Stoa,
-and the thread listing reports whether a further page exists rather than a
-total."*
+**No post count on a Stoa row.** `DStoaListScreen.qml:390-399` records that
+nothing computes one: *"no call answers how many posts this peer holds for a
+Stoa, and the thread listing reports whether a further page exists rather than a
+total."* **Unread is deliberately not folded in here** — it is excluded by
+ruling 2, which is a decision rather than a missing call, so it is not an entry
+a future core change works off.
 
 **History is kept, but no contract method reads earlier versions.**
 `revision.rs:11-13` states the three properties the module implements, the third
@@ -206,5 +216,6 @@ stale silently` trap), and its second case conditions on a document outside
 - **`FeedScreen.qml:344-350` is left alone.** Its note argues that an inert
   ordering row *"reads as a working control"* and is *"worse than absent"*. That
   is a local observation about one row, it is **not** carried into PLAN.md as a
-  repo rule, and it is not cited as authority for one. A separate piece deals
-  with the comment itself.
+  repo rule, and it is not cited as authority for one. The `unauthorised-rules`
+  piece owns the comment itself; `design.md` Decision 9 records why this change
+  leaves it alone rather than annotating it in place.

@@ -66,10 +66,10 @@ because §7.2 told it to.
 
 Ruling 2 is the one ruling that changes an entry's **kind** rather than its
 content: an open question invites the next agent to answer it, and this one is
-answered for the MVP. So the entry is rewritten as a decided exclusion, keeping
-its reasoning verbatim — that unread needs peer-local, never-published state
-which nothing in this design has yet required, and that inventing the first
-instance of that as a feed field is how it gets designed badly.
+answered for the MVP. So the entry is rewritten as a decided exclusion, **keeping
+its reasoning verbatim and in place** — the peer-local-state argument, which is
+not restated here; `docs/PLAN.md` §9.1 question 8 is its only copy, and
+Decision 6c records why it was not migrated.
 
 **Rejected: strike the bullet and add a ruling below it.** PLAN.md's strike
 convention exists for a claim that became *false*. This one did not become
@@ -151,7 +151,8 @@ the specs' stable identifiers, and `openspec` renames them visibly.
 
 Per `.claude/agents/README.md` — reasoning attached to a landed decision moves
 to `design.md` and is **removed** from PLAN.md, because two copies drift and the
-wrong one gets read. Three passages moved here. Each is now recorded once.
+wrong one gets read. **Two passages moved here** (6a and 6b), each now recorded
+once; 6c records the third candidate and why it stayed in PLAN.md instead.
 
 #### 6a. Why item 5 contradicted a §9.1 decision — and how the contradiction ended
 
@@ -204,20 +205,113 @@ placeholder *value* usually does. Where the placeholder would be a number, it is
 almost always forbidden — which is why both narrowing requirements in Decision 5
 are about numbers.
 
-#### 6c. Why unread was left undecided
+#### 6c. Nothing migrated for unread — and why that is not an omission
 
-Migrated from §9.1's question 8 rationale only insofar as it explains the
-ruling; the part describing what is not built stays in PLAN.md per Decision 2.
+**Two passages moved here, not three.** Decision 2 keeps §9.1 question 8's
+reasoning in PLAN.md, because it is reasoning about something still not built.
+An earlier draft of this file also restated that reasoning here, under a heading
+claiming to migrate "only insofar as it explains the ruling" — which did not
+divide anything, because for unread the ruling-reasoning and the not-built
+reasoning are the same sentences. The result was the same argument in two files,
+which is the drift Decision 6 exists to prevent; it is removed rather than
+reworded, and `docs/PLAN.md` §9.1 question 8 is the single copy.
 
-The reason unread was never merely a missing field: **it needs per-user local
-state that is not an op and never crosses the wire**, and nothing in this design
-has yet required peer-local, never-published state that is not a projection of
-ops. Inventing the first instance of that category as a feed field is how the
-category gets designed badly — the field would fix the shape of everything that
-later needed the same thing.
+This heading is kept rather than deleted so the asymmetry is visible: a reader
+comparing Decision 2 against 6a/6b would otherwise wonder whether the third
+migration was forgotten. It was declined, and Decision 2 is the argument.
 
-That argument is why the exclusion is comfortable rather than regrettable: the
-MVP does not pay for a state category it has no other use for yet.
+### 7. Case 1's `MUST` stays in PLAN.md, and stays a `MUST`
+
+Ruling 4's case 1 — *"core serves it: the control MUST be wired"* — is PLAN.md's
+first **first-person** RFC-2119 keyword. Its only prior `MUST` (line 509) quotes
+an external protocol document's requirement; this one asserts an obligation of
+our own, in a document whose stated job is "what exists, and what is not built
+yet", and nothing in `openspec/specs/` carries it.
+
+**Chosen: keep the wording, keep it here.** The phrasing is the owner's ruling
+quoted — *"if core exists, then the button must be wired"*, given as a scope
+ruling for the MVP phase. This change exists to record scope without altering
+it, so rewording the ruling into "should" would be the change editing its own
+subject.
+
+**Rejected: soften to "should be wired".** It removes the keyword-force
+objection and it removes the ruling's content with it. Case 1's whole point is
+that inertness is *not* an acceptable shortcut where the call exists; "should"
+is precisely the register that permits the shortcut.
+
+**Rejected: promote case 1 to a requirement in `openspec/specs/`.** Two
+arguments, and the second is the load-bearing one. The weaker: case 1 has no
+fixed enumerable subject — the set of wired-able controls widens with every
+trait method, which is this repo's `hand-maintained sweep lists go stale
+silently` trap, so a requirement naming them is stale on the next method. That
+is an argument about testability. The stronger: **a spec contracts what the
+system does; case 1 contracts what a phase may ship.** It is true of the MVP and
+expires with it, and staging has never been spec-level here. A requirement
+reading "during the MVP" is one nothing retires, and `openspec/specs/` would
+then carry a contract that outlives its own subject.
+
+**What breaks without this:** a reader who has internalised RFC-2119 from §4's
+SDS quotations reads line 3534 as contractual and finds no test behind it. That
+risk is real and mitigated only by placement — the sentence introducing the four
+rulings calls them "scope decisions... none is a design change", and the
+two-merged-requirements block below states that a scope note does not override a
+spec. Both sit within a screen of the MUST. Recorded because the next reader to
+notice the keyword will ask this question again, and the answer is a decision
+rather than an oversight.
+
+### 8. No CI gate on "worse than absent"-style phrasing
+
+Decision 4 declines to write a repo-wide rule about inert controls. A mechanism
+was proposed to *keep it declined*: a CI gate scanning prose for "worse than
+absent"-style phrasing, so that a later change generalising `FeedScreen.qml`'s
+local comment into a PLAN.md or spec rule would fail a check rather than pass
+review unnoticed.
+
+**Rejected as over-engineering for the MVP phase.** The failure it guards
+against is one sentence appearing in one document, with exactly one existing
+instance — a code comment that is correct where it sits. A phrase-matching gate
+over prose has the two properties this repo has already been bitten by: its
+corpus is hand-written English, so it measures the wording rather than the rule
+(the same objection Decision 3 makes to a `// CASE 2:` marker), and it produces
+false positives on every legitimate *citation* of the comment — of which this
+change's own `docs/PLAN.md` case-2 list contains one, so the gate would have
+failed on the change that introduced it.
+
+**Rejected alternative, for the same reason it is worth naming:** a narrower
+gate keyed to PLAN.md and `openspec/specs/` only, exempting citations. That is
+a smaller corpus but the exemption is the hard part — distinguishing "PLAN.md
+states this as a rule" from "PLAN.md quotes a file that states it locally" is
+the judgement the gate was supposed to replace.
+
+**What breaks without this:** nothing red, and that is the honest statement of
+the residual risk. Decision 4's argument is enforced by review and by
+`composer-view/spec.md:638-639` contradicting the generalisation — a spec
+reviewer noticing the conflict, not a gate. Recorded so the next agent tempted
+to build the gate reaches for it deliberately, with the false-positive problem
+already known rather than rediscovered.
+
+### 9. `FeedScreen.qml:344-350` is left untouched, and deferred rather than swept
+
+The comment Decision 4 spends the most space on is the one file this change does
+not edit. That is a choice, not an omission.
+
+**Chosen: leave it entirely alone**, and let a separate piece deal with it. The
+`unauthorised-rules` piece owns that comment and has done the work there, which
+is why this change touches no file under `dialectica-ui/`.
+
+**Rejected: annotate the comment in place** — a line pointing at ruling 4, so a
+reader hitting `FeedScreen.qml` sees the scope note rather than an unqualified
+local claim. It is the more helpful end state and it was still the wrong move
+here, for two reasons. It would put a `dialectica-ui/` edit into a change whose
+entire reviewable claim is *"`docs/PLAN.md` only, no behaviour"* — the property
+that lets a reviewer verify the piece by reading one diff, and the basis of
+`.openspec.yaml`'s `skip_specs: true` argument. And two changes editing the same
+comment for different reasons is the collision that produces a silent merge
+keeping both edits.
+
+**What breaks without this:** nothing, and the deferral is durable rather than
+lost — the comment is the other piece's subject, not a note left for whoever
+finds it next.
 
 ## Risks / Trade-offs
 
@@ -251,6 +345,13 @@ reverting the commit. No build artefact, no data format, no deployed behaviour.
 
 ## Open Questions
 
-None that can be deferred. Ruling 4's enforcement mechanism (Decision 3's
-grep-able marker) is deliberately not built rather than undecided, and the
-condition it would enforce is met today by the list.
+None that can be deferred. **Two mechanisms are deliberately not built rather
+than undecided**, each with its rejection recorded where the next person will
+look for it: Decision 3's grep-able `// CASE 2:` marker, whose condition is met
+today by the list, and Decision 8's CI gate on "worse than absent"-style
+phrasing, whose false-positive problem is recorded so it is not rediscovered.
+
+Decision 7 notes one thing that is genuinely open, though not blocking: whether
+case 1 should eventually become contract material rather than a PLAN.md scope
+rule. It is left to the owner, since it means re-deciding an owner ruling, and
+nothing in this change forecloses it.

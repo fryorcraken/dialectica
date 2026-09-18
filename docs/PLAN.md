@@ -1691,7 +1691,9 @@ own answer:
 >
 > **The exclusion reaches the UI: the MVP ships no moderation screen.** That
 > follows from "no moderation UI" above, and it is restated because §9.2's MVP
-> list is where a screen author looks and it did not say so.
+> list is where a screen author looks and, before the change that added this
+> note, it did not say so. §9.2 now says it too; both sites are kept because
+> each is reached from a different direction.
 >
 > **It is blocked at the contract, not merely deferred**, which is the part
 > worth knowing before anyone treats the screen as a phase somebody skipped. The
@@ -3584,13 +3586,20 @@ core grows to serve it** rather than leaving it to be disproved.
    nothing implements; the trait says the same on `list_threads`. **So "by
    relevance" is not implementable**, which is ruling 1 seen from the contract
    side. The ordering row is present and offers no selection.
-3. **No post count on a Stoa row, and no unread count.** `DStoaListScreen.qml`
-   records that nothing computes either: a listed item carries an address and a
-   title, no call answers how many posts this peer holds for a Stoa, and the
-   thread listing reports whether a further page exists rather than a total.
+3. **No post count on a Stoa row.** `DStoaListScreen.qml` records that nothing
+   computes one: a listed item carries an address and a title, no call answers
+   how many posts this peer holds for a Stoa, and the thread listing reports
+   whether a further page exists rather than a total.
    **This entry is one the narrowing above governs** — `stoa-navigation-view`
    forbids the placeholder *number* here, so the position is left empty rather
    than filled.
+
+   **Unread is not on this list, and belongs to ruling 2 instead.** The
+   distinction is worth keeping, because this list is the "work it off later"
+   checklist: every entry here names a call core does not yet have, so core
+   growing the call is what removes the entry. Unread is excluded by decision —
+   ruling 2 — not by a missing call, so it is not worked off by a core change
+   and reopening it is a fresh scope ruling rather than a gap being closed.
 4. **History is kept, but no contract method reads earlier versions.**
    `revision.rs` states that superseded versions stay in the op log; the trait
    exposes no method reading them, `read_thread` being the thread read. So "read

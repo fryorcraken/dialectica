@@ -27,7 +27,7 @@ Two gaps below are worth recording, and one is worth fixing before merge.
 
 ## Findings
 
-- [ ] **`dev-writer`** — `openspec/changes/mvp-scope/design.md` (no Decision
+- [x] **`dev-writer`** — `openspec/changes/mvp-scope/design.md` (no Decision
       entry) — three runner calls made during this piece are not recorded as
       Decisions, and at least one of them meets this repo's own bar for what
       belongs here.
@@ -53,7 +53,38 @@ Two gaps below are worth recording, and one is worth fixing before merge.
       recorded that I would not block on those two alone. The CI-gate
       rejection is the one with no trace anywhere in the change.
 
-- [ ] **`dev-writer`** — `openspec/changes/mvp-scope/proposal.md:206-210` vs.
+      **Fixed.** `design.md` gains **Decision 8, "No CI gate on 'worse than
+      absent'-style phrasing"**, recording the proposal, the rejection, and
+      the reason — over-engineering for the MVP phase — in the
+      what-was-considered/what-ruled-it-out shape the Decisions section uses.
+
+      The finding asked for the rejection; what it could not supply is *why*
+      the gate would not have worked, which is the part worth more than the
+      fact it was declined. Two reasons are recorded. Its corpus is
+      hand-written English, so it measures the wording rather than the rule —
+      the same objection Decision 3 already makes to a `// CASE 2:` marker,
+      and now visibly the same argument twice, which is itself the useful
+      signal. And it false-positives on every legitimate **citation** of the
+      comment, of which this change's own case-2 list contains one: the gate
+      would have failed on the change that introduced it. A narrower gate
+      scoped to PLAN.md and `openspec/specs/` with a citation exemption is
+      recorded as the rejected alternative, because distinguishing "states
+      this as a rule" from "quotes a file that states it locally" is the
+      judgement the gate was meant to replace.
+
+      The entry closes with the residual risk stated plainly — Decision 4 is
+      enforced by review and by `composer-view/spec.md:638-639` contradicting
+      the generalisation, not by any gate — so the next agent reaching for
+      this gate finds the false-positive problem already known rather than
+      rediscovering it.
+
+      **The other two calls are also now recorded**, rather than left at
+      "close enough": the `FeedScreen.qml` deferral is Decision 9 (see the
+      finding below), and the `MUST`/spec question raised by
+      `architecture.md` finding 2 is Decision 7. Decision numbering shifted
+      accordingly — the CI-gate entry is 8, not 7.
+
+- [x] **`dev-writer`** — `openspec/changes/mvp-scope/proposal.md:206-210` vs.
       `design.md` (no Decision entry) — the decision to leave
       `FeedScreen.qml:344-350` untouched is stated in `proposal.md`'s Impact
       section but not recorded under Decisions in `design.md`, even though it
@@ -68,6 +99,32 @@ Two gaps below are worth recording, and one is worth fixing before merge.
       origin/main...HEAD -- dialectica-ui/src/qml/FeedScreen.qml` is empty),
       but "a separate piece deals with the comment itself" in `proposal.md` is
       itself a decision (defer, don't touch) with no alternatives recorded.
+
+      **Fixed.** `design.md` gains **Decision 9, "`FeedScreen.qml:344-350` is
+      left untouched, and deferred rather than swept"**, stating it as a
+      choice with its alternative rather than as a fact about what changed —
+      which is the finding's actual point, and the reason Impact was the wrong
+      section for it.
+
+      The rejected alternative the finding names — annotate the comment in
+      place so a reader hitting `FeedScreen.qml` sees the scope note — is
+      recorded with the two arguments against it. It would put a
+      `dialectica-ui/` edit into a change whose entire reviewable claim is
+      "`docs/PLAN.md` only, no behaviour", which is the property that lets a
+      reviewer verify the piece from one diff and the basis of
+      `.openspec.yaml`'s `skip_specs: true` argument. And two changes editing
+      one comment for different reasons is the collision that merges cleanly
+      while keeping both edits.
+
+      **Where the deferral went is now named**, which is what makes it a
+      deferral rather than a drop: the `unauthorised-rules` piece owns that
+      comment and has already done the work there. `proposal.md`'s "a separate
+      piece deals with the comment itself" did not say which piece, so the
+      pointer resolved to nothing once this conversation ended.
+
+      The verification in this finding still holds — `dialectica-ui/` remains
+      untouched by this change, and Decision 9 is the reason, not an
+      exception to it.
 
 ## What is in good shape, stated so it is not re-litigated
 

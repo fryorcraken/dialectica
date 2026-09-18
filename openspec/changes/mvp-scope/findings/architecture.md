@@ -37,7 +37,7 @@ this worktree's tree, not relayed from the proposal.
 
 ## Findings
 
-- [ ] **`dev-writer`** — `docs/PLAN.md:3253-3272` and
+- [x] **`dev-writer`** — `docs/PLAN.md:3253-3272` and
       `openspec/changes/mvp-scope/design.md:207-220` — the unread-counts
       reasoning is duplicated, not migrated, contradicting Decision 2's own
       stated rule.
@@ -65,7 +65,43 @@ this worktree's tree, not relayed from the proposal.
       about unbuilt behaviour elsewhere), or strike the PLAN.md passage and
       point to design.md the way 6a and 6b do for their sites — pick one.
 
-- [ ] **`dev-writer`** — `docs/PLAN.md:3534` — a first-person RFC-2119 `MUST`
+      **Fixed**, taking the first branch: the restatement is deleted and
+      PLAN.md §9.1 question 8 is the single copy. The finding's central
+      observation is accepted in full — Decision 2's split (ruling-reasoning
+      vs. not-built-reasoning) does not divide anything for unread, because
+      the ruling *is* the not-built reasoning. A split that separates nothing
+      is not a line worth defending, and the second copy was the cost of
+      pretending it was.
+
+      Three places changed, and the third is why this took more than a
+      deletion:
+      - **6c is rewritten, not removed**, and retitled "Nothing migrated for
+        unread — and why that is not an omission". An empty slot between 6b
+        and the Risks section would leave a reader comparing against Decision
+        2 unable to tell a declined migration from a forgotten one. It now
+        says the earlier draft made this mistake and why the heading's own
+        "only insofar as it explains the ruling" claim was empty.
+      - **Decision 6's preamble said "Three passages moved here"**, which the
+        fix falsifies. It now reads "Two passages moved here (6a and 6b)... 6c
+        records the third candidate and why it stayed in PLAN.md instead."
+        Not flagged by this finding, but made false by acting on it.
+      - **Decision 2 carried a third copy of the same sentences**, which this
+        finding did not name — it cited design.md:207-220 (6c) only. Found
+        while checking the fix with `grep -rn "designed badly"`. Decision 2
+        has to name the reasoning to say what it is deciding about, so it is
+        reduced to a pointer ("the peer-local-state argument, which is not
+        restated here") naming PLAN.md as the only copy.
+
+      **Verified:** `grep -rn "per-user local state"` across `docs/PLAN.md`
+      and `openspec/changes/mvp-scope/` now matches only this findings file's
+      own quotation of the defect.
+
+      `proposal.md:55` still paraphrases the reasoning and is deliberately
+      left: it is the document that announced the ruling, written before
+      `design.md` existed, and it archives as the original statement rather
+      than as a live second copy.
+
+- [x] **`dev-writer`** — `docs/PLAN.md:3534` — a first-person RFC-2119 `MUST`
       is asserted in PLAN.md with no spec behind it, which is new to this
       document and blurs the "scope note, not a requirement" framing the
       whole piece rests on.
@@ -92,7 +128,47 @@ this worktree's tree, not relayed from the proposal.
       language, or accept that this is a case for a lightweight spec/policy
       requirement instead) rather than leaving it as an accidental first use.
 
-- [ ] **`dev-writer`** — `openspec/changes/mvp-scope/proposal.md:92-108` — the
+      **Rejected** — kept as written, in PLAN.md, with the keyword. The
+      finding asks for a conscious decision rather than an accidental first
+      use, and that is the part that is answered here: it was not accidental.
+
+      **The wording is the owner's own ruling, quoted.** "If core exists, then
+      the button must be wired" is how the ruling was given, as a scope ruling
+      for the MVP phase. §9.2 records what the owner decided in the terms the
+      owner decided it; softening it to "should be wired" or "is expected to
+      be wired" would be this change editing the ruling it exists to record,
+      and the piece's whole claim is that it records scope without altering
+      it. A scope record that rewords its subject is the failure mode, not the
+      fix.
+
+      **Why not a spec requirement.** `.openspec.yaml` and `proposal.md`
+      already argue case 1 has no fixed enumerable subject, and this finding
+      correctly reads that as an argument about testability rather than about
+      where an obligation belongs. The stronger reason is placement: a spec in
+      `openspec/specs/` contracts what the system does, and case 1 contracts
+      what a *phase* may ship — it is a staging rule, true of the MVP and
+      expiring with it. Staging has never been spec-level in this project, and
+      a requirement that says "during the MVP" is one nothing can retire.
+      PLAN.md's job, per `.claude/agents/README.md`, is exactly "what is not
+      built yet", which is the register a staging obligation lives in.
+
+      **Where the finding lands even so**, because it is a real observation
+      about how the line reads: it is right that a reader carrying RFC-2119
+      conventions from §4's SDS quotations may read line 3534 as contractual
+      and find nothing enforcing it. That is mitigated in the paragraph
+      immediately above it — the four rulings are introduced as "scope
+      decisions — what ships first — and none is a design change" — and by the
+      two-merged-requirements block below, which states that a scope note does
+      not override a spec. A reader who reaches the MUST has passed both.
+
+      **Deliberately not deferred to its own piece.** Making case 1 contract
+      material is a live option and this change is not the place to foreclose
+      it; the finding's argument is preserved here and moves to `design.md`
+      with the rest before `findings/` is deleted. But opening a piece for it
+      would be opening a piece to re-decide an owner ruling on the owner's
+      behalf, which is not this agent's call to make.
+
+- [x] **`dev-writer`** — `openspec/changes/mvp-scope/proposal.md:92-108` — the
       case-1 method table is exactly the hand-maintained sweep list the same
       document warns against 90 lines later, with no caveat pointing at the
       authoritative source.
@@ -115,6 +191,29 @@ this worktree's tree, not relayed from the proposal.
       so staleness here is less costly than in PLAN.md, but the
       inconsistency (warning against the pattern while using it, unflagged,
       in the same file) is worth a one-line fix.
+
+      **Fixed.** The table now carries a caveat directly above it, before the
+      header row, taking the "at minimum" shape this finding asks for and
+      adding the part the finding's own analysis supplies: that
+      `proposal.md` archives as a snapshot rather than being maintained, so a
+      later reader is told not to trust it rather than being expected to
+      update it. It names the trap in the same words the document uses 90
+      lines later, points at the `Dialectica` trait as the current surface,
+      and states why the table exists here and deliberately not in
+      `docs/PLAN.md` — it demonstrates that case 1 already has a substantial
+      subject, which is that section's argument, while PLAN.md states the rule
+      against such a list and keeps none.
+
+      The readability reviewer filed this table independently
+      (`readability.md` finding 1), reaching it from the "one sentence after
+      an instruction to read the trait rather than from any list" angle. One
+      edit answers both; the outcome is recorded in both files.
+
+      **Deleting the table was considered.** It is the only fix that removes
+      the inconsistency rather than annotating it. Rejected because the table
+      is load-bearing for the case-1 argument, and because this finding's own
+      severity reasoning holds: an archived snapshot with a caveat has a fixed
+      endpoint, where a live one would not.
 
 ## Not filed as findings, recorded for the record
 
