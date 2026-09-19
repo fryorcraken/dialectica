@@ -1053,6 +1053,24 @@ jobs:
       - name: the runner's undefined-binding check
         run: dialectica-ui/tests/tst_check_bindings.sh
 
+      # The runner's vanished-test check, gated here for the same reason as the
+      # one above: it is a helper, so a version narrowed until it matches
+      # nothing would report clean on every run.
+      #
+      # WHAT IT GUARDS. A QML test function can be DECLARED and never RUN with
+      # the suite still green. One mechanism is reproduced in the test file:
+      # QtTest treats `test_foo_data()` as the data provider for `test_foo()`,
+      # so that pair takes BOTH functions out of the run and leaves only a
+      # `WARNING: ... no data supplied` line, which is not a failure. Measured
+      # on Qt 6.10.3 as `3 passed, 0 failed` over a spec that ran neither.
+      #
+      # `tst_stoa_screens.qml` documents an earlier, still-undiagnosed instance
+      # of a test vanishing. This check does not depend on knowing the cause: it
+      # compares declared names against the names the runner reported, so it
+      # fires whatever produced the loss.
+      - name: the runner's vanished-test check
+        run: dialectica-ui/tests/tst_check_every_test_ran.sh
+
       # The component tests. `REQUIRE_QML_TESTS=1` so a missing or
       # wrong-major-version runner FAILS rather than skipping: a job that
       # quietly stops testing is the false green this file is written against.

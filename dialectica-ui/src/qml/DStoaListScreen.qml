@@ -509,17 +509,48 @@ ScreenFrame {
 
                 Item { Layout.fillWidth: true }
 
-                // **Nothing occupies the position the mockup puts a count in**,
-                // and that is deliberate. `31 posts received here` would be a
-                // legitimate number — it counts what this machine holds — and it
-                // is simply not computed: a listed item carries an address and a
-                // title, no call answers how many posts this peer holds for a
-                // Stoa, and the thread listing reports whether a further page
-                // exists rather than a total. A page length from some other call
-                // rendered here would look like a total, would not be one, and
-                // would be wrong by an amount that grows with the Stoa.
-                // `nothing received yet` is unavailable for the same reason: it
-                // is a claim about a count nothing computed.
+                // ---- PLACEHOLDER, AND THE POSITION IS THE ONLY REAL PART ---
+                //
+                // **This number counts nothing. It is a fixed string.** Nothing
+                // computes a per-Stoa count: a listed item carries an address
+                // and a title, no call answers how many posts this peer holds
+                // for a Stoa, and the thread listing reports whether a further
+                // page exists rather than a total.
+                //
+                // It is here because the owner amended `stoa-navigation-view`'s
+                // "Every number rendered is one this peer can actually answer"
+                // to admit a marked placeholder, so the row can be seen as
+                // designed. The requirement's permanent half is untouched and is
+                // honoured here: nothing global is rendered, and this value is
+                // derived from NO reply.
+                //
+                // **A FIXED string rather than a derived one, and that is the
+                // decision rather than laziness.** A page length from some other
+                // call would look like a total, would not be one, and — worse —
+                // would MOVE with the data, so a reader comparing two rows would
+                // be reading a real signal that means something other than what
+                // the row says. A placeholder that never changes is honest about
+                // being a placeholder in a way a derived wrong number is not.
+                // The amended requirement forbids the derived form for exactly
+                // this reason.
+                //
+                // **The unread half is a different kind of absence**, and the
+                // two are worked off differently. The post count leaves when
+                // core grows a call answering it; unread leaves only when
+                // someone decides to build peer-local state, which ruling 2
+                // excluded from the MVP and which no core change supplies.
+                // PLAN.md §9.2 case 2 entries 3 and 7.
+                //
+                // Rendered in `note` on `inkMuted` — the design's own treatment
+                // for this position, and the quietest type on the row, which is
+                // right for the one value on it that is not a fact.
+                Text {
+                    objectName: "rowCountPlaceholder"
+                    text: "counts not yet available"
+                    font: DTheme.note
+                    color: DTheme.inkMuted
+                    textFormat: Text.PlainText
+                }
 
                 // Share: offered only where this view HOLDS the genesis record,
                 // and absent otherwise. An address is a one-way hash of the

@@ -423,6 +423,14 @@ ScreenFrame {
             : ""
     }
 
+    // The moderation screen was asked for.
+    //
+    // A signal rather than a direct write, for the reason `closed()` is one:
+    // this screen does not know what is rendering it, and a screen that reached
+    // out to change what surrounds it could not be tested in isolation. The
+    // Stoa is the navigator's already, so it is not repeated here.
+    signal moderationRequested()
+
     // ---- header ---------------------------------------------------------
 
     RowLayout {
@@ -506,6 +514,37 @@ ScreenFrame {
                     screen.page = 0
                     screen.reload()
                 }
+            }
+        }
+
+        // The route to the moderation screen.
+        //
+        // **This is an affordance to a screen that publishes nothing**, and it
+        // is offered anyway because the owner reversed ruling 3's screen half so
+        // the screen could be SEEN — a screen no route reaches is a screen
+        // nobody can look at, which is the whole of what the reversal asked for.
+        // `moderation-view` contracts the reachability for that reason.
+        //
+        // **It is NOT gated on whether this peer may moderate**, and that is a
+        // decision rather than an omission. Nothing answers the question:
+        // `getModerationCapability` is designed in PLAN.md §9.1 and does not
+        // exist, and `stoa-membership` states that a listed Stoa means the user
+        // chose it rather than that the user governs it — the retained creator
+        // key is never re-checked against the peer's current signing key. So a
+        // gate here would be a guess, and a guess in this position is the one
+        // that tells a user they moderate a Stoa. Offering the route claims
+        // nothing; hiding it on a guess would.
+        Text {
+            objectName: "moderateLink"
+            text: "MODERATE"
+            font: DTheme.label
+            color: DTheme.inkMuted
+            textFormat: Text.PlainText
+
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: screen.moderationRequested()
             }
         }
     }

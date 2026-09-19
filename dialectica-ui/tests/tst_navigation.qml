@@ -471,6 +471,118 @@ TestCase {
         view.destroy()
     }
 
+    // ---- the moderation route --------------------------------------------
+
+    // The screen exists so the owner can SEE it, so a route to it is the whole
+    // point rather than a detail. This drives the affordance a user acts on,
+    // not `moderateIn` directly — the static gate proves the type is
+    // instantiated, and only this shows that pressing something reaches it.
+    function test_the_feed_offers_a_route_into_moderation() {
+        Core.bridge = spec.bridgeFor({
+            "list_stoas": spec.oneStoa,
+            "list_threads": '{"items":[],"page":0,"hasMore":false}',
+            "who_am_i": '{"hasIdentity":false,"reason":"none"}',
+            "get_capabilities": '{"canPost":false,"reason":"none"}'
+        })
+        var view = mainComponent.createObject(null, {})
+        view.open(spec.stoaA, "Nym Research", "beef")
+
+        var link = spec.visibleNamed(view, "moderateLink")
+        compare(link.length, 1, "the feed offers the route")
+        spec.namedAnywhere(view, "feed")[0].moderationRequested()
+
+        compare(view.screenShown, "moderation")
+        compare(spec.visibleNamed(view, "moderation").length, 1)
+        var screen = spec.namedAnywhere(view, "moderation")[0]
+        compare(screen.stoaAddress, spec.stoaA,
+                "and the Stoa travels, so the way back lands on its feed")
+        view.destroy()
+    }
+
+    // **The assertion this file exists to make about this screen.** Every
+    // control is inert, and the only way to show that from outside is to press
+    // them and observe that the call log did not grow.
+    //
+    // A fake that answered every method identically could not tell "no call was
+    // made" from "a call was made and ignored"; the house fake RECORDS, so the
+    // count is what distinguishes them.
+    function test_nothing_on_the_moderation_screen_calls_the_core() {
+        var bridge = spec.bridgeFor({
+            "list_stoas": spec.oneStoa,
+            "list_threads": '{"items":[],"page":0,"hasMore":false}',
+            "who_am_i": '{"hasIdentity":false,"reason":"none"}',
+            "get_capabilities": '{"canPost":false,"reason":"none"}'
+        })
+        Core.bridge = bridge
+        var view = mainComponent.createObject(null, {})
+        view.open(spec.stoaA, "Nym Research", "beef")
+        view.moderateIn(spec.stoaA, "Nym Research", "beef")
+
+        var before = bridge.calls.length
+        verify(before > 0, "the feed did call the core, so a zero below means "
+               + "this screen made none rather than the fake being unreachable")
+
+        var inert = ["markModeratedButton", "moderateAuthorButton",
+                     "unmoderateAuthorButton", "unmoderatePostButton"]
+        for (var i = 0; i < inert.length; i++) {
+            var buttons = spec.visibleNamed(view, inert[i])
+            verify(buttons.length > 0, inert[i] + " is on the screen")
+            for (var j = 0; j < buttons.length; j++)
+                buttons[j].clicked()
+        }
+
+        compare(bridge.calls.length, before,
+                "pressing every inert control made no call")
+        compare(view.screenShown, "moderation",
+                "and none of them navigated anywhere either")
+        view.destroy()
+    }
+
+    // The way out, and that acting on an inert control does not withdraw it.
+    // Sharper here than on any other screen: every other control does nothing,
+    // so this is the only one that answers a press at all.
+    function test_the_moderation_screen_can_be_left_after_pressing_its_controls() {
+        Core.bridge = spec.bridgeFor({
+            "list_stoas": spec.oneStoa,
+            "list_threads": '{"items":[],"page":0,"hasMore":false}',
+            "who_am_i": '{"hasIdentity":false,"reason":"none"}',
+            "get_capabilities": '{"canPost":false,"reason":"none"}'
+        })
+        var view = mainComponent.createObject(null, {})
+        view.open(spec.stoaA, "Nym Research", "beef")
+        view.moderateIn(spec.stoaA, "Nym Research", "beef")
+
+        spec.visibleNamed(view, "markModeratedButton")[0].clicked()
+
+        var back = spec.visibleNamed(view, "moderationBackButton")
+        compare(back.length, 1, "the way out survives an inert press")
+        back[0].clicked()
+
+        compare(view.screenShown, "feed")
+        compare(spec.namedAnywhere(view, "feed")[0].stoaAddress, spec.stoaA,
+                "and it is the feed the screen was entered from")
+        view.destroy()
+    }
+
+    // Cancel is the second way out, and it must work for the same reason: it is
+    // the control a user reaches for once they have decided against acting, and
+    // a cancel that did nothing would strand them on a destructive screen.
+    function test_cancel_leaves_the_moderation_screen() {
+        Core.bridge = spec.bridgeFor({
+            "list_stoas": spec.oneStoa,
+            "list_threads": '{"items":[],"page":0,"hasMore":false}',
+            "who_am_i": '{"hasIdentity":false,"reason":"none"}',
+            "get_capabilities": '{"canPost":false,"reason":"none"}'
+        })
+        var view = mainComponent.createObject(null, {})
+        view.open(spec.stoaA, "Nym Research", "beef")
+        view.moderateIn(spec.stoaA, "Nym Research", "beef")
+
+        spec.visibleNamed(view, "cancelButton")[0].clicked()
+        compare(view.screenShown, "feed")
+        view.destroy()
+    }
+
     // ---- exactly one screen, from one source -----------------------------
 
     function test_exactly_one_screen_is_shown_in_every_reachable_state() {
@@ -482,7 +594,8 @@ TestCase {
             "get_capabilities": '{"canPost":false,"reason":"none"}'
         })
         var view = mainComponent.createObject(null, {})
-        var names = ["stoaList", "joinScreen", "feed", "thread", "onboarding"]
+        var names = ["stoaList", "joinScreen", "feed", "thread", "onboarding",
+                     "moderation"]
 
         function shownCount() {
             var n = 0
@@ -504,6 +617,27 @@ TestCase {
 
         view.createIdentityFor(spec.stoaA, "Nym Research", "beef")
         compare(shownCount(), 1, "onboarding alone")
+
+        view.moderateIn(spec.stoaA, "Nym Research", "beef")
+        compare(shownCount(), 1, "the moderation screen alone")
+        view.destroy()
+    }
+
+    // The screen-name list above is hand-written, which is this repo's
+    // `hand-maintained sweep lists go stale silently` trap: a seventh screen
+    // would be added to `Main.qml` with that walk still passing over six.
+    //
+    // This pins the list against the navigator's own `stateNames`, which is the
+    // thing a new state must be added to for the navigator to work at all. It is
+    // off by one on purpose and the test says why: `stateNames` holds the five
+    // states that carry a payload, and the list screen is the sixth rendering —
+    // the one shown when every state is null, so it has no entry to hold.
+    function test_the_screen_walk_covers_every_state_the_navigator_has() {
+        Core.bridge = spec.bridgeFor({ "list_stoas": spec.oneStoa })
+        var view = mainComponent.createObject(null, {})
+        compare(view.stateNames.length + 1, 6,
+                "a state added to the navigator without a screen added to the "
+                + "walk above leaves that screen unchecked")
         view.destroy()
     }
 
@@ -520,12 +654,21 @@ TestCase {
         })
         var view = mainComponent.createObject(null, {})
 
+        // DERIVED from the navigator's own state list, not restated. The
+        // restated version counted four states and a fifth was added to
+        // `Main.qml` with this test still passing over four — it would have
+        // reported "one state set" while `moderating` sat set beside it. A
+        // sweep list written out by hand goes stale silently, and this is the
+        // test whose whole subject is that no second state is set.
         function setCount() {
-            return (view.chosen !== null ? 1 : 0)
-                 + (view.previewing !== null ? 1 : 0)
-                 + (view.reading !== null ? 1 : 0)
-                 + (view.onboarding !== null ? 1 : 0)
+            var n = 0
+            for (var i = 0; i < view.stateNames.length; i++)
+                if (view[view.stateNames[i]] !== null)
+                    n++
+            return n
         }
+
+        verify(view.stateNames.length >= 5)
 
         view.preview(spec.stoaA, "beef");            compare(setCount(), 1)
         view.open(spec.stoaA, "Nym Research", "beef"); compare(setCount(), 1)
@@ -533,7 +676,44 @@ TestCase {
         view.closeThread();                          compare(setCount(), 1)
         view.createIdentityFor(spec.stoaA, "T", ""); compare(setCount(), 1)
         view.closeOnboarding();                      compare(setCount(), 1)
+        view.moderateIn(spec.stoaA, "T", "");        compare(setCount(), 1)
+        view.closeModeration();                      compare(setCount(), 1)
         view.closeFeed();                            compare(setCount(), 0)
+        view.destroy()
+    }
+
+    // The reshape that made `enterOnly` the one transition primitive removed the
+    // hand-written clears, each of which had to name every sibling state. Two of
+    // them (`openThread`, `createIdentityFor`) had been written naming only
+    // three of the four, so the invariant held by accident of which screens
+    // could reach which rather than by anything in the code.
+    //
+    // **`createIdentityFor` is the one this can drive**, and the asymmetry is
+    // worth stating rather than papering over: `openThread` refuses outright
+    // when `chosen` is null — you cannot open a thread from no feed — so it is
+    // unreachable from moderation and its missing clear could never fire. That
+    // makes `openThread`'s half satisfied by construction, not by this test.
+    //
+    // This fails against the pre-reshape `Main.qml`: entering moderation and
+    // then identity creation left `moderating` set beside `onboarding`, with
+    // `screenShown` resolving to "onboarding" purely by ternary order.
+    function test_entering_onboarding_from_moderation_clears_the_moderation_state() {
+        Core.bridge = spec.bridgeFor({
+            "list_stoas": spec.oneStoa,
+            "list_threads": '{"items":[],"page":0,"hasMore":false}',
+            "who_am_i": '{"hasIdentity":false,"reason":"none"}',
+            "get_capabilities": '{"canPost":false,"reason":"none"}'
+        })
+        var view = mainComponent.createObject(null, {})
+
+        view.open(spec.stoaA, "Nym Research", "beef")
+        view.moderateIn(spec.stoaA, "Nym Research", "beef")
+        compare(view.moderating !== null, true, "moderation is up")
+
+        view.createIdentityFor(spec.stoaA, "Nym Research", "beef")
+        compare(view.moderating, null,
+                "entering onboarding leaves no moderation state behind it")
+        compare(view.screenShown, "onboarding")
         view.destroy()
     }
 
@@ -556,7 +736,8 @@ TestCase {
             function () { view.preview(spec.stoaA, "beef") },
             function () { view.open(spec.stoaA, "Nym Research", "beef") },
             function () { view.openThread("cc" + "11".repeat(31)) },
-            function () { view.createIdentityFor(spec.stoaA, "T", "") }
+            function () { view.createIdentityFor(spec.stoaA, "T", "") },
+            function () { view.moderateIn(spec.stoaA, "T", "") }
         ]
         for (var i = 0; i < states.length; i++) {
             states[i]()
