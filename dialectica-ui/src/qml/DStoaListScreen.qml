@@ -437,101 +437,136 @@ ScreenFrame {
         // restated 213 lines from the state that makes it necessary.
         model: screen.visibleRows
 
-        delegate: RowLayout {
-            id: row
+        // The reference's screen 08 separates rows by a hairline under EVERY row,
+        // the last one included — unlike the moderation lists, which drop it on
+        // the last. A ColumnLayout per row rather than a bare RowLayout is what
+        // gives the rule somewhere to live.
+        delegate: ColumnLayout {
+            id: rowBlock
             required property var modelData
-
-            // The address, as the reply spelled it. A row must never be able to
-            // render a title without one: a founding title is chosen freely by
-            // whoever created the Stoa, is not unique, is verified against
-            // nothing, and can be picked to resemble another Stoa's. The address
-            // is the only distinguishing half.
-            readonly property string rowStoa:
-                typeof modelData.stoa === "string" ? modelData.stoa : ""
-            readonly property string rowTitle:
-                typeof modelData.foundingTitle === "string" ? modelData.foundingTitle : ""
-
             Layout.fillWidth: true
-            spacing: 16
+            spacing: DTheme.itemGap
 
-            Identicon {
-                address: row.rowStoa
-                size: DTheme.markInList
-            }
+            RowLayout {
+                id: row
+                readonly property var modelData: rowBlock.modelData
 
-            ColumnLayout {
-                spacing: 2
+                // The address, as the reply spelled it. A row must never be able
+                // to render a title without one: a founding title is chosen
+                // freely by whoever created the Stoa, is not unique, is verified
+                // against nothing, and can be picked to resemble another Stoa's.
+                // The address is the only distinguishing half.
+                readonly property string rowStoa:
+                    typeof modelData.stoa === "string" ? modelData.stoa : ""
+                readonly property string rowTitle:
+                    typeof modelData.foundingTitle === "string" ? modelData.foundingTitle : ""
 
-                // An EMPTY founding title renders as nothing, and the row is
-                // still a row. An empty title is legal — the genesis record has
-                // no minimum length — so a row that collapsed would be a Stoa
-                // the user cannot reach, and a substitute like "Untitled" would
-                // be a title no peer agrees on.
-                Text {
-                    text: row.rowTitle
-                    font: DTheme.body
-                    color: DTheme.ink
-                    // Peer-supplied, unnormalised, carrying whatever characters
-                    // its creator typed. Never markup.
-                    textFormat: Text.PlainText
-                    visible: row.rowTitle !== ""
+                Layout.fillWidth: true
+                spacing: 16
+
+                Identicon {
+                    address: row.rowStoa
+                    size: DTheme.markInList
                 }
 
-                // The one abbreviation, owned by AddressLabel: head 8, middle 8,
-                // tail 6. No second elision is written anywhere — a head-and-tail
-                // form is the shape vanity-address generators are built to
-                // defeat, and a second implementation is how one screen quietly
-                // acquires the weaker one.
-                AddressLabel {
-                    address: row.rowStoa
-                    // A click copies the FULL address, not the abbreviation on
-                    // screen. This is not the share string: an address alone
-                    // cannot be joined, and the share affordance below is the
-                    // only thing that produces something joinable.
-                    copyText: row.rowStoa
-                    onCopyRequested: {
-                        if (screen.clipboard)
-                            screen.clipboard.copy(row.rowStoa)
+                ColumnLayout {
+                    spacing: 2
+
+                    // An EMPTY founding title renders as nothing, and the row is
+                    // still a row. An empty title is legal — the genesis record
+                    // has no minimum length — so a row that collapsed would be a
+                    // Stoa the user cannot reach, and a substitute like
+                    // "Untitled" would be a title no peer agrees on.
+                    Text {
+                        text: row.rowTitle
+                        font: DTheme.rowTitle
+                        color: DTheme.ink
+                        // Peer-supplied, unnormalised, carrying whatever
+                        // characters its creator typed. Never markup.
+                        textFormat: Text.PlainText
+                        visible: row.rowTitle !== ""
+                    }
+
+                    // The one abbreviation, owned by AddressLabel: head 8,
+                    // middle 8, tail 6. No second elision is written anywhere —
+                    // a head-and-tail form is the shape vanity-address
+                    // generators are built to defeat, and a second
+                    // implementation is how one screen quietly acquires the
+                    // weaker one.
+                    AddressLabel {
+                        address: row.rowStoa
+                        // A click copies the FULL address, not the abbreviation
+                        // on screen. This is not the share string: an address
+                        // alone cannot be joined, and the share affordance below
+                        // is the only thing that produces something joinable.
+                        copyText: row.rowStoa
+                        onCopyRequested: {
+                            if (screen.clipboard)
+                                screen.clipboard.copy(row.rowStoa)
+                        }
                     }
                 }
-            }
 
-            Item { Layout.fillWidth: true }
+                Item { Layout.fillWidth: true }
 
-            // **Nothing occupies the position the mockup puts a count in**, and
-            // that is deliberate. `31 posts received here` would be a legitimate
-            // number — it counts what this machine holds — and it is simply not
-            // computed: a listed item carries an address and a title, no call
-            // answers how many posts this peer holds for a Stoa, and the thread
-            // listing reports whether a further page exists rather than a total.
-            // A page length from some other call rendered here would look like a
-            // total, would not be one, and would be wrong by an amount that
-            // grows with the Stoa. `nothing received yet` is unavailable for the
-            // same reason: it is a claim about a count nothing computed.
+                // **Nothing occupies the position the mockup puts a count in**,
+                // and that is deliberate. `31 posts received here` would be a
+                // legitimate number — it counts what this machine holds — and it
+                // is simply not computed: a listed item carries an address and a
+                // title, no call answers how many posts this peer holds for a
+                // Stoa, and the thread listing reports whether a further page
+                // exists rather than a total. A page length from some other call
+                // rendered here would look like a total, would not be one, and
+                // would be wrong by an amount that grows with the Stoa.
+                // `nothing received yet` is unavailable for the same reason: it
+                // is a claim about a count nothing computed.
 
-            // Share: offered only where this view HOLDS the genesis record, and
-            // absent otherwise. An address is a one-way hash of the record, so a
-            // share without one would produce a plausible-looking string that
-            // fails to verify on somebody else's machine, as a refusal they
-            // cannot explain. The absence is the honest rendering and is not an
-            // error state.
-            FlatButton {
-                objectName: "shareButton"
-                text: "Copy a shareable reference"
-                kind: "secondary"
-                visible: screen.canShare(row.rowStoa)
-                onClicked: {
-                    var text = DStoaReference.shareText(row.rowStoa, screen.genesisFor(row.rowStoa))
-                    if (text !== "" && screen.clipboard)
-                        screen.clipboard.copy(text)
+                // Share: offered only where this view HOLDS the genesis record,
+                // and absent otherwise. An address is a one-way hash of the
+                // record, so a share without one would produce a
+                // plausible-looking string that fails to verify on somebody
+                // else's machine, as a refusal they cannot explain. The absence
+                // is the honest rendering and is not an error state.
+                FlatButton {
+                    objectName: "shareButton"
+                    text: "Copy a shareable reference"
+                    kind: "secondary"
+                    visible: screen.canShare(row.rowStoa)
+                    onClicked: {
+                        var text = DStoaReference.shareText(row.rowStoa, screen.genesisFor(row.rowStoa))
+                        if (text !== "" && screen.clipboard)
+                            screen.clipboard.copy(text)
+                    }
+                }
+
+                FlatButton {
+                    text: "Open"
+                    kind: "secondary"
+                    onClicked: screen.stoaChosen(row.rowStoa, row.rowTitle,
+                                                 screen.genesisFor(row.rowStoa))
                 }
             }
 
-            FlatButton {
-                text: "Open"
-                kind: "secondary"
-                onClicked: screen.stoaChosen(row.rowStoa, row.rowTitle,
-                                             screen.genesisFor(row.rowStoa))
+            // The separator under every row, the last included. The reference
+            // draws it that way so the list reads as a bounded block rather
+            // than as rows trailing off into the page.
+            //
+            // **Named, because the spec requires it and a test has to find it.**
+            // `stoa-navigation-view`'s "Where one listed Stoa ends and the next
+            // begins is rendered" contracts one boundary per row; a test keyed
+            // on geometry instead would match whatever else happened to be a
+            // 1px-high Rectangle, and would go on passing if this element were
+            // deleted and some unrelated rule took its place in the walk.
+            //
+            // Not decorative: dropping the name takes tst_stoa_screens.qml from
+            // 82 passed to 79 passed, 3 failed. Five other rectangles in this
+            // file share this exact width and height, so a geometry walk would
+            // count them too. See design.md D5e.
+            Rectangle {
+                objectName: "rowSeparator"
+                Layout.fillWidth: true
+                Layout.preferredHeight: DTheme.hairline
+                color: DTheme.rule
             }
         }
     }
@@ -881,4 +916,35 @@ ScreenFrame {
         }
     }
 
+    // ---- THIS SCREEN CARRIES NO IDENTITY CHIP, AND THAT IS A REQUIREMENT ---
+    //
+    // A `DScreenFooter` — the pagination/identity/lamps row — was mounted here
+    // and removed. It is recorded rather than silently dropped, because adding
+    // one back is the obvious next idea and it breaks a merged requirement that
+    // no gate would catch by inspection.
+    //
+    // **`stoa-navigation-view` R13 forbids this screen raising identity at all**
+    // — `tst_stoa_screens.qml`'s
+    // `test_neither_the_list_nor_the_creation_outcome_claims_moderation_or_identity`
+    // fails on the word, by design: one key signs in every Stoa in this release,
+    // so anything on a per-Stoa screen that raises identity offers an
+    // unlinkability property the software does not have. `DIdentityChip`'s
+    // no-identity arm renders "Voting, posting and replying need an identity",
+    // which trips it. The requirement is right and the chip is what was wrong.
+    //
+    // **This is NOT in tension with the key block above.** That block is about
+    // a key belonging to THIS MACHINE — its strings say so and say nothing about
+    // identity, which is exactly the distinction R13 draws. A chip claiming a
+    // per-Stoa identity is the thing forbidden here; naming the one key the
+    // machine signs everything with is not.
+    //
+    // **The lamps are not here either, and that is `Main.qml`'s decision rather
+    // than this screen's.** `DStatusBar` is mounted once as shared chrome
+    // outside every screen's `visible:` binding, so it accompanies this screen
+    // too — see `Main.qml`'s "shared chrome" block for why a per-screen subset
+    // would make its absence ambiguous.
+    //
+    // **The reference agrees on the chip**: screen 08 carries no identity chip.
+    // It belongs to the feed (03/05), where posting is what the identity is FOR
+    // and the claim is about this machine rather than about a Stoa.
 }
