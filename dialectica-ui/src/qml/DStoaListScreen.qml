@@ -50,19 +50,61 @@ ScreenFrame {
 
     // Genesis records this view holds, keyed by address.
     //
-    // **`list_stoas` does not return them.** The core RETAINS the record for
-    // every Stoa the peer is in — `stoa-membership` requires it so moderation
-    // can be resolved later — but the listing reply carries `stoa` and
-    // `foundingTitle` only. So the view holds a record for exactly the Stoas it
-    // created or joined in THIS session, and for no others.
+    // **Both replies carry them**, and this map is filled from the reply rather
+    // than from anything the view remembers. The core RETAINS the record for
+    // every Stoa the peer is in — `stoa-membership` requires it so moderation can
+    // be resolved later — and `create_stoa` and `list_stoas` now report it as
+    // `genesis`, hex-encoded.
     //
     // Two things need one and neither can work around its absence, because
-    // deriving a record from an address is what a one-way hash forbids:
-    // sharing a Stoa, and opening its feed. Both are therefore conditional on
-    // this map, and the absence of a share affordance is the honest rendering
-    // rather than an error state. Closing this properly is a CORE change —
-    // widen the listing item to carry the retained record.
+    // deriving a record from an address is what a one-way hash forbids: sharing a
+    // Stoa, and opening its feed. Both were therefore unreachable while the
+    // replies named only an address — "Open" handed `read_feed` an empty string,
+    // which is zero bytes and fails the version-byte take as "genesis record
+    // ended mid-field". That is the error the owner met, and it was this absence
+    // rather than a codec defect.
+    //
+    // **Filling it from the LISTING is what survives a restart.** A map filled
+    // only on create or join holds records for the current session, so a
+    // relaunched app could open nothing it had not just made.
     property var genesisByStoa: ({})
+
+    // Record what a reply says about one Stoa, or leave the map untouched.
+    //
+    // A non-string or an empty string is NOT recorded, and the omission is the
+    // point: `genesisFor` returning "" is what hides the share affordance and is
+    // an honest "this view holds no record". Writing "" in would make `canShare`
+    // true for a Stoa whose share text cannot be built, and would send that same
+    // "" to `read_feed` — reinstating the exact defect this closes.
+    function rememberGenesis(stoa, genesis) {
+        if (typeof stoa !== "string" || stoa === "")
+            return
+        if (typeof genesis !== "string" || genesis === "")
+            return
+        // **The explicit `genesisByStoaChanged()` is what makes the screen
+        // re-evaluate, and it is load-bearing on its own.** A QML `var` property
+        // does not notify on an in-place key write, so without this emit the map
+        // would hold the record while `canShare`'s binding kept the share button
+        // hidden and `Open` inert — data right, screen wrong, and silent, because
+        // basecamp swallows QML errors.
+        //
+        // Do not replace it with a reassignment. `var next = screen.genesisByStoa`
+        // binds `next` to the SAME object the property already holds — JS objects
+        // are reference types and nothing here clones — so `screen.genesisByStoa =
+        // next` assigns the property to the object it already pointed at and
+        // notifies nothing on its own merits. That reassignment was here, was
+        // credited by this comment for the fix, and was measured to be a no-op
+        // (object identity unchanged across the call); it was removed rather than
+        // left with a note, because a line whose only role is to be explained away
+        // is the line a later reader mistakes for the mechanism.
+        //
+        // NOT covered by the suite: see `design.md`, "The record map notifies
+        // through an explicit signal". Removing this emit leaves the specs green,
+        // because they read `canShare` as a function rather than through a live
+        // binding.
+        screen.genesisByStoa[stoa] = genesis
+        screen.genesisByStoaChanged()
+    }
 
     // ---- this peer's master key -----------------------------------------
     //
@@ -159,6 +201,21 @@ ScreenFrame {
             return
         }
 
+        // Every record the listing hands over, recorded before the rows render.
+        //
+        // Additive rather than a replacement: paging away from a Stoa must not
+        // drop the record for it, and a peer with more Stoas than fit a page
+        // would otherwise lose the ability to share or open one it had just
+        // scrolled past. An item short of its `genesis` is skipped rather than
+        // failing the read — the listing is still a truthful answer to "which
+        // Stoas am I in", and the share affordance's absence is how that item
+        // reads.
+        for (var i = 0; i < reply.value.items.length; ++i) {
+            var item = reply.value.items[i]
+            if (item)
+                screen.rememberGenesis(item.stoa, item.genesis)
+        }
+
         screen.lastListing = reply.value.items
         screen.hasMore = reply.value.hasMore === true
         screen.failure = ""
@@ -214,11 +271,14 @@ ScreenFrame {
         screen.created = reply.value
         screen.createState = "created"
 
-        // A Stoa just created is one whose record this view could hold — but the
-        // creation reply carries `stoa`, `foundingTitle` and `policy`, and no
-        // genesis record either. So there is still nothing to record here, and
-        // the share affordance stays absent for it. Said plainly rather than
-        // left as an apparent oversight.
+        // The record for the Stoa just created, from the creation reply itself.
+        //
+        // The reload below would also supply it, and this is still here rather
+        // than left to it: the creation reply is the authority on the Stoa THIS
+        // call settled on, and a `perPage`-th Stoa created by a peer already in a
+        // full page would not appear on page 0 at all. Recording it here means
+        // "create it, then share it" never depends on where the new row landed.
+        screen.rememberGenesis(reply.value.stoa, reply.value.genesis)
 
         screen.page = 0
         screen.reload()

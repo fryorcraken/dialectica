@@ -554,6 +554,113 @@ TestCase {
         screen.destroy()
     }
 
+    // ---- the record comes from the reply ----------------------------------
+    //
+    // The owner's defect. Every fixture below hands the screen a reply and then
+    // asserts on what it holds — none of them writes `genesisByStoa` directly,
+    // which is what the older tests in this file do and is exactly why the defect
+    // survived them: a test that seeds the map is a test that assumes the very
+    // thing that was missing.
+
+    function test_a_listed_stoa_is_openable_from_the_reply_alone() {
+        // The click that failed. "Open" passes `genesisFor(stoa)`, and when the
+        // listing carried no record that was "" — zero bytes, which the core
+        // refuses as "genesis record ended mid-field". Nothing is seeded here.
+        var addr = "aa".repeat(32)
+        var genesis = "01" + "cc".repeat(32) + "00" + "0000000A" + "74657374"
+        var screen = makeList({
+            "list_stoas": '{"items":[{"stoa":"' + addr + '","foundingTitle":"Held",'
+                        + '"genesis":"' + genesis + '"}],"page":0,"hasMore":false}'
+        })
+
+        compare(screen.genesisFor(addr), genesis,
+                "the record the listing reported must be what Open hands over")
+        verify(screen.genesisFor(addr) !== "",
+               "an empty record is the input that produces 'ended mid-field'")
+        screen.destroy()
+    }
+
+    function test_a_created_stoa_is_openable_from_the_creation_reply_alone() {
+        var addr = "dd".repeat(32)
+        var genesis = "01" + "ee".repeat(32) + "00" + "00000004" + "74657374"
+        var screen = makeList({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "create_stoa": '{"stoa":"' + addr + '","foundingTitle":"New",'
+                         + '"policy":"open","genesis":"' + genesis + '"}'
+        })
+        screen.create()
+
+        compare(screen.createState, "created")
+        compare(screen.genesisFor(addr), genesis,
+                "a Stoa just created must be openable without waiting for a reload")
+        compare(screen.canShare(addr), true,
+                "and shareable — the same absence hid both affordances")
+        screen.destroy()
+    }
+
+    function test_a_record_survives_paging_away_from_the_stoa_that_carried_it() {
+        // Additive rather than replacing. A peer with more Stoas than fit a page
+        // would otherwise lose the record for everything not on the current page,
+        // so Open would work on page 0 and fail on page 1.
+        var first = "11".repeat(32)
+        var second = "22".repeat(32)
+        var screen = makeList({
+            "list_stoas": '{"items":[{"stoa":"' + first + '","foundingTitle":"One",'
+                        + '"genesis":"aabb"}],"page":0,"hasMore":true}'
+        })
+        compare(screen.genesisFor(first), "aabb")
+
+        Core.bridge = bridgeFor({
+            "list_stoas": '{"items":[{"stoa":"' + second + '","foundingTitle":"Two",'
+                        + '"genesis":"ccdd"}],"page":1,"hasMore":false}'
+        })
+        screen.page = 1
+        screen.reload()
+
+        compare(screen.genesisFor(second), "ccdd", "the new page's record is recorded")
+        compare(screen.genesisFor(first), "aabb",
+                "and the previous page's record is NOT dropped")
+        screen.destroy()
+    }
+
+    function test_an_item_short_of_its_record_is_not_recorded_as_an_empty_one() {
+        // The guard that keeps the defect from coming back wearing a success. An
+        // "" written into the map would make `canShare` true and would send ""
+        // straight to `read_feed` — the original failure, now with a visible
+        // share button promising a reference that cannot be built.
+        var missing = "33".repeat(32)
+        var empty = "44".repeat(32)
+        var screen = makeList({
+            "list_stoas": '{"items":['
+                        + '{"stoa":"' + missing + '","foundingTitle":"No field"},'
+                        + '{"stoa":"' + empty + '","foundingTitle":"Empty","genesis":""}'
+                        + '],"page":0,"hasMore":false}'
+        })
+
+        // **Asserted against the map's own keys, not against `genesisFor`.**
+        // `genesisFor` returns "" both when the key is absent and when it holds
+        // an explicit "", so every assertion phrased through it passes whichever
+        // branch `rememberGenesis` takes — measured: removing the `genesis === ""`
+        // half of the guard left 81/81 green. `hasOwnProperty` is the only
+        // accessor that tells "never written" from "written as empty", which is
+        // the distinction the guard exists to make.
+        verify(!screen.genesisByStoa.hasOwnProperty(missing),
+               "an absent field must leave NO key behind, not a key holding ''")
+        verify(!screen.genesisByStoa.hasOwnProperty(empty),
+               "an empty field must leave no key either — writing '' in is the "
+               + "regression this guard prevents, and it is invisible to genesisFor")
+
+        compare(screen.genesisFor(missing), "", "an absent field records nothing")
+        compare(screen.genesisFor(empty), "", "and an empty one is not a record either")
+        compare(screen.canShare(missing), false,
+                "no share may be offered for a reference that cannot be built")
+        compare(screen.canShare(empty), false)
+        // The listing itself still succeeded: "which Stoas am I in" was answered.
+        compare(screen.readState, "ok",
+                "an item short of its record is not a failed read")
+        screen.destroy()
+    }
+
     // ---- sharing ---------------------------------------------------------
 
     function test_a_share_is_offered_only_where_the_view_holds_the_record() {

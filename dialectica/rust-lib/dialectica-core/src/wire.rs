@@ -2105,6 +2105,41 @@ fn thread_page_json(page: &crate::thread::ThreadPage) -> String {
 /// this field rather than redefining it — PLAN.md §9.1's own shape for `getStoa`.
 const FOUNDING_TITLE: &str = "foundingTitle";
 
+/// The genesis record itself, hex-encoded.
+///
+/// # Why an address is not enough, and no caller can make up the difference
+///
+/// A Stoa address is `stoa_address(&genesis.canonical_bytes())` — a one-way hash.
+/// So a view holding an address holds nothing it can turn back into a record, and
+/// every call that needs one ([`read_feed`], [`read_thread`], [`join_stoa`], and
+/// the share text a user pastes elsewhere) needs the record itself. Reporting the
+/// address alone left a view with no honest option but to send an empty string,
+/// which is zero bytes and fails the version-byte take as "genesis record ended
+/// mid-field" — a decode error that reads like a codec bug and is the absence of
+/// this field.
+///
+/// **This costs no network call and no new state.** `stoa-membership` already
+/// requires the peer RETAIN the record for every Stoa it is in, and
+/// [`crate::membership`] stores `canonical_bytes()` verbatim precisely so it can
+/// be handed back. Only the wire shape was omitting it.
+///
+/// # Hex, and the same hex `join_stoa` reads
+///
+/// The field a caller hands BACK is a hex string ([`join_stoa`] hex-decodes it),
+/// so reporting anything else would make the reply and the request disagree about
+/// one record. `a_listed_record_round_trips_through_the_join_the_view_performs`
+/// pins that agreement through both calls rather than trusting this sentence.
+///
+/// # Encoding cannot fail here, and is not silently defaulted
+///
+/// Every record that reaches a reply has already been encoded — a creation hashed
+/// it to get the address, and a stored one was decoded from the bytes this
+/// re-encodes. `canonical_bytes` is still fallible in the type, and a failure is
+/// reported as the error shape rather than as an empty string: an empty `genesis`
+/// is exactly the input that produces the owner's bug, so defaulting to it would
+/// reintroduce the defect as a success reply.
+const GENESIS: &str = "genesis";
+
 /// What a create or a join reports about the Stoa it settled on.
 ///
 /// One function rather than two spellings, because the spec requires both replies
@@ -2113,11 +2148,20 @@ const FOUNDING_TITLE: &str = "foundingTitle";
 /// a list item: the spec fixes a list item as carrying the address and the
 /// founding title, and widening the paginated envelope's item shape is a decision
 /// for whoever needs it.
+///
+/// **[`GENESIS`] is on both shapes**, because the reason for it is not a property
+/// of either call: a view that can open a Stoa it just created but not one it
+/// merely lists is a view that breaks on restart.
 fn stoa_reply(stoa: &crate::identity::Address, genesis: &crate::stoa::Genesis) -> String {
+    let bytes = match genesis.canonical_bytes() {
+        Ok(b) => b,
+        Err(e) => return error_json(&e.to_string()),
+    };
     serde_json::json!({
         "stoa": stoa.to_hex(),
         FOUNDING_TITLE: genesis.title,
         "policy": policy_name(genesis.policy),
+        GENESIS: hex::encode(bytes),
     })
     .to_string()
 }
@@ -2177,7 +2221,8 @@ fn policy_name(policy: crate::stoa::Policy) -> &'static str {
     }
 }
 
-/// Create a Stoa: `{"title":"…"}` -> `{"stoa":…,"foundingTitle":…,"policy":…}`.
+/// Create a Stoa: `{"title":"…"}` ->
+/// `{"stoa":…,"foundingTitle":…,"policy":…,"genesis":…}`.
 ///
 /// # The creator key is not a parameter, and cannot be
 ///
@@ -2779,7 +2824,8 @@ pub fn join_stoa(request: &str, store: &mut crate::membership::MembershipStore) 
 
 /// One page of the Stoas this peer is in.
 ///
-/// `{"page":N,"perPage":N}` -> `{"items":[{"stoa":…,"foundingTitle":…}],"page":N,"hasMore":bool}`.
+/// `{"page":N,"perPage":N}` ->
+/// `{"items":[{"stoa":…,"foundingTitle":…,"genesis":…}],"page":N,"hasMore":bool}`.
 ///
 /// # Exactly what membership records, and nothing derived from ops
 ///
@@ -2915,17 +2961,27 @@ pub fn with_membership_store_read(
 pub use crate::membership::membership_path_in;
 
 /// The pagination shape for a membership listing, built in one place.
+///
+/// **An item carries [`GENESIS`] for the reason that constant gives**, and the
+/// listing is the call where it matters most: a view holds records only for what
+/// it created or joined in the current session, so without this field a relaunched
+/// app can open nothing at all. The core retained the record the whole time.
 fn membership_page_json(page: &crate::membership::MembershipPage) -> String {
-    let items: Vec<serde_json::Value> = page
-        .items
-        .iter()
-        .map(|m| {
-            serde_json::json!({
-                "stoa": m.stoa.to_hex(),
-                FOUNDING_TITLE: m.genesis.title,
-            })
-        })
-        .collect();
+    let mut items: Vec<serde_json::Value> = Vec::with_capacity(page.items.len());
+    for m in &page.items {
+        // Reported as a failure rather than as an item missing its record. A
+        // listing is how a view decides what it can open, so an item silently
+        // short of its record is the owner's bug wearing a success reply.
+        let bytes = match m.genesis.canonical_bytes() {
+            Ok(b) => b,
+            Err(e) => return error_json(&e.to_string()),
+        };
+        items.push(serde_json::json!({
+            "stoa": m.stoa.to_hex(),
+            FOUNDING_TITLE: m.genesis.title,
+            GENESIS: hex::encode(bytes),
+        }));
+    }
     serde_json::json!({
         "items": items,
         "page": page.page,
@@ -12702,6 +12758,186 @@ mod tests {
                 "a bare `title` would assert a currency nothing has checked: {v}"
             );
         }
+    }
+
+    /// The genesis record a reply carries, decoded, with its address checked
+    /// against the address the same reply names.
+    ///
+    /// The check is the relation rather than a pinned literal: a reply could carry
+    /// a well-formed record of some OTHER Stoa and satisfy "the field decodes". The
+    /// only thing that makes the field useful to a view is that it is the record
+    /// THIS address is the hash of, because that is exactly what the view will hand
+    /// back to `join_stoa` and to the share text.
+    fn genesis_of(reply: &serde_json::Value) -> crate::stoa::Genesis {
+        let hex_str = reply["genesis"].as_str().unwrap_or_else(|| {
+            panic!("the reply must carry a `genesis` record for the view to open or share: {reply}")
+        });
+        let bytes = hex::decode(hex_str)
+            .unwrap_or_else(|e| panic!("`genesis` must be hex ({e}): {hex_str}"));
+        let genesis = crate::stoa::Genesis::decode(&bytes)
+            .unwrap_or_else(|e| panic!("`genesis` must decode as a record ({e}): {hex_str}"));
+        assert_eq!(
+            genesis
+                .address()
+                .expect("a decoded record has an address")
+                .to_hex(),
+            reply["stoa"].as_str().expect("a reply names its address"),
+            "the record must be the one this address is the hash of: {reply}"
+        );
+        genesis
+    }
+
+    #[test]
+    fn a_creation_reports_the_record_its_address_is_the_hash_of() {
+        // The owner's bug: the reply named an address and no record, so the view
+        // had nothing to hand to `read_feed` and sent "" — which hex-decodes to
+        // zero bytes and fails the version-byte take as "genesis record ended
+        // mid-field". An address is a ONE-WAY hash, so a view cannot derive the
+        // record it was denied here; only this reply can carry it.
+        let mut store = a_membership_store();
+        let reply = create(&mut store, "Agora");
+
+        let genesis = genesis_of(&reply);
+        // The decoded record is the one that was created, not merely a valid one.
+        assert_eq!(genesis.title, "Agora", "got {reply}");
+        assert_eq!(genesis.creator, creator_key(), "got {reply}");
+    }
+
+    #[test]
+    fn a_listed_stoa_carries_the_record_its_address_is_the_hash_of() {
+        // The same obligation on the listing, and it is the one that matters on a
+        // RESTART: a view holds records for what it created this session and the
+        // core retains them for everything the peer is in. Without this field a
+        // relaunched app can open nothing it did not just create.
+        let mut store = a_membership_store();
+        create(&mut store, "Agora");
+
+        let rows = listed(&store, 25);
+        assert_eq!(rows.len(), 1, "got {rows:?}");
+        assert_eq!(genesis_of(&rows[0]).title, "Agora");
+    }
+
+    #[test]
+    fn a_record_that_cannot_be_encoded_is_a_failure_rather_than_an_empty_field() {
+        // The spec's sibling guarantee to the three tests above: where the record
+        // cannot be encoded, the call reports the failure shape and MUST NOT
+        // report success carrying an empty or absent record.
+        //
+        // **An empty `genesis` is exactly the input that produced the owner's
+        // bug** — zero bytes, failing the version-byte take as "ended mid-field" —
+        // so a success reply defaulting to one would reintroduce the defect
+        // wearing a success, and move the error to a later call that cannot
+        // explain it. That is the failure this pins, and it is why the assertion
+        // is not merely "an error came back": it also denies the success shape.
+        //
+        // The branch is unreachable through `create_stoa` and `list_stoas` today —
+        // every record reaching a reply has been encoded once already (hashed for
+        // its address, or decoded out of storage). It is a defensive arm, so it is
+        // exercised at `stoa_reply` directly with a record built to exceed the
+        // title cap. Reaching for the handler instead would need a store holding
+        // bytes the encoder refuses, which is a state `decode_row` rejects.
+        let over_cap = crate::stoa::Genesis {
+            creator: creator_key(),
+            policy: crate::stoa::Policy::Open,
+            title: "x".repeat(crate::stoa::MAX_CANONICAL_BYTES),
+        };
+        // The premise: this record genuinely cannot be encoded. Without this the
+        // test would pass against a record that encodes fine and a reply that
+        // simply happened to carry no error.
+        assert!(
+            over_cap.canonical_bytes().is_err(),
+            "the fixture must be a record the encoder refuses, or this test proves nothing"
+        );
+
+        let address = crate::identity::Address::from_bytes([0u8; 32]);
+        let out = stoa_reply(&address, &over_cap);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+
+        assert!(
+            v.get("error").is_some(),
+            "an unencodable record must be reported as the failure shape: {out}"
+        );
+        // Not a partial success: the module has ONE failure shape, and a reply
+        // carrying both an error and a half-built record would be neither.
+        assert!(
+            v.get(GENESIS).is_none(),
+            "a failure must not also carry a `genesis` field, empty or otherwise: {out}"
+        );
+        assert!(
+            v.get("stoa").is_none(),
+            "a failure must not be a success shape with an error bolted on: {out}"
+        );
+    }
+
+    #[test]
+    fn a_listed_record_round_trips_through_the_join_the_view_performs() {
+        // End to end through the ACTUAL pair of calls the owner's click makes: the
+        // listing hands over a record, and that record is accepted by the handler
+        // that decodes a `genesis` hex string. This is what pins the two sides to
+        // one encoding — a reply carrying, say, base64 would pass both tests above
+        // and still leave the view sending something `join_stoa` refuses.
+        let mut store = a_membership_store();
+        create(&mut store, "Agora");
+        let row = listed(&store, 25).remove(0);
+
+        let request = serde_json::json!({
+            "stoa": row["stoa"].as_str().unwrap(),
+            "genesis": row["genesis"].as_str().unwrap(),
+        })
+        .to_string();
+        let out = join_stoa(&request, &mut store);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(
+            v.get("error").is_none(),
+            "the record the listing handed over must be one the core accepts: {out}"
+        );
+    }
+
+    #[test]
+    fn a_stoa_is_openable_from_the_listing_after_a_restart() {
+        // **The scenario the in-memory tests above structurally cannot reach**,
+        // and the one the owner actually lives in. A caller can only remember
+        // records for Stoas it created or joined during the current session, so
+        // every Stoa it was already in is one the listing alone must make usable.
+        //
+        // A real file and a genuinely reopened store: the record is re-decoded
+        // from `genesis_bytes` on the way out rather than being the one this
+        // process happened to build, which is what makes this a test of what
+        // SURVIVES rather than of what was held in memory.
+        let dir = WireTempDir::new("restart-openable");
+        let path = dir.path().join("stoas.sqlite");
+
+        let created = {
+            let mut store = crate::membership::MembershipStore::open(&path)
+                .expect("a membership store is creatable");
+            create(&mut store, "Agora")
+        };
+        let address = created["stoa"]
+            .as_str()
+            .expect("a creation names its address");
+
+        let reopened = crate::membership::MembershipStore::open(&path).expect("the store reopens");
+        let listing: serde_json::Value =
+            serde_json::from_str(&list_stoas("{}", &reopened)).unwrap();
+        let row = &listing["items"][0];
+
+        assert_eq!(row["stoa"].as_str().unwrap(), address);
+        // The record came back across the restart and still names this address.
+        assert_eq!(genesis_of(row).title, "Agora");
+        // And it is what the record-taking calls accept — the whole point of
+        // carrying it, asserted through the call rather than by inspection.
+        let request = serde_json::json!({
+            "stoa": address,
+            "genesis": row["genesis"].as_str().unwrap(),
+        })
+        .to_string();
+        let mut writable = crate::membership::MembershipStore::open(&path).unwrap();
+        let out = join_stoa(&request, &mut writable);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(
+            v.get("error").is_none(),
+            "a record recovered across a restart must still be accepted: {out}"
+        );
     }
 
     #[test]
