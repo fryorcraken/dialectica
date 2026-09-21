@@ -11,11 +11,11 @@ from a table here, so that this file stays the thing worth reading in full:
 
 | Read | When |
 |---|---|
-| [`docs/PLAN.md`](docs/PLAN.md) | **Before any design decision.** It carries the architecture, what was rejected and why, and the traps found before a line was written. |
 | [`.claude/agents/RUNNER.md`](.claude/agents/RUNNER.md) | **Before dispatching your first agent.** Written for the session that orchestrates rather than for the agents it launches: how to tell whether an agent is still running, how many to launch at once, and why one piece is one PR. Read it whenever you are about to spawn an agent — the mistakes it prevents all came from its rules living in files the runner never opened. |
 | [`.claude/agents/README.md`](.claude/agents/README.md) | **Before starting a change.** The spec-driven flow: which document answers which question, and the role agents. Also the test defects that have shipped here and what prevents them. |
 | [`docs/OPENSPEC-ARCHIVE.md`](docs/OPENSPEC-ARCHIVE.md) | **Before archiving a change**, which is the last step in closing it and runs after its PR merges — not before starting one. The traps that lose a requirement silently, and why `validate --strict` passes a spec that contradicts itself. |
 | [`docs/SCAFFOLD.md`](docs/SCAFFOLD.md) | **Before changing a value in `scaffold.toml`**, or when a build, `install` or `launch` misbehaves. Every entry whose purpose is not visible from its value — why two `[repos.*]` tables exist for a zone we do not use, which pairs of `attr` values deadlock `install`, and what the settings under `[basecamp.env]` and `[basecamp.profiles.*]` are each preventing. It lives here because `lgs` deletes every comment in that file. |
+| [`docs/SOURCES.md`](docs/SOURCES.md) | **When a claim about the surrounding Logos ecosystem needs re-checking against source** — which local checkout has the delivery API, the SDS spec, the LEZ private-account construction, and which of those checkouts are stale working trees that will mislead if read directly. |
 
 ### Keeping this file true
 
@@ -353,8 +353,9 @@ changes, and SDS is LIP-109 at *raw*, the weakest maturity tier, with an API
 marked Developer Preview. **File the upstream gap; do not wait on it, and do
 not design around it.**
 
-`docs/PLAN.md` §13 works this through, including the two claims about it that
-were wrong.
+`openspec/changes/archive/2026-09-16-op-clock/design.md`'s "The layering rule
+this change is a consequence of" works this through, including a claim about
+it that was wrong and how the error happened.
 
 ### The core API is the deliverable
 

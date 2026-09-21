@@ -7,6 +7,88 @@ Lamport counter that is authoritative for every ordering, and an author-asserted
 wall-clock that decides nothing. The spec settles *what* must hold. This records
 *how*, and — where the spec left a value or a shape open — *why this one*.
 
+### The layering rule this change is a consequence of
+
+Migrated from `docs/PLAN.md` §13, which is where this reasoning was worked out
+before the fields above existed.
+
+**Use SDS's API as it is, and build the ordering and causality the application
+needs on top of it.** SDS is HTTP or TCP in this stack. TCP retransmits, orders
+within a connection, and tells you a transfer failed — and it still cannot
+tell you your file is half-written, because it does not know what a complete
+file is. Only the application does.
+
+So SDS repairing what it can see is not a substitute for dialectica knowing
+what a **complete thread** is, and no upstream change would make it one. The
+missing ordering fields at the transport layer were never a deficiency to
+design around — they were never ours to depend on. An application that can
+only order its own content while the transport hands it ordering metadata
+breaks the moment that transport changes, and SDS is LIP-109 at *raw*, the
+weakest maturity tier, with an API marked Developer Preview that expects to
+change. File the upstream gap; do not wait on it.
+
+**What dialectica builds at its own layer**, carried inside the signed op
+preimage so a relay cannot forge or strip it:
+
+- **An author-asserted wall-clock `createdAt`.** Cheap, needs nothing from
+  upstream, gives a real recency ordering, and is *asserted* — so it must be
+  clamped and must never feed a security decision. Appendix-level research on
+  a nearby kin project (`logos-messaging/OpChan`) found it reading an
+  unclamped author timestamp for decay, letting a post pin itself to the top
+  permanently.
+- **A dialectica Lamport counter**, advanced on the ops received. Self-
+  consistent across peers without reference to SDS's own clock.
+
+**Causality is ours too.** A Lamport counter is the causality mechanism: a
+peer receives an op at N, sets its clock to `max(local, N)`, and replies at
+N+1 — the reply carries "I had seen something at N", which is the
+written-knowing-about relation. What SDS's `causalHistory` adds beyond that is
+not causality but *gap detection* — an explicit list of message ids the
+sender held, so a receiver can notice "this references X and I do not have
+X". A scalar counter cannot do that: N+1 says a peer had seen *something* at
+N, never *which*.
+
+But dialectica already has that edge, at the granularity that matters here: a
+reply names its parent op id inside the signed preimage, so "I hold a reply to
+X and no X" is detectable with no `causalHistory` at all — the parent pointer
+is the causal edge the forum cares about. And the scopes differ in a way that
+matters more than the mechanism: SDS repairs per Stoa (one channel per Stoa),
+chasing gaps across every thread at once, most of which a given reader will
+never open. Dialectica needs repair per thread — someone opening a thread
+wants *that* thread complete, and a thread is a tree walkable from its root,
+so the set of ops needed to render it completely is computable from the ops
+already held. That is demand-driven repair, and it is not designed or built
+by this change.
+
+**A field a malicious peer sets freely is not an ordering until it has a
+bound.** Two adversarial cases follow from that sentence and are answered by
+decisions below: a far-future wall-clock is defeated by the field ordering
+nothing at all rather than by a clamp (clamping is kept as a display rule on
+top, decision 11); an inflated Lamport counter is bounded by a rule that a
+received counter raises this peer's clock only within a fixed distance
+(`ADVANCE_BOUND`, decision 4), so the attack costs its author one position and
+costs every honest peer nothing.
+
+#### A correction, recorded because of how it happened
+
+An earlier draft of this reasoning, while it still lived in `docs/PLAN.md`,
+briefly claimed that the Reliable Channel API's `MessageReceivedEvent` carries
+three fields and that ordering values were dropped lower still, inside SDS, in
+a type called `SdsDeliverable` — presented as a correction of an
+earlier, sourced, two-layer finding (that the event carries one field, and
+that the delivery module plugin drops even the timestamp it forwards). **That
+was wrong, and the type does not exist**: a sweep of every upstream checkout
+on the development machine found `SdsDeliverable` nowhere outside dialectica's
+own prose. It came from an agent report written into the document without
+being checked against source, and it cited as its evidence the very design
+document that says "one field."
+
+The lesson is about direction of travel: a claim that *removes* sourcing —
+replacing a quoted line number with a summary — should be held to a higher
+standard than the claim it replaces, not a lower one. The caveat it carried
+("no realised copy to read") read as a narrow sourcing gap about one field; it
+should have been read as a signal that nobody had opened the file.
+
 The shape of the existing code decides most of it. Three facts dominate:
 
 - `cmp_ops(a: OpEntry, b: OpEntry)` takes `OpEntry { arrival: &Arrival, id: &OpId }`.
