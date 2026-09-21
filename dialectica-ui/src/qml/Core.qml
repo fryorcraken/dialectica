@@ -152,25 +152,40 @@ QtObject {
         return root.call("list_threads", [JSON.stringify(request)])
     }
 
-    function getCapabilities(stoa) {
-        return root.call("get_capabilities", [JSON.stringify({ stoa: stoa })])
-    }
-
-    // One thread, as a flat list of posts each naming its parent.
+    // One page of a thread: the root, then its replies, flat and each naming its
+    // parent.
     //
-    // `thread` is the ROOT POST's op id, which never moves when the post is
-    // edited — an identifier that changed under a revision would leave a caller
-    // holding one that no longer answers to anything.
+    // **`thread` is the ROOT POST's op id — its `id`, never its
+    // `currentVersion`.** The two differ the moment the post is edited, and only
+    // the id is stable across a revision, so a caller passing the version asks
+    // for a thread that stops existing when its root is edited.
+    //
+    // The genesis record travels for the same reason it travels to
+    // `listThreads`: moderation cannot be resolved for a Stoa whose record this
+    // peer does not hold, and core re-derives the address from the record and
+    // refuses a mismatch — so passing it from here is safe rather than a hole.
     //
     // **Nesting is not in this reply and must not be looked for.** The items are
     // flat and carry no depth or indentation level; depth is a count of parents
-    // and the caller holds the parents. That is deliberate: which posts are in
-    // the thread is computed from the parent chain, never from the `thread`
-    // field an op carries, because that field is its author's claim and a reader
-    // placing posts by the claim would render one inside a conversation it was
-    // never part of.
+    // and the caller holds the parents. A depth reported from core would be a
+    // second answer to a question the parent field already settles, and the two
+    // could disagree on a partial set of ops.
+    //
+    // That flatness is deliberate rather than incidental: which posts are in the
+    // thread is computed from the parent chain, never from the `thread` field an
+    // op carries, because that field is its author's claim and a reader placing
+    // posts by the claim would render one inside a conversation it was never
+    // part of.
+    //
+    // No `perPage`: the screen takes core's default rather than naming a number
+    // here, for the reason `listStoas` records — a page size buried in this
+    // wrapper is one two screens would silently share.
     function readThread(request) {
         return root.call("read_thread", [JSON.stringify(request)])
+    }
+
+    function getCapabilities(stoa) {
+        return root.call("get_capabilities", [JSON.stringify({ stoa: stoa })])
     }
 
     // Create a Stoa. A title and nothing else, because there is no creator
@@ -315,5 +330,90 @@ QtObject {
     // user's disk.
     function whoAmI(stoa) {
         return root.call("who_am_i", [JSON.stringify({ stoa: stoa })])
+    }
+
+    // ---- normalising a probe reply --------------------------------------
+    //
+    // `call()` above normalises the ENVELOPE — failed versus answered. These two
+    // normalise the two probe ANSWERS that every posting screen reads, into one
+    // shape each with every field always present.
+    //
+    // **They live here, on the one singleton both screens already import,
+    // because two screens holding private copies is a rule that has to be
+    // remembered rather than one the data enforces.** They were byte-for-byte
+    // identical in `FeedScreen.qml` and `DThreadScreen.qml`, with nothing able to
+    // observe them drifting apart: a fix to the `=== true` strictness applied to
+    // one and not the other reintroduces, on the unfixed screen alone, exactly
+    // the defect the strictness exists to avert — and every gate stays green,
+    // because each copy is internally consistent. `DIdentityChip.qml`'s header
+    // named `FeedScreen.qml` as *the* normalising boundary, which stopped being
+    // true the moment a second screen normalised too; a shared helper is what
+    // makes that sentence stay true as screens are added.
+    //
+    // **What breaks without this**: nothing, immediately — that is the point, and
+    // why it is recorded rather than left to read as tidying. The cost lands on
+    // the next change to either rule, which is the change that has no failing
+    // test to warn it that a second copy exists.
+
+    // One `get_capabilities` reply, normalised to
+    // `{canPost: <bool>, reason: <string>}` — both fields always present, so a
+    // consumer never branches on which arm produced it.
+    //
+    // **Fail closed, and `=== true` is what makes that structural.** A probe that
+    // could not be reached, answered with something that is not a probe reply, or
+    // answered with an object carrying neither an affirmative capability nor a
+    // reason must all reach the SAME state as a probe reporting "not possible" —
+    // because the gate's whole point is that a box the user can type into can
+    // actually submit. `canPost !== true` covers every one of those without a
+    // branch per shape: absent, `undefined`, `"true"`, `1` and `null` are all
+    // not-`true`.
+    //
+    // A probe that supplied no reason leaves `reason` empty rather than inventing
+    // text: the spec forbids substituting a reason of the view's own, and an
+    // empty reason is a visible gap in core's answer rather than a plausible
+    // sentence covering for one.
+    function capabilityFrom(probe) {
+        var granted = probe.ok && probe.value.canPost === true
+        var supplied = probe.ok
+            ? (typeof probe.value.reason === "string" ? probe.value.reason : "")
+            : probe.error
+
+        return {
+            canPost: granted,
+            // An open gate carries no reason: there is no blockage to name, and a
+            // leftover reason beside an open composer would describe a state the
+            // reader is not in.
+            reason: granted ? "" : (typeof supplied === "string" ? supplied : "")
+        }
+    }
+
+    // One `who_am_i` reply, normalised to
+    // `{hasIdentity: <bool>, publicKey: <string>, reason: <string>}`.
+    //
+    // **A DIFFERENT question from the posting probe, and the two can honestly
+    // disagree** (`lib.rs:258`): a stored identity whose keystore permissions are
+    // too open is a real identity that cannot currently be used. Only this
+    // answers *who* a reply would be signed by.
+    //
+    // `hasIdentity === true` and nothing looser, for the reason
+    // `DIdentityChip.qml` states in its own header: `"true"`, `1`, `null` and
+    // `undefined` are all not-`true`, and each is truthy-or-falsy in a way that
+    // does not match what it means. A chip handed any of them under a looser test
+    // renders the IDENTITY PRESENT arm, claiming an identity the machine does not
+    // have, with every gate green.
+    function identityFrom(probe) {
+        var present = probe.ok && probe.value.hasIdentity === true
+        return {
+            hasIdentity: present,
+            publicKey: present && typeof probe.value.publicKey === "string"
+                ? probe.value.publicKey : "",
+            // The reason a user is nobody here, as core wrote it. Empty where
+            // there is an identity: a leftover reason beside a filled chip would
+            // describe a state the reader is not in.
+            reason: !present && probe.ok
+                    && typeof probe.value.reason === "string"
+                ? probe.value.reason
+                : (probe.ok ? "" : probe.error)
+        }
     }
 }

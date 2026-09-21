@@ -517,6 +517,165 @@ TestCase {
         return found
     }
 
+    // ---- the row treatment ------------------------------------------------
+    //
+    // `stoa-navigation-view`: "Where one listed Stoa ends and the next begins is
+    // rendered, not left to spacing". The requirement is about which half of a
+    // row belongs to which Stoa — the same concern as "a row carries the address
+    // as well as the title", read one level out — so these assertions are about
+    // the COUNT of boundaries against the count of rows, never about how a
+    // boundary is drawn. The capability's Purpose puts "colours, type, metrics"
+    // outside itself by name, and pinning the hairline's thickness or colour
+    // here would contract something that spec declines to.
+
+    function test_every_rendered_row_is_separated_from_the_next() {
+        // THREE rows, not one. A screen that drew a single separator for the
+        // whole list — or one that dropped it on the last row, which is the
+        // common convention and the thing the requirement rules out — passes any
+        // assertion phrased as "a separator exists". Only the count against the
+        // row count distinguishes those, so that is what is asserted: N rows
+        // produce N boundaries, and adding a row adds one.
+        var screen = makeList({
+            "list_stoas": '{"items":['
+                        + '{"stoa":"7f3a91c4' + "11".repeat(28) + '","foundingTitle":"Nym Research"},'
+                        + '{"stoa":"b02d5e77' + "22".repeat(28) + '","foundingTitle":"Transport Notes"},'
+                        + '{"stoa":"1ce0aa38' + "33".repeat(28) + '","foundingTitle":"Keystore Notes"}'
+                        + '],"page":0,"hasMore":false}'
+        })
+
+        compare(screen.readState, "ok", "the fixture's own precondition")
+        compare(screen.visibleRows.length, 3, "all three rows must be rendered")
+
+        var rules = spec.visibleNamed(screen, "rowSeparator")
+        compare(rules.length, 3,
+                "each of the 3 rows must carry a boundary, the last included; "
+                + "found " + rules.length)
+        screen.destroy()
+    }
+
+    // One screen, created, measured and destroyed before returning, so no two
+    // component trees are ever live at once. The earlier single-function form
+    // of the two tests below read a count from one screen, called `destroy()`
+    // on it — which only QUEUES the deletion onto the event loop — and then
+    // built a second screen through `makeList`, which reassigns `Core.bridge`.
+    // The two trees briefly coexisted, and correctness rested on `Repeater`
+    // populating synchronously and on the walk beating the queued deletion:
+    // timing assumptions the test neither stated nor pinned. Measuring inside
+    // a helper that owns the whole lifetime removes the overlap rather than
+    // documenting it.
+    //
+    // The count is captured while the object is live and only the NUMBER
+    // outlives it, so nothing here walks a destroyed tree.
+    function separatorsForRowCount(replies, expectedRows) {
+        var screen = makeList(replies)
+        compare(screen.readState, "ok", "the fixture's own precondition")
+        compare(screen.visibleRows.length, expectedRows,
+                "the fixture must render the row count it claims")
+        var count = spec.visibleNamed(screen, "rowSeparator").length
+        screen.destroy()
+        return count
+    }
+
+    // The two halves of what was one function. Neither alone is the relation:
+    // the one-row case is what a separator dropped on the last row fails (1
+    // expected, 0 found), and the four-row case is what a separator hoisted out
+    // of the delegate fails — a hoisted rule renders a FIXED number however many
+    // rows there are, so it can satisfy any single fixture whose row count it
+    // happens to equal and cannot satisfy two that disagree. Keeping the counts
+    // different (1 and 4, neither of them 3) is what makes the pair a relation
+    // rather than two independently tunable constants; the arithmetic is
+    // asserted in the second, against the first re-measured from its own screen.
+    function test_one_row_draws_exactly_one_boundary() {
+        compare(separatorsForRowCount({
+            "list_stoas": '{"items":[{"stoa":"' + "aa".repeat(32) + '","foundingTitle":"One"}],'
+                        + '"page":0,"hasMore":false}'
+        }, 1), 1, "one row must draw exactly one boundary")
+    }
+
+    function test_the_row_count_and_the_separator_count_move_together() {
+        var afterOne = separatorsForRowCount({
+            "list_stoas": '{"items":[{"stoa":"' + "aa".repeat(32) + '","foundingTitle":"One"}],'
+                        + '"page":0,"hasMore":false}'
+        }, 1)
+        var afterFour = separatorsForRowCount({
+            "list_stoas": '{"items":['
+                        + '{"stoa":"' + "a1".repeat(32) + '","foundingTitle":"One"},'
+                        + '{"stoa":"' + "a2".repeat(32) + '","foundingTitle":"Two"},'
+                        + '{"stoa":"' + "a3".repeat(32) + '","foundingTitle":"Three"},'
+                        + '{"stoa":"' + "a4".repeat(32) + '","foundingTitle":"Four"}'
+                        + '],"page":0,"hasMore":false}'
+        }, 4)
+
+        compare(afterFour, 4, "four rows must draw exactly four boundaries")
+        compare(afterFour - afterOne, 3,
+                "three further rows must add three further boundaries, got "
+                + (afterFour - afterOne))
+    }
+
+    function test_an_empty_list_draws_no_row_boundary() {
+        // The other direction, and not a formality: a separator hoisted to the
+        // list container rather than into the delegate renders on the empty
+        // state too, where it is a rule belonging to a row that is not there.
+        // Both count assertions above are blind to that — neither instantiates
+        // an empty list.
+        var screen = makeList({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}'
+        })
+
+        compare(screen.readState, "ok",
+                "an empty membership is the ok state, not a failure")
+        compare(screen.visibleRows.length, 0, "the fixture's own precondition")
+        compare(spec.visibleNamed(screen, "rowSeparator").length, 0,
+                "an empty list must draw no row boundary")
+        screen.destroy()
+    }
+
+    // NO SPEC: the type a row title is set at is NOT contracted anywhere.
+    // `stoa-navigation-view`'s Purpose puts the visual system — "colours, type,
+    // metrics, the mark" — outside that capability by name, so the delta this
+    // change adds deliberately covers the row boundary and stops there. The
+    // design reference sets a row title at 19px against body's 15px, and this
+    // pins the RELATION that establishes — a row title outweighs the prose
+    // around it without reaching the screen's own heading — rather than the
+    // literal 19, which a reword of the reference may legitimately change and
+    // which no requirement makes binding.
+    function test_a_row_title_is_set_apart_from_body_prose_without_reaching_a_heading() {
+        var screen = makeList({
+            "list_stoas": '{"items":[{"stoa":"' + "7f3a91c4" + "00".repeat(28)
+                        + '","foundingTitle":"Nym Research"}],"page":0,"hasMore":false}'
+        })
+
+        // Found by its rendered content, so a title element that vanished or was
+        // renamed fails here rather than trivially satisfying the assertion.
+        var titles = spec.titleElementsFor(screen, "Nym Research")
+        compare(titles.length, 1, "the title element must be found by its content")
+
+        // Against the TOKENS, not against a hardcoded 19. The claim under test
+        // is the ordering between three roles in the type scale; a suite that
+        // pinned the number would fail on a reference revision that kept the
+        // ordering, and would pass on a DTheme where body had been raised to 19
+        // and the distinction collapsed.
+        compare(titles[0].font.pixelSize, DTheme.rowTitle.pixelSize,
+                "the row title must be set at the rowTitle token")
+        verify(DTheme.rowTitle.pixelSize > DTheme.body.pixelSize,
+               "a row title must outweigh the prose around it: rowTitle "
+               + DTheme.rowTitle.pixelSize + " vs body " + DTheme.body.pixelSize)
+        verify(DTheme.rowTitle.pixelSize < DTheme.heading.pixelSize,
+               "a row title must not compete with the screen's own heading: "
+               + "rowTitle " + DTheme.rowTitle.pixelSize + " vs heading "
+               + DTheme.heading.pixelSize)
+        screen.destroy()
+    }
+
+    // **Narrowed by the `moderation-screen` change's amendment**, and what it
+    // still forbids is the whole of what had a permanent reason. The owner
+    // amended `stoa-navigation-view` to admit a MARKED PLACEHOLDER in the count
+    // position; every assertion below survives that amendment unchanged, because
+    // a placeholder rendering no number satisfies all of them. If a later change
+    // renders a numeral there, this test and
+    // `test_no_digit_is_rendered_that_the_reply_did_not_supply` both fail — which
+    // is the intended outcome, since the amendment permits a placeholder rather
+    // than a number.
     function test_no_row_renders_a_count_of_held_posts_or_anything_global() {
         // A thread listing is answered too, so a screen tempted to render some
         // other call's page length in the row's margin has one available.
@@ -551,6 +710,113 @@ TestCase {
         // page length rendered as though it were a total.
         verify(shown.indexOf("3 posts") < 0 && shown.indexOf("3 POSTS") < 0,
                "a page length from another call must not appear in a row")
+        screen.destroy()
+    }
+
+    // ---- the record comes from the reply ----------------------------------
+    //
+    // The owner's defect. Every fixture below hands the screen a reply and then
+    // asserts on what it holds — none of them writes `genesisByStoa` directly,
+    // which is what the older tests in this file do and is exactly why the defect
+    // survived them: a test that seeds the map is a test that assumes the very
+    // thing that was missing.
+
+    function test_a_listed_stoa_is_openable_from_the_reply_alone() {
+        // The click that failed. "Open" passes `genesisFor(stoa)`, and when the
+        // listing carried no record that was "" — zero bytes, which the core
+        // refuses as "genesis record ended mid-field". Nothing is seeded here.
+        var addr = "aa".repeat(32)
+        var genesis = "01" + "cc".repeat(32) + "00" + "0000000A" + "74657374"
+        var screen = makeList({
+            "list_stoas": '{"items":[{"stoa":"' + addr + '","foundingTitle":"Held",'
+                        + '"genesis":"' + genesis + '"}],"page":0,"hasMore":false}'
+        })
+
+        compare(screen.genesisFor(addr), genesis,
+                "the record the listing reported must be what Open hands over")
+        verify(screen.genesisFor(addr) !== "",
+               "an empty record is the input that produces 'ended mid-field'")
+        screen.destroy()
+    }
+
+    function test_a_created_stoa_is_openable_from_the_creation_reply_alone() {
+        var addr = "dd".repeat(32)
+        var genesis = "01" + "ee".repeat(32) + "00" + "00000004" + "74657374"
+        var screen = makeList({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "create_stoa": '{"stoa":"' + addr + '","foundingTitle":"New",'
+                         + '"policy":"open","genesis":"' + genesis + '"}'
+        })
+        screen.create()
+
+        compare(screen.createState, "created")
+        compare(screen.genesisFor(addr), genesis,
+                "a Stoa just created must be openable without waiting for a reload")
+        compare(screen.canShare(addr), true,
+                "and shareable — the same absence hid both affordances")
+        screen.destroy()
+    }
+
+    function test_a_record_survives_paging_away_from_the_stoa_that_carried_it() {
+        // Additive rather than replacing. A peer with more Stoas than fit a page
+        // would otherwise lose the record for everything not on the current page,
+        // so Open would work on page 0 and fail on page 1.
+        var first = "11".repeat(32)
+        var second = "22".repeat(32)
+        var screen = makeList({
+            "list_stoas": '{"items":[{"stoa":"' + first + '","foundingTitle":"One",'
+                        + '"genesis":"aabb"}],"page":0,"hasMore":true}'
+        })
+        compare(screen.genesisFor(first), "aabb")
+
+        Core.bridge = bridgeFor({
+            "list_stoas": '{"items":[{"stoa":"' + second + '","foundingTitle":"Two",'
+                        + '"genesis":"ccdd"}],"page":1,"hasMore":false}'
+        })
+        screen.page = 1
+        screen.reload()
+
+        compare(screen.genesisFor(second), "ccdd", "the new page's record is recorded")
+        compare(screen.genesisFor(first), "aabb",
+                "and the previous page's record is NOT dropped")
+        screen.destroy()
+    }
+
+    function test_an_item_short_of_its_record_is_not_recorded_as_an_empty_one() {
+        // The guard that keeps the defect from coming back wearing a success. An
+        // "" written into the map would make `canShare` true and would send ""
+        // straight to `read_feed` — the original failure, now with a visible
+        // share button promising a reference that cannot be built.
+        var missing = "33".repeat(32)
+        var empty = "44".repeat(32)
+        var screen = makeList({
+            "list_stoas": '{"items":['
+                        + '{"stoa":"' + missing + '","foundingTitle":"No field"},'
+                        + '{"stoa":"' + empty + '","foundingTitle":"Empty","genesis":""}'
+                        + '],"page":0,"hasMore":false}'
+        })
+
+        // **Asserted against the map's own keys, not against `genesisFor`.**
+        // `genesisFor` returns "" both when the key is absent and when it holds
+        // an explicit "", so every assertion phrased through it passes whichever
+        // branch `rememberGenesis` takes — measured: removing the `genesis === ""`
+        // half of the guard left 81/81 green. `hasOwnProperty` is the only
+        // accessor that tells "never written" from "written as empty", which is
+        // the distinction the guard exists to make.
+        verify(!screen.genesisByStoa.hasOwnProperty(missing),
+               "an absent field must leave NO key behind, not a key holding ''")
+        verify(!screen.genesisByStoa.hasOwnProperty(empty),
+               "an empty field must leave no key either — writing '' in is the "
+               + "regression this guard prevents, and it is invisible to genesisFor")
+
+        compare(screen.genesisFor(missing), "", "an absent field records nothing")
+        compare(screen.genesisFor(empty), "", "and an empty one is not a record either")
+        compare(screen.canShare(missing), false,
+                "no share may be offered for a reference that cannot be built")
+        compare(screen.canShare(empty), false)
+        // The listing itself still succeeded: "which Stoas am I in" was answered.
+        compare(screen.readState, "ok",
+                "an item short of its record is not a failed read")
         screen.destroy()
     }
 
@@ -1986,6 +2252,116 @@ TestCase {
                    + "taken from another call's page length. Rendered: " + shown)
         }
         screen.destroy()
+    }
+
+    // ---- the count placeholder --------------------------------------------
+
+    // The amended requirement permits a placeholder and requires that it be
+    // derived from no reply. **The assertion is that it does not MOVE**, which
+    // is the property that distinguishes a placeholder from a page length
+    // rendered in the count position — the failure the requirement names.
+    //
+    // A null implementation that rendered a constant would satisfy "does not
+    // move" for free, so the fixtures below differ in every quantity a screen
+    // could reach for: the number of Stoas listed, and the number of threads the
+    // other call answered. If the position were bound to either, the two runs
+    // would differ.
+    // Both halves of the amended requirement, in one function.
+    //
+    // **They were written as two and one of them did not appear in the run**, at
+    // two different names, with no warning of any kind. What resolved it was
+    // folding them together; what the cause was is NOT established, and saying
+    // so is the honest version — an earlier draft of this comment blamed a
+    // runner enumeration limit and that was a guess dressed as a measurement.
+    // The count that looked like evidence for it was my own miscount: a
+    // `grep -c "    function test_"` reads the words "function test_" inside a
+    // comment as a declaration, so the file's real total was one lower than the
+    // number the claim rested on.
+    //
+    // The diagnostic that actually works, if a test here stops appearing:
+    // list the declared names and the run names and compare them, rather than
+    // comparing two totals. Two totals cannot say which one is missing, and one
+    // of them is easy to get wrong.
+    //
+    // **That diagnostic is now a gate and runs on every spec.**
+    // `check_every_test_ran` in `run-qml-tests.sh` does exactly this comparison
+    // and fails the run on a declared test that did not execute — so a
+    // recurrence here, or in any sibling file, is now loud rather than silent.
+    // It needs no root cause to work, which is what makes it the right answer
+    // to an incident whose cause was never established.
+    //
+    // ONE mechanism for silent test loss has since been reproduced, though it
+    // is NOT established as the cause of the incident above — no `_data` name
+    // appears anywhere in this file's history. QtTest treats `test_foo_data()`
+    // as the DATA PROVIDER for `test_foo()`, so declaring both removes BOTH
+    // from the run: measured on Qt 6.10.3 as `3 passed, 0 failed` with neither
+    // function executed, the only trace a `WARNING: ... no data supplied` line.
+    // Recorded here because it is the same defect SHAPE, and because the next
+    // person to lose a test in this file should check that name pattern first.
+    function test_the_row_count_placeholder_claims_no_measurement() {
+        // ---- it does not read as a measurement ---------------------------
+        //
+        // A placeholder saying "0 posts" would be constant AND false about
+        // every Stoa on the list, so the two halves below are both needed.
+        var screen = makeList({
+            "list_stoas": '{"items":[{"stoa":"' + "cc".repeat(32)
+                        + '","foundingTitle":"Transport Notes"}],'
+                        + '"page":0,"hasMore":false}'
+        })
+        var text = spec.namedAnywhere(screen, "rowCountPlaceholder")[0].text
+
+        verify(spec.digitRunsIn(text).length === 0,
+               "a placeholder carrying a numeral reads as a count: " + text)
+        // NO SPEC: the requirement says a placeholder must not be presented as
+        // this peer's measurement and does not fix the wording. This pins that
+        // it does not assert emptiness, which is the one substitute value that
+        // would be both digit-free and false.
+        verify(text.toLowerCase().indexOf("nothing received") < 0
+               && text.toLowerCase().indexOf("no posts") < 0,
+               "asserting emptiness is a claim about a count nothing computed: "
+               + text)
+        screen.destroy()
+
+        // ---- it does not MOVE with the data ------------------------------
+        //
+        // The property that distinguishes a placeholder from another call's
+        // page length rendered in the count position, which is the failure the
+        // requirement names. The two fixtures differ in every quantity a screen
+        // could reach for — the number of Stoas listed and the number of threads
+        // the other call answered — so a position bound to either would differ
+        // between them.
+        var addrOne = "aa".repeat(32)
+        var addrTwo = "bb".repeat(32)
+
+        var thin = makeList({
+            "list_stoas": '{"items":[{"stoa":"' + addrOne + '","foundingTitle":"One"}],'
+                        + '"page":0,"hasMore":false}',
+            "list_threads": '{"items":[],"page":0,"hasMore":false}'
+        })
+        compare(thin.visibleRows.length, 1)
+        var firstFound = spec.namedAnywhere(thin, "rowCountPlaceholder")
+        compare(firstFound.length, 1, "the row carries the placeholder")
+        var placeholder = firstFound[0].text
+        verify(placeholder !== "", "and it renders something")
+        thin.destroy()
+
+        var thick = makeList({
+            "list_stoas": '{"items":[{"stoa":"' + addrOne + '","foundingTitle":"One"},'
+                        + '{"stoa":"' + addrTwo + '","foundingTitle":"Two"}],'
+                        + '"page":0,"hasMore":true}',
+            "list_threads": '{"items":[{"thread":"t1"},{"thread":"t2"},'
+                          + '{"thread":"t3"},{"thread":"t4"}],'
+                          + '"page":0,"hasMore":true}'
+        })
+        compare(thick.visibleRows.length, 2, "a different amount of data")
+        var bothFound = spec.namedAnywhere(thick, "rowCountPlaceholder")
+        compare(bothFound.length, 2, "one placeholder per row")
+
+        for (var i = 0; i < bothFound.length; i++)
+            compare(bothFound[i].text, placeholder,
+                    "the placeholder is the same string whatever the data, so "
+                    + "it is not another call's page length in disguise")
+        thick.destroy()
     }
 
     // ---- the two paste outcomes, pinned by meaning rather than by difference

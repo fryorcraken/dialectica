@@ -118,6 +118,77 @@ check_bindings() {
     return 1
 }
 
+# A test function that is DECLARED and never RUNS, with the suite still green.
+#
+# WHY IT IS NEEDED. `tst_stoa_screens.qml` documents an incident where two tests
+# were written, one never appeared in the run under two different names, and
+# folding them into one function was what resolved it. The cause was never
+# established, and the comment there says so. This check does not need the cause:
+# it compares the names declared in the file against the names the runner
+# reported, so it fails on a test that vanished for ANY reason, including one
+# nobody has diagnosed.
+#
+# ONE MECHANISM IS NOW REPRODUCED, and it is worth recording because it is
+# entirely silent and it takes TWO tests out rather than one. QtTest treats
+# `test_foo_data()` as the DATA PROVIDER for `test_foo()`, not as a test:
+#
+#   function test_the_placeholder()      { verify(true) }
+#   function test_the_placeholder_data() { /* assertions here */ }
+#
+# Measured on Qt 6.10.3, this reports `3 passed, 0 failed` — and NEITHER
+# function ran as a test. The `_data` body was called as a provider, returned
+# undefined, and `test_the_placeholder` was then skipped for want of rows. The
+# only trace is a `WARNING: ... no data supplied` line, which is not a failure
+# and which `check_bindings` does not look for. A suite can lose a matched pair
+# of tests this way and stay green, which is this repo's worst defect shape.
+#
+# WHY NAMES RATHER THAN A COUNT. The comment in `tst_stoa_screens.qml` reaches
+# the same conclusion from the other end: a count comparison cannot say WHICH
+# test is missing, and the count of declarations is itself easy to get wrong —
+# `grep -c "function test_"` reads those words inside a comment as a
+# declaration, which is how an earlier guess at this defect got its number. The
+# declaration pattern below is anchored to the four-space indent a TestCase
+# member has, so prose mentioning the words does not match.
+check_every_test_ran() {
+    out=$1
+    spec=$2
+    missing=0
+    # Declared: `    function test_<name>(` at member indent.
+    declared=$(grep -o '^    function test_[A-Za-z0-9_]*' "$spec" \
+               | sed 's/^    function //' | sort -u)
+    # Ran: qmltestrunner prints `PASS   : qmltestrunner::<Case>::<name>()`, so
+    # the line carries FOUR colon pairs and the name is the last `::` segment
+    # before the parens. Matching the trailing `::<name>(` anchors on the one
+    # part that is stable — an earlier `[^:]*::` form matched nothing, because
+    # the case prefix contains colons itself, and every test then read as
+    # missing. A check that reports every test missing is as useless as one that
+    # reports none, so both directions are pinned in tst_check_every_test_ran.sh.
+    #
+    # Only RESULT lines count. A `WARNING:` line also names the function —
+    # including, precisely, the `no data supplied for test_foo()` line the
+    # `_data` defect emits — so accepting any `::name()` would let the skipped
+    # half of that pair read as having run. Measured: with warnings counted,
+    # the probe reported only `test_the_placeholder_data` missing and let
+    # `test_the_placeholder`, which was also skipped, pass as run.
+    ran=$(grep -E '^(PASS|FAIL!|SKIP|XFAIL|XPASS|BLACKLIST)' "$out" \
+          | grep -o -E '::[A-Za-z0-9_]+\(\)' \
+          | sed 's/^:://; s/()$//' | sort -u)
+    for name in $declared; do
+        if ! printf '%s\n' "$ran" | grep -qx "$name"; then
+            if [ "$missing" -eq 0 ]; then
+                echo "qml tests: $spec — declared test(s) that did not run:" >&2
+            fi
+            echo "           $name" >&2
+            missing=$((missing + 1))
+        fi
+    done
+    [ "$missing" -eq 0 ] && return 0
+    echo "           The spec above still reports a pass: a test that never ran" >&2
+    echo "           cannot fail. If a name ends in _data, QtTest consumed it as" >&2
+    echo "           the data provider for the same-stem test and took BOTH out." >&2
+    return 1
+}
+
 # Run ONE spec and check its output. The single place a spec is executed and
 # captured, used by both the named-spec path and the whole-suite loop below.
 #
@@ -138,6 +209,12 @@ run_spec() {
     spec=$1
     out=$2
     rc=0
+    # `check_bindings` assigns its own `spec` (shell functions share globals),
+    # so the path is held here under a name nothing else writes. Without this
+    # the declaration grep below runs against a basename and cannot open the
+    # file — which made the check report `No such file or directory` rather
+    # than a result, the shape of a gate that measures nothing.
+    spec_path=$1
     echo "--- $(basename "$spec")"
     if [ -n "${extra_import:-}" ]; then
         "$runner" -input "$spec" -import "$qml_dir" -import "$extra_import" \
@@ -147,6 +224,7 @@ run_spec() {
     fi
     cat "$out"
     check_bindings "$out" "$(basename "$spec")" || rc=1
+    check_every_test_ran "$out" "$spec_path" || rc=1
     return "$rc"
 }
 

@@ -1689,21 +1689,34 @@ own answer:
 > are built, tested and merged, and they stay. The read-time authority check
 > below **remains the design** whenever the publishing half lands.
 >
-> **The exclusion reaches the UI: the MVP ships no moderation screen.** That
-> follows from "no moderation UI" above, and it is restated because §9.2's MVP
-> list is where a screen author looks and, before the change that added this
-> note, it did not say so. §9.2 now says it too; both sites are kept because
-> each is reached from a different direction.
+> ~~**The exclusion reaches the UI: the MVP ships no moderation screen.**~~
+> **REVERSED BY THE OWNER: the MVP ships the moderation screen, inert.** The
+> exclusion above still reaches every op, every publish path and every feed —
+> what it no longer reaches is the screen. The owner decided screen 07 ships with
+> its controls calling nothing, because they want to see it; §9.2's ruling 3
+> carries the same reversal, and both sites are kept because each is reached from
+> a different direction.
+>
+> **Read this as a scope decision and not as a contract change.** The paragraph
+> below is unamended and still true: there is no moderation-publishing method, so
+> the screen's controls have nothing to call. The `moderation-view` capability
+> contracts what the screen must therefore say about itself — an inert
+> destructive control is a hazard rather than a neutral placeholder, because a
+> moderator who believes a post is hidden stops dealing with it, and on this
+> screen a successful moderation and a control that does nothing look identical.
 >
 > **It is blocked at the contract, not merely deferred**, which is the part
-> worth knowing before anyone treats the screen as a phase somebody skipped. The
+> worth knowing before anyone treats the screen's CONTROLS as a phase somebody
+> skipped. The
 > `Dialectica` trait in `dialectica/rust-lib/src/lib.rs` exposes `publish_post`,
 > `publish_reply` and `publish_vote` and **no moderation-publishing method at
 > all**; `publish_moderation` appears once in that file and only hypothetically,
-> as the fourth pair a reshaping argument would have had to keep in step. So a
+> as the fourth pair a reshaping argument would have had to keep in step. ~~So a
 > moderation screen is not a screen someone declined to write — there is nothing
-> for it to call. Read the trait rather than this sentence for the current
-> surface.
+> for it to call.~~ **The screen now exists and that sentence's premise holds
+> anyway**: it was written to explain why no screen existed, and what it actually
+> establishes is why the screen that does exist publishes nothing. Read the trait
+> rather than this sentence for the current surface.
 >
 > ~~The limitation two paragraphs down — that an `Unhide` cannot currently win —
 > is the reason the sequencing is comfortable.~~ **That limitation is lifted**
@@ -2941,30 +2954,27 @@ deciding op, and that a hidden reply is omitted by default while a hidden root
 is returned marked. Restating either here would give the rule two copies that
 drift, and a reader finding the stale one cannot tell.
 
-**What remains live is a gap the spec cannot close**, because it is a
-divergence between two reads rather than a property of one: **the feed reports
-moderation as a boolean and the thread read reports the three-valued object.**
-Both are built from the same resolver, so a view must currently branch on which
-call produced an item — which §2.5's "JSON shapes are source-independent"
-forbids. The thread read's shape is the correct one; the feed's is the older.
-Until the feed is brought to it, `restored` is a state the feed cannot express
-at all.
+**What remains live is a gap the spec cannot close**: the feed and the thread
+read report moderation in two different shapes, so a view must branch on which
+call produced an item. Still open, and now measured at the first screen that had
+to render the other shape — the reasoning and the measurement are in
+`ui-thread-view`'s `design.md` D7.
 
-**And one obligation the core does not meet**: a view must not render a hidden
+~~**And one obligation the core does not meet**: a view must not render a hidden
 post indistinguishably from a visible one in the show-hidden view. A reader who
-asked to see what was hidden is owed the knowledge of which ones those were.
+asked to see what was hidden is owed the knowledge of which ones those were.~~
+**Contracted on the view side — see the `thread-view` spec**, whose *A withheld
+body and an empty body are rendered differently* requires a withheld body to
+render as a moderation outcome rather than as a blank post, and requires the two
+to be distinguishable on screen.
 
 **The bidi obligation is wider than §11.1 currently states it, and that is a
-third thing for that list.** §11.1 frames Unicode and bidi rendering around
-*metadata titles*, because that is where it was found: the metadata op
-deliberately does not sanitise, since normalising would break op-id agreement
-between peers. The same reasoning applies unchanged to **every** attacker-
-supplied string this section renders — post bodies above all, which are the
-largest and least constrained of them, and also the abbreviated **public key** a
-view renders beside an author (~~author addresses~~ — issue #80 deleted the
-author address). `op.rs` preserves display text exactly and never normalises it,
-by design and with a test pinning that; so the obligation follows the text
-everywhere it goes, not only to the field where it was first noticed.
+third thing for that list.** It reaches every attacker-supplied string, not only
+the metadata titles §11.1 frames it around. Insofar as it reaches post bodies it
+is now discharged on the view side — `thread-view`'s *Every string rendered from
+an item is rendered as the read supplied it*, with the reasoning in
+`ui-thread-view`'s `design.md` D8. What is still open here is the obligation's
+reach beyond post bodies.
 
 **Edit history is deliberately not in this call.** §5.7 keeps superseded
 versions in the op log, and a thread view that returned every version of every
@@ -3507,9 +3517,12 @@ the costs below were named and accepted.
 All of it over **delivery's reliable channel** (§4.1). **No Logos Storage** —
 §4.6's attachments-by-CID are out, so a post in the MVP is text.
 
-**Out of the MVP:** moderation (§6) — **including any moderation screen**,
-per-Stoa identity (§5.2), Logos Storage (§4.6), **voting and vote-based ordering
-(§7.2)**, and **unread counts** (§9.1's question 8).
+**Out of the MVP:** moderation (§6) — ~~**including any moderation screen**~~
+**but not the moderation screen, which ships inert by owner reversal of ruling
+3**, per-Stoa identity (§5.2), Logos Storage (§4.6), **voting and vote-based
+ordering (§7.2)**, and ~~**unread counts** (§9.1's question 8)~~ **unread counts,
+which ship as a marked placeholder on a Stoa row by owner reversal of ruling 2 —
+the concept stays out, the rendered position does not**.
 
 Nothing on either list is deleted or withdrawn. `moderation.rs` and its specs are
 built, tested and merged and they stay; §4.6 stands as the attachment design for
@@ -3530,13 +3543,47 @@ relevance design; its MVP membership does not. Read from the contract side this
 is the same fact: core computes **exactly one ordering and takes no `order`
 argument**, so "by relevance" is not implementable today — see the list below.
 
-**2. Unread counts are out of the MVP.** §9.1's question 8 is now a decided
-exclusion rather than an open question, with its reasoning kept there.
+**2. Unread counts are out of the MVP** — **amended: the count is out, the
+rendered position is in.** §9.1's question 8 is a decided exclusion rather than an
+open question, with its reasoning kept there, and that reasoning is untouched:
+unread needs peer-local state that is not a projection of ops, and inventing the
+first instance of that as a feed field is how it gets designed badly.
 
-**3. Moderation stays out, and the MVP ships no moderation screen.** §6 carries
-the ruling and the reason it is blocked at the contract rather than merely
-deferred: the trait exposes no moderation-publishing method, so there is nothing
-for a screen to call.
+**What the owner reversed is narrower than the ruling's heading suggests**, and
+the distinction is the whole of it. A Stoa row renders an unread *position*
+carrying a placeholder, so the screen can be seen as designed; `listThreads` still
+gains no `unread` field, no peer-local state is built, and nothing computes a
+count. The amended `stoa-navigation-view` requirement carries the conditions the
+placeholder must meet — marked as a placeholder in the source, derived from no
+other call's reply, and not presented as a measurement.
+
+**This entry is not worked off by a core change**, which is why it reads
+differently from the case-2 list below. No call arriving removes it; a decision to
+build peer-local state for its own sake is what does.
+
+**3. ~~Moderation stays out, and the MVP ships no moderation screen.~~ Moderation
+stays out; the MVP ships the moderation SCREEN, inert.** §6 carries the ruling and
+the reason it is blocked at the contract rather than merely deferred: the trait
+exposes no moderation-publishing method, so there is nothing for a screen to call.
+
+**The screen half was reversed by the owner**, who decided the MVP ships screen 07
+with every control calling nothing, because they want to see it. The reasoning
+above is not withdrawn and the contract has not moved — it is the same sentence
+about the same trait — so read the strike as applying to the second clause only.
+**Moderation itself is still out**: no op is published, nothing is hidden, and no
+feed is filtered by anything the screen displays.
+
+A previous agent refused to build the screen on the strength of the unamended
+ruling and asked rather than proceeding, which is the outcome this file is written
+for. Recorded because the next reader's question is whether the screen arrived by
+decision or by drift.
+
+What the reversal costs, stated rather than left to be met: a destructive control
+that does nothing is a hazard of its own, because a moderator who believes a post
+is hidden stops dealing with it. The `moderation-view` capability is what closes
+that — it requires the screen to carry the absence in its own rendering rather
+than relying on nothing visibly happening, which is what a successful moderation
+would also look like here.
 
 **4. The core contract is the UI authority.** Where the design bundle asks for
 something core cannot honestly serve, **the bundle is amended** — core does not
@@ -3570,13 +3617,23 @@ wrong, so it is stated rather than left to be found:
 
 - `stoa-navigation-view`'s **"Every number rendered is one this peer can
   actually answer"** forbids a rendered count on the Stoa list and the join
-  preview, including substituting another call's page length.
+  preview, including substituting another call's page length. **Amended by the
+  `moderation-screen` change**, which is the mechanism this paragraph prescribes
+  working as intended rather than an exception to it: the owner wanted the
+  design's row counts, a scope note could not deliver them, so the requirement was
+  amended. It now permits a **marked placeholder** on a row and keeps every
+  permanent prohibition — nothing global, nothing derived from another call's
+  reply, nothing presented as a measurement. Read the requirement, not this line,
+  for the conditions.
 - `composer-view`'s **"The vote control displays no score"** forbids a rendered
-  score on the vote control.
+  score on the vote control. Unamended.
 
 Case 2 permits a placeholder **where nothing forbids one**. Where a requirement
 forbids one, the requirement governs, and relaxing it is a spec change rather
-than a scope note.
+than a scope note. **That the first bullet has since been amended does not soften
+this**; it is the evidence for it. The route from "the owner wants a placeholder
+the spec forbids" to a placeholder on screen ran through a spec delta, reviewed as
+one, and not through an edit to this file.
 
 #### Case 2: where core cannot serve what the bundle asks
 
@@ -3601,24 +3658,75 @@ core grows to serve it** rather than leaving it to be disproved.
    computes one: a listed item carries an address and a title, no call answers
    how many posts this peer holds for a Stoa, and the thread listing reports
    whether a further page exists rather than a total.
-   **This entry is one the narrowing above governs** — `stoa-navigation-view`
+   ~~**This entry is one the narrowing above governs** — `stoa-navigation-view`
    forbids the placeholder *number* here, so the position is left empty rather
-   than filled.
+   than filled.~~ **The requirement was amended and the position is now filled
+   with a marked placeholder**, per the owner reversal recorded above. The
+   narrowing paragraph still governs this entry — it is what sent the change
+   through a spec delta instead of through a note here. `DStoaListScreen.qml`
+   marks the value at the site that renders it, and core growing a call that
+   answers the number is what removes both the placeholder and this entry.
 
-   **Unread is not on this list, and belongs to ruling 2 instead.** The
-   distinction is worth keeping, because this list is the "work it off later"
-   checklist: every entry here names a call core does not yet have, so core
-   growing the call is what removes the entry. Unread is excluded by decision —
-   ruling 2 — not by a missing call, so it is not worked off by a core change
-   and reopening it is a fresh scope ruling rather than a gap being closed.
+   **Unread is on this list now, and it is the one entry no core change works
+   off.** It was excluded from this list on the ground that ruling 2 is a decision
+   rather than a missing call, and that remains exactly true of the *count*. What
+   put it here is the *rendered position*, which the owner's amendment to ruling 2
+   admits and which is a placeholder like any other. Keep the two apart when
+   working the list off: this list is the "work it off later" checklist and nearly
+   every entry names a call core does not yet have, so core growing the call is
+   what removes it. Unread is the exception — excluded by decision, ruling 2, not
+   by a missing call — so no core change removes it and reopening the count is a
+   fresh scope ruling rather than a gap being closed. What the amendment admitted
+   is the position, not the concept.
 4. **History is kept, but no contract method reads earlier versions.**
    `revision.rs` states that superseded versions stay in the op log; the trait
    exposes no method reading them, `read_thread` being the thread read. So "read
    the earlier versions" is a case 2 control.
-5. **No moderation-publishing method**, per ruling 3 — the case 2 entry with the
+
+   **Built inert on the thread screen**, as `DThreadScreen.qml` renders it:
+   present beside a revised post, offering no action, and reaching no call. It
+   is static text rather than a button with an empty handler, so there is no
+   route to a call at all rather than a route that happens to go nowhere.
+5. **The thread screen's vote control is inert, and this entry is narrower than
+   entry 1.** Entry 1 says no score is rendered anywhere; this says the arrows on
+   a thread item do not *act* either. `publish_vote` exists, so the control could
+   be wired — but voting is out of the MVP by ruling 1, and a working vote
+   control on one screen would be the one place in the interface where a ruling
+   is contradicted by a live affordance. So `DThreadScreen.qml` renders it
+   `interactive: false`.
+
+   **The feed's control is wired and this one is not**, which is a real
+   inconsistency rather than an oversight: the feed's predates the ruling. Making
+   the two agree is a decision about which way, not a gap in core, so it does not
+   come off this list by a core change.
+6. **No moderation-publishing method**, per ruling 3. ~~The case 2 entry with the
    simplest resolution, since ruling 3 also removes the screen that would carry
-   the control.
-6. **The DELIVERY lamp has no source and is left unbound.** `DStatusBar` renders
+   the control.~~ **That resolution is gone: ruling 3's screen half was reversed
+   and the screen ships**, so this is now an ordinary case 2 entry with controls
+   on screen that call nothing. Read the `Dialectica` trait for the current
+   surface; `publish_moderation` is not on it.
+
+   **The inert controls are `DModerationScreen.qml`'s**, and the requirement that
+   makes them acceptable rather than dangerous is `moderation-view`'s "The screen
+   states that nothing it offers takes effect". An inert destructive control is
+   unlike the other placeholders on this list: an unfilled position claims
+   nothing, while a button labelled "Mark as moderated" claims it moderates. The
+   screen therefore says so in what it renders, and the contract requires it to
+   rather than leaving it to a comment. Core growing the method removes this
+   entry, that rendering, and nothing else — the screen stays.
+6. **No moderated-author and moderated-post lists.** Nothing enumerates what a
+   Stoa has moderated: `moderation::resolve` answers whether one named target is
+   hidden, which is a different question from "what is hidden here", and the trait
+   exposes no listing at all. `DModerationScreen.qml` therefore renders fixtures
+   held in the view, marked at the site that declares them, and
+   `moderation-view`'s "No control on this screen makes a call, and no reply is
+   rendered as one" requires that they not be presented as this peer's moderation
+   state. A core listing call removes the entry.
+7. **No unread count, and the position is a placeholder** — the entry that belongs
+   to ruling 2 rather than to a missing call, and the only one on this list a core
+   change does not work off. See entry 3 and ruling 2 for why the two halves are
+   kept apart.
+8. **The DELIVERY lamp has no source and is left unbound.** `DStatusBar` renders
    three lamps — delivery, storage, zone — and nothing can tell it the truth
    about the first. `delivery_module.lidl` carries the outcome as three channel
    events (`channelMessageSent`, `channelMessageError`, `messagePropagated`),
@@ -3637,20 +3745,20 @@ core grows to serve it** rather than leaving it to be disproved.
 
    The six tooltip strings are likewise unset. `DStatusBar` invents nothing when
    they are, so no explanation is shown and none is wrong.
-7. **The STORAGE lamp reads the last screen's read, which is a mock.** Nothing in
+9. **The STORAGE lamp reads the last screen's read, which is a mock.** Nothing in
    the contract reports whether the store is readable as a machine-wide
    condition — each read reports its own outcome — so `Main.qml` binds the lamp
    to whether the screen that last read the store succeeded. It is honest about
    the read it describes and is not the machine-wide claim the lamp's position
    implies. Marked as a mock in `Main.qml`.
-8. **No fonts are shipped, so the design does not render at its intended
-   density.** `DTheme` names Spectral and IBM Plex Mono — matching the design
-   bundle's `Theme.qml` exactly — but `dialectica-ui/src/` contains no font
-   files, so Qt silently falls back to a system font. The bundle's README warns
-   that shipping them matters "or the density of the design changes", and this is
-   the repo's silent-failure house style: nothing errors, the app just looks
-   wrong. Closing it is a binary-asset change (both families are OFL) and is a
-   piece of its own rather than something to bundle into a navigation change.
+10. **No fonts are shipped, so the design does not render at its intended
+    density.** `DTheme` names Spectral and IBM Plex Mono — matching the design
+    bundle's `Theme.qml` exactly — but `dialectica-ui/src/` contains no font
+    files, so Qt silently falls back to a system font. The bundle's README warns
+    that shipping them matters "or the density of the design changes", and this is
+    the repo's silent-failure house style: nothing errors, the app just looks
+    wrong. Closing it is a binary-asset change (both families are OFL) and is a
+    piece of its own rather than something to bundle into a navigation change.
 
 ~~`derive_stoa_key` is built and simply is not called~~ — **this was false when
 written.** The adapter called it twice, and a Stoa's `creator` was derived under a

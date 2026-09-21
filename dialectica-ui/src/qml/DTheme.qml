@@ -169,6 +169,11 @@ QtObject {
     readonly property font display:    Qt.font({ family: serif, pixelSize: 27 })
     readonly property font heading:    Qt.font({ family: serif, pixelSize: 25 })
     readonly property font postBody:   Qt.font({ family: serif, pixelSize: 20 })
+    // The name on a row in a list of things you can open — a Stoa on the home
+    // screen. Between `heading` (a screen's subject) and `body` (prose): a row
+    // title is the thing being chosen between, so it outweighs the prose around
+    // it without competing with the screen's own heading.
+    readonly property font rowTitle:   Qt.font({ family: serif, pixelSize: 19 })
     readonly property font body:       Qt.font({ family: serif, pixelSize: 15 })
     readonly property font bodySmall:  Qt.font({ family: serif, pixelSize: 14 })
     readonly property font note:       Qt.font({ family: serif, pixelSize: 14, italic: true })

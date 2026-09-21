@@ -18,11 +18,11 @@ import QtQuick.Layouts
 // what makes that unrepresentable: there is no longer anywhere to put one.
 //
 // The feed carries, behind the posting gate, a composer for a top-level post
-// plus a vote control on each row. There is still no THREAD view, and that is
-// why there is no reply box: this feed lists thread heads, so a reply box under
-// a row would be a thread-view affordance on a screen that is not one.
-// `DComposer.qml` supports replying and is tested in that mode; the
-// instantiation arrives with the thread screen.
+// plus a vote control on each row. A reply box is not among them, and that is
+// still right: this feed lists thread HEADS, so a reply box under a row would be
+// a thread-view affordance on a screen that is not one. The reply composer lives
+// on `DThreadScreen`, which is where a reader has a post in front of them to
+// answer — and that screen is reached from a row's "read the thread".
 Item {
     id: root
 
@@ -69,7 +69,17 @@ Item {
     // exists to make unconstructible. One state, one property.
     property var reading: null
 
-    // A five-screen navigator, and it still needs no StackView: its entire
+    // The Stoa whose moderation screen is open, or `null`. `{stoa,
+    // foundingTitle, genesis}` — the same shape `chosen` carries, and carrying
+    // the whole thing rather than a bare address is what lets the return land
+    // back on the feed the user left, exactly as `onboarding` does.
+    //
+    // **The screen it opens publishes nothing**, which changes nothing about how
+    // it is routed to: an inert screen is reached and left like any other, and
+    // the navigator is not the layer that knows what a screen can do.
+    property var moderating: null
+
+    // A six-screen navigator, and it still needs no StackView: its entire
     // state is which of these properties is non-null, and a push/pop
     // lifecycle alongside that is a second source of truth that can disagree
     // with it. One `visible:` binding each cannot. (design.md D5.)
@@ -95,29 +105,66 @@ Item {
     // (design.md D4.)
     readonly property string screenShown:
         root.onboarding !== null ? "onboarding"
+      : root.moderating !== null ? "moderation"
       : root.reading !== null ? "thread"
       : root.chosen !== null ? "feed"
       : root.previewing !== null ? "join"
       : "list"
 
-    // The transitions, each clearing what the others own.
+    // ---- the one transition primitive -----------------------------------
     //
-    // Functions rather than bare assignment because the clearing is the point:
-    // a caller that assigns `previewing` directly re-creates the impossible
-    // state, and a guard that must be remembered at every call site is the shape
-    // CLAUDE.md says to replace with one the data enforces.
+    // **Every transition below goes through `enterOnly`, and none of them clears
+    // a sibling by hand.** That is a reshaping of what was here, and the reason
+    // is the defect the old shape produced rather than a preference for brevity.
+    //
+    // Each setter used to name the other states and set each to `null`. With
+    // four states that is four functions each listing three names — a guard that
+    // must be got right at every call site, which is the shape CLAUDE.md says to
+    // replace with one the data enforces. **It was already wrong**: adding this
+    // change's `moderation` state required editing five functions, and two of
+    // them (`openThread`, `createIdentityFor`) had been written with only three
+    // of the four clears in the first place, so the invariant held by accident
+    // of which screens could reach which rather than by anything in the code.
+    // A seventh state would have meant getting six more edits right.
+    //
+    // Here the list of states is written ONCE, and entering one is "write this
+    // one, null everything else in the list". A sixth state is one entry in
+    // `stateNames` plus one line in `screenShown`; no existing function changes,
+    // and there is no call site at which the clearing can be got wrong, because
+    // no call site does any clearing.
+    //
+    // Behaviour is unchanged for every transition that was correct before. The
+    // two that were not are now correct, which is the point.
+    //
+    // Lower-case initial because QML refuses a property name beginning with an
+    // upper-case letter — `STATES` compiles to "Property names cannot begin with
+    // an upper case letter", which takes `Main.qml` out entirely rather than
+    // failing locally.
+    readonly property var stateNames: ["previewing", "chosen", "reading",
+                                       "onboarding", "moderating"]
+
+    // Enter `name` carrying `payload`, and leave every other state empty.
+    //
+    // `payload` of `null` is how a state is LEFT: `enterOnly("", null)` empties
+    // all of them, which is the list screen. There is deliberately no "clear one
+    // state" primitive — a function that emptied one state without touching the
+    // others would be the hand-clearing shape coming back through a different
+    // door.
+    function enterOnly(name, payload) {
+        for (var i = 0; i < root.stateNames.length; i++) {
+            var key = root.stateNames[i]
+            root[key] = (key === name) ? payload : null
+        }
+    }
+
+    // The transitions. Each names the state it enters and nothing else.
     function preview(stoa, genesis) {
-        root.chosen = null
-        root.onboarding = null
-        root.reading = null
-        root.previewing = { stoa: stoa, genesis: genesis }
+        root.enterOnly("previewing", { stoa: stoa, genesis: genesis })
     }
 
     function open(stoa, foundingTitle, genesis) {
-        root.previewing = null
-        root.onboarding = null
-        root.reading = null
-        root.chosen = { stoa: stoa, foundingTitle: foundingTitle, genesis: genesis }
+        root.enterOnly("chosen", { stoa: stoa, foundingTitle: foundingTitle,
+                                   genesis: genesis })
     }
 
     // Into a thread, from the feed row that heads it.
@@ -132,25 +179,32 @@ Item {
     // returned none — and it goes to the core unchanged. A fabricated or
     // placeholder record would fail verification in the core and surface as a
     // refusal the user cannot act on.
+    // **A row naming no op opens nothing**, rather than opening a thread screen
+    // that immediately asks core about a thread identified by the empty string.
+    // `FeedScreen.threadTarget()` already withholds the affordance from such a
+    // row, so this is the same judgement held a second time at the transition —
+    // a guard is a job, and "is it applied everywhere?" stays a question with an
+    // answer only if the navigator does not depend on every future caller having
+    // remembered it. `thread-view`'s *No thread is rendered before one has been
+    // chosen* requires that no read be made for a thread the user never asked
+    // for, and this is where that is enforced for the route.
     function openThread(rootOp) {
-        if (root.chosen === null)
+        if (root.chosen === null || rootOp === "")
             return
         var from = root.chosen
-        root.previewing = null
-        root.onboarding = null
-        root.chosen = null
-        root.reading = { stoa: from.stoa, foundingTitle: from.foundingTitle,
-                         genesis: from.genesis, rootOp: rootOp }
+        root.enterOnly("reading", { stoa: from.stoa, foundingTitle: from.foundingTitle,
+                                    genesis: from.genesis, rootOp: rootOp })
     }
 
     // Out of the thread, back to the feed it was opened from — without the view
     // being restarted, which is what makes this a return rather than a reset.
     function closeThread() {
         var was = root.reading
-        root.reading = null
-        if (was !== null)
-            root.chosen = { stoa: was.stoa, foundingTitle: was.foundingTitle,
-                            genesis: was.genesis }
+        if (was === null)
+            root.enterOnly("", null)
+        else
+            root.enterOnly("chosen", { stoa: was.stoa, foundingTitle: was.foundingTitle,
+                                       genesis: was.genesis })
     }
 
     // Into identity acquisition, from the feed of the Stoa the identity is for.
@@ -162,17 +216,46 @@ Item {
     // So onboarding is reachable only from a state that holds a Stoa, which is
     // the feed. (design.md D2.)
     function createIdentityFor(stoa, foundingTitle, genesis) {
-        root.previewing = null
-        root.chosen = null
-        root.reading = null
-        root.onboarding = { stoa: stoa, foundingTitle: foundingTitle, genesis: genesis }
+        root.enterOnly("onboarding", { stoa: stoa, foundingTitle: foundingTitle,
+                                       genesis: genesis })
+    }
+
+    // Into the moderation screen, from the feed of the Stoa it is about.
+    //
+    // **The whole feed context travels**, exactly as it does into onboarding and
+    // a thread, because the way back is "the feed this was opened from" and the
+    // navigator is the only layer holding it.
+    //
+    // **The screen this opens publishes nothing.** That is the screen's business
+    // and not the navigator's: routing to an inert screen is routing, and a
+    // navigator that branched on what a screen can do would be a second place
+    // where the trait's surface is written down.
+    function moderateIn(stoa, foundingTitle, genesis) {
+        root.enterOnly("moderating", { stoa: stoa, foundingTitle: foundingTitle,
+                                       genesis: genesis })
+    }
+
+    // Out of moderation, back to the feed it was entered from.
+    //
+    // **Unconditional on what the user did there**, for the reason
+    // `closeOnboarding` is: a route out offered only on some outcomes is a route
+    // absent in exactly the cases where the user is stuck. On this screen that
+    // is sharper than elsewhere, because every other control does nothing — so
+    // this is the only control that answers a press at all.
+    function closeModeration() {
+        var was = root.moderating
+        if (was === null)
+            root.enterOnly("", null)
+        else
+            root.enterOnly("chosen", { stoa: was.stoa, foundingTitle: was.foundingTitle,
+                                       genesis: was.genesis })
     }
 
     // The way out of each screen. `closeFeed` is the counterpart of the
     // `cancelled` the join screen already had, and its absence was what stranded
     // a user on the first Stoa they opened.
     function closeFeed() {
-        root.chosen = null
+        root.enterOnly("", null)
     }
 
     // Out of onboarding, back to the feed it was entered from.
@@ -185,10 +268,11 @@ Item {
     // affordance that calls it is declared where no phase is in scope.
     function closeOnboarding() {
         var was = root.onboarding
-        root.onboarding = null
-        if (was !== null)
-            root.chosen = { stoa: was.stoa, foundingTitle: was.foundingTitle,
-                            genesis: was.genesis }
+        if (was === null)
+            root.enterOnly("", null)
+        else
+            root.enterOnly("chosen", { stoa: was.stoa, foundingTitle: was.foundingTitle,
+                                       genesis: was.genesis })
     }
 
     // A keep reported that something was stored.
@@ -280,7 +364,7 @@ Item {
                     list.reload()
                 }
 
-                onCancelled: root.previewing = null
+                onCancelled: root.enterOnly("", null)
             }
 
             FeedScreen {
@@ -310,6 +394,14 @@ Item {
                 // the Stoa and its record come from `chosen`, which the
                 // navigator already holds.
                 onThreadOpened: (rootOp) => root.openThread(rootOp)
+
+                // The route into moderation. Same shape as the two above: the
+                // screen asks, the navigator decides where that lands and what
+                // travels.
+                onModerationRequested: root.moderateIn(
+                    root.chosen !== null ? root.chosen.stoa : "",
+                    root.chosen !== null ? root.chosen.foundingTitle : "",
+                    root.chosen !== null ? root.chosen.genesis : "")
             }
 
             // ---- the onboarding route ------------------------------------
@@ -361,13 +453,56 @@ Item {
                 id: thread
                 objectName: "thread"
                 visible: root.screenShown === "thread"
+                // Every value comes from `reading`, which `openThread()` filled
+                // from the feed the row was rendered in. There is no property
+                // on the screen holding a usable default — a second source for
+                // the thread it renders is a build shipping a hardcoded one.
+                //
+                // **`threadId`, and it is the ROOT POST's `id`.** The screen
+                // names the property that way rather than `threadRoot` because
+                // what travels is an op id and not a thread handle: `id` does
+                // not move when the post is revised, where `currentVersion`
+                // does, so a route carrying the version would point at a thread
+                // that stops answering to it after an edit.
                 stoaAddress: root.reading !== null ? root.reading.stoa : ""
+                stoaTitle: root.reading !== null ? root.reading.foundingTitle : ""
                 stoaGenesis: root.reading !== null ? root.reading.genesis : ""
-                threadRoot: root.reading !== null ? root.reading.rootOp : ""
+                threadId: root.reading !== null ? root.reading.rootOp : ""
                 Layout.alignment: Qt.AlignHCenter
                 Layout.preferredWidth: Math.min(DTheme.cardWidth, root.width - 2 * DTheme.cardPaddingX)
 
                 onClosed: root.closeThread()
+            }
+
+            // ---- the moderation screen -------------------------------------
+            //
+            // **Mounted so the screen can be SEEN**, which is the whole of what
+            // the owner's reversal of PLAN.md ruling 3 asked for. A registered
+            // screen nothing instantiates passes every test written about it and
+            // cannot be opened, and that is the defect `check_qml_reachable.py`
+            // exists for — the worst possible one to ship on a screen whose only
+            // purpose in this build is to be looked at.
+            //
+            // **The subject is a fixture, and it is supplied HERE rather than
+            // inside the screen.** Nothing routes a real post into moderation,
+            // because nothing on a feed row offers a moderate affordance — the
+            // route in is the feed's header link, which names no post. So the
+            // confirmation needs a subject and there is none to give it. It is
+            // passed from the navigator so the screen holds no fixture of its own
+            // beyond its two lists, which keeps the screen's own mock surface in
+            // one place. PLAN.md §9.2's case 2 entry 5 carries it.
+            DModerationScreen {
+                id: moderation
+                objectName: "moderation"
+                visible: root.screenShown === "moderation"
+                stoaAddress: root.moderating !== null ? root.moderating.stoa : ""
+                subjectName: "slow cobalt lamplighter"
+                subjectAddress: "c04e77b1a92f3c8d4e17b6520fa9c3d1de51a92f7b408c6e35a1f2d98c3714ab"
+                subjectExcerpt: "“Keystore mode 0644 — what actually breaks…”"
+                Layout.alignment: Qt.AlignHCenter
+                Layout.preferredWidth: Math.min(DTheme.cardWidth, root.width - 2 * DTheme.cardPaddingX)
+
+                onClosed: root.closeModeration()
             }
 
             // ---- shared chrome: the three lamps ---------------------------
