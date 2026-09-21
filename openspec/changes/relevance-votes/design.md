@@ -1,5 +1,49 @@
 # Design: an interim engagement score, and the trigger that retires it
 
+## 0. §7.2's six rules, quoted — what the rest of this document argues with
+
+This document cites "§7.2 rule N" throughout. §7.2 ("Relevance") was a
+section of `docs/PLAN.md`, now deleted; its six rules are quoted here, in
+condensed form, so those citations resolve inside this document rather than
+against a file that no longer exists. Read this once and trust the citations.
+
+1. **Relevance is a local projection, never an op.** No score is ever
+   published; a score is a column in the SQLite projection, derived from ops
+   and rebuilt by replay. Two peers holding different ops rank differently,
+   and that is correct — there is no consensus mechanism to reach for.
+2. **v1 ships an engagement ordering, and calls it that.** `new` (Lamport
+   order) and `active` (most recent non-hidden reply) cannot be gamed by
+   minting identities. `top` counts vote ops per distinct identity: a
+   moderator's upvote weighs `K_mod`, a vouched voter's weighs `K_vouch`,
+   everyone else weighs 1, and a post's score is floored at zero. `top` is an
+   **engagement ordering, not a relevance signal** — it does not resist
+   sybils, and it is safe only because there is currently nobody to attack
+   it (see rule 6).
+3. **Weight by the credential, not by the vote count.** When proof-of-holding
+   lands, count only votes carrying a valid claim; claimless votes count
+   zero, not a discounted amount. Counting all votes and adding a bonus for
+   credentialed ones leaves minting identities the cheapest lever — the
+   credential must *gate* the signal, not decorate it. This end-state gate
+   waits on RLN's per-epoch nullifiers, not on the holding proof, because a
+   re-presentable credential could back several votes.
+4. **Moderation filters, it does not penalise — and a credential may amplify
+   promotion but never suppression.** A hidden post is excluded from the
+   projection, not demoted by a percentage haircut, because a haircut does
+   not bind. Rule 2's weights therefore apply to an upvote only, for every
+   weight class alike: an amplified downvote has none of a moderation op's
+   properties (no binding, no deciding op, no specified reversal), so
+   offering one is a worse tool than offering none.
+5. **Decay must be indexable — and there is currently no age to decay.**
+   Store a decay-free score plus a timestamp and apply decay in the
+   `ORDER BY` expression, because a score recomputed from the current clock
+   on every read cannot be indexed — "retrofitting an index onto a
+   time-varying score is the expensive version." No value in the system
+   currently expresses an authorship time that is both attested and
+   unforgeable, so decay ships disabled (`= 1.0`) until one exists.
+6. **The interim ordering (rule 2) expires on a named trigger**, so a staged
+   decision does not become a permanent one nobody admitted making. §9 below
+   quotes the trigger's four conditions in full.
+
 ## 1. What the projection schema must reserve — read this first
 
 This section is separated and placed first because the SQLite projection schema
@@ -196,7 +240,9 @@ cannot.
 
 ### The reserved shape does not accommodate this, and the mismatch is instructive
 
-§7.2 line 1330 reserves:
+§7.2's rule 2 ("v1 ships an engagement ordering, and calls it that") reserved
+this shape for the scorer, quoted here in full since the document that
+reserved it (`docs/PLAN.md`) no longer exists:
 
 ```
 score = f(engagement) · decay(age) · weight(author_claims)
@@ -242,14 +288,67 @@ second).
 
 Hidden posts are **excluded before scoring**, not scored and demoted (rule 4).
 
+### What "Appendix A" measured, quoted rather than cited
+
+Every "Appendix A" reference in this document points at content that lived
+only in `docs/PLAN.md`'s Appendix A, now deleted. Quoted here in full so this
+document stands on its own.
+
+Appendix A was a reading of `logos-messaging/OpChan` — a Logos-ecosystem
+forum, the nearest kin with a real relevance implementation — read at `main`
+as of 2026-09-09, commit `d48f975`. Its scorer
+(`packages/core/src/lib/forum/RelevanceCalculator.ts`) computed:
+
+```
+score = ( (10 + 1.0·upvotes + 0.5·comments) · verification_multiplier
+          + 0.1·verified_upvoters + 0.05·verified_commenters )
+        · e^(−0.1·days) · (moderated ? 0.5 : 1)
+```
+
+with `verification_multiplier` at 1.25 for an ENS holder, 1.10 for a
+connected wallet, 1.0 otherwise. For a fresh post:
+
+| | score |
+|---|---|
+| anonymous author, 0 upvotes | 10.00 |
+| **ENS-verified** author, 0 upvotes | 12.50 |
+| anonymous author, **3 free sybil upvotes** | 13.00 |
+
+**Three throwaway identities outweigh holding an ENS name** — 13.00 against
+12.50. The more durable statement is the ratio: a credentialed voter's
+premium (+0.10 per vote) is a *tenth* of the raw vote it rides on (+1.00),
+while the author multiplier is a flat 25% however many votes are in play.
+The credential garnishes an unmetered signal instead of gating it — this is
+what §7.2 rule 3 states as a design rule, and this is the measurement behind
+it.
+
+Four further findings, each of which a §7.2 rule is a direct inversion of:
+
+- **The moderation penalty was ×0.5**, a haircut rather than an exclusion, so
+  a well-upvoted hidden post outranked a fresh visible one (rule 4: filter,
+  do not penalise).
+- **Decay read an author-asserted timestamp with nothing clamping it**, so a
+  post claiming a future time got an unbounded multiplier above 1 (rule 5:
+  no author-asserted value may feed decay).
+- **Vote dedup was last-write-wins by inequality, not `>`**, so an older vote
+  could overwrite a newer one and peers resolved a vote-flip differently by
+  arrival order (use Lamport order; do not invent a second rule — this is
+  the "fourth finding" cited elsewhere in this document).
+- **Moderation authority was never checked on read** — any peer could forge a
+  moderation, or forge the removal of one; only the *send* path checked that
+  the actor was a cell admin.
+
+Downvotes were collected and then filtered out of every scorer: the
+real-world signal, in the one implementation measured, was upvote-only.
+
 ## 3. What a moderator's upvote is worth: K = 3, and why a number at all
 
-**Naming note:** `K` throughout this document is the **moderator** weight, which
-PLAN calls **`K_mod`** now that §7.3 has introduced a second constant,
-`K_vouch`. The bare form is kept here because every use predates the split and
-refers to the same thing; read `K` as `K_mod` wherever it appears. Anything
-written after this change should use the qualified names, since "K" alone stops
-being unambiguous the moment there are two.
+**Naming note:** `K` throughout this document is the **moderator** weight,
+called **`K_mod`** from §11 onward, once vouching introduces a second
+constant, `K_vouch`. The bare form is kept here because every use predates
+the split and refers to the same thing; read `K` as `K_mod` wherever it
+appears. Anything written after this change should use the qualified names,
+since "K" alone stops being unambiguous the moment there are two.
 
 The brief asks for a justified number, on the grounds that "a multiplier nobody
 can justify is a number someone will change arbitrarily." The honest answer has
@@ -499,8 +598,9 @@ named. **A staged decision without a named trigger is a permanent decision that
 nobody admitted making** — the interim becomes the answer by default, because
 no moment ever arrives that obliges anyone to revisit it.
 
-So the trigger is stated as an observable condition, in PLAN.md where it is
-read, not only in an archived design doc:
+So the trigger is stated as an observable condition, quoted here in full
+rather than left to a citation, so it is read wherever this document is read
+rather than only in an archived design doc:
 
 > **6. The interim engagement ordering (rule 2) expires on any of four
 > conditions. Whichever fires first, `top` is withdrawn or re-gated before the
@@ -535,9 +635,11 @@ well-defined.** Worse, identities are free to mint, so the count is
 attacker-controlled in both directions — an attacker could trip the trigger or
 stay under it at will.
 
-The other three conditions pass because somebody **trips over** them: broadcast
-discovery fires inside someone else's change and PLAN names its owner; RLN is a
-code-level fact; a vote burst is visible in one peer's own log. The replacement
+The other three conditions pass because somebody **trips over** them:
+broadcast discovery fires inside someone else's change and the quoted trigger
+above names its owner directly ("whoever proposes broadcast discovery owns
+this check"); RLN is a code-level fact; a vote burst is visible in one peer's
+own log. The replacement
 matches that standard — it is per-peer observable and names a person — and it is
 what the original justification actually rested on, since "a moderator reading
 the Stoa notices a brigade" was always a claim about a moderator's own view
@@ -591,9 +693,9 @@ will re-examine unless something makes them.
 
 The owner extended the scope mid-change: alongside the moderator class, a reader
 should be able to **decide for themselves** whose judgement to weigh, for someone
-producing good content who holds no system credential. PLAN §7.3 carries the
-decision; this section records only what a reader of *this change* needs, and the
-mechanism is deliberately **not specified or tasked here** — see §12.
+producing good content who holds no system credential. This section records
+the decision and what a reader of *this change* needs; the mechanism is
+deliberately **not specified or tasked here** — see §12.
 
 **The vocabulary is the part that was actually asked for**, and the rejected
 options each encode a different mechanism, which is why the choice is not
@@ -635,8 +737,7 @@ with "I agree", so **a reader who upvotes only what they agree with builds a
 vouched set that agrees with them, and nothing in v1 prevents that.** The honest
 claim for vouching is therefore narrower than it was: it makes a reader's
 weighting **explicit and revocable**, not viewpoint-neutral. Bridging (§14) is
-the mechanism that would address it; PLAN §7.3 carries the same caveat so a
-reader of the plan alone is not misled.
+the mechanism that would address it.
 
 **It does not expire under rule 6.** When the credential gate lands and plain
 votes drop to zero, vouched votes survive — a vouch *is* a credential, issued by
@@ -648,9 +749,10 @@ token holders.
 ### Four vouching decisions taken here, with the arguments that produced them
 
 These were decided in this change rather than deferred — `tasks.md` §5 marks
-three of them done — so the reasoning belongs in a `design.md` rather than only
-in PLAN. The vouch proposal (§12) inherits the conclusions; without this it
-would inherit them bare.
+three of them done — so the reasoning belongs in this `design.md` rather than
+in a document nobody carrying the vouch proposal forward would read. The vouch
+proposal (§12) inherits the conclusions; without this it would inherit them
+bare.
 
 **1. Weight must accrue from votes already cast, because an explicit-only list
 ships dead.** Asking a reader to maintain a curation list is asking for work
@@ -709,12 +811,12 @@ lives, how it is persisted, whether it is exported when a user moves devices, an
 what happens to a vouch naming an identity the reader no longer holds ops for are
 all questions with more than one defensible answer.
 
-So PLAN §7.3 records the decision and the vocabulary; the mechanism gets its own
-proposal.
+So §11 above records the decision and the vocabulary; the mechanism gets its
+own proposal.
 
 ## 13. Two axes — proposed, then withdrawn on evidence
 
-**Outcome: rejected. The design is one vote axis, plus §7.3's vouch, plus a
+**Outcome: rejected. The design is one vote axis, plus §11's vouch, plus a
 report to the moderator.** This section is kept in full because the reasoning
 that produced the wrong answer is worth more than the answer, and because
 someone will propose the two-axis split again.
@@ -740,7 +842,7 @@ The owner raised a second extension: the upvote/downvote model conflates *qualit
 (spam versus good content) with *agreement* ("I don't agree with you but it's
 still engaging, genuine, constructive content"), and asked for an original design
 — noting that web2's "report spam" is the wrong frame, because the reader is
-**evaluating content, not filing a report**. PLAN §7.4 carries it.
+**evaluating content, not filing a report**.
 
 **The objection is correct and it attacks §1 rather than merely the UX.** One
 control collecting two unrelated judgements means a downvote for disagreement
@@ -908,11 +1010,11 @@ It is not v1 because it is **fragile under permissionless identity** — publish
 analyses show fewer than ten strategically placed ratings can push a meaningful
 fraction of low-quality items over threshold, and the deployed instance resists
 this only through platform-supplied sybil resistance that §7 is explicit
-dialectica lacks. **§7.3's vouch is the candidate replacement for that layer**,
-which is a stronger argument for vouching than §7.3 makes on its own — and it
+dialectica lacks. **§11's vouch is the candidate replacement for that layer**,
+which is a stronger argument for vouching than §11 makes on its own — and it
 means bridging is *downstream* of vouch being populated, not parallel to it.
 
-Recorded in PLAN §7.4 and §13 as a named future direction, so that the next
+Recorded here, in this section, as a named future direction, so that the next
 person reaching for a second axis finds the better mechanism first.
 
 ### Reddit's `controversial`: credited, then also rejected
