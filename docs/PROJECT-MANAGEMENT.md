@@ -150,6 +150,27 @@ role files over a related-sounding justification, and the diagnosis being
 right didn't make the edit the runner's to make. This role's job is to name
 the gap and propose the fix, not to apply it.
 
+## Recording who is working an issue
+
+The same session that surfaced the closing-keyword gap also surfaced this one:
+this role had no way to know PR #132 was in flight except being told directly.
+An issue with no comment on it looks identical whether it is unstarted,
+abandoned, or actively being worked by a session nobody announced.
+
+**Until a real assignee/session-link convention exists, this role's practice
+is to comment on an issue with an identifying marker (a session name, or
+whatever the working session is called) at the point it's known to be picked
+up** — on request, or noticed via a PR referencing it — so the issue itself
+carries that fact rather than it only living in a conversation. This is a
+convention this role can start applying immediately with plain `gh issue
+comment`, and it needs no `.claude/` change to begin.
+
+**A more durable version of this — e.g. every dispatched agent's brief
+including an instruction to comment its session identifier on the issue it
+was handed, at pickup — is the same category as the closing-keyword fix
+above: a `dev-writer`/`RUNNER.md` instruction, not something this role edits
+in. Propose it the same way; do not add it to an agent file directly.**
+
 ## What this role explicitly does not do
 
 - Does not write specs, design docs, tasks.md, or code.
