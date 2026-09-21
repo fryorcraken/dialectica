@@ -101,15 +101,20 @@ calling the scope settled.
    than doing the trawl by hand. This role directs that work; it does not
    become a dev-writer to do it.
 
-5. **Sweep merged PRs against open issues, periodically, not just when asked.**
-   Nothing notifies this role when a PR merges, and a PR description mentioning
-   an issue in prose does not close it — GitHub only auto-closes on its own
-   keyword syntax (`Closes #N`, `Fixes #N`, `Resolves #N`), which this repo's
-   PRs have not consistently used. Until the fix below is adopted, treat every
-   PR that merges without a closing keyword as a manual-check item: `gh pr list
-   --state merged` since the last sweep, cross-referenced against open issues
-   each one plausibly touches. See "A process gap this role cannot fix
-   itself" below for what would close this permanently.
+5. **Sweep periodically, not just when asked.** Two checks, both easy to skip
+   silently:
+   - **Merged PRs against open issues.** Nothing notifies this role when a PR
+     merges, and a PR description mentioning an issue in prose does not close
+     it — GitHub only auto-closes on its own keyword syntax (`Closes #N`,
+     `Fixes #N`, `Resolves #N`), which this repo's PRs have not consistently
+     used. Treat every PR merged since the last sweep as a manual-check item:
+     `gh pr list --state merged`, cross-referenced against open issues each
+     one plausibly touches. See "A process gap this role cannot fix itself"
+     below for the permanent fix.
+   - **Every open issue has a milestone.** `gh issue list --state open` with
+     no milestone in the output is the check — an unmilestoned issue is
+     unplanned work, indistinguishable from an issue nobody has triaged yet.
+     No parking-lot milestone either; find the real one it serves.
 
 ## A process gap this role cannot fix itself
 
