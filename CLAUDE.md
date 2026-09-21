@@ -393,6 +393,25 @@ These are structural and bite at build time, not review time.
   or `flake.lock` gets two builder nodes, the stale one silently wins under
   `--override-input`, and the build fails with `no 'main' field in
   metadata.json`.
+- **Dual remotes: Radicle and GitHub, and GitHub is load-bearing.** Radicle is
+  the canonical home — a peer-to-peer forum hosted solely on a single
+  centralised platform would sit oddly with its own design — but GitHub
+  cannot be dropped: Actions runs CI, and the Logos module catalogue is
+  hosted on **GitHub Releases**, so `lgpd` and `lgpm` fetch packages from
+  there and a module not released on GitHub cannot be installed by the
+  standard tooling. Both remotes get every push; releases are cut on GitHub
+  tags. Two consequences of being a monorepo — two modules under one git repo,
+  where the catalogue expects one module per submodule:
+  - **The catalogue's release action must support a `module_path` pointing
+    *inside* a submodule.** Older versions fail checkout with "pathspec did
+    not match any file(s) known to git" for this layout. Pin
+    `_release-module.yml` to a fixed tag rather than a moving one, so the
+    release pipeline cannot change under the catalogue without a commit here
+    saying so.
+  - **`release-all.yml` auto-discovery cannot see two modules in one repo** —
+    it reads module paths straight from `.gitmodules` submodule paths.
+    `dialectica` and `dialectica_ui` each need their own
+    manually-triggered workflow, not the umbrella.
 - **On Linux, set `runtime_dir` to the session's real one** (e.g.
   `/run/user/1000`) in `[basecamp.profiles.<n>]`. The in-profile `xdg-tmp`
   default overflows the 108-byte `sun_path` cap and **every module segfaults**
