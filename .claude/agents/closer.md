@@ -113,11 +113,7 @@ lives nowhere else disappears with the directory.
 A branch cut before a large change landed and never updated carries "the file
 without that change" as an intentional-looking deletion, and a squash merge
 applies it. There is no conflict, because nobody edited the same lines twice.
-Three PRs here each carried ~690-705 deletions of files they never touched —
-seven agent files, `docs/OPENSPEC-ARCHIVE.md`, and three `## Purpose` sections
-without which `openspec archive` aborts and writes nothing.
-
-**`mergeStateStatus` reported `UNKNOWN` for all three.** Not `BEHIND`, not
+**`mergeStateStatus` reports `UNKNOWN` when this happens.** Not `BEHIND`, not
 `DIRTY`. Nothing in the PR view showed it. So do not read a merge-state field
 as a staleness check — run the diff:
 
@@ -193,10 +189,8 @@ are visible from the files; this section does not restate them, because two
 copies drift and the reader who finds the stale one cannot tell. What follows
 is only what is specific to closing.
 
-Run `openspec --version` first. This page once recorded the CLI as absent, the
-absence was real, the sentence outlived it, and "openspec is not installed"
-reached five agents in one day on that basis. Believe the command, not any
-document — this one included.
+Run `openspec --version` first. Believe the command, not any document — this one
+included.
 
 `openspec` walks up from the cwd to the nearest `openspec/`, so it resolves to
 your change — you are standing in the tree that holds it. Check the reported root
@@ -226,12 +220,10 @@ deleted in Step 1 is the one real deletion, so say so in the commit message, or
 the diff reads as though it is removing review evidence.
 
 **Then push it** — check `git config --get-regexp "^branch\.piece"` first and
-expect **nothing** back, because the branch is created with `git worktree add
---no-track` and has no upstream. `merge refs/heads/main` coming back means it was
-made without the flag and is configured to push to `main`; stop and say so. `git
-branch -vv` is not the check — it prints `[origin/main]` either way, which is how
-a bare `git push` has landed commits on `main` here more than once. With no
-upstream, name the refspec in full:
+expect **nothing** back. `merge refs/heads/main` coming back means the branch is
+configured to push to `main`; stop and say so. (CLAUDE.md's "Worktrees are not
+scratch" has why, and why `git branch -vv` is not the check.) Name the refspec in
+full:
 
 ```
 git push origin HEAD:refs/heads/piece/<name>
@@ -260,9 +252,8 @@ gh run watch <run-id> --exit-status
 ```
 
 `gh run list --branch` returns runs for the branch, including ones on the old
-tip. A shepherd here watched the newest `in_progress` run to a Build LGX
-failure — *"The operation was canceled"* mid-`nix build`, no compile error —
-which was a run its own push had cancelled moments earlier. **Check `headSha`
+tip — which can surface as a Build LGX failure reading *"The operation was
+canceled"* mid-`nix build` with no compile error. **Check `headSha`
 on the run against the branch tip before reading its result.** The workflow
 sets `cancel-in-progress`, so a superseded run is the normal case rather than
 the exception, and `--log-failed` gives no output on a cancelled job, which
