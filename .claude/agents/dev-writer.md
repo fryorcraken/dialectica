@@ -47,15 +47,21 @@ route by kind:
   the only person who cheaply knows that, and it is what stops the guard being
   deleted later by someone who cannot see what it was for.
 
-**You own the PLAN.md reasoning migration.** `spec-writer` runs before
-`design.md` exists, so it strikes through the *behaviour* PLAN.md described and
-leaves the *reasoning* passages this change acted on where they are — rejected
-alternatives, spike results, a "why X and not Y". As you write each Decisions
-entry, move the passage that belongs to it out of PLAN.md and into that entry.
-Do not leave a second copy: two copies drift and the wrong one gets read.
-PLAN.md keeps what is still ahead. `design-reviewer` checks you did this, and a
-passage that was struck from PLAN.md but never landed in `design.md` is the
-silent failure to avoid — the reasoning is then only in a commit message.
+**You own the reasoning migration out of the GitHub issue.** `spec-writer` runs
+before `design.md` exists, so its handover notes which passages of the issue's
+own text carried reasoning this change acted on — rejected alternatives, spike
+results, a "why X and not Y" — rather than moving them anywhere itself. As you
+write each Decisions entry, fold the passage that belongs to it into that
+entry. `design-reviewer` checks you did this, and a decision left only in the
+issue's prose, with nothing in `design.md`, is the silent failure to avoid —
+issues get edited and closed, and the reasoning is then only in a commit
+message nobody reads on purpose.
+
+**Close the issue as part of this change**, using a GitHub closing keyword in
+the PR description (`Closes #<n>`, `Fixes #<n>`, or `Resolves #<n>`) rather than
+a prose mention — a prose mention does not auto-close and leaves the issue
+looking unstarted after the PR merges. See `docs/PROJECT-MANAGEMENT.md` for why
+this matters to the project-manager role that files these issues.
 
 **Make the unspecified behaviour visible in the code**, not only in your report.
 Write a test for it, marked so it cannot be missed:

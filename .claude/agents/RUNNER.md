@@ -65,9 +65,9 @@ backs it; a paraphrase arrives without that, and the content occupies your
 context twice — once from the report, once rewritten into the next brief. That
 crowding is what loses the state you are supposed to be tracking.
 
-The same holds for `design.md`, `proposal.md`, PLAN.md, the spec and the code:
-point at them. If you are reading a diff to judge whether it is right, that is a
-reviewer's dispatch, not your reading.
+The same holds for `design.md`, `proposal.md`, the GitHub issue, the spec and
+the code: point at them. If you are reading a diff to judge whether it is
+right, that is a reviewer's dispatch, not your reading.
 
 ## Rebuild the state before you act on it
 
@@ -266,7 +266,7 @@ A full review is six agents of three types, one per stage-block row:
 |---|---|---|
 | `code-reviewer` × 4 — correctness, security, readability, architecture, named in the prompt | the code | `findings/<dimension>.md` |
 | `spec-test-reviewer` | **spec and tests only — never the implementation** | `findings/spec-test.md` |
-| `design-reviewer` | code, `design.md`, PLAN.md | `findings/design-review.md` |
+| `design-reviewer` | code, `design.md`, the change's GitHub issue | `findings/design-review.md` |
 
 The last two are not smaller `code-reviewer`s:
 

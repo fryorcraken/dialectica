@@ -176,24 +176,17 @@ have to have moved.
   whole file. This has happened here.
 - **Testability.** A scenario asserting something no test could check is a spec
   defect, not a coverage gap — say which it is.
-- **Staleness against `docs/PLAN.md` on `origin/main`**, not the branch's copy.
-  A change specified against a superseded section is a real defect and has
-  happened here.
+- **Staleness against the change's GitHub issue**, read fresh with `gh issue
+  view <n> --repo fryorcraken/dialectica` rather than from a paraphrase. A
+  change specified against a scope the issue no longer states — because it was
+  narrowed, corrected or reworded after the spec was written — is a real
+  defect and has happened here when the source was `docs/PLAN.md`; the same
+  risk now attaches to an issue.
 
-## 6. Did PLAN.md shed the behaviour the spec now carries?
-
-PLAN.md holds what is **not built yet**; a spec holds built behaviour. For each
-requirement in the spec, check PLAN.md on `origin/main` and report where it
-still:
-
-- describes as an open question something the spec has answered
-- states as future intent something the spec now specifies
-- duplicates behaviour the spec states, rather than pointing at it
-
-A strikethrough plus "answered: see `<spec>`" is the right shape, so the
-question's history stays legible.
-
-Reasoning left in PLAN.md is the `design-reviewer`'s check, not yours.
+Whether the issue this change addresses should be closed once the PR merges is
+the `closer`'s to check via the PR's closing keyword, not yours. Reasoning that
+belongs in `design.md` and is not yet there is the `design-reviewer`'s check,
+not yours.
 
 ## Output
 

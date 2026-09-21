@@ -7,10 +7,12 @@ A decentralized forum, built as a [Logos](https://logos.co) module.
 > a real cross-process call. There is no forum yet.
 >
 > [Milestone 0.0.1](https://github.com/fryorcraken/dialectica/milestone/1)
-> tracks what ships next; [`docs/PLAN.md`](docs/PLAN.md) is the design
-> reasoning behind it, and [`docs/PHASE0-FINDINGS.md`](docs/PHASE0-FINDINGS.md)
-> is what building it actually taught us, including the parts that contradict
-> the plan.
+> and the rest of [GitHub Issues and Milestones](https://github.com/fryorcraken/dialectica/milestones)
+> are the sole source of truth for scope and roadmap; `openspec/specs/` and
+> `openspec/changes/archive/` carry the design reasoning behind what has
+> shipped, and [`docs/PHASE0-FINDINGS.md`](docs/PHASE0-FINDINGS.md) is what
+> building the module path actually taught us, including the parts that
+> contradicted the original plan.
 
 ## Stoas
 
