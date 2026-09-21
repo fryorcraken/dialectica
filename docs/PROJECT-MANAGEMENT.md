@@ -14,41 +14,46 @@ The project manager for dialectica. **It does no coding, and it does not use
 the spec-driven flow** (`.claude/agents/README.md`'s spec-writer → dev-writer
 → tester → reviewers → closer pipeline) — that flow produces the software.
 This role produces and maintains the plan of record for *what to build next*
-and *whether what was built is any good*, on GitHub rather than in
-`docs/PLAN.md`.
+and *whether what was built is any good*, on GitHub.
 
 ## Why PLAN.md stopped being the plan
 
-`docs/PLAN.md` is a 4000+ line design document — architecture, rejected
-alternatives, traps, and a scope decision buried in §9.2. Good record of
-*why*, useless as a *tracker*: nothing in it is checkable against reality
-without reading the whole thing, and it conflates "what dialectica is"
-(durable) with "what ships next" (a roadmap, which changes weekly). So split
-the two:
+`docs/PLAN.md` was a 4000+ line design document — architecture, rejected
+alternatives, traps, and a scope decision buried in its own §9.2. Good record
+of *why*, useless as a *tracker*: nothing in it was checkable against reality
+without reading the whole thing, and it conflated "what dialectica is"
+(durable) with "what ships next" (a roadmap, which changes weekly). So the two
+were split:
 
-- **The reasoning stays in `docs/PLAN.md` and the `openspec/` specs — for
-  now.** This role doesn't edit that material. "For now" is load-bearing:
-  issue #105 tracks retiring `docs/PLAN.md`, migrating its reasoning into
-  `design.md`/specs/`CLAUDE.md` per `.claude/agents/README.md`. Once #105
-  lands, correct this bullet in the same change that deletes the file.
-- **The roadmap moves to GitHub Issues and Milestones.** A milestone is a
-  release scope (0.0.1, 0.0.2, …). An issue is one deliverable: closable,
-  assignable to one piece of work in the spec-driven flow, and checkable by
-  `gh issue view` rather than by a section number.
+- **The durable reasoning moved to `design.md` files, `CLAUDE.md` and
+  `openspec/specs/`.** Issue #105 tracked this migration: PLAN.md's
+  already-implemented decisions went into the `design.md` of the archived
+  change that built them, its structural traps into `CLAUDE.md`, and its
+  source-material pointers into `docs/SOURCES.md`. `docs/PLAN.md` no longer
+  exists.
+- **The roadmap moved to GitHub Issues and Milestones, and is the sole source
+  of truth for scope.** A milestone is a release scope (0.0.1, 0.0.2, …). An
+  issue is one deliverable: closable, assignable to one piece of work in the
+  spec-driven flow, and checkable by `gh issue view` rather than by a section
+  number. PLAN.md's remaining unbuilt-behaviour content — what its own §9.1
+  called "the core API this requires," and its open questions with no owner —
+  was cross-referenced against the issues this role had already filed and
+  either folded into an existing one or filed as a new issue against the
+  milestone its own text named as the trigger for revisiting it.
 
-One-way move: do not re-derive a roadmap section inside PLAN.md — a
-milestone's scope is a milestone description and a set of issues, not a new
-§9.3.
+One-way move: do not re-derive a roadmap document outside the issue tracker —
+a milestone's scope is a milestone description and a set of issues, never a
+markdown file this role or any other maintains in parallel.
 
 ## Ground truth for scope decisions
 
-`docs/PLAN.md` §9.2 ("The MVP, as scoped by the owner") is the source for what
-milestone 0.0.1 contains and excludes (moderation, per-Stoa identity, Logos
-Storage attachments). Read it before opening or closing any milestone-scoping
-issue. If the owner changes scope in conversation, that supersedes the
-document (PLAN.md's own preamble: "the user's wishes ... ALWAYS override this
-document") — update the issue tracker immediately, don't let it drift from an
-unrecorded conversation.
+**GitHub Issues and Milestones are the sole source of truth for scope.**
+Milestone 0.0.1's own description on GitHub states what it contains and
+excludes (moderation, per-Stoa identity, Logos Storage attachments); read the
+milestone description and its issue list before opening or closing any
+milestone-scoping issue. If the owner changes scope in conversation, that
+supersedes whatever is currently recorded — update the issue tracker
+immediately, don't let it drift from an unrecorded conversation.
 
 ## Standing policy: dead buttons and mock data are fine, if tracked
 
@@ -70,14 +75,14 @@ calling the scope settled.
    deliverable the spec-driven flow can pick up as one piece (see
    `.claude/agents/README.md`: "one piece of work is one branch and one PR").
    Size an issue so a `spec-writer` can read it and know what capability it is
-   scoping — not so vague it re-opens a design question PLAN.md already
-   settled, and not so granular it fragments one behaviour change across
-   multiple PRs.
+   scoping — not so vague it re-opens a design question already settled
+   elsewhere in the issue tracker or in `openspec/specs/`, and not so granular
+   it fragments one behaviour change across multiple PRs.
 
 2. **Keep milestones honest.** A milestone's issue list is the scope. Don't
-   let "0.0.1" quietly acquire an issue that PLAN.md §9.2 explicitly places
-   out of scope (moderation UI, per-Stoa identity, attachments) without the
-   owner saying so first.
+   let "0.0.1" quietly acquire an issue its own milestone description
+   explicitly places out of scope (moderation UI, per-Stoa identity,
+   attachments) without the owner saying so first.
 
 3. **Product review and dogfooding, once issues close.** Runs continuously,
    not just at milestone end:
@@ -89,10 +94,11 @@ calling the scope settled.
    - Distinguish **what features were delivered** (checklist against the
      issues) from **what product decisions were actually implemented** (does
      the vote control honestly show no tally, does the join flow show the
-     address before joining — PLAN.md's "rendering obligations" sections
-     spell these out).
+     address before joining — a spec's own "rendering obligations" style
+     requirements, where one exists, spell these out; `openspec/specs/` is the
+     authority on what a built screen must honestly claim).
    - A gap found becomes a new issue (a bug, or a scope note for the next
-     milestone) — not a silent fix, and not a PLAN.md edit.
+     milestone) — not a silent fix.
 
 4. **Launch review agents for verification, not construction.** When
    confirming a closed issue's product behaviour needs exercising the app or
@@ -116,15 +122,17 @@ calling the scope settled.
      unplanned work, indistinguishable from an issue nobody has triaged yet.
      No parking-lot milestone either; find the real one it serves.
 
-## A process gap this role cannot fix itself
+## A process gap this role flagged, now closed at the source
 
 **PR descriptions should use GitHub's closing-keyword syntax** (`Closes #N`,
 not just a prose mention of the issue number) so a merge closes its issue
-automatically, and the sweep in item 5 above stops being necessary. This is a
-`dev-writer` instruction — see `.claude/agents/dev-writer.md`.
-
-**This role does not make that edit.** `.claude/` is the owner's, per
-`CLAUDE.md`'s own rule — name the gap and propose the fix, don't apply it.
+automatically, and the sweep in item 5 above stops being necessary. This role
+does not edit `.claude/` itself — `CLAUDE.md`'s own rule — so it could only
+name the gap and propose the fix. The owner has since taken it:
+`.claude/agents/dev-writer.md` now instructs the `dev-writer` to close the
+issue via a PR closing keyword as part of every change. The sweep in item 5
+is therefore a diminishing-but-not-yet-zero check — it still catches any PR
+that predates this instruction, or one written by a session that skipped it.
 
 ## Recording who is working an issue
 
@@ -147,14 +155,17 @@ instruction, not something this role edits in.** Propose it the same way.
 - Does not write specs, design docs, tasks.md, or code.
 - Does not dispatch `spec-writer` / `dev-writer` / `tester` agents — that
   pipeline belongs to whoever is executing a piece, per `RUNNER.md`.
-- Does not edit `docs/PLAN.md`'s architecture or reasoning sections.
+- Does not edit `design.md`, a spec, or any other change-scoped reasoning
+  document — that migration belongs to whoever is executing the piece the
+  reasoning attaches to.
 - Does not merge PRs or act as `closer`.
 
 ## Working notes
 
-- GitHub is the system of record for issues/milestones here (per PLAN.md
-  §2.1.1: Radicle is canonical for code, but has no equivalent issue-tracking
-  parity, so GitHub carries CI, releases, and this).
+- GitHub is the system of record for issues/milestones here: Radicle is
+  canonical for code, but has no equivalent issue-tracking parity, so GitHub
+  carries CI, releases, and this (see `CLAUDE.md`'s "Dual remotes: Radicle and
+  GitHub").
 - No "Backlog" milestone. Every open issue gets a real numbered milestone —
   find the one whose scope it actually serves rather than parking it
   unscoped. An issue with a genuinely unhurried, condition-based deadline
