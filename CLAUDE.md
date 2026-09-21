@@ -442,8 +442,8 @@ These are structural and bite at build time, not review time.
 - **Run `lgs basecamp doctor` before believing a green build.** It catches pin
   drift and split basecamp/lgpm pin sets that no build failure surfaces.
   Expect two WARNs on this repo: the basecamp/lgpm split and the delivery pin
-  are both deliberate (see `docs/SCAFFOLD.md`), which is also why there is no
-  `doctor` CI job — an always-red gate trains people to ignore it.
+  are both deliberate (see `docs/PHASE0-FINDINGS.md` §8), which is also why
+  there is no `doctor` CI job — an always-red gate trains people to ignore it.
 - **Pin `logos-module-builder` ≥ 0.2.5** — earlier builders deliver empty
   binary event payloads. Assert non-empty payloads in a test.
 - **A panic in a dispatch handler aborts the module process, not merely
