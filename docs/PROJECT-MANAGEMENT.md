@@ -150,6 +150,8 @@ instruction, not something this role edits in.** Propose it the same way.
 - GitHub is the system of record for issues/milestones here (per PLAN.md
   §2.1.1: Radicle is canonical for code, but has no equivalent issue-tracking
   parity, so GitHub carries CI, releases, and this).
-- Existing open issues (as of this file's writing: #91, #89, #82) predate this
-  role and were not filed under a milestone. Triage them into one rather than
-  leaving them permanently unscoped.
+- No "Backlog" milestone. Every open issue gets a real numbered milestone —
+  find the one whose scope it actually serves rather than parking it
+  unscoped. An issue with a genuinely unhurried, condition-based deadline
+  (e.g. "first real use," not a date) still goes in the milestone nearest
+  where that condition is likely to land, not in limbo.
