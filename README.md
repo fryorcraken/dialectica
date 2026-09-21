@@ -6,9 +6,11 @@ A decentralized forum, built as a [Logos](https://logos.co) module.
 > in Basecamp, the view renders, and the core reaches `delivery_module` across
 > a real cross-process call. There is no forum yet.
 >
-> [`docs/PLAN.md`](docs/PLAN.md) is the design;
-> [`docs/PHASE0-FINDINGS.md`](docs/PHASE0-FINDINGS.md) is what building it
-> actually taught us, including the parts that contradict the plan.
+> [Milestone 0.0.1](https://github.com/fryorcraken/dialectica/milestone/1)
+> tracks what ships next; [`docs/PLAN.md`](docs/PLAN.md) is the design
+> reasoning behind it, and [`docs/PHASE0-FINDINGS.md`](docs/PHASE0-FINDINGS.md)
+> is what building it actually taught us, including the parts that contradict
+> the plan.
 
 ## Stoas
 
