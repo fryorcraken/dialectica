@@ -366,3 +366,85 @@ it exists. And `cmp_ops` must not change: it is a comparator, and it has to stay
 - **Eviction, retention or compaction.** §4.7 makes local retention the thing that
   "makes v1 usable", so a log that discarded ops would remove the tier the plan
   leans on. When snapshots land (§4.7's third tier) the question becomes real.
+
+## Why this crate owns the local store at all, rather than consuming `cloud_data_module`
+
+Migrated from `docs/PLAN.md` §3.1, which recorded this before the trait above
+existed. Considered and rejected, and the reasoning is architectural rather than
+a judgement on the code.
+
+`cloud_data_module` solves convergence with **CRDTs over plain pub/sub**. It does
+not use SDS, and does not need to: every op (a signed operation) is idempotent by
+`opId`, safe to apply out of order or repeatedly, so convergence comes from merge
+semantics rather than from transport ordering.
+
+Dialectica takes **SDS as the primary reliability layer** (the `op-transport`
+spec). Those are *alternatives, not layers*. Running both would pay SDS's
+per-message bloom filter and causal history cost for guarantees a CRDT already
+provides, and would leave two convergence mechanisms to reconcile.
+
+Two of `cloud_data_module`'s three jobs were unusable for a forum regardless:
+`query()` is a full table scan with no index, sort or pagination — which is
+precisely what a forum feed is — and it has no op authenticity, so moderation
+flags are forgeable. Having replaced both, owning the third (the oplog and local
+store, which is this trait) is a small marginal cost for full control of the data
+path, no dependency on a v0.1.0 single-contributor prototype, and no licensing
+question (the repo carried no licence at all when this was evaluated).
+
+**The later move, not yet scheduled, is to extract our own SDS + storage layer as
+a reusable module** — what `cloud_data_module` was reaching for, built on SDS
+rather than beside it.
+
+## What the SDK does not provide, and why the domain logic in this crate has zero SDK types
+
+Migrated from `docs/PLAN.md` §2.3. `logos-rust-sdk` (MIT/Apache-2.0) is the
+runtime this module builds against. Forking it was considered and rejected —
+not on quality grounds, but because **forking it alone accomplishes nothing**:
+`logos-module-builder` supplies both the generator and the SDK source from its
+own single pinned input, staged beside the crate. `Cargo.toml` does not control
+that dependency. A fork means also forking or overriding the builder, then
+maintaining a generator against an `lp_*` ABI that has moved fast — with an
+upstream issue openly proposing to rework the SDK's foundation. That is
+permanent rebasing. **Contribute upstream instead, and design around what is
+missing:**
+
+- **There is no panic guard.** No `catch_unwind` anywhere; the default profile
+  unwinds. Every generated `extern "C"` dispatch calls straight into author code,
+  so a panic unwinds through an `extern "C"` frame — undefined behaviour.
+  **Measured, and worse than predicted** (`docs/PHASE0-FINDINGS.md` §3): an
+  unguarded panic **aborts the module process** — `failed to initiate panic,
+  error 5`, SIGABRT — before any later dispatch can meet a poisoned lock. The
+  caller waits out its 20s timeout, and every call after that gets
+  `MODULE_NOT_LOADED`. The guard this repo builds at its own boundary is
+  load-bearing rather than hardening, which is exactly why no handler may
+  unwind. Upstreaming it is a small change to the dispatch emitter plus
+  poison-tolerant locks, and is the highest-value contribution available.
+- **Event queues are unbounded.** `std::sync::mpsc` with no backpressure, no
+  bound and no drop policy; the C trampoline never blocks and never fails. A
+  consumer slower than the event rate grows the queue until OOM. Bound it
+  ourselves.
+- **There is no mock host**, and this is not a testing inconvenience — it is an
+  architectural constraint. Anything touching `modules().<dep>` or `context()`
+  calls `lp_*` symbols that are undefined in an rlib and will not link into a
+  test binary. **This is why this crate's domain logic — ops, signatures, the op
+  log, ordering, moderation rules — has zero SDK types**: it is forced by the
+  SDK rather than merely supported by it, and the trait impl in the adapter crate
+  is a thin layer over it.
+- **The builder's pinned SDK rev lags HEAD.** Check what the pin actually
+  delivers before designing against upstream documentation. The gap has included
+  subscription status and restart policy (without which `recv()` blocks forever
+  and a dead provider hangs a listener thread permanently), per-call timeouts,
+  and argument type checking (without which a wrong-typed argument silently
+  becomes `0` or `""`).
+
+Constraints the SDK imposes on this crate's shape, for the same reason:
+
+- The module instance is **`Default`-constructed and a process-global
+  singleton**. No constructor injection: state reachable from both dispatch and
+  a background thread lives in `static`s or `Arc`s rather than an owned struct.
+- **`concurrency` in metadata decides threading.** `single` (the default) takes
+  the instance mutex for the whole handler, so calls serialize; `multi` gives
+  `&self` and overlapping handlers, and the module owns interior mutability.
+- **No async runtime, and none needed.** `EventSubscription` is `Send` by
+  design: subscribe in `on_context_ready`, move the subscription into a thread
+  the module owns, and block on it there.
