@@ -120,6 +120,36 @@ issue before calling the earlier milestone's scope settled.
    read-only) rather than doing the multi-hour trawl by hand. This role
    directs that work; it does not become a dev-writer to do it.
 
+5. **Sweep merged PRs against open issues, periodically, not just when asked.**
+   This is not automatic: nothing notifies this role when a PR merges, and a PR
+   description mentioning an issue in prose does not close it — GitHub only
+   auto-closes on its own keyword syntax (`Closes #N`, `Fixes #N`, `Resolves
+   #N`) appearing in the PR description, and this repo's PRs have not
+   consistently used it. #122 merged and fully satisfied #97, and #97 sat open
+   for two days before this role caught it on a manual check — the mechanism
+   gap, not a one-off oversight. Until the fix below is adopted, treat every PR
+   that merges without a closing keyword as a manual-check item: `gh pr list
+   --state merged` since the last sweep, cross-referenced against open issues
+   each one plausibly touches. See "A process gap this role cannot fix
+   itself" below for what would close this permanently.
+
+## A process gap this role cannot fix itself
+
+**PR descriptions should use GitHub's closing-keyword syntax** (`Closes #N`,
+not just a prose mention of the issue number) so a merge closes its issue
+automatically, and the sweep in item 5 above stops being necessary. This is a
+`dev-writer` instruction — see `.claude/agents/dev-writer.md`, wherever it
+already tells the writer what a PR description must contain.
+
+**This role does not make that edit.** `.claude/` is the owner's per
+`CLAUDE.md`'s own rule ("do not add, edit, delete or restructure anything
+under `.claude/`... unless the owner asked for that specific change"), and
+"it would make the tracker more reliable" is exactly the reasoning that rule
+exists to refuse — recorded there as the precedent: a runner rewrote seven
+role files over a related-sounding justification, and the diagnosis being
+right didn't make the edit the runner's to make. This role's job is to name
+the gap and propose the fix, not to apply it.
+
 ## What this role explicitly does not do
 
 - Does not write specs, design docs, tasks.md, or code.
