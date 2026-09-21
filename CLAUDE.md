@@ -425,6 +425,52 @@ These are structural and bite at build time, not review time.
 - **The UI's icon must be a 256×256 PNG**, and the UI module must declare core
   in `dependencies` with **matching versions**.
 
+- **`lgs basecamp install` does not install a module's declared
+  `dependencies`.** It builds the `[modules.*]` project sources and never reads
+  the `dependencies` array in `metadata.json`. `lgs basecamp modules` is the
+  verb that captures runtime dependencies; run it first, then `install`. Skip
+  it and the module fails to load with `Cannot resolve dependencies for:
+  <name>`, which presents as a launcher tile that does nothing when clicked —
+  while the build stays green and `modules --show` lists the dependency it
+  never installed.
+- **`pgrep basecamp` finds nothing while Basecamp is running.** The launcher is
+  `.LogosBasecamp.elf` and each module is a separate `.logos_host.elf`, both
+  under the dynamic loader. Read the PID from `<profile>/launch.state` instead
+  (`lgs basecamp paths <profile>` locates it). Requested as a first-class verb
+  in `logos-co/scaffold#268`.
+- **Run `lgs basecamp doctor` before believing a green build.** It catches pin
+  drift and split basecamp/lgpm pin sets that no build failure surfaces.
+  Expect two WARNs on this repo: the basecamp/lgpm split and the delivery pin
+  are both deliberate (see `docs/SCAFFOLD.md`), which is also why there is no
+  `doctor` CI job — an always-red gate trains people to ignore it.
+- **Pin `logos-module-builder` ≥ 0.2.5** — earlier builders deliver empty
+  binary event payloads. Assert non-empty payloads in a test.
+- **A panic in a dispatch handler aborts the module process, not merely
+  poisons a lock.** Measured, not inferred: `failed to initiate panic, error
+  5`, SIGABRT, and every later call gets `MODULE_NOT_LOADED` — the caller
+  having first waited out a 20s timeout that names nothing
+  (`docs/PHASE0-FINDINGS.md` §3). The SDK has no panic guard, so no handler
+  may unwind; dialectica's own guard is what stands between those two
+  outcomes.
+- **`recv()` on an event subscription may block forever** on an older SDK rev
+  that lacks subscription status — a dead provider hangs the listener thread
+  permanently. Check what the builder's pin delivers before relying on a
+  timeout.
+- **Handle `RET_STALE_WARN` (3)** from the delivery C ABI: a non-terminal
+  "still running" tick every ~5s, always followed by a terminal OK/ERR.
+  Ignoring it double-counts completions.
+- **`createNode` exactly once per context.** The delivery node is a singleton
+  per Logos Core instance; `stop()` kills traffic for every module using it.
+  Contracted in the `op-transport` spec; kept here because it presents as a
+  runtime failure in someone else's module.
+- **`messageReceived`'s timestamp is nanoseconds**; every other delivery event
+  is ISO-8601 (delivery bug #26).
+- **`messageReceived` fires for your own messages; `channelMessageReceived`
+  does not** — own sends come back as `channelMessageSent`. The consequence is
+  contracted in the `op-transport` spec ("A peer's own published op is not
+  received back as an arrival"); the asymmetry itself is worth keeping here,
+  because it is what makes a missing-own-post bug look like a storage bug.
+
 - **Never name a QML type something basecamp also registers.** Our theme
   singleton was `Theme`; basecamp registers a type of that name, and basecamp's
   won — every `Theme.x` in the view resolved to basecamp's object, every token
