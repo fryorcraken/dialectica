@@ -179,8 +179,7 @@ there; this line points rather than restates, because two copies drift.
 commits through a PR only — `enforce_admins` is on, and a direct push is rejected
 with `GH006`. The archive is the one that reads as though it might be exempt,
 being a bookkeeping commit; it is not, and it goes onto the piece branch like
-everything else. This page and `closer.md` both used to say otherwise, until a
-closer tried it.
+everything else.
 
 Cherry-pick rather than merge, so the task branch reads as a flat sequence rather
 than six merge commits carrying six branches.

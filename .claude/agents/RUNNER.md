@@ -28,21 +28,12 @@ path>)`, and stay there.** A session moving *itself* is the case the tool is
 built for; it is dispatched agents that cannot do it, for reasons README.md
 keeps.
 
-**Why one runner per piece, and not one runner switching branches.** Two
-alternatives were on the table:
+**Never check out a different piece's branch in this session.** Doing so
+silently forks the next dispatched agent from the wrong piece — no error, no
+warning, the agent just works confidently on the wrong code.
 
-| Shape | Why not |
-|---|---|
-| one runner, checking out each piece before dispatching | the checkouts must be serialised, and **dispatching while HEAD is on the wrong branch silently forks the agent from the wrong piece** — no error, no warning, just an agent confidently working on the wrong code |
-| one runner in the main checkout, as before | every agent forks from `main` and holds none of the piece's commits |
-
-**One runner per piece has no shared HEAD, so the first hazard is structurally
-absent rather than merely avoidable.** That is the reason for the shape: not that
-switching is hard to get right, but that getting it wrong produces no signal. A
-runner that can only see one piece cannot fork an agent from another.
-
-The practical consequence: **do not run two pieces from one session.** Start a
-second session in the second piece's worktree instead.
+**Do not run two pieces from one session.** Start a second session in the
+second piece's worktree instead.
 
 ### What you read, and what you only point at
 
@@ -198,8 +189,7 @@ A mutating reviewer that ran without the check would break the tree your own HEA
 points at, which is why the guard is in every file rather than in the brief.
 
 **Cherry-pick before you dispatch the next agent, and make sure your HEAD carries
-it.** This is the ordering rule that replaces "one writer at a time because they
-share a tree": every dispatch forks from *your HEAD*, so an agent launched before
+it.** Every dispatch forks from *your HEAD*, so an agent launched before
 the previous one's work has landed on your branch gets a tree without it. It will
 then rewrite, duplicate or contradict work it cannot see, and nothing fails —
 there is no conflict, because the two agents were never in the same tree. The

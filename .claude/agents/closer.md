@@ -27,8 +27,8 @@ goes back to the runner with the evidence attached.
 
 **You should arrive already inside your own worktree**, forked from the runner's
 HEAD, so it holds the piece's commits. Use **plain relative paths**, and do not
-call `EnterWorktree` — it is for a session moving itself, and `README.md`'s
-"Handing over between agents" says why a dispatched agent cannot.
+call `EnterWorktree` — it is for a session moving itself, not a dispatched
+agent.
 
 **Confirm it first, with `pwd` and `git rev-parse --abbrev-ref HEAD`.** If the
 branch is `piece/<name>` or the path is the repository root, the isolation did

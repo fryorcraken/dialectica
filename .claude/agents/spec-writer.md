@@ -136,8 +136,7 @@ delete it — a capability directory has no such file.
 ## Keywords
 
 RFC 2119, and in this repo that means **MUST** / **MUST NOT** for requirements.
-Avoid SHOULD and MAY — an optional requirement is either a requirement or it is
-not one.
+Avoid SHOULD and MAY.
 
 A definition is not a requirement: "A Stoa IS its genesis record" is a plain
 statement, "a genesis record MUST carry a creator key" is something an

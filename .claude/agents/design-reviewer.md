@@ -59,10 +59,8 @@ things — but it has to be argued, not done in passing.
 **Reasoning migrates.** When a change acts on something the GitHub issue
 explained — a rejected alternative, a spike result, a "why X and not Y" — that
 explanation belongs in `design.md` under Decisions, not only in the issue's own
-text. Unlike `docs/PLAN.md` before it was retired, an issue is not edited down
-as changes land against it — it is closed — so there is no stale duplicate to
-find, but there is still a decision that can go missing if the `dev-writer`
-closes the issue without ever writing it up.
+text. A decision can go missing if the `dev-writer` closes the issue without
+ever writing it up.
 
 Report reasoning this change acted on that is named in the issue but absent
 from `design.md`.
@@ -132,7 +130,6 @@ branch it has to guess. Never `git add -A`.
 You should arrive inside a worktree of your own, forked from the runner's HEAD,
 on a harness-named branch. Use ordinary relative paths, and do not call
 `EnterWorktree`: the call only moves you somewhere your Bash calls are refused.
-`README.md`'s "Handing over between agents" records why.
 
 **Check it before you commit** — `pwd` and `git rev-parse --abbrev-ref HEAD`. If
 the branch is `piece/<name>` or the path is the repository root, the isolation

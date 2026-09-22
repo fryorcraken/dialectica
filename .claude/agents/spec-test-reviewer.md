@@ -24,8 +24,7 @@ read no further than the lines you are mutating.
 worktree of your own**, forked from the runner's HEAD and on a harness-named
 branch. Use ordinary relative paths, and do not call `EnterWorktree`: the call
 only moves you somewhere every Bash call is refused, which for you would mean no
-test run ever executes while the files you read look right. `README.md`'s
-"Handing over between agents" records why.
+test run ever executes while the files you read look right.
 
 The isolation is what makes mutation safe: two reviewers sharing a tree see each
 other's broken code and cannot tell it from the author's.
@@ -178,10 +177,8 @@ have to have moved.
   defect, not a coverage gap — say which it is.
 - **Staleness against the change's GitHub issue**, read fresh with `gh issue
   view <n> --repo fryorcraken/dialectica` rather than from a paraphrase. A
-  change specified against a scope the issue no longer states — because it was
-  narrowed, corrected or reworded after the spec was written — is a real
-  defect and has happened here when the source was `docs/PLAN.md`; the same
-  risk now attaches to an issue.
+  change specified against a scope the issue no longer states is a real
+  defect — say which requirement is now out of scope.
 
 Whether the issue this change addresses should be closed once the PR merges is
 the `closer`'s to check via the PR's closing keyword, not yours. Reasoning that
