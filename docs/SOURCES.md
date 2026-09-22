@@ -3,24 +3,30 @@
 Migrated from `docs/PLAN.md` §12. This project's design was written from
 several investigations of local checkouts on the development machine. When a
 claim about the surrounding ecosystem needs re-checking, these are where it
-came from — all absolute paths on the development machine, none of them
-vendored into this repo.
+came from — none of them vendored into this repo.
 
-| What | Where |
+**Paths are relative to `~`, and the convention is `~/src/<org>/<repo>`** —
+e.g. `logos-co/logos-scaffold` below means `~/src/logos-co/logos-scaffold`.
+This repo itself is the one exception: dialectica lives at `~/rad/dialectica`,
+not under `~/src/`, so a sibling checkout of it (if you need one) is
+`~/rad/<repo>`. If a checkout named below isn't where the convention says,
+check both locations before concluding it isn't cloned.
+
+| What | Where (relative to `~`) |
 |---|---|
-| **The structural template** — monorepo, core+UI, Rust FFI, CI, `CLAUDE.md` conventions | `/home/fryorcraken/src/rad/radicle-logos-module` |
-| Docs source for docs.logos.co (module building, delivery API, LEZ, LGX format) | `/home/fryorcraken/src/logos-co/logos-docs/docs/` |
-| Delivery module — **read at tag `v0.2.1`**, not the working tree | `/home/fryorcraken/src/logos-co/logos-delivery-module` |
-| Waku/Nim internals — sharding, retention, message size, RLN config | `/home/fryorcraken/src/logos-messaging/logos-delivery` |
-| SDS spec (LIP-109) and LIP-23 content topics | `/home/fryorcraken/src/logos-co/logos-lips/docs/` |
-| LEZ private accounts — nullifiers, ML-KEM, commitment set | `/home/fryorcraken/src/logos-blockchain/logos-execution-zone` |
-| λAccount / VLAD identity roadmap and FURPS | `/home/fryorcraken/src/logos-co/roadmap/content/anoncomms/` |
-| A real delivery consumer (older API, still instructive) | `/home/fryorcraken/src/logos-co/logos-delivery-demo` |
-| `logos-scaffold` source, docs and bundled skills | `/home/fryorcraken/src/logos-co/logos-scaffold` |
+| **The structural template** — monorepo, core+UI, Rust FFI, CI, `CLAUDE.md` conventions | `rad/radicle-logos-module` |
+| Docs source for docs.logos.co (module building, delivery API, LEZ, LGX format) | `src/logos-co/logos-docs/docs/` |
+| Delivery module — **read at tag `v0.2.1`**, not the working tree | `src/logos-co/logos-delivery-module` |
+| Waku/Nim internals — sharding, retention, message size, RLN config | `src/logos-messaging/logos-delivery` |
+| SDS spec (LIP-109) and LIP-23 content topics | `src/logos-co/logos-lips/docs/` |
+| LEZ private accounts — nullifiers, ML-KEM, commitment set | `src/logos-blockchain/logos-execution-zone` |
+| λAccount / VLAD identity roadmap and FURPS | `src/logos-co/roadmap/content/anoncomms/` |
+| A real delivery consumer (older API, still instructive) | `src/logos-co/logos-delivery-demo` |
+| `logos-scaffold` source, docs and bundled skills | `src/logos-co/logos-scaffold` |
 | OpChan — the nearest kin forum, read for the relevance-design appendix that lived in PLAN.md. **No local checkout**; clone from GitHub | `logos-messaging/OpChan` |
-| λ-Prize LP-0005 / LP-0016 / LP-0017 — **submission write-ups only, not code.** The solution repos are not cloned here, so every claim about them is the builders' self-assessment | `/home/fryorcraken/src/logos-co/lambda-prize/` |
-| The JS SDK reliable-channels tutorial — informal prose, and the clearest statement of what a channel id is | `/home/fryorcraken/src/logos-messaging/docs.waku.org/` |
-| Spasm — a signer-agnostic social protocol, read for the never-verified-credential precedent behind the `identity`/claims design. **The code is the spec**: versioning lives in format strings (`spasmid01`, `SpasmEventV2`) and the normative reference for its hashing rule is its README, so read `src.ts/`, not the docs site | `/home/fryorcraken/src/spasm-network/spasm.js` |
+| λ-Prize LP-0005 / LP-0016 / LP-0017 — **submission write-ups only, not code.** The solution repos are not cloned here, so every claim about them is the builders' self-assessment | `src/logos-co/lambda-prize/` |
+| The JS SDK reliable-channels tutorial — informal prose, and the clearest statement of what a channel id is | `src/logos-messaging/docs.waku.org/` |
+| Spasm — a signer-agnostic social protocol, read for the never-verified-credential precedent behind the `identity`/claims design. **The code is the spec**: versioning lives in format strings (`spasmid01`, `SpasmEventV2`) and the normative reference for its hashing rule is its README, so read `src.ts/`, not the docs site | `src/spasm-network/spasm.js` |
 
 Two of these are **stale working trees** and will mislead if read directly:
 `logos-delivery-module` sits on a pre-channels branch, and
