@@ -14,7 +14,7 @@ per-role models and tool limits.
 
 | Document | Question | Where it ends up |
 |---|---|---|
-| GitHub Issues and Milestones | **What is not built yet** — the roadmap. See `docs/PROJECT-MANAGEMENT.md` | github.com, not this repo's working tree |
+| GitHub Issues and Milestones | **What is not built yet** — the roadmap | github.com, not this repo's working tree |
 | `proposal.md` | Why this change, which capabilities it touches | `changes/archive/<date>-<name>/` |
 | `openspec/specs/` | **What** the system does — the behaviour contract | `openspec/specs/`, current |
 | `design.md` | **How**, and **why this approach** (Decisions) | `changes/archive/<date>-<name>/` |
@@ -36,13 +36,9 @@ included.
 
 ### A spec must never cite a GitHub issue number as though it were a section
 
-`openspec/specs/` is read on its own. A requirement citing "§5.7" pointed at a
-`docs/PLAN.md` heading before that file was retired (issue #105); the same
-trap now applies to citing "#123" as though the issue's current wording were
-stable enough to restate a requirement's substance. An issue is a roadmap
-item that can be edited, closed or reworded at any time, and a reader of a
-spec does not have it open. Cite by requirement name, or restate the
-substance in one clause.
+`openspec/specs/` is read on its own, and an issue can be edited, closed or
+reworded at any time. Cite by requirement name, or restate the substance in
+one clause.
 
 One instance is live in `moderation-resolution` ("The deciding moderation is
 named"), inherited from its delta and left alone by the sweep that found it —
@@ -63,13 +59,8 @@ Reasoning never goes in a spec at all — a spec is a behaviour contract, and
 prose rationale in one is prose nobody will maintain.
 
 **GitHub Issues and Milestones are the sole source of truth for scope and
-roadmap** — see `docs/PROJECT-MANAGEMENT.md`. This repo previously carried a
-4000+ line `docs/PLAN.md` mixing durable design reasoning with what shipped
-next; issue #105 retired it, moving its reasoning into the `design.md` files
-of the archived changes that implemented each decision, its structural traps
-into `CLAUDE.md`, and its remaining unbuilt-behaviour content into GitHub
-issues. Do not re-create a document that holds "what is not built yet" outside
-the issue tracker — that is precisely the split #105 undid.
+roadmap.** Do not re-create a document that holds "what is not built yet"
+outside the issue tracker.
 
 ## The roles
 
@@ -567,11 +558,8 @@ cannot be varied through the API; behaviour that does not exist yet cannot be
 covered. Describe what is checkable, or say it is out of scope.
 
 **Read the GitHub issue and `openspec/specs/` fresh, not from memory or a
-paraphrase.** Before `docs/PLAN.md` was retired (#105), a change was once
-designed against a section that had been rewritten to say the opposite while
-the agent was working from an earlier read. The same risk now attaches to an
-issue's wording and to a spec on `origin/main` — both can change under a change
-in flight, and neither is safe to reason about from a cached read.
+paraphrase.** Both can change under a change in flight, and neither is safe to
+reason about from a cached read.
 
 **A green gate can be structurally blind.** `cargo fmt --check` does not follow
 path dependencies, so it never reaches `dialectica-core` — where nearly all the

@@ -12,13 +12,12 @@ that scopes it.
 not from a paraphrase in your brief.** An issue is editable roadmap text, not a
 frozen spec — its scope can be narrowed, corrected or reworded after it was
 filed, and a stale read is how a change gets designed against a decision that
-was reversed. GitHub Issues and Milestones are the sole source of truth for
-scope here; see `docs/PROJECT-MANAGEMENT.md`.
+was reversed.
 
 **You should arrive already inside your own worktree**, forked from the runner's
 HEAD, so it holds the piece's commits. Use **plain relative paths**, and do not
-call `EnterWorktree` — it is for a session moving itself, and `README.md`'s
-"Handing over between agents" says why a dispatched agent cannot.
+call `EnterWorktree` — it is for a session moving itself, not a dispatched
+agent.
 
 **You are not on `piece/<name>`** — the harness puts you on `worktree-agent-<id>`.
 Read it with `git rev-parse --abbrev-ref HEAD` rather than assuming, and **report
@@ -106,10 +105,9 @@ This file carries only the split between documents:
   usually where the reasoning for *why this scope* started out — but that
   reasoning does not stay there once a change picks the issue up.
 
-**Close the loop with the issue as you go.** Once this change lands, the issue
-it addresses should be closed (by the `closer`, via the PR's closing keyword —
-see `dev-writer.md`) rather than left open describing work that now has a
-spec and code. If the issue's own text carried reasoning worth keeping —
+**Close the loop with the issue as you go.** The `closer` closes it via the
+PR's closing keyword (see `dev-writer.md`). If the issue's own text carried
+reasoning worth keeping —
 rejected alternatives, a spike result, why a particular shape was chosen — that
 belongs in `design.md`'s Decisions section once one exists. **That migration is
 not yours**, because you run before `design.md` exists and you do not write it:
@@ -117,9 +115,8 @@ not yours**, because you run before `design.md` exists and you do not write it:
 folds each one into the Decisions entry it belongs to; `design-reviewer` checks
 it happened.
 
-**Never route reasoning into the spec.** A spec is a behaviour contract: prose
-rationale in one is prose nobody maintains, and it makes the requirements harder
-to read for the person checking whether a test covers them.
+**Never route reasoning into the spec.** Reasoning belongs in `design.md`'s
+Decisions section.
 
 ## Reorganising specs
 
@@ -134,8 +131,7 @@ the schema requires), in one change. If the old capability ends up empty,
 `retire_capabilities: true` in **the change's** `.openspec.yaml` lets archive
 delete it — a capability directory has no such file.
 
-**Requirement text moves verbatim** — an extraction that also edits behaviour is
-two changes wearing one hat, and neither half can be reviewed.
+**Requirement text moves verbatim.**
 
 ## Keywords
 

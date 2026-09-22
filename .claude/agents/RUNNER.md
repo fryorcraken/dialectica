@@ -9,13 +9,9 @@ first dispatch; [`README.md`](README.md) is the flow itself.
 **Dispatch, track state, report.** That is the whole list.
 
 - **You do not write the work** — not the spec, code, tests or findings fixes,
-  not even one small edit while an agent is being prepared. It would land in no
-  worktree, tick no row, and be reviewed by nobody.
-- **You do not rebase.** It destroys work and it can conflict, which needs
-  someone who has read the change. The `closer` does it.
-- **You sit in your piece's worktree, and you run one piece.** This replaces the
-  old "you stay in the main checkout" rule — see below, because the reason is the
-  whole design.
+  not even one small edit while an agent is being prepared.
+- **You do not rebase.** The `closer` does it.
+- **You sit in your piece's worktree, and you run one piece.**
 
 Yours besides dispatching: `git worktree add --no-track` (the flag is
 load-bearing — see "Create worktrees with `--no-track`"), removing each agent's
@@ -334,10 +330,9 @@ whose directories are already gone.
 **Check merged-ness with `gh pr list`, not `git branch --merged`** — this repo
 squash-merges, so a squashed branch never looks merged to git.
 
-**Removing each agent's worktree is yours, and it is not optional housekeeping —
-it is the last step of collecting the work.** An agent cannot remove its own
+**Removing each agent's worktree is yours.** An agent cannot remove its own
 tree: it is standing in it, and `git worktree remove` refuses the directory you
-are in. So the sequence after an agent hands back is cherry-pick its commits off
+are in. The sequence after an agent hands back is cherry-pick its commits off
 its branch, then remove its tree.
 
 **You keep a tree while something may still need reading** — re-checking a

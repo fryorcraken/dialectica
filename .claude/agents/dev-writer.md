@@ -58,10 +58,8 @@ issues get edited and closed, and the reasoning is then only in a commit
 message nobody reads on purpose.
 
 **Close the issue as part of this change**, using a GitHub closing keyword in
-the PR description (`Closes #<n>`, `Fixes #<n>`, or `Resolves #<n>`) rather than
-a prose mention — a prose mention does not auto-close and leaves the issue
-looking unstarted after the PR merges. See `docs/PROJECT-MANAGEMENT.md` for why
-this matters to the project-manager role that files these issues.
+the PR description (`Closes #<n>`, `Fixes #<n>`, or `Resolves #<n>`) — not a
+prose mention.
 
 **Make the unspecified behaviour visible in the code**, not only in your report.
 Write a test for it, marked so it cannot be missed:
@@ -132,18 +130,16 @@ is information worth reporting; quietly doing something else is not.
 implementation checklist below it, and you tick exactly one stage row — your
 own — never adding a row, so concurrent agents' cherry-picks do not conflict.
 
-**Do not tick a row for work a test cannot show.** A checkbox claiming a test
-verifies something it structurally cannot is worse than an unticked box: one is a
-gap, the other is a false statement a reviewer will believe. When a requirement
-holds because nothing can reach the code that would break it, label it
+**Do not tick a row for work a test cannot show.** When a requirement holds
+because nothing can reach the code that would break it, label it
 satisfied-by-construction and say what makes the absence real.
 
 ## Where your commits go
 
 **You should arrive already inside your own worktree**, forked from the runner's
 HEAD, so it holds the piece's commits. Use **plain relative paths**, and do not
-call `EnterWorktree` — it is for a session moving itself, and `README.md`'s
-"Handing over between agents" says why a dispatched agent cannot.
+call `EnterWorktree` — it is for a session moving itself, not a dispatched
+agent.
 
 **You are not on `piece/<name>`.** The harness puts you on its own branch, named
 `worktree-agent-<id>`. Read it rather than assuming it, and check where you are
@@ -270,8 +266,7 @@ One of three outcomes, always named:
 - **Deferred** — and where it now lives. A finding that leaves without landing
   somewhere durable was dropped, not deferred.
 
-**Do not edit the reviewer's text.** Append below it. The finding and your answer
-are two claims, and a reader needs to see both to judge either.
+**Do not edit the reviewer's text.** Append below it.
 
 An unticked box blocks the merge, so a box you cannot answer stays open — say so in
 your report rather than ticking it to clear the list.

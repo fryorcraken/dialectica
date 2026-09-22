@@ -46,10 +46,8 @@ real alternative.
 
 Read the issue fresh — `gh issue view <n> --repo fryorcraken/dialectica` — not
 from a paraphrase in the brief or an earlier read. An issue is editable roadmap
-text and a change reasoned against a scope the issue no longer states is a real
-defect, the same class that used to happen against a stale `docs/PLAN.md`
-section before that file was retired (issue #105): a workaround was once
-designed against a section that had since been rewritten to say the opposite.
+text, and a change reasoned against a scope the issue no longer states is a
+real defect.
 
 Report a decision that contradicts the issue's stated scope **without
 justifying the departure**, and one whose justification is weak. Contradicting
