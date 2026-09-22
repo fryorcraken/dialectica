@@ -47,15 +47,19 @@ route by kind:
   the only person who cheaply knows that, and it is what stops the guard being
   deleted later by someone who cannot see what it was for.
 
-**You own the PLAN.md reasoning migration.** `spec-writer` runs before
-`design.md` exists, so it strikes through the *behaviour* PLAN.md described and
-leaves the *reasoning* passages this change acted on where they are — rejected
-alternatives, spike results, a "why X and not Y". As you write each Decisions
-entry, move the passage that belongs to it out of PLAN.md and into that entry.
-Do not leave a second copy: two copies drift and the wrong one gets read.
-PLAN.md keeps what is still ahead. `design-reviewer` checks you did this, and a
-passage that was struck from PLAN.md but never landed in `design.md` is the
-silent failure to avoid — the reasoning is then only in a commit message.
+**You own the reasoning migration out of the GitHub issue.** `spec-writer` runs
+before `design.md` exists, so its handover notes which passages of the issue's
+own text carried reasoning this change acted on — rejected alternatives, spike
+results, a "why X and not Y" — rather than moving them anywhere itself. As you
+write each Decisions entry, fold the passage that belongs to it into that
+entry. `design-reviewer` checks you did this, and a decision left only in the
+issue's prose, with nothing in `design.md`, is the silent failure to avoid —
+issues get edited and closed, and the reasoning is then only in a commit
+message nobody reads on purpose.
+
+**Close the issue as part of this change**, using a GitHub closing keyword in
+the PR description (`Closes #<n>`, `Fixes #<n>`, or `Resolves #<n>`) — not a
+prose mention.
 
 **Make the unspecified behaviour visible in the code**, not only in your report.
 Write a test for it, marked so it cannot be missed:
@@ -126,18 +130,16 @@ is information worth reporting; quietly doing something else is not.
 implementation checklist below it, and you tick exactly one stage row — your
 own — never adding a row, so concurrent agents' cherry-picks do not conflict.
 
-**Do not tick a row for work a test cannot show.** A checkbox claiming a test
-verifies something it structurally cannot is worse than an unticked box: one is a
-gap, the other is a false statement a reviewer will believe. When a requirement
-holds because nothing can reach the code that would break it, label it
+**Do not tick a row for work a test cannot show.** When a requirement holds
+because nothing can reach the code that would break it, label it
 satisfied-by-construction and say what makes the absence real.
 
 ## Where your commits go
 
 **You should arrive already inside your own worktree**, forked from the runner's
 HEAD, so it holds the piece's commits. Use **plain relative paths**, and do not
-call `EnterWorktree` — it is for a session moving itself, and `README.md`'s
-"Handing over between agents" says why a dispatched agent cannot.
+call `EnterWorktree` — it is for a session moving itself, not a dispatched
+agent.
 
 **You are not on `piece/<name>`.** The harness puts you on its own branch, named
 `worktree-agent-<id>`. Read it rather than assuming it, and check where you are
@@ -264,8 +266,7 @@ One of three outcomes, always named:
 - **Deferred** — and where it now lives. A finding that leaves without landing
   somewhere durable was dropped, not deferred.
 
-**Do not edit the reviewer's text.** Append below it. The finding and your answer
-are two claims, and a reader needs to see both to judge either.
+**Do not edit the reviewer's text.** Append below it.
 
 An unticked box blocks the merge, so a box you cannot answer stays open — say so in
 your report rather than ticking it to clear the list.

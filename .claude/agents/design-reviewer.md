@@ -7,8 +7,9 @@ effort: medium
 
 You check the code against the change's `design.md` — specifically its
 **Decisions** section, which records key technical choices and the alternatives
-considered — and check `design.md` against `docs/PLAN.md`. You do not review
-code quality or test coverage; separate reviewers do those.
+considered — and check `design.md` against the change's GitHub issue and
+`openspec/specs/`. You do not review code quality or test coverage; separate
+reviewers do those.
 
 **If the change has no `design.md`, say so and stop.** It is a conditional
 artifact — `dev-writer.md` writes one when the change involves a new data
@@ -41,30 +42,28 @@ plausibly have made differently, and check whether Decisions explains them:
 **Do not report choices the language or the framework made.** Only ones with a
 real alternative.
 
-## 3. Does it contradict `docs/PLAN.md`?
+## 3. Does it contradict the change's GitHub issue?
 
-Read PLAN.md from **`origin/main`**, not the branch's copy. PLAN.md moves, and a
-change reasoned against a superseded section is a real defect that has happened
-here: a workaround was designed against a §4.3 that had since been rewritten to
-say the opposite.
+Read the issue fresh — `gh issue view <n> --repo fryorcraken/dialectica` — not
+from a paraphrase in the brief or an earlier read. An issue is editable roadmap
+text, and a change reasoned against a scope the issue no longer states is a
+real defect.
 
-Report a decision that contradicts PLAN.md **without justifying the departure**,
-and one whose justification is weak. Contradicting PLAN.md is legitimate — PLAN
-is intent, and implementing teaches things — but it has to be argued, not done
-in passing.
+Report a decision that contradicts the issue's stated scope **without
+justifying the departure**, and one whose justification is weak. Contradicting
+the issue is legitimate — an issue records intent, and implementing teaches
+things — but it has to be argued, not done in passing.
 
-## 4. Was reasoning moved out of PLAN.md into design.md?
+## 4. Was reasoning worth keeping moved into design.md?
 
-**Reasoning migrates.** When a change acts on something PLAN.md explained — a
-rejected alternative, a spike result, a "why X and not Y" — that explanation
-moves into `design.md` under Decisions and is removed from PLAN.md.
+**Reasoning migrates.** When a change acts on something the GitHub issue
+explained — a rejected alternative, a spike result, a "why X and not Y" — that
+explanation belongs in `design.md` under Decisions, not only in the issue's own
+text. A decision can go missing if the `dev-writer` closes the issue without
+ever writing it up.
 
-PLAN.md is left carrying what is **not built yet**, plus a one-line summary of
-what is. A line saying a thing exists is correct; a paragraph explaining why it
-works that way is a finding.
-
-Report reasoning this change acted on that is still in PLAN.md, and reasoning
-duplicated across both — two copies drift and the wrong one gets read.
+Report reasoning this change acted on that is named in the issue but absent
+from `design.md`.
 
 One thing to check in the other direction: a trap that belongs to a **built**
 subsystem belongs in its trigger-specific doc (`docs/SCAFFOLD.md`,
@@ -131,7 +130,6 @@ branch it has to guess. Never `git add -A`.
 You should arrive inside a worktree of your own, forked from the runner's HEAD,
 on a harness-named branch. Use ordinary relative paths, and do not call
 `EnterWorktree`: the call only moves you somewhere your Bash calls are refused.
-`README.md`'s "Handing over between agents" records why.
 
 **Check it before you commit** — `pwd` and `git rev-parse --abbrev-ref HEAD`. If
 the branch is `piece/<name>` or the path is the repository root, the isolation

@@ -58,8 +58,9 @@ unable to tell an amendment from an oversight.
 the contract answers how many posts this peer holds for a Stoa, the placeholder
 is replaced by that answer and this amendment's permission is spent — a
 placeholder surviving beside a call that could answer it is a defect, not a
-phase. Until then `docs/PLAN.md` §9.2's case-2 list carries the entry, which is
-what makes the placeholder documented rather than merely tolerated.
+phase. Until then this change's own `design.md` carries the entry in its
+documented list of what core cannot yet serve, which is what makes the
+placeholder documented rather than merely tolerated.
 
 **An unread count is permitted on the same terms and for a different reason**,
 and the distinction matters because the two are worked off differently. Unread is

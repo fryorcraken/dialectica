@@ -336,7 +336,7 @@ data, and closing it inside the view would mean decoding the genesis record
 there, which "What is shared carries the founding record, not the address alone"
 forbids for the same reason it forbids reconstructing one. **This conditional
 binds for exactly as long as that gap does**: when a core call answers a founding
-title for an un-joined reference — `getStoa` in `docs/PLAN.md` §9.1's shape, or a
+title for an un-joined reference — the `getStoa` method issue #98 tracks, or a
 narrower call that describes a pair without recording membership — the condition
 is satisfied at preview time and the requirement reads unconditionally again.
 

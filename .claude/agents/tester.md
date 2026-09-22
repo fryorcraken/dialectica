@@ -161,8 +161,8 @@ Never a compound command; `cd <dir> && cargo test` costs an approval click even
 though `cargo test` is allow-listed. For a suite in a subdirectory, prefer the
 tool's own path flag over moving directory.
 
-**Do not call `EnterWorktree`** — it is for a session moving itself;
-`README.md`'s "Handing over between agents" says why a dispatched agent cannot.
+**Do not call `EnterWorktree`** — it is for a session moving itself, not a
+dispatched agent.
 
 **You are not on `piece/<name>`.** The harness puts you on `worktree-agent-<id>`.
 Read it with `git rev-parse --abbrev-ref HEAD`, commit there, and **tick the

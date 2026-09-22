@@ -14,7 +14,7 @@ per-role models and tool limits.
 
 | Document | Question | Where it ends up |
 |---|---|---|
-| `docs/PLAN.md` | A short summary of what exists, and **what is not built yet** | Lives at `docs/`, edited forever |
+| GitHub Issues and Milestones | **What is not built yet** — the roadmap | github.com, not this repo's working tree |
 | `proposal.md` | Why this change, which capabilities it touches | `changes/archive/<date>-<name>/` |
 | `openspec/specs/` | **What** the system does — the behaviour contract | `openspec/specs/`, current |
 | `design.md` | **How**, and **why this approach** (Decisions) | `changes/archive/<date>-<name>/` |
@@ -34,47 +34,43 @@ says why that ordering. `openspec` is installed; run
 `openspec --version` rather than believing any document about it, this one
 included.
 
-### A spec must never cite a PLAN section number
+### A spec must never cite a GitHub issue number as though it were a section
 
-`openspec/specs/` is read on its own. A requirement citing "§5.7" points at a
-`docs/PLAN.md` heading that the reader does not have open, that carries no
-stable number, and that PLAN.md sheds as changes land. Cite by requirement
-name, or restate the substance in one clause.
+`openspec/specs/` is read on its own, and an issue can be edited, closed or
+reworded at any time. Cite by requirement name, or restate the substance in
+one clause.
 
 One instance is live in `moderation-resolution` ("The deciding moderation is
 named"), inherited from its delta and left alone by the sweep that found it —
 an archive sweep that also edits prose is a sweep nobody can review.
 
-### PLAN.md sheds in two directions
+### Reasoning migrates to `design.md`; behaviour migrates to a spec
 
-As a change lands, the part of PLAN.md it implements moves out:
+As a change lands, whatever unbuilt reasoning or scope motivated it moves out
+of wherever it was recorded — a GitHub issue, a conversation with the owner —
+and into the place `.claude/agents/README.md`'s document table names:
 
-- **Behaviour → the spec.** Struck through in PLAN.md, with a one-line summary
-  that the thing exists.
-- **Reasoning → `design.md`** under Decisions, and removed from PLAN.md. Someone
-  investigating a past decision reads the archive; that is what it is for.
-
-PLAN.md is left with what is **not built yet**, plus one line per built area
-saying it exists — never why it works that way. Keeping a second copy of the
-reasoning is the failure mode: two copies drift and the wrong one gets read.
+- **Behaviour → the spec.** A capability's requirements are what a reader can
+  now rely on; the issue that asked for it can close.
+- **Reasoning → `design.md`** under Decisions. Someone investigating a past
+  decision reads the archive; that is what it is for.
 
 Reasoning never goes in a spec at all — a spec is a behaviour contract, and
 prose rationale in one is prose nobody will maintain.
 
-**This applies to changes as they land, not as a migration.** PLAN.md today
-holds plenty that would now live in a `design.md` — §2.3's SDK gaps, §11's
-traps, why BIP-340 was rejected — and most of it has no change to attach to.
-Leave it. It shrinks by attrition as changes touch each area.
+**GitHub Issues and Milestones are the sole source of truth for scope and
+roadmap.** Do not re-create a document that holds "what is not built yet"
+outside the issue tracker.
 
 ## The roles
 
 | Agent | Reads | Writes |
 |---|---|---|
-| `spec-writer` | PLAN.md (from `origin/main`) | `proposal.md`, `specs/` |
-| `dev-writer` | spec, PLAN.md | `design.md`, `tasks.md`, code, tests-as-it-goes, **the PR** |
+| `spec-writer` | the change's GitHub issue, `openspec/specs/` | `proposal.md`, `specs/` |
+| `dev-writer` | spec, the change's GitHub issue | `design.md`, `tasks.md`, code, tests-as-it-goes, **the PR** |
 | `tester` | spec, inherited tests | the test suite |
 | `spec-test-reviewer` | **spec + tests only** | findings |
-| `design-reviewer` | code, `design.md`, PLAN.md | findings |
+| `design-reviewer` | code, `design.md`, the change's GitHub issue | findings |
 | `code-reviewer` | code | findings |
 | `closer` | `tasks.md`, `findings/`, CI, the PR | deletes `findings/`, the archive commit |
 
@@ -183,8 +179,7 @@ there; this line points rather than restates, because two copies drift.
 commits through a PR only — `enforce_admins` is on, and a direct push is rejected
 with `GH006`. The archive is the one that reads as though it might be exempt,
 being a bookkeeping commit; it is not, and it goes onto the piece branch like
-everything else. This page and `closer.md` both used to say otherwise, until a
-closer tried it.
+everything else.
 
 Cherry-pick rather than merge, so the task branch reads as a flat sequence rather
 than six merge commits carrying six branches.
@@ -561,8 +556,9 @@ reasonable default becomes permanent by accident.
 cannot be varied through the API; behaviour that does not exist yet cannot be
 covered. Describe what is checkable, or say it is out of scope.
 
-**Read PLAN.md from `origin/main`.** A change was once designed against a §4.3
-that had been rewritten to say the opposite.
+**Read the GitHub issue and `openspec/specs/` fresh, not from memory or a
+paraphrase.** Both can change under a change in flight, and neither is safe to
+reason about from a cached read.
 
 **A green gate can be structurally blind.** `cargo fmt --check` does not follow
 path dependencies, so it never reaches `dialectica-core` — where nearly all the

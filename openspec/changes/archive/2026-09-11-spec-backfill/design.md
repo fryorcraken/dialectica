@@ -188,6 +188,93 @@ are pinned to independently derived answers. That is a statement about how the
 contract is defended rather than about the algorithm, and it is checkable
 without naming one.
 
+### Ed25519 over BIP-340 Schnorr on secp256k1, and why LEZ's scheme was never a candidate
+
+Migrated from `docs/PLAN.md` §5.4, which is where this decision was originally
+recorded, ahead of the spec that now governs the scheme's absence from the
+contract (above).
+
+**It is tempting to reason that because LEZ proof-of-holding is a future
+credential (see the `relevance-votes` change), dialectica should sign with
+LEZ's scheme so the two interoperate. That reasoning is wrong**, and it is worth
+refuting explicitly because it is the plausible mistake:
+
+- **A claim binds to a key named in its own journal, not to a matching curve.**
+  LP-0005's journal exposes a `presenter_pubkey` carried as a length-checked
+  byte blob, and binding works by the presenter signing a verifier nonce over
+  the journal hash. **The LEZ account key never appears in the journal at
+  all**, since keeping `npk` private is the point. (Do not read the presenter
+  key as freely chosen: an early gate allowed that, and error `3010` was added
+  precisely to require the signer *be* the attested account. The conclusion
+  survives, the freedom does not.)
+- **There is no single "LEZ scheme" to match.** LEZ's own account material is
+  already mixed — `npk` is a SHA-256 chain rather than a curve point, and `vpk`
+  is an ML-KEM-768 key — and a shipped LEZ program (`sequencer_stake`) verifies
+  **ed25519** in-guest. A LEZ guest links whatever signature crate it wants.
+- **Matching a scheme LEZ may leave.** LEZ's own source notes its signature
+  keys are a hedge, to be reduced "once LEE is upgraded to use PQ signatures".
+  Matching today could mean matching something abandoned tomorrow.
+
+So the forum's signing scheme was chosen on the forum's own criteria — key
+derivation, parse safety, verify cost — with a claim binding to it regardless
+of how it signs.
+
+**The scheme is Ed25519**, decided on those criteria, over BIP-340 Schnorr on
+secp256k1 (`k256`) — which was the LEZ-matching candidate the bullets above
+dispose of.
+
+Parse safety was the clearest criterion and is not a matter of taste. In `k256`
+0.13, `VerifyingKey::from_bytes` and `TryFrom<&[u8]> for Signature` each take a
+byte slice, return a `Result`, and **panic** anyway on a wrong length — one via
+`generic-array`'s `from_slice`, the other via `split_at`. A public key and a
+signature arrive inside every inbound op, so both were remotely reachable, and
+`docs/PHASE0-FINDINGS.md` §3 measured what a panic in a dispatch handler does:
+the module process aborts, and the guard cannot help because the abort happens
+below it. Ed25519's constructors take fixed-size arrays, so the mistake cannot
+be expressed rather than having to be guarded against. (`k256` 0.14 fixes both
+structurally; the choice was not close enough for that to reopen it, since key
+derivation decided it.)
+
+**Verification must use `verify_strict`, and every peer must use the same
+predicate.** The requirement is *pinning*, not a reading of RFC 8032: the two
+functions differ in rejecting small-order `A` and `R` and non-canonical `R` —
+torsion malleability — rather than in the cofactored/cofactorless choice, and
+both dalek verifiers are cofactorless. What matters is that peers verify
+independently, so any disagreement about which predicate applies is a
+partition in the one place this design cannot tolerate one. The implication
+runs one way: a peer accidentally calling plain `verify` accepts a strict
+superset, so it admits ops that strict peers reject.
+
+Worth recording because no command will tell you: dalek's own `verify_strict`
+doc comment quotes the RFC's cofactor sentence and describes behaviour the code
+does not implement (upstream `curve25519-dalek#663`). So this is a semantics
+choice pinned to a library whose documentation is wrong about it — which is why
+the call site names the required checks explicitly, so that a dependency bump
+is visible rather than silent.
+
+ZIP-215 is worth reading here and reaches the *opposite* answer from the same
+premise: it removes the torsion checks and multiplies by the cofactor, because
+for consensus it wanted the more deterministic option. That is a legitimate
+alternative pin; what is not legitimate is peers disagreeing.
+
+**Two other alternatives were considered and rejected on different grounds:**
+
+- **λAccount / VLAD** is the right long-term target and its requirements read
+  like a forum identity spec (stable address under key rotation, append-only
+  key log, no irreversible single-key takeover). But the library spec, registry
+  interface and backend decision are all v0.3 deliverables, and the
+  blockchain-backed registry is mainnet. Cannot be consumed yet.
+- **LEZ private accounts taken literally** would inherit the wrong properties —
+  they are a financial confidentiality primitive. No rotation, no recovery, no
+  sybil resistance, and an address that changes when keys do. Match their
+  cryptographic seriousness, not their construction.
+- **Chat module identity** is ephemeral (restarting mints a fresh identity) and
+  `getIdentity()` is marked `// TODO: Deprecate`. Do not build on it.
+
+There is **no identity or keystore module** in the ecosystem, first-party or
+otherwise. `wallet_module` has no key custody. Dialectica defines this
+interface rather than consuming one.
+
 ### Requirements that already live in another spec were left there
 
 `op-format` states *Verification answers authenticity, not authority*, and its

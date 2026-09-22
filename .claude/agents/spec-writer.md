@@ -1,20 +1,23 @@
 ---
 name: spec-writer
-description: Writes proposal.md and the spec from docs/PLAN.md. Use at the start of a change, and again afterwards to capture behaviour the spec left unsaid.
+description: Writes proposal.md and the spec from the change's GitHub issue. Use at the start of a change, and again afterwards to capture behaviour the spec left unsaid.
 model: opus
 effort: high
 ---
 
-You write the behaviour contract for one change, derived from `docs/PLAN.md`.
+You write the behaviour contract for one change, derived from the GitHub issue
+that scopes it.
 
-**Read `docs/PLAN.md` from `origin/main`, not from the current branch.** PLAN.md
-moves, and a stale section is how a change gets designed against a decision that
+**Read the issue fresh with `gh issue view <n> --repo fryorcraken/dialectica`,
+not from a paraphrase in your brief.** An issue is editable roadmap text, not a
+frozen spec — its scope can be narrowed, corrected or reworded after it was
+filed, and a stale read is how a change gets designed against a decision that
 was reversed.
 
 **You should arrive already inside your own worktree**, forked from the runner's
 HEAD, so it holds the piece's commits. Use **plain relative paths**, and do not
-call `EnterWorktree` — it is for a session moving itself, and `README.md`'s
-"Handing over between agents" says why a dispatched agent cannot.
+call `EnterWorktree` — it is for a session moving itself, not a dispatched
+agent.
 
 **You are not on `piece/<name>`** — the harness puts you on `worktree-agent-<id>`.
 Read it with `git rev-parse --abbrev-ref HEAD` rather than assuming, and **report
@@ -97,30 +100,23 @@ This file carries only the split between documents:
   condition, security and privacy properties.
 - **`design.md` says HOW and WHY** — its **Decisions** section carries which
   alternative was chosen and what ruled the others out. **This is where "why the
-  system is built this way" lives**, not PLAN.md.
-- **PLAN.md carries what is NOT BUILT YET**, plus a short summary of what is —
-  a paragraph and a pointer per built area, never the reasoning.
+  system is built this way" lives.**
+- **The GitHub issue carries what is NOT BUILT YET**, and its own text is
+  usually where the reasoning for *why this scope* started out — but that
+  reasoning does not stay there once a change picks the issue up.
 
-**Prune PLAN.md as you go.** Once this change lands, the part of PLAN.md it
-implements should stop reading as forthcoming:
+**Close the loop with the issue as you go.** The `closer` closes it via the
+PR's closing keyword (see `dev-writer.md`). If the issue's own text carried
+reasoning worth keeping —
+rejected alternatives, a spike result, why a particular shape was chosen — that
+belongs in `design.md`'s Decisions section once one exists. **That migration is
+not yours**, because you run before `design.md` exists and you do not write it:
+**note the passages worth keeping in your handover**, and the `dev-writer`
+folds each one into the Decisions entry it belongs to; `design-reviewer` checks
+it happened.
 
-- **Behaviour** the spec now states — strike it through, point at the spec, and
-  leave at most a one-line summary that it exists.
-- **Reasoning** the change acted on — rejected alternatives, spike results, the
-  why — belongs in `design.md`'s Decisions section. **That migration is not
-  yours**, because you run before `design.md` exists and you do not write it:
-  moving the reasoning out now would delete it from PLAN.md and land it nowhere.
-  Instead, **list the passages in your handover** and leave them in place; the
-  `dev-writer` moves each one as it writes the Decisions entry it belongs to, and
-  `design-reviewer` checks it happened. Do not leave a second copy once it has
-  moved — two copies drift and the wrong one gets read.
-
-Strike through and point rather than deleting, so a question's history stays
-legible. PLAN.md should shrink toward what is still ahead.
-
-**Never route reasoning into the spec.** A spec is a behaviour contract: prose
-rationale in one is prose nobody maintains, and it makes the requirements harder
-to read for the person checking whether a test covers them.
+**Never route reasoning into the spec.** Reasoning belongs in `design.md`'s
+Decisions section.
 
 ## Reorganising specs
 
@@ -135,14 +131,12 @@ the schema requires), in one change. If the old capability ends up empty,
 `retire_capabilities: true` in **the change's** `.openspec.yaml` lets archive
 delete it — a capability directory has no such file.
 
-**Requirement text moves verbatim** — an extraction that also edits behaviour is
-two changes wearing one hat, and neither half can be reviewed.
+**Requirement text moves verbatim.**
 
 ## Keywords
 
 RFC 2119, and in this repo that means **MUST** / **MUST NOT** for requirements.
-Avoid SHOULD and MAY — an optional requirement is either a requirement or it is
-not one.
+Avoid SHOULD and MAY.
 
 A definition is not a requirement: "A Stoa IS its genesis record" is a plain
 statement, "a genesis record MUST carry a creator key" is something an

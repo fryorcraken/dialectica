@@ -2,15 +2,27 @@
 
 ## Context
 
-The owner reversed `docs/PLAN.md` ruling 3's screen half. The MVP ships screen 07
-with every control calling nothing, because the owner wants to see it. The
-publishing half of ruling 3 is untouched: the `Dialectica` trait exposes no
-moderation-publishing method, so there is genuinely nothing for the controls to
-call.
+**The owner reversed the third of four MVP scope rulings, on its screen half
+only.** That ruling had read: "moderation stays out, and the MVP ships no
+moderation screen" — the reasoning being that §6's moderation design is
+blocked at the contract rather than merely deferred, since the `Dialectica`
+trait exposes no moderation-publishing method and there is nothing for a
+screen to call. The owner decided the MVP ships screen 07 anyway, with every
+control calling nothing, because they want to see it. **The publishing half
+of the ruling is untouched**: the trait still exposes no moderation-publishing
+method, so there is genuinely nothing for the controls to call — only the
+"and ships no screen" clause was reversed.
 
-Two merged requirements also had to move, because a scope note in PLAN.md does not
-override one — PLAN.md says so itself, and this change is that mechanism working
-rather than an exception to it.
+Two merged requirements also had to move. The scope rulings were never
+license to override a permanent requirement on their own — a fourth ruling
+governing all of them said so explicitly: **a scope note does not override a
+merged requirement; where a requirement forbids something, the requirement
+governs, and relaxing it is a spec change rather than a scope note.** This
+change is that mechanism working as intended, not an exception to it: the
+owner wanted the design bundle's row counts, a scope note alone could not
+deliver them because `stoa-navigation-view`'s "every number rendered is one
+this peer can actually answer" forbade it, so the requirement itself was
+amended through a reviewed spec delta.
 
 ## Decisions
 
@@ -30,10 +42,11 @@ results. A moderator who believes a post is hidden stops dealing with it.
 
 **Considered and rejected: disable the controls.** A greyed-out button says "not
 available to you", which is a claim about authority. Nothing answers whether this
-peer may moderate this Stoa — `getModerationCapability` is designed in PLAN.md
-§9.1 and does not exist — so a disabled control would assert something the
-software has not checked, on the one screen where a user could act on it to their
-cost. Live-looking controls with an honest notice claim less than disabled ones.
+peer may moderate this Stoa — a `getModerationCapability`-shaped call was
+proposed for this and does not exist on the `Dialectica` trait today — so a
+disabled control would assert something the software has not checked, on the
+one screen where a user could act on it to their cost. Live-looking controls
+with an honest notice claim less than disabled ones.
 
 **Why it is a requirement rather than a comment:** the notice reads as clutter to
 anybody who has not worked out the above, and the buttons read as merely
@@ -162,22 +175,24 @@ than left to be discovered.** `tmp/ui-bundle-new/handoff/README.md` line 40 is
 one of the four "rules easiest to break while implementing": *"Never show a count
 of anything global. Every number counts what this machine holds."* The amendment
 that permits this position to be filled reconciles the spec
-(`stoa-navigation-view`) and PLAN.md §9.2, and says nothing about the bundle — so
-a reader holding both documents would not learn from either that they now differ
-on this exact point.
+(`stoa-navigation-view`) and the MVP scope ruling that a Stoa row's count
+position ships filled with a marked placeholder (see "Reasoning moved out of
+PLAN.md" below), and says nothing about the bundle — so a reader holding both
+documents would not learn from either that they now differ on this exact
+point.
 
-**What the owner reversed, and what they did not.** The reversal was of PLAN.md
-ruling 3, whose subject is the moderation screen: it was reversed so the screen
-could be built and *seen*. Nothing in it addresses counting. So the honest
-statement is that the bundle's rule 3 has **not** been overridden by anyone, and
-this change does not treat it as overridden.
+**What the owner reversed, and what they did not.** The reversal was of the
+MVP scope ruling whose subject is the moderation screen: it was reversed so
+the screen could be built and *seen*. Nothing in it addresses counting. So the
+honest statement is that the bundle's rule 3 has **not** been overridden by
+anyone, and this change does not treat it as overridden.
 
 **The reason no conflict arises in fact is that the placeholder is not a count**
 — `counts not yet available` renders no numeral and asserts no quantity, which is
 precisely what D5 chose it for. The bundle forbids showing a count that is not
 this machine's; a string saying a count is unavailable shows no count at all.
-Every rule survives: the bundle's, the spec's permanent prohibition on global
-counts, and PLAN.md's.
+Every rule survives: the bundle's, and the spec's permanent prohibition on
+global counts.
 
 **Where it would become a real divergence** is the moment anything renders a
 number in that position. If a future change fills it from a core call, the
@@ -313,24 +328,107 @@ nothing because `qmltestrunner::<Case>::` contains colons itself, so every test
 read as missing. A check that reports everything missing is as useless as one
 that reports nothing, and both directions are pinned.
 
-## Reasoning moved out of `docs/PLAN.md`
+## Reasoning moved out of `docs/PLAN.md`, and what replaced it
 
-Per the flow's PLAN-sheds rule, reasoning this change acted on moves here rather
-than being left in two places. What moved:
+Per the flow's PLAN-sheds rule, reasoning this change acted on moved here
+rather than being left in two places. What moved:
 
 - **Why the screen's controls being inert is a hazard rather than a neutral
-  placeholder.** PLAN.md §6 and §9.2 ruling 3 now record *that* the owner
-  reversed the ruling and *that* `moderation-view` contracts the account the
-  screen must give; the argument for why — that a moderator who believes a post
-  is hidden stops dealing with it, and that on this screen a successful
-  moderation and a dead control look identical — lives in D1 above.
-- **Why a derived count is worse than a constant one.** PLAN.md's case 2 entry 3
-  now names the placeholder and the file that marks it; the argument that a
+  placeholder.** The MVP scope ruling below (and §6's moderation design)
+  record *that* the owner reversed the ruling and *that* `moderation-view`
+  contracts the account the screen must give; the argument for why — that a
+  moderator who believes a post is hidden stops dealing with it, and that on
+  this screen a successful moderation and a dead control look identical —
+  lives in D1 above.
+- **Why a derived count is worse than a constant one.** The case-2 entry
+  below names the placeholder and the file that marks it; the argument that a
   moving wrong number is worse than a static honest one is D5.
 
-**What stays in PLAN.md deliberately:** the rulings themselves, the case 2 list,
-and ruling 2's reasoning about peer-local state. Those are scope and what is not
-built yet, which is what PLAN.md is for — not reasoning this change consumed.
+**What follows was deliberately left in `docs/PLAN.md`** — the rulings
+themselves, the case-2 list, and ruling 2's reasoning about peer-local
+state — because those are scope and what is not built yet, which is what
+PLAN.md was for rather than reasoning this change consumed. Now that
+PLAN.md is gone, that content has no other home, so it is quoted here in
+full rather than left dangling.
+
+### The MVP scope rulings this screen answers to
+
+Four owner rulings governed what the MVP ships, recorded because scope
+decided in a conversation is scope the next agent re-derives from the design
+documents — and the design documents argue for building all of it. None of
+the four is a design change; each is a decision about what ships first.
+
+1. **Voting is out of the MVP and out of the UI target.** The relevance
+   design (see `relevance-votes/design.md` §0) stays as the design; its MVP
+   membership does not. From the contract side this is the same fact: core
+   computes exactly one ordering and takes no `order` argument, so "by
+   relevance" is not implementable today.
+2. **Unread counts are out of the MVP, amended: the count is out, the
+   rendered position is in.** Unread needs peer-local state that is not a
+   projection of ops, and inventing the first instance of that as a feed
+   field is how it gets designed badly. What the owner reversed is narrower
+   than it sounds: a Stoa row renders an unread *position* carrying a
+   placeholder, so the screen can be seen as designed; `listThreads` still
+   gains no `unread` field, no peer-local state is built, and nothing
+   computes a count. **This entry is not worked off by a core change** — no
+   call arriving removes it; only a decision to build peer-local state does.
+3. **Moderation stays out; the MVP ships the moderation screen, inert.**
+   The trait exposes no moderation-publishing method, so there is nothing
+   for a screen to call — that half is unchanged. The screen half was
+   reversed by the owner, who decided the MVP ships the screen with every
+   control calling nothing, because they want to see it. Moderation itself
+   is still out: no op is published, nothing is hidden, no feed is filtered.
+4. **The core contract is the UI authority.** Where the design bundle asks
+   for something core cannot honestly serve, the bundle is amended — core
+   does not grow to satisfy a mockup. From this, a two-case rule for any
+   control on a screen:
+   - **Case 1 — core serves it: the control MUST be wired.** Inertness is
+     not an acceptable shortcut where the call exists; an unwired control is
+     a defect rather than a phase.
+   - **Case 2 — core cannot serve it: an inert control or a placeholder
+     value is acceptable for this MVP phase, on one condition — it is
+     documented.** The documentation requirement is what makes it
+     acceptable: an undocumented placeholder is indistinguishable from one
+     nobody noticed.
+
+   **Two merged requirements narrow case 2, and a scope note does not
+   override them:** `stoa-navigation-view`'s "every number rendered is one
+   this peer can actually answer" forbids a rendered count on the Stoa list
+   and the join preview (amended by this very change, as described above,
+   to permit a marked placeholder); `composer-view`'s "the vote control
+   displays no score" forbids a rendered score on the vote control,
+   unamended. Case 2 permits a placeholder only where nothing forbids one.
+
+### The case-2 list: documented placeholders for this MVP phase
+
+Each entry names what core cannot serve and the file that establishes the
+absence. An entry is removed when core grows to serve it, not when it is
+disproved by inspection.
+
+1. **No score anywhere.** Nothing reads `Vote` ops, so no feed row carries a
+   score.
+2. **Exactly one ordering, and no `order` parameter.** There is no ordering
+   parameter, no comparator to select. "By relevance" is not implementable.
+3. **No post count on a Stoa row** — amended by this change. The position is
+   now filled with a marked placeholder (`counts not yet available`),
+   per the owner reversal and the amended `stoa-navigation-view`
+   requirement. **Unread is on this list too**, and it is the one entry no
+   core change works off: it is excluded by decision (ruling 2 above), not
+   by a missing call, so no core change removes it — only a fresh scope
+   ruling reopens it.
+4. **History is kept, but no contract method reads earlier versions.**
+   Superseded post versions stay in the op log; no method reads them.
+5. **The thread screen's vote control is inert.** `publish_vote` exists, so
+   it could be wired — but voting is out of the MVP by ruling 1, and a
+   working vote control on one screen would be the one place in the
+   interface where the ruling is contradicted by a live affordance.
+6. **No moderation-publishing method**, per ruling 3. This is now an
+   ordinary case-2 entry with controls on screen that call nothing — the
+   `DModerationScreen.qml` controls this design covers.
+7. **No moderated-author and moderated-post lists.** Nothing enumerates what
+   a Stoa has moderated; the trait exposes no listing call, only a
+   per-target resolution. `DModerationScreen.qml` renders fixtures held in
+   the view for this reason.
 
 ## What the gates here cannot see
 

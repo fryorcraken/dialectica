@@ -9,13 +9,9 @@ first dispatch; [`README.md`](README.md) is the flow itself.
 **Dispatch, track state, report.** That is the whole list.
 
 - **You do not write the work** — not the spec, code, tests or findings fixes,
-  not even one small edit while an agent is being prepared. It would land in no
-  worktree, tick no row, and be reviewed by nobody.
-- **You do not rebase.** It destroys work and it can conflict, which needs
-  someone who has read the change. The `closer` does it.
-- **You sit in your piece's worktree, and you run one piece.** This replaces the
-  old "you stay in the main checkout" rule — see below, because the reason is the
-  whole design.
+  not even one small edit while an agent is being prepared.
+- **You do not rebase.** The `closer` does it.
+- **You sit in your piece's worktree, and you run one piece.**
 
 Yours besides dispatching: `git worktree add --no-track` (the flag is
 load-bearing — see "Create worktrees with `--no-track`"), removing each agent's
@@ -32,21 +28,12 @@ path>)`, and stay there.** A session moving *itself* is the case the tool is
 built for; it is dispatched agents that cannot do it, for reasons README.md
 keeps.
 
-**Why one runner per piece, and not one runner switching branches.** Two
-alternatives were on the table:
+**Never check out a different piece's branch in this session.** Doing so
+silently forks the next dispatched agent from the wrong piece — no error, no
+warning, the agent just works confidently on the wrong code.
 
-| Shape | Why not |
-|---|---|
-| one runner, checking out each piece before dispatching | the checkouts must be serialised, and **dispatching while HEAD is on the wrong branch silently forks the agent from the wrong piece** — no error, no warning, just an agent confidently working on the wrong code |
-| one runner in the main checkout, as before | every agent forks from `main` and holds none of the piece's commits |
-
-**One runner per piece has no shared HEAD, so the first hazard is structurally
-absent rather than merely avoidable.** That is the reason for the shape: not that
-switching is hard to get right, but that getting it wrong produces no signal. A
-runner that can only see one piece cannot fork an agent from another.
-
-The practical consequence: **do not run two pieces from one session.** Start a
-second session in the second piece's worktree instead.
+**Do not run two pieces from one session.** Start a second session in the
+second piece's worktree instead.
 
 ### What you read, and what you only point at
 
@@ -65,9 +52,9 @@ backs it; a paraphrase arrives without that, and the content occupies your
 context twice — once from the report, once rewritten into the next brief. That
 crowding is what loses the state you are supposed to be tracking.
 
-The same holds for `design.md`, `proposal.md`, PLAN.md, the spec and the code:
-point at them. If you are reading a diff to judge whether it is right, that is a
-reviewer's dispatch, not your reading.
+The same holds for `design.md`, `proposal.md`, the GitHub issue, the spec and
+the code: point at them. If you are reading a diff to judge whether it is
+right, that is a reviewer's dispatch, not your reading.
 
 ## Rebuild the state before you act on it
 
@@ -202,8 +189,7 @@ A mutating reviewer that ran without the check would break the tree your own HEA
 points at, which is why the guard is in every file rather than in the brief.
 
 **Cherry-pick before you dispatch the next agent, and make sure your HEAD carries
-it.** This is the ordering rule that replaces "one writer at a time because they
-share a tree": every dispatch forks from *your HEAD*, so an agent launched before
+it.** Every dispatch forks from *your HEAD*, so an agent launched before
 the previous one's work has landed on your branch gets a tree without it. It will
 then rewrite, duplicate or contradict work it cannot see, and nothing fails —
 there is no conflict, because the two agents were never in the same tree. The
@@ -266,7 +252,7 @@ A full review is six agents of three types, one per stage-block row:
 |---|---|---|
 | `code-reviewer` × 4 — correctness, security, readability, architecture, named in the prompt | the code | `findings/<dimension>.md` |
 | `spec-test-reviewer` | **spec and tests only — never the implementation** | `findings/spec-test.md` |
-| `design-reviewer` | code, `design.md`, PLAN.md | `findings/design-review.md` |
+| `design-reviewer` | code, `design.md`, the change's GitHub issue | `findings/design-review.md` |
 
 The last two are not smaller `code-reviewer`s:
 
@@ -334,10 +320,9 @@ whose directories are already gone.
 **Check merged-ness with `gh pr list`, not `git branch --merged`** — this repo
 squash-merges, so a squashed branch never looks merged to git.
 
-**Removing each agent's worktree is yours, and it is not optional housekeeping —
-it is the last step of collecting the work.** An agent cannot remove its own
+**Removing each agent's worktree is yours.** An agent cannot remove its own
 tree: it is standing in it, and `git worktree remove` refuses the directory you
-are in. So the sequence after an agent hands back is cherry-pick its commits off
+are in. The sequence after an agent hands back is cherry-pick its commits off
 its branch, then remove its tree.
 
 **You keep a tree while something may still need reading** — re-checking a

@@ -11,11 +11,11 @@ from a table here, so that this file stays the thing worth reading in full:
 
 | Read | When |
 |---|---|
-| [`docs/PLAN.md`](docs/PLAN.md) | **Before any design decision.** It carries the architecture, what was rejected and why, and the traps found before a line was written. |
 | [`.claude/agents/RUNNER.md`](.claude/agents/RUNNER.md) | **Before dispatching your first agent.** Written for the session that orchestrates rather than for the agents it launches: how to tell whether an agent is still running, how many to launch at once, and why one piece is one PR. Read it whenever you are about to spawn an agent — the mistakes it prevents all came from its rules living in files the runner never opened. |
 | [`.claude/agents/README.md`](.claude/agents/README.md) | **Before starting a change.** The spec-driven flow: which document answers which question, and the role agents. Also the test defects that have shipped here and what prevents them. |
 | [`docs/OPENSPEC-ARCHIVE.md`](docs/OPENSPEC-ARCHIVE.md) | **Before archiving a change**, which is the last step in closing it and runs after its PR merges — not before starting one. The traps that lose a requirement silently, and why `validate --strict` passes a spec that contradicts itself. |
 | [`docs/SCAFFOLD.md`](docs/SCAFFOLD.md) | **Before changing a value in `scaffold.toml`**, or when a build, `install` or `launch` misbehaves. Every entry whose purpose is not visible from its value — why two `[repos.*]` tables exist for a zone we do not use, which pairs of `attr` values deadlock `install`, and what the settings under `[basecamp.env]` and `[basecamp.profiles.*]` are each preventing. It lives here because `lgs` deletes every comment in that file. |
+| [`docs/SOURCES.md`](docs/SOURCES.md) | **When a claim about the surrounding Logos ecosystem needs re-checking against source** — which local checkout has the delivery API, the SDS spec, the LEZ private-account construction, and which of those checkouts are stale working trees that will mislead if read directly. |
 
 ### Keeping this file true
 
@@ -353,8 +353,9 @@ changes, and SDS is LIP-109 at *raw*, the weakest maturity tier, with an API
 marked Developer Preview. **File the upstream gap; do not wait on it, and do
 not design around it.**
 
-`docs/PLAN.md` §13 works this through, including the two claims about it that
-were wrong.
+`openspec/changes/archive/2026-09-16-op-clock/design.md`'s "The layering rule
+this change is a consequence of" works this through, including a claim about
+it that was wrong and how the error happened.
 
 ### The core API is the deliverable
 
@@ -392,6 +393,25 @@ These are structural and bite at build time, not review time.
   or `flake.lock` gets two builder nodes, the stale one silently wins under
   `--override-input`, and the build fails with `no 'main' field in
   metadata.json`.
+- **Dual remotes: Radicle and GitHub, and GitHub is load-bearing.** Radicle is
+  the canonical home — a peer-to-peer forum hosted solely on a single
+  centralised platform would sit oddly with its own design — but GitHub
+  cannot be dropped: Actions runs CI, and the Logos module catalogue is
+  hosted on **GitHub Releases**, so `lgpd` and `lgpm` fetch packages from
+  there and a module not released on GitHub cannot be installed by the
+  standard tooling. Both remotes get every push; releases are cut on GitHub
+  tags. Two consequences of being a monorepo — two modules under one git repo,
+  where the catalogue expects one module per submodule:
+  - **The catalogue's release action must support a `module_path` pointing
+    *inside* a submodule.** Older versions fail checkout with "pathspec did
+    not match any file(s) known to git" for this layout. Pin
+    `_release-module.yml` to a fixed tag rather than a moving one, so the
+    release pipeline cannot change under the catalogue without a commit here
+    saying so.
+  - **`release-all.yml` auto-discovery cannot see two modules in one repo** —
+    it reads module paths straight from `.gitmodules` submodule paths.
+    `dialectica` and `dialectica_ui` each need their own
+    manually-triggered workflow, not the umbrella.
 - **On Linux, set `runtime_dir` to the session's real one** (e.g.
   `/run/user/1000`) in `[basecamp.profiles.<n>]`. The in-profile `xdg-tmp`
   default overflows the 108-byte `sun_path` cap and **every module segfaults**
@@ -424,6 +444,52 @@ These are structural and bite at build time, not review time.
   target a worktree**, which is the wrong lesson and was drawn once already.
 - **The UI's icon must be a 256×256 PNG**, and the UI module must declare core
   in `dependencies` with **matching versions**.
+
+- **`lgs basecamp install` does not install a module's declared
+  `dependencies`.** It builds the `[modules.*]` project sources and never reads
+  the `dependencies` array in `metadata.json`. `lgs basecamp modules` is the
+  verb that captures runtime dependencies; run it first, then `install`. Skip
+  it and the module fails to load with `Cannot resolve dependencies for:
+  <name>`, which presents as a launcher tile that does nothing when clicked —
+  while the build stays green and `modules --show` lists the dependency it
+  never installed.
+- **`pgrep basecamp` finds nothing while Basecamp is running.** The launcher is
+  `.LogosBasecamp.elf` and each module is a separate `.logos_host.elf`, both
+  under the dynamic loader. Read the PID from `<profile>/launch.state` instead
+  (`lgs basecamp paths <profile>` locates it). Requested as a first-class verb
+  in `logos-co/scaffold#268`.
+- **Run `lgs basecamp doctor` before believing a green build.** It catches pin
+  drift and split basecamp/lgpm pin sets that no build failure surfaces.
+  Expect two WARNs on this repo: the basecamp/lgpm split and the delivery pin
+  are both deliberate (see `docs/PHASE0-FINDINGS.md` §8), which is also why
+  there is no `doctor` CI job — an always-red gate trains people to ignore it.
+- **Pin `logos-module-builder` ≥ 0.2.5** — earlier builders deliver empty
+  binary event payloads. Assert non-empty payloads in a test.
+- **A panic in a dispatch handler aborts the module process, not merely
+  poisons a lock.** Measured, not inferred: `failed to initiate panic, error
+  5`, SIGABRT, and every later call gets `MODULE_NOT_LOADED` — the caller
+  having first waited out a 20s timeout that names nothing
+  (`docs/PHASE0-FINDINGS.md` §3). The SDK has no panic guard, so no handler
+  may unwind; dialectica's own guard is what stands between those two
+  outcomes.
+- **`recv()` on an event subscription may block forever** on an older SDK rev
+  that lacks subscription status — a dead provider hangs the listener thread
+  permanently. Check what the builder's pin delivers before relying on a
+  timeout.
+- **Handle `RET_STALE_WARN` (3)** from the delivery C ABI: a non-terminal
+  "still running" tick every ~5s, always followed by a terminal OK/ERR.
+  Ignoring it double-counts completions.
+- **`createNode` exactly once per context.** The delivery node is a singleton
+  per Logos Core instance; `stop()` kills traffic for every module using it.
+  Contracted in the `op-transport` spec; kept here because it presents as a
+  runtime failure in someone else's module.
+- **`messageReceived`'s timestamp is nanoseconds**; every other delivery event
+  is ISO-8601 (delivery bug #26).
+- **`messageReceived` fires for your own messages; `channelMessageReceived`
+  does not** — own sends come back as `channelMessageSent`. The consequence is
+  contracted in the `op-transport` spec ("A peer's own published op is not
+  received back as an arrival"); the asymmetry itself is worth keeping here,
+  because it is what makes a missing-own-post bug look like a storage bug.
 
 - **Never name a QML type something basecamp also registers.** Our theme
   singleton was `Theme`; basecamp registers a type of that name, and basecamp's

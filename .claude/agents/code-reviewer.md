@@ -31,8 +31,7 @@ This has happened twice.
 **You are dispatched with `isolation: "worktree"`, so you should be standing in a
 worktree of your own**, forked from the runner's HEAD. Use ordinary relative
 paths, and do not call `EnterWorktree` — the call only takes you somewhere your
-Bash calls will be refused. `README.md`'s "Handing over between agents" records
-why.
+Bash calls will be refused.
 
 **Check that before you mutate anything. It has been false.** An agent has been
 dispatched with `isolation: "worktree"` and landed in the main checkout, on the
