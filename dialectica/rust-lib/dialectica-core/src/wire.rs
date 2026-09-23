@@ -1710,24 +1710,26 @@ fn sanitised_json(s: &crate::sanitise::Sanitised) -> serde_json::Value {
 }
 
 /// The pagination shape, built in one place.
+///
+/// `latestReply` is **absent** from a row whose thread has no visible reply,
+/// never `null` and never `""` — the wire contract's rule for a field the reply
+/// would have no meaning for, and the one `thread_page_json` follows for
+/// `parent`. `replyCount` is present on every row, zero included: a count of
+/// nothing is a count, and an absent one would read as "not computed".
 fn feed_page_json(page: &crate::feed::FeedPage) -> String {
     let items: Vec<serde_json::Value> = page
         .items
         .iter()
         .map(|row| {
-            serde_json::json!({
+            let mut object = serde_json::json!({
                 "thread": row.thread,
                 "currentVersion": row.current_version,
-                // The address and NO display name. `generated-names` requires
+                // The public key and NO display name. `generated-names` requires
                 // that a name never travels on any reply: a derived value beside
                 // the material it derives from is two values that must agree and
                 // could disagree, and a name on the wire is one a relay could
                 // strip or forge. A name is derived by whoever holds the key, at
-                // the point of rendering.
-                //
-                // What this row does not yet carry is the derivation's INPUT —
-                // the public key — which is the known gap recorded on
-                // `crate::feed::FeedRow::author`. `a_feed_row_carries_no_display_name`
+                // the point of rendering. `a_row_carries_the_public_key_and_no_derived_display_name`
                 // in `feed.rs` pins the absence positively, so restoring a name
                 // here fails rather than passing quietly.
                 "author": row.author,
@@ -1735,7 +1737,14 @@ fn feed_page_json(page: &crate::feed::FeedPage) -> String {
                 "attachments": row.attachments.iter().map(sanitised_json).collect::<Vec<_>>(),
                 "isRevised": row.is_revised,
                 "isHidden": row.is_hidden,
-            })
+                "replyCount": row.reply_count(),
+            });
+            // `if let` rather than an unwrap, for the reason `thread_page_json`
+            // gives: a panic aborts the module process.
+            if let (Some(map), Some(latest)) = (object.as_object_mut(), row.latest_reply()) {
+                map.insert("latestReply".to_string(), serde_json::json!(latest));
+            }
+            object
         })
         .collect();
     serde_json::json!({
@@ -6586,6 +6595,9 @@ mod tests {
             .map(|k| k.as_str())
             .collect();
         keys.sort_unstable();
+        // This row's thread has no reply, so `latestReply` is ABSENT from it —
+        // the one key of the row that may be. The set with it present is pinned
+        // by `a_feed_row_with_a_reply_carries_latest_reply_and_nothing_else_new`.
         assert_eq!(
             keys,
             [
@@ -6595,11 +6607,16 @@ mod tests {
                 "currentVersion",
                 "isHidden",
                 "isRevised",
+                "replyCount",
                 "thread",
             ],
             "the feed row's field set changed: {out}"
         );
         assert_eq!(row["body"]["text"], "hello");
+        assert_eq!(
+            row["replyCount"], 0,
+            "a count of nothing is zero, and present: {out}"
+        );
 
         // **`displayName` is absent, and its absence is what this set pins.**
         // An earlier pass shipped one here; the owner reversed it, because
@@ -6625,6 +6642,81 @@ mod tests {
             feed_key(2).public_key().to_hex(),
             "the public key is the identity and stays on the row"
         );
+    }
+
+    #[test]
+    fn a_feed_row_with_a_reply_carries_latest_reply_and_nothing_else_new() {
+        // The other half of the key set pinned above: with a reply held,
+        // `latestReply` is present, a string, and the reply's own op id — and
+        // no further key arrived with it.
+        let stoa = feed_genesis().address().unwrap();
+        let poster = feed_key(2);
+        let root = Op {
+            stoa,
+            author: poster.public_key(),
+            clock: None,
+            kind: OpKind::Post {
+                thread: None,
+                parent: None,
+                body: "root".to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&poster);
+        let replier = feed_key(3);
+        let reply = Op {
+            stoa,
+            author: replier.public_key(),
+            clock: None,
+            kind: OpKind::Post {
+                thread: Some(root.op.id()),
+                parent: Some(root.op.id()),
+                body: "reply".to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&replier);
+        let mut log = MemoryOpLog::new();
+        log.append(root.clone(), Arrival::unordered()).unwrap();
+        log.append(reply.clone(), Arrival::unordered()).unwrap();
+
+        let out = list_threads(&feed_request(""), &log, &feed_genesis());
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(
+            v["items"].as_array().unwrap().len(),
+            1,
+            "a reply is not a row: {out}"
+        );
+        let row = &v["items"][0];
+        let mut keys: Vec<&str> = row
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(|k| k.as_str())
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "attachments",
+                "author",
+                "body",
+                "currentVersion",
+                "isHidden",
+                "isRevised",
+                "latestReply",
+                "replyCount",
+                "thread",
+            ],
+            "the feed row's field set changed: {out}"
+        );
+        assert_eq!(row["replyCount"], 1, "{out}");
+        assert_eq!(
+            row["latestReply"].as_str(),
+            Some(reply.op.id().to_hex().as_str()),
+            "the latest reply is the reply's op id, in the encoding `thread` uses: {out}"
+        );
+        assert_eq!(row["thread"].as_str(), Some(root.op.id().to_hex().as_str()));
     }
 
     #[test]

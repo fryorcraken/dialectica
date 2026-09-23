@@ -1935,6 +1935,7 @@ fn a_vote_is_stored_and_is_rendered_by_nothing() {
         attachments,
         is_revised,
         is_hidden,
+        replies,
     } = &page.items[0];
     assert_eq!(
         thread, current_version,
@@ -1978,6 +1979,8 @@ fn a_vote_is_stored_and_is_rendered_by_nothing() {
     assert!(attachments.is_empty());
     assert!(!is_revised);
     assert!(!is_hidden);
+    // A vote names the post and is not a reply to it, so the row reports none.
+    assert_eq!(*replies, None, "a vote is not counted as a reply");
 }
 
 #[test]
