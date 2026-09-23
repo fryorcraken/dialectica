@@ -159,12 +159,29 @@ This is a genuine, well-documented spec gap, not a defect — `design.md` Decisi
 threads) and reject it on cost grounds, explicitly leaving the choice for the
 spec-writer: *"It is still a choice the spec should either make or refuse."*
 
-- [ ] **`spec-writer`** — decide and record whether a store failure on a reply
+- [x] **`spec-writer`** — decide and record whether a store failure on a reply
       whose thread is off the requested page should fail the whole read (current
       behaviour, matching the head loop's existing behaviour for off-page heads)
       or should be scoped to the page somehow. Either answer is defensible;
       leaving it silent means a future reader of the spec alone cannot tell this
       was a deliberate choice rather than an oversight.
+      **Outcome (spec-writer): fixed — the current behaviour is now contracted.**
+      `specs/feed-read/spec.md`'s requirement *"Computing the reply fields fails
+      as an error and never aborts"* now requires the read to fail whichever
+      reply in the Stoa the failure is met on: a reply on the page, one on
+      another page, or one whose thread's row the read does not return (hidden
+      root, hidden content excluded). It forbids skipping a failure because its
+      reply belongs to no returned row. Two scenarios were added, each with a
+      healthy-store control: *"A store failure on a reply of a thread on
+      another page fails the read"* and *"A store failure on a reply of a thread
+      whose row is not returned fails the read"*. `proposal.md`'s What Changes
+      lists it too. Why page-scoping was refused, for the `dev-writer` to add
+      to Decision 5: the failing read in this marker's own fixture is the `get`
+      on the reply itself, the first step of `thread_of`. So when a failure is
+      met while placing a reply, that reply's thread is not yet known, and
+      nothing can show it is off the page. Scoping would silently undercount
+      whichever on-page thread the reply really belongs to. The `NO SPEC:`
+      marker at `feed.rs:2001` should now be removed.
 
 (`feed.rs:863`'s `NO SPEC:` marker, on the `author` field's shape, predates this
 change — introduced by #88's "Delete the author address" — and is out of scope.)

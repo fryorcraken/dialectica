@@ -35,6 +35,9 @@ ordering is not built here, and this change only makes the field available for i
   rows appear. It does not widen what a row counts.
 - **The count is over this peer's copy**, and the contract says so. It is not the
   thread's total size, which no peer can know.
+- **A store failure met on any reply in the Stoa fails the read**, including one
+  on a reply whose thread's row is on another page or is not returned at all. It
+  is never reported as a smaller count or a missing row.
 - **No ordering changes.** The feed still has one ordering and no ordering
   parameter. `active` stays unbuilt.
 

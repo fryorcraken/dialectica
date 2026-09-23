@@ -227,7 +227,9 @@ A thread's replies MUST NOT affect which threads appear as feed rows, the order 
 
 ### Requirement: Computing the reply fields fails as an error and never aborts
 
-A store failure met while computing any row's reply fields MUST make the feed read fail with the wire contract's error shape, carrying the reason the store gave. It MUST NOT be reported as a row with a count of zero, a row without a latest reply, or a row missing from the page.
+A store failure met while computing the reply fields MUST make the feed read fail with the wire contract's error shape, carrying the reason the store gave. It MUST NOT be reported as a row with a count of zero, a row without a latest reply, or a row missing from the page.
+
+The read MUST fail in that way whichever reply in the Stoa the failure is met on. That includes a reply whose thread's row is on the requested page, a reply whose thread's row is on another page, and a reply whose thread's row the read does not return because its root is hidden and hidden content is excluded. A failure MUST NOT be skipped on the ground that the reply it was met on belongs to no row of the page returned.
 
 Computing the reply fields MUST terminate, and MUST NOT abort the process, for any contents the log may hold. That includes forged ops, posts naming parents that are not held, a post naming itself as its parent, parent references forming a cycle of any length, and ops of every kind naming a reply.
 
@@ -237,6 +239,20 @@ Computing the reply fields MUST terminate, and MUST NOT abort the process, for a
 - **THEN** the feed read's answer is an error carrying the reason the store gave
 - **AND** it carries no items
 - **AND** the same store answering those reads too returns the thread's row, so the failure is the one met while computing the reply fields
+
+#### Scenario: A store failure on a reply of a thread on another page fails the read
+
+- **WHEN** the feed holds two threads and is read one row per page, and the store fails every read keyed by the op id of a reply to the thread whose row comes second, and the first page is read
+- **THEN** the feed read's answer is an error carrying the reason the store gave
+- **AND** it carries no items
+- **AND** the same store answering those reads too returns the first page holding the first thread's row, so the failure is the one met on the other page's reply
+
+#### Scenario: A store failure on a reply of a thread whose row is not returned fails the read
+
+- **WHEN** a moderator hides one thread's root, a second thread is not hidden, the store fails every read keyed by the op id of a reply to the hidden thread, and the feed is read with hidden content excluded
+- **THEN** the feed read's answer is an error carrying the reason the store gave
+- **AND** it carries no items
+- **AND** the same store answering those reads too returns the second thread's row and no row for the hidden thread, so the failure is the one met on the reply of a row the read does not return
 
 #### Scenario: An adversarial log is read without aborting
 
