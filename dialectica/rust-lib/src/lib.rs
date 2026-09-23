@@ -205,10 +205,33 @@ pub trait DialecticaModule: Send + 'static {
     /// this peer in it.
     ///
     /// **`foundingTitle`, never `title`.** What a Stoa is called *today* comes
-    /// from a moderator-signed metadata op, and nothing resolves those yet —
-    /// so presenting this as a current title would assert something no peer has
-    /// checked.
+    /// from a moderator-signed metadata op, which `getStoa` resolves and this
+    /// call does not — so presenting this as a current title would assert
+    /// something this call has not checked.
     fn list_stoas(&mut self, request: String) -> String;
+
+    /// What a Stoa is called today, joined or not.
+    ///
+    /// Takes `{"stoa":"<hex>","genesis":"<hex>"}` and returns
+    /// `{"stoa":"<hex>","title":"…","description":"…","policy":"open","isGenesisFallback":bool}`.
+    ///
+    /// **The title and description come from the leading metadata op signed by
+    /// the Stoa's moderator**, and fall back to the genesis title and an empty
+    /// description where this peer holds none. `isGenesisFallback` is the only
+    /// field that says which: a moderator may rename a Stoa to its founding
+    /// title, so a matching title proves nothing. A fallback title may be years
+    /// stale, and this is how a view can say so.
+    ///
+    /// **It takes the genesis record, as `listThreads` does**, because the
+    /// moderator set comes from the record and an address cannot be turned back
+    /// into one. That is also what lets it answer for a Stoa this peer has not
+    /// joined — a preview before a join — and it joins nothing and publishes
+    /// nothing.
+    ///
+    /// There is no `foundingTitle` field: the caller holds the founding title
+    /// already, in the record it sent. An unreadable store is the error shape,
+    /// never a fallback.
+    fn get_stoa(&mut self, request: String) -> String;
 
     /// Mint this peer's master key if it has none.
     ///
@@ -925,6 +948,19 @@ impl DialecticaModule for Dialectica {
         // The READ half, so this handler's read-only-ness survives the seam.
         core::with_membership_store_read(&core::membership_path_in(&dir), |store| {
             core::list_stoas(&request, store)
+        })
+    }
+
+    fn get_stoa(&mut self, request: String) -> String {
+        let dir = match self.storage_dir() {
+            Ok(d) => d,
+            Err(e) => return e,
+        };
+        // The op log and NOTHING else — no membership store — which is how this
+        // call answers for a Stoa this peer has not joined and cannot record a
+        // join. Opened per call, as `list_threads` opens it.
+        core::get_stoa(&request, || {
+            core::log::SqliteOpLog::open(&dir.join("ops.sqlite"))
         })
     }
 

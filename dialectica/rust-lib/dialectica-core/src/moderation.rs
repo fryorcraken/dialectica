@@ -210,7 +210,14 @@ impl Moderators {
     /// Note what is NOT checked: the op's kind. A caller wanting moderations has
     /// already narrowed to them, and this is asked of things that are already
     /// candidates.
-    fn authorises(&self, entry: &Entry) -> bool {
+    ///
+    /// **`pub(crate)` because the second resolver arrived.**
+    /// [`crate::stoa_metadata::resolve`] asks the same question of a
+    /// `StoaMetadata` op — may this signer, in this Stoa, do this — and calls
+    /// this rather than spelling the conjunction again. The name reads
+    /// "authorises a moderation"; what it actually decides is whether an op
+    /// binds under this moderator set, which is what both callers need.
+    pub(crate) fn authorises(&self, entry: &Entry) -> bool {
         // Scope first, because it is the cheapest and the most likely to
         // exclude: an unrestricted read over a peer holding several Stoas is
         // mostly other Stoas. Order is a performance matter only — all three
