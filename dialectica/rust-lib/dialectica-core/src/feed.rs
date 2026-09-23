@@ -80,29 +80,52 @@
 //! read" — nothing is optimised here speculatively, and the in-memory log makes
 //! the per-row call cheap.
 //!
-//! **No reply count and no last reply.** §9.1's proposed row carries both, and
-//! §7 names them as a gap: "There is no reply count and no most-recent-reply
-//! [...] Both must also be of non-hidden replies, which makes them folds over
-//! moderation-resolved state rather than over raw ops." §8 then asks whether the
-//! count is worth its cost, and leaves it open. A fold over every reply's
-//! moderation state, per row, for a number no caller has asked for, is not the
-//! smallest thing that works — so it is not here. The view renders no reply
-//! count, which is honest, rather than a wrong one, which would not be.
+//! # A row reports its thread's visible replies: how many, and which is latest
 //!
-//! (§8 framed that question as "before Lamport values arrive". They have now
-//! arrived, inside the op, and the cost question is unchanged by it: the fold is
-//! over moderation state, which no counter makes cheaper.)
+//! **This header used to argue for leaving both out, and that argument is
+//! withdrawn.** It held that a fold over every reply's moderation state, for a
+//! number no caller had asked for, was not the smallest thing that works. Issue
+//! #100 is the caller: a row that cannot say whether anyone has answered, and a
+//! later `active` ordering that has nothing to order on until the latest reply
+//! exists. The `feed-read` capability is the contract, and the `reply-count`
+//! change's `design.md` records the withdrawal.
+//!
+//! What survives from the old argument is the part that was never about cost:
+//! both values are **folds over moderation-resolved state**, never over raw ops.
+//! A count including hidden replies looks right and is wrong, and so does a latest
+//! reply that names one.
+//!
+//! Three rules decide what the fold sees, and none of them is written here:
+//!
+//! - **Which thread a reply is in** is [`thread_of`]'s answer — the parent chain,
+//!   never the reply's own `thread` field, which is its author's claim. A count
+//!   read from that field would let any peer inflate any thread's count, or
+//!   become its latest reply, by naming it.
+//! - **Whether a reply is hidden** is [`crate::moderation::resolve`]'s answer, and
+//!   the include-hidden flag does not reach the fold at all. The flag decides
+//!   which rows appear; it does not widen what a row counts.
+//! - **Which reply is latest** is the first one the fold meets in
+//!   [`OpLog::iter_stoa`]'s order — so the ordering rule picks it, and this module
+//!   still writes no comparison.
+//!
+//! **The count is of what this peer holds**, for the reason [`FeedPage`] carries
+//! no total: a count of what one machine holds is not a count of what exists.
+//! Nothing here may call it the thread's total, and a view rendering it bare would
+//! be making that claim for it.
 //!
 //! **No vote score.** §9.1 is explicit that votes are not staged: "a vote button
 //! would publish an op that changes nothing a reader can see". Nothing reads
 //! `Vote` ops, so no row carries a score.
 
 use crate::identity::Address;
-use crate::log::{OpLog, OpLogError};
+use crate::log::{Entry, OpLog, OpLogError};
 use crate::moderation::{Moderation, Moderators};
-use crate::op::OpKind;
+use crate::op::{OpId, OpKind};
 use crate::revision::current_version;
 use crate::sanitise::{sanitise, Sanitised};
+use crate::thread::thread_of;
+use std::collections::HashMap;
+use std::num::NonZeroUsize;
 
 /// The largest page a caller may ask for.
 ///
@@ -182,6 +205,44 @@ pub struct FeedRow {
     /// view can distinguish them, which §9.1 requires: "a reader who asked to see
     /// what was hidden is owed the knowledge of which ones those were."
     pub is_hidden: bool,
+    /// The thread's visible replies, or `None` where it has none.
+    ///
+    /// **One `Option` rather than a count and an optional id side by side**, so
+    /// the two cannot disagree: a row with replies has a latest one, and a row
+    /// without has neither. Read it through [`reply_count`](Self::reply_count) and
+    /// [`latest_reply`](Self::latest_reply), which are the two facts the wire
+    /// reports.
+    pub replies: Option<Replies>,
+}
+
+impl FeedRow {
+    /// How many of the thread's replies this peer holds that are not hidden.
+    ///
+    /// Zero where there are none, never absent.
+    pub fn reply_count(&self) -> usize {
+        self.replies.as_ref().map_or(0, |r| r.count.get())
+    }
+
+    /// The op id of the visible reply the ordering rule places first, or `None`
+    /// where the thread has no visible reply.
+    pub fn latest_reply(&self) -> Option<&str> {
+        self.replies.as_ref().map(|r| r.latest.as_str())
+    }
+}
+
+/// What a row reports about its thread's visible replies, where it has any.
+///
+/// **The count cannot be zero**, which is what keeps a latest reply from sitting
+/// beside a count saying there is nothing to be latest. A thread with no visible
+/// reply has no `Replies` at all.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Replies {
+    /// How many replies are counted. Over this peer's copy, never a total.
+    pub count: NonZeroUsize,
+    /// The reply post's own op id, hex — not its current version's. **Latest by
+    /// the ordering rule**, which is causal: it says which reply leads the
+    /// forum's order, never which was written most recently in time.
+    pub latest: String,
 }
 
 /// One page of the feed.
@@ -233,7 +294,8 @@ pub fn clamp_per_page(requested: Option<usize>) -> usize {
 /// 3. Keep the `Post`s whose `parent` is `None`: the thread heads.
 /// 4. Resolve each one's current version and moderation state.
 /// 5. Drop the hidden ones unless `include_hidden`.
-/// 6. Page what is left.
+/// 6. Attach each head's visible replies — see [`visible_replies_by_thread`].
+/// 7. Page what is left.
 ///
 /// **Hiding is applied after resolution and before paging**, which is the only
 /// order that gives stable pages: filtering after paging would produce short
@@ -254,9 +316,14 @@ pub fn list_threads<L: OpLog>(
     per_page: usize,
     include_hidden: bool,
 ) -> Result<FeedPage, OpLogError> {
+    let entries = log.iter_stoa(stoa)?;
+    // Folded ONCE over the Stoa rather than per row, and before the heads are
+    // filtered: `include_hidden` is deliberately not an argument, because it
+    // decides which rows appear and never what a row counts.
+    let mut replies = visible_replies_by_thread(log, moderators, &entries)?;
     let mut rows = Vec::new();
 
-    for entry in log.iter_stoa(stoa)? {
+    for entry in &entries {
         // Authenticity first. The log stores forgeries deliberately (§3.3), so
         // this is the check that stops one rendering as a post by the author it
         // names. It runs before anything else reads the op's fields, because
@@ -298,6 +365,9 @@ pub fn list_threads<L: OpLog>(
             attachments: version.attachments().iter().map(|a| sanitise(a)).collect(),
             is_revised: version.is_revised(),
             is_hidden,
+            // `remove` rather than `get(..).cloned()`: each thread has one row,
+            // so the tally is handed over rather than copied.
+            replies: replies.remove(&id),
         });
     }
 
@@ -314,6 +384,96 @@ pub fn list_threads<L: OpLog>(
         page,
         has_more,
     })
+}
+
+/// Every thread's visible replies, keyed by the root each reply's parent chain
+/// reaches.
+///
+/// # What is counted
+///
+/// A reply is counted under a thread when it verifies, is a `Post` with a
+/// parent, its chain reaches that thread's root through [`thread_of`], and
+/// [`crate::moderation::resolve`] does not report it hidden. That is exactly
+/// what a thread read with hidden content excluded returns beside its root, and
+/// it is the same two functions deciding it, so the feed and the thread screen
+/// cannot disagree about which replies exist.
+///
+/// Nothing else is read. Not the reply's `thread` field, not its parent's
+/// moderation state — a reply beneath a hidden reply is still counted — and not
+/// any op that is not a post: a revision, a vote or a moderation naming a reply
+/// is skipped by its kind before anything else looks at it.
+///
+/// # The latest reply is the FIRST one met
+///
+/// `entries` arrive in [`cmp_ops`](crate::arrival::cmp_ops) order, so the first
+/// visible reply met for a thread is the one the ordering rule places first.
+/// `or_insert_with` keeps it and every later reply only adds to the count. No
+/// value is compared here, for the reason this module's header gives.
+///
+/// Its place is the reply POST's own, because only posts are counted: a revision
+/// is a different op, skipped by its kind, and cannot lift an old reply to the
+/// front. The id recorded is the post's for the same reason.
+///
+/// # Over the whole Stoa, not the requested page
+///
+/// Every reply in `entries` is placed and resolved, whether or not its thread
+/// ends up on the page asked for. The head loop in [`list_threads`] already
+/// resolves every head in the Stoa on every call, so this keeps the read in the
+/// same cost class rather than adding a second shape of work. A store failure
+/// met on any reply fails the read, including one under a thread that is not
+/// on this page, and `feed-read` requires that.
+///
+/// # Terminates, and cannot abort, over whatever the log holds
+///
+/// The only loop is over `entries`, and [`thread_of`]'s walk terminates on a
+/// visited set over any parent references a peer chose. The count saturates
+/// rather than overflowing, though no log reaches `usize::MAX` ops.
+fn visible_replies_by_thread<L: OpLog>(
+    log: &L,
+    moderators: &Moderators,
+    entries: &[Entry],
+) -> Result<HashMap<OpId, Replies>, OpLogError> {
+    let mut by_thread: HashMap<OpId, Replies> = HashMap::new();
+
+    for entry in entries {
+        // Authenticity before any field is read, as in the head loop.
+        if !entry.op.verify() {
+            continue;
+        }
+        // Replies only: the root is never counted, and neither is any op that
+        // is not a post, whatever post it names.
+        if !matches!(
+            entry.op.op.kind,
+            OpKind::Post {
+                parent: Some(_),
+                ..
+            }
+        ) {
+            continue;
+        }
+
+        let id = entry.id();
+
+        // THE membership rule, owned by `thread-read`. A chain that cannot be
+        // completed places the reply under no thread, so it is counted nowhere.
+        let Some(root) = thread_of(log, &id)? else {
+            continue;
+        };
+
+        if crate::moderation::resolve(log, moderators, &id)?.is_hidden() {
+            continue;
+        }
+
+        by_thread
+            .entry(root)
+            .and_modify(|replies| replies.count = replies.count.saturating_add(1))
+            .or_insert_with(|| Replies {
+                count: NonZeroUsize::MIN,
+                latest: id.to_hex(),
+            });
+    }
+
+    Ok(by_thread)
 }
 
 #[cfg(test)]
@@ -717,6 +877,9 @@ mod tests {
         // list someone keeps up to date: adding a field to `FeedRow` makes this
         // stop compiling, which is a louder failure than an assertion and one
         // that cannot go stale.
+        //
+        // `replies` joined the set with issue #100, and it carries a count and a
+        // reply's op id — neither of them a name.
         let FeedRow {
             thread: _,
             current_version: _,
@@ -725,6 +888,7 @@ mod tests {
             attachments: _,
             is_revised: _,
             is_hidden: _,
+            replies: _,
         } = &rows[0];
     }
 
@@ -1083,6 +1247,1036 @@ mod tests {
             err.to_string().contains("the disk is on fire"),
             "the underlying reason must survive to the caller, got {err}"
         );
+    }
+
+    // ─── The reply count and the latest reply ─────────────────────────────
+    //
+    // Every fixture here that asserts a subtraction also asserts the log
+    // WITHOUT it, so a fold that ignored moderation, forgery or membership
+    // could not pass by producing the same number for a different reason.
+
+    /// A post carrying a counter, so a fixture can say which reply the
+    /// ordering rule places first rather than leaving it to op-id hashes.
+    fn a_post_at(author_seed: u8, parent: Option<OpId>, counter: u64, body: &str) -> SignedOp {
+        let key = a_key(author_seed);
+        Op {
+            stoa: a_stoa(),
+            author: key.public_key(),
+            clock: Some(crate::op::OpClock {
+                counter,
+                asserted_ms: 1_789_729_304_000,
+            }),
+            kind: OpKind::Post {
+                thread: parent,
+                parent,
+                body: body.to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&key)
+    }
+
+    fn a_moderation_at(target: OpId, action: ModerationAction, counter: u64) -> SignedOp {
+        let creator = a_key(1);
+        Op {
+            stoa: a_stoa(),
+            author: creator.public_key(),
+            clock: Some(crate::op::OpClock {
+                counter,
+                asserted_ms: 1_789_729_304_000,
+            }),
+            kind: OpKind::Moderate { target, action },
+        }
+        .sign(&creator)
+    }
+
+    fn row_for<'a>(rows: &'a [FeedRow], root: &SignedOp) -> &'a FeedRow {
+        rows.iter()
+            .find(|r| r.thread == root.op.id().to_hex())
+            .expect("the thread must have a row")
+    }
+
+    #[test]
+    fn a_thread_with_no_replies_reports_zero_and_no_latest() {
+        let head = a_thread(2, "unanswered");
+        let rows = all_of(&a_log(vec![head.clone()]), false);
+        let row = row_for(&rows, &head);
+        assert_eq!(row.reply_count(), 0);
+        assert_eq!(row.latest_reply(), None);
+        assert_eq!(row.replies, None);
+    }
+
+    #[test]
+    fn replies_at_every_depth_are_counted_and_a_deeper_one_can_be_latest() {
+        let root = a_post_at(2, None, 1, "root");
+        let mid = a_post_at(3, Some(root.op.id()), 2, "mid");
+        let deep = a_post_at(4, Some(mid.op.id()), 3, "deep");
+        let rows = all_of(&a_log(vec![root.clone(), mid, deep.clone()]), false);
+        let row = row_for(&rows, &root);
+        assert_eq!(row.reply_count(), 2);
+        assert_eq!(row.latest_reply(), Some(deep.op.id().to_hex().as_str()));
+    }
+
+    #[test]
+    fn the_latest_reply_is_the_one_the_ordering_rule_places_first() {
+        // Appended higher-counter FIRST and in the opposite sequence on a
+        // second log, so neither insertion order nor a "last seen wins" fold
+        // lands on the right answer by accident.
+        let root = a_post_at(2, None, 1, "root");
+        let lower = a_post_at(3, Some(root.op.id()), 2, "lower");
+        let higher = a_post_at(4, Some(root.op.id()), 7, "higher");
+        let forwards = a_log(vec![root.clone(), higher.clone(), lower.clone()]);
+        let backwards = a_log(vec![lower, higher.clone(), root.clone()]);
+        for log in [&forwards, &backwards] {
+            let rows = all_of(log, false);
+            assert_eq!(
+                row_for(&rows, &root).latest_reply(),
+                Some(higher.op.id().to_hex().as_str())
+            );
+        }
+    }
+
+    #[test]
+    fn a_hidden_reply_is_neither_counted_nor_latest() {
+        // The test issue #100 asks for by name: the case that looks right by
+        // accident. The hidden reply is the one that would otherwise be latest,
+        // so a fold ignoring moderation gets BOTH fields wrong.
+        let root = a_post_at(2, None, 1, "root");
+        let visible = a_post_at(3, Some(root.op.id()), 2, "visible");
+        let to_hide = a_post_at(4, Some(root.op.id()), 3, "to hide");
+        let hide = a_moderation_at(to_hide.op.id(), ModerationAction::Hide, 4);
+
+        let unmoderated = a_log(vec![root.clone(), visible.clone(), to_hide.clone()]);
+        let before = all_of(&unmoderated, false);
+        assert_eq!(row_for(&before, &root).reply_count(), 2);
+        assert_eq!(
+            row_for(&before, &root).latest_reply(),
+            Some(to_hide.op.id().to_hex().as_str()),
+            "without the hide, the reply to be hidden is latest — or this fixture \
+             cannot tell a field that ignores moderation from one that applies it"
+        );
+
+        let moderated = a_log(vec![root.clone(), visible.clone(), to_hide, hide]);
+        let after = all_of(&moderated, false);
+        assert_eq!(row_for(&after, &root).reply_count(), 1);
+        assert_eq!(
+            row_for(&after, &root).latest_reply(),
+            Some(visible.op.id().to_hex().as_str())
+        );
+    }
+
+    #[test]
+    fn a_thread_whose_only_reply_is_hidden_reports_zero_and_no_latest() {
+        let root = a_post_at(2, None, 1, "root");
+        let only = a_post_at(3, Some(root.op.id()), 2, "only");
+        let hide = a_moderation_at(only.op.id(), ModerationAction::Hide, 3);
+        let rows = all_of(&a_log(vec![root.clone(), only, hide]), false);
+        let row = row_for(&rows, &root);
+        assert_eq!(row.reply_count(), 0);
+        assert_eq!(row.latest_reply(), None);
+    }
+
+    #[test]
+    fn a_reply_beneath_a_hidden_reply_is_counted() {
+        let root = a_post_at(2, None, 1, "root");
+        let hidden = a_post_at(3, Some(root.op.id()), 2, "hidden");
+        let beneath = a_post_at(4, Some(hidden.op.id()), 3, "beneath");
+        let hide = a_moderation_at(hidden.op.id(), ModerationAction::Hide, 4);
+        let rows = all_of(
+            &a_log(vec![root.clone(), hidden, beneath.clone(), hide]),
+            false,
+        );
+        let row = row_for(&rows, &root);
+        assert_eq!(row.reply_count(), 1);
+        assert_eq!(row.latest_reply(), Some(beneath.op.id().to_hex().as_str()));
+    }
+
+    #[test]
+    fn a_restored_reply_is_counted_again() {
+        // Counters on both moderations, so last-write-wins is real: without
+        // them the resolver's fail-closed bias keeps the hide, which is the
+        // degraded case and not this one.
+        let root = a_post_at(2, None, 1, "root");
+        let reply = a_post_at(3, Some(root.op.id()), 2, "reply");
+        let hide = a_moderation_at(reply.op.id(), ModerationAction::Hide, 3);
+        let unhide = a_moderation_at(reply.op.id(), ModerationAction::Unhide, 4);
+
+        let hidden_only = all_of(
+            &a_log(vec![root.clone(), reply.clone(), hide.clone()]),
+            false,
+        );
+        assert_eq!(row_for(&hidden_only, &root).reply_count(), 0);
+
+        let restored = all_of(&a_log(vec![root.clone(), reply, hide, unhide]), false);
+        assert_eq!(row_for(&restored, &root).reply_count(), 1);
+    }
+
+    #[test]
+    fn a_non_moderators_hide_removes_nothing_from_the_count() {
+        let root = a_post_at(2, None, 1, "root");
+        let reply = a_post_at(3, Some(root.op.id()), 2, "reply");
+        let impostor = a_key(9);
+        let hide = Op {
+            stoa: a_stoa(),
+            author: impostor.public_key(),
+            clock: None,
+            kind: OpKind::Moderate {
+                target: reply.op.id(),
+                action: ModerationAction::Hide,
+            },
+        }
+        .sign(&impostor);
+        assert!(hide.verify(), "authentic; it is the AUTHORITY that fails");
+        let rows = all_of(&a_log(vec![root.clone(), reply, hide]), false);
+        assert_eq!(row_for(&rows, &root).reply_count(), 1);
+    }
+
+    #[test]
+    fn a_forged_reply_is_neither_counted_nor_latest() {
+        let root = a_post_at(2, None, 1, "root");
+        let genuine = a_post_at(3, Some(root.op.id()), 2, "genuine");
+        // Claims key 4, signed by key 9, and carries the highest counter in
+        // the thread — so a fold that skipped verification would report it as
+        // latest as well as counting it.
+        let op = Op {
+            stoa: a_stoa(),
+            author: a_key(4).public_key(),
+            clock: Some(crate::op::OpClock {
+                counter: 50,
+                asserted_ms: 1_789_729_304_000,
+            }),
+            kind: OpKind::Post {
+                thread: Some(root.op.id()),
+                parent: Some(root.op.id()),
+                body: "forged".to_string(),
+                attachments: vec![],
+            },
+        };
+        let forged = SignedOp {
+            signature: crate::identity::sign_op_bytes(&a_key(9), &op.canonical_bytes()),
+            op,
+        };
+        assert!(!forged.verify(), "the fixture must be a forgery");
+
+        let log = a_log(vec![root.clone(), genuine.clone(), forged.clone()]);
+        assert!(
+            log.get(&forged.op.id()).unwrap().is_some(),
+            "the forgery is stored, so its absence from the count is the reader's doing"
+        );
+        let rows = all_of(&log, false);
+        let row = row_for(&rows, &root);
+        assert_eq!(row.reply_count(), 1);
+        assert_eq!(row.latest_reply(), Some(genuine.op.id().to_hex().as_str()));
+    }
+
+    #[test]
+    fn a_post_is_counted_by_its_parent_chain_and_never_by_its_thread_field() {
+        // Both directions: counted under the thread its parent is in, and not
+        // under the thread it names. A fold returning zero everywhere passes
+        // the second half alone.
+        let first = a_post_at(2, None, 1, "first");
+        let second = a_post_at(3, None, 2, "second");
+        let key = a_key(4);
+        let liar = Op {
+            stoa: a_stoa(),
+            author: key.public_key(),
+            clock: Some(crate::op::OpClock {
+                counter: 9,
+                asserted_ms: 1_789_729_304_000,
+            }),
+            kind: OpKind::Post {
+                thread: Some(second.op.id()),
+                parent: Some(first.op.id()),
+                body: "names the second, replies into the first".to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&key);
+        let rows = all_of(
+            &a_log(vec![first.clone(), second.clone(), liar.clone()]),
+            false,
+        );
+        assert_eq!(row_for(&rows, &first).reply_count(), 1);
+        assert_eq!(
+            row_for(&rows, &first).latest_reply(),
+            Some(liar.op.id().to_hex().as_str())
+        );
+        assert_eq!(row_for(&rows, &second).reply_count(), 0);
+        assert_eq!(row_for(&rows, &second).latest_reply(), None);
+    }
+
+    #[test]
+    fn a_post_whose_parent_is_not_held_is_counted_once_the_parent_arrives() {
+        let root = a_post_at(2, None, 1, "root");
+        let mid = a_post_at(3, Some(root.op.id()), 2, "mid");
+        let deep = a_post_at(4, Some(mid.op.id()), 3, "deep");
+        let mut log = a_log(vec![root.clone(), deep]);
+        assert_eq!(row_for(&all_of(&log, false), &root).reply_count(), 0);
+        log.append(mid, Arrival::unordered()).unwrap();
+        assert_eq!(row_for(&all_of(&log, false), &root).reply_count(), 2);
+    }
+
+    #[test]
+    fn a_revision_does_not_move_a_reply_or_change_the_id_reported() {
+        let root = a_post_at(2, None, 1, "root");
+        let earlier = a_post_at(3, Some(root.op.id()), 2, "earlier");
+        let later = a_post_at(4, Some(root.op.id()), 3, "later");
+        let revise = |target: &SignedOp, seed: u8, counter: u64| {
+            let key = a_key(seed);
+            Op {
+                stoa: a_stoa(),
+                author: key.public_key(),
+                clock: Some(crate::op::OpClock {
+                    counter,
+                    asserted_ms: 1_789_729_304_000,
+                }),
+                kind: OpKind::Revise {
+                    target: target.op.id(),
+                    body: "revised".to_string(),
+                    attachments: vec![],
+                },
+            }
+            .sign(&key)
+        };
+        // The EARLIER reply is revised at a counter above everything, so a fold
+        // taking a reply's position from its current version would move it to
+        // the front.
+        let lifted = revise(&earlier, 3, 20);
+        let rows = all_of(
+            &a_log(vec![root.clone(), earlier.clone(), later.clone(), lifted]),
+            false,
+        );
+        assert_eq!(
+            row_for(&rows, &root).reply_count(),
+            2,
+            "a revision is not a reply"
+        );
+        assert_eq!(
+            row_for(&rows, &root).latest_reply(),
+            Some(later.op.id().to_hex().as_str())
+        );
+
+        // And the LATEST reply revised: the id reported is the post's own.
+        let own = revise(&later, 4, 21);
+        let rows = all_of(
+            &a_log(vec![root.clone(), earlier, later.clone(), own.clone()]),
+            false,
+        );
+        assert_eq!(
+            row_for(&rows, &root).latest_reply(),
+            Some(later.op.id().to_hex().as_str())
+        );
+        assert_ne!(
+            row_for(&rows, &root).latest_reply(),
+            Some(own.op.id().to_hex().as_str())
+        );
+    }
+
+    #[test]
+    fn a_reply_revised_voted_on_and_unhidden_with_no_prior_hide_is_counted_once() {
+        // spec.md's "Ops that are not posts are not counted" names all three
+        // non-post kinds against a SINGLE reply, and the unhide carries no
+        // prior hide of that reply anywhere in the log. Each kind has its own
+        // isolated test elsewhere (a revision alone, a restore after a real
+        // hide), but a fold that treated any `Moderate` op naming the reply as
+        // evidence of a resolved-hidden state, or that let an unmatched
+        // unhide leave a stray mark, would not be caught by those — only a
+        // reply carrying a revise, a vote AND an unhide together, with the
+        // count still landing on exactly one, tells them apart.
+        let root = a_post_at(2, None, 1, "root");
+        let reply = a_post_at(3, Some(root.op.id()), 2, "reply");
+        let revise = Op {
+            stoa: a_stoa(),
+            author: a_key(3).public_key(),
+            clock: Some(crate::op::OpClock {
+                counter: 3,
+                asserted_ms: 1_789_729_304_000,
+            }),
+            kind: OpKind::Revise {
+                target: reply.op.id(),
+                body: "revised".to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&a_key(3));
+        let vote = Op {
+            stoa: a_stoa(),
+            author: a_key(6).public_key(),
+            clock: None,
+            kind: OpKind::Vote {
+                target: reply.op.id(),
+                direction: crate::op::VoteDirection::Up,
+            },
+        }
+        .sign(&a_key(6));
+        // No hide of `reply` anywhere in this log: this unhide matches nothing.
+        let unhide = a_moderation_at(reply.op.id(), ModerationAction::Unhide, 4);
+
+        let rows = all_of(
+            &a_log(vec![root.clone(), reply.clone(), revise, vote, unhide]),
+            false,
+        );
+        let row = row_for(&rows, &root);
+        assert_eq!(row.reply_count(), 1);
+        assert_eq!(row.latest_reply(), Some(reply.op.id().to_hex().as_str()));
+    }
+
+    #[test]
+    fn the_include_hidden_flag_changes_no_rows_reply_fields() {
+        let root = a_post_at(2, None, 1, "root");
+        let visible = a_post_at(3, Some(root.op.id()), 2, "visible");
+        let hidden = a_post_at(4, Some(root.op.id()), 3, "hidden");
+        let hide = a_moderation_at(hidden.op.id(), ModerationAction::Hide, 4);
+        let log = a_log(vec![root.clone(), visible.clone(), hidden, hide]);
+
+        let excluded = all_of(&log, false);
+        let included = all_of(&log, true);
+        assert_eq!(
+            row_for(&excluded, &root).replies,
+            row_for(&included, &root).replies
+        );
+        assert_eq!(row_for(&included, &root).reply_count(), 1);
+        assert_eq!(
+            row_for(&included, &root).latest_reply(),
+            Some(visible.op.id().to_hex().as_str())
+        );
+    }
+
+    #[test]
+    fn a_hidden_threads_row_counts_its_visible_replies() {
+        let root = a_post_at(2, None, 1, "root");
+        let a = a_post_at(3, Some(root.op.id()), 2, "a");
+        let b = a_post_at(4, Some(root.op.id()), 3, "b");
+        let hide = a_moderation_at(root.op.id(), ModerationAction::Hide, 4);
+        let rows = all_of(&a_log(vec![root.clone(), a, b.clone(), hide]), true);
+        let row = row_for(&rows, &root);
+        assert!(row.is_hidden);
+        assert_eq!(row.reply_count(), 2);
+        assert_eq!(row.latest_reply(), Some(b.op.id().to_hex().as_str()));
+    }
+
+    #[test]
+    fn a_new_reply_does_not_move_its_threads_row() {
+        let first = a_post_at(2, None, 5, "first");
+        let second = a_post_at(3, None, 4, "second");
+        let before_log = a_log(vec![first.clone(), second.clone()]);
+        let before: Vec<String> = all_of(&before_log, false)
+            .iter()
+            .map(|r| r.thread.clone())
+            .collect();
+        assert_eq!(
+            before,
+            vec![first.op.id().to_hex(), second.op.id().to_hex()]
+        );
+
+        let reply = a_post_at(4, Some(second.op.id()), 9, "a reply above both roots");
+        let after_log = a_log(vec![first, second.clone(), reply]);
+        let after = all_of(&after_log, false);
+        assert_eq!(
+            after.iter().map(|r| r.thread.clone()).collect::<Vec<_>>(),
+            before,
+            "the reply must not move its thread, nor appear as a row"
+        );
+        assert_eq!(row_for(&after, &second).reply_count(), 1);
+    }
+
+    /// A log that answers `get`/`iter`/`iter_stoa` from a table of `(id, entry)`
+    /// pairs **whose ids need not be the entries' own** — the same device
+    /// `thread.rs`'s `CyclicLog` uses, and for the same reason: an op id is the
+    /// hash of bytes that include `parent`, so a two-op cycle needs each id
+    /// computed from bytes that already carry the other, which is not mintable
+    /// against SHA-256. `MemoryOpLog` keys on `op.id()`, so no fixture over a
+    /// real log can produce a cycle; a store whose key disagrees with its bytes
+    /// is what a corrupted or hand-edited file can hold, and the fold consumes
+    /// whatever `OpLog::get`/`iter_stoa` return.
+    struct WrongKeyLog {
+        entries: Vec<(OpId, Entry)>,
+    }
+
+    impl WrongKeyLog {
+        fn filed_at(at: OpId, op: SignedOp) -> (OpId, Entry) {
+            assert!(op.verify(), "the op itself must be authentic");
+            (
+                at,
+                Entry {
+                    op,
+                    arrival: Arrival::unordered(),
+                },
+            )
+        }
+    }
+
+    impl OpLog for WrongKeyLog {
+        fn append(
+            &mut self,
+            _op: SignedOp,
+            _arrival: Arrival,
+        ) -> Result<crate::log::Appended, OpLogError> {
+            unreachable!("this fake is read-only")
+        }
+        fn get(&self, id: &OpId) -> Result<Option<Entry>, OpLogError> {
+            Ok(self
+                .entries
+                .iter()
+                .find(|(at, _)| at == id)
+                .map(|(_, e)| e.clone()))
+        }
+        fn iter(&self) -> Result<Vec<Entry>, OpLogError> {
+            Ok(self.entries.iter().map(|(_, e)| e.clone()).collect())
+        }
+        fn iter_stoa(&self, stoa: &Address) -> Result<Vec<Entry>, OpLogError> {
+            Ok(self
+                .entries
+                .iter()
+                .map(|(_, e)| e.clone())
+                .filter(|e| e.op.op.stoa == *stoa)
+                .collect())
+        }
+        fn iter_target(&self, _target: &OpId) -> Result<Vec<Entry>, OpLogError> {
+            Ok(vec![])
+        }
+        fn len(&self) -> Result<usize, OpLogError> {
+            Ok(self.entries.len())
+        }
+    }
+
+    fn an_id(seed: u8) -> OpId {
+        OpId::from_hex(&format!("{seed:02x}").repeat(32)).unwrap()
+    }
+
+    #[test]
+    fn a_post_in_a_parent_cycle_is_counted_under_no_thread() {
+        // A closed ring of three replies, each naming the next as parent and
+        // each carrying a `thread` field naming the genuine root — so a fold
+        // reading `thread` instead of walking the chain would count all three,
+        // and a walk with no visited set would spin forever. `thread_of`'s own
+        // termination over a cycle is pinned in `thread.rs`
+        // (`a_cycle_among_parents_terminates_and_places_nothing`); this pins
+        // that the feed's count and latest reply see the same "placed nowhere"
+        // answer for every op in the ring, rather than looping or crediting any
+        // of them to the root.
+        let root = a_post_at(2, None, 1, "root");
+        let ring_ids: Vec<OpId> = (0..3).map(an_id).collect();
+        let ring: Vec<(OpId, Entry)> = (0..ring_ids.len())
+            .map(|i| {
+                let next = ring_ids[(i + 1) % ring_ids.len()];
+                let key = a_key(3 + i as u8);
+                let op = Op {
+                    stoa: a_stoa(),
+                    author: key.public_key(),
+                    clock: Some(crate::op::OpClock {
+                        counter: 9 + i as u64,
+                        asserted_ms: 1_789_729_304_000,
+                    }),
+                    kind: OpKind::Post {
+                        thread: Some(root.op.id()),
+                        parent: Some(next),
+                        body: "cyclic".to_string(),
+                        attachments: vec![],
+                    },
+                }
+                .sign(&key);
+                WrongKeyLog::filed_at(ring_ids[i], op)
+            })
+            .collect();
+
+        let mut entries = ring;
+        entries.push(WrongKeyLog::filed_at(root.op.id(), root.clone()));
+        let log = WrongKeyLog { entries };
+
+        let rows = list_threads(&log, &moderators(), &a_stoa(), 0, MAX_PER_PAGE, false)
+            .unwrap()
+            .items;
+        let row = row_for(&rows, &root);
+        assert_eq!(
+            row.reply_count(),
+            0,
+            "no op in a parent cycle is placed under any thread"
+        );
+        assert_eq!(row.latest_reply(), None);
+    }
+
+    #[test]
+    fn a_reply_carrying_a_far_future_asserted_time_is_not_thereby_latest() {
+        // The reply with the LOWER counter asserts a time far in the future,
+        // and the reply with the higher counter asserts an earlier time. If the
+        // fold read the wall-clock instead of relying on arrival order, the
+        // future-dated reply would win.
+        let root = a_post_at(2, None, 1, "root");
+        let key = a_key(3);
+        let future_but_lower = Op {
+            stoa: a_stoa(),
+            author: key.public_key(),
+            clock: Some(crate::op::OpClock {
+                counter: 2,
+                asserted_ms: 9_999_999_999_000,
+            }),
+            kind: OpKind::Post {
+                thread: Some(root.op.id()),
+                parent: Some(root.op.id()),
+                body: "claims the future".to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&key);
+        let earlier_but_higher = a_post_at(4, Some(root.op.id()), 7, "earlier assertion");
+        let rows = all_of(
+            &a_log(vec![
+                root.clone(),
+                earlier_but_higher.clone(),
+                future_but_lower,
+            ]),
+            false,
+        );
+        assert_eq!(
+            row_for(&rows, &root).latest_reply(),
+            Some(earlier_but_higher.op.id().to_hex().as_str()),
+            "the higher counter wins regardless of which reply claims the later time"
+        );
+    }
+
+    #[test]
+    fn a_second_stoas_reply_naming_the_first_stoas_root_as_parent_is_not_counted() {
+        // A validly signed post whose OWN `stoa` field is a second Stoa, naming
+        // a thread root of the FIRST Stoa as its parent. `visible_replies_by_thread`
+        // is folded over `iter_stoa(stoa)`'s entries, so this op is never in the
+        // set it walks — the same boundary `only_this_stoas_threads_are_returned`
+        // pins for heads, pinned here for a reply specifically, since a reply
+        // reaches `thread_of` rather than the head filter.
+        let root = a_post_at(2, None, 1, "root");
+        let elsewhere = Genesis {
+            creator: a_key(1).public_key(),
+            policy: Policy::Open,
+            title: "Somewhere else".to_string(),
+        }
+        .address()
+        .unwrap();
+        let key = a_key(5);
+        let foreign_reply = Op {
+            stoa: elsewhere,
+            author: key.public_key(),
+            clock: Some(crate::op::OpClock {
+                counter: 9,
+                asserted_ms: 1_789_729_304_000,
+            }),
+            kind: OpKind::Post {
+                thread: Some(root.op.id()),
+                parent: Some(root.op.id()),
+                body: "from elsewhere, naming this root as parent".to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&key);
+        let rows = all_of(&a_log(vec![root.clone(), foreign_reply]), false);
+        let row = row_for(&rows, &root);
+        assert_eq!(row.reply_count(), 0);
+        assert_eq!(row.latest_reply(), None);
+    }
+
+    #[test]
+    fn two_peers_holding_different_copies_report_different_counts_without_error() {
+        // One peer holds all three of a thread's replies; another holds only
+        // two of them — the ordinary partial-set case (§3.3), not an attack or
+        // a defect. Both reads must succeed, and each reports what it holds.
+        let root = a_post_at(2, None, 1, "root");
+        let a = a_post_at(3, Some(root.op.id()), 2, "a");
+        let b = a_post_at(4, Some(root.op.id()), 3, "b");
+        let c = a_post_at(5, Some(root.op.id()), 4, "c");
+
+        let full_peer = a_log(vec![root.clone(), a.clone(), b.clone(), c.clone()]);
+        let partial_peer = a_log(vec![root.clone(), a, b]);
+
+        let full = list_threads(&full_peer, &moderators(), &a_stoa(), 0, MAX_PER_PAGE, false)
+            .expect("the first peer's read is not an error");
+        let partial = list_threads(
+            &partial_peer,
+            &moderators(),
+            &a_stoa(),
+            0,
+            MAX_PER_PAGE,
+            false,
+        )
+        .expect("the second peer's read is not an error");
+
+        assert_eq!(row_for(&full.items, &root).reply_count(), 3);
+        assert_eq!(row_for(&partial.items, &root).reply_count(), 2);
+    }
+
+    #[test]
+    fn the_count_agrees_with_the_thread_read() {
+        // One fixture carrying every case that subtracts, read both ways.
+        let root = a_post_at(2, None, 1, "root");
+        let visible = a_post_at(3, Some(root.op.id()), 2, "visible");
+        let hidden = a_post_at(4, Some(root.op.id()), 3, "hidden");
+        let beneath = a_post_at(5, Some(hidden.op.id()), 4, "beneath the hidden");
+        let hide = a_moderation_at(hidden.op.id(), ModerationAction::Hide, 5);
+        // Names the thread in its `thread` field and has no parent in it.
+        let claimant = Op {
+            stoa: a_stoa(),
+            author: a_key(6).public_key(),
+            clock: Some(crate::op::OpClock {
+                counter: 6,
+                asserted_ms: 1_789_729_304_000,
+            }),
+            kind: OpKind::Post {
+                thread: Some(root.op.id()),
+                parent: None,
+                body: "claims the thread and has no parent in it".to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&a_key(6));
+        let op = Op {
+            stoa: a_stoa(),
+            author: a_key(7).public_key(),
+            clock: None,
+            kind: OpKind::Post {
+                thread: Some(root.op.id()),
+                parent: Some(root.op.id()),
+                body: "forged".to_string(),
+                attachments: vec![],
+            },
+        };
+        let forged = SignedOp {
+            signature: crate::identity::sign_op_bytes(&a_key(9), &op.canonical_bytes()),
+            op,
+        };
+        let log = a_log(vec![
+            root.clone(),
+            visible,
+            hidden,
+            beneath,
+            hide,
+            claimant,
+            forged,
+        ]);
+
+        let thread = crate::thread::read_thread(
+            &log,
+            &moderators(),
+            &a_stoa(),
+            &root.op.id(),
+            crate::thread::ReadOptions {
+                page: 0,
+                per_page: crate::thread::MAX_PER_PAGE,
+                include_hidden: false,
+                now_ms: 1_789_729_304_000,
+            },
+        )
+        .unwrap()
+        .unwrap();
+        assert!(!thread.has_more, "the whole thread must fit one page here");
+        let reply_ids: Vec<String> = thread
+            .items
+            .iter()
+            .filter(|i| i.id != root.op.id().to_hex())
+            .map(|i| i.id.clone())
+            .collect();
+
+        let rows = all_of(&log, false);
+        let row = row_for(&rows, &root);
+        assert_eq!(row.reply_count(), reply_ids.len());
+        assert_eq!(row.reply_count(), 2, "visible and beneath-the-hidden");
+        assert!(reply_ids.contains(&row.latest_reply().unwrap().to_string()));
+    }
+
+    #[test]
+    fn an_adversarial_log_is_read_without_aborting() {
+        // spec.md's "An adversarial log is read without aborting" puts every
+        // named shape in ONE log, read ONCE: a forged post, a post naming a
+        // parent not held, a post naming itself as its parent, a parent cycle,
+        // and ops of every other kind naming a reply. Each shape has its own
+        // isolated test elsewhere in this file; none combines them, so an
+        // interaction between two shapes at once (e.g. a cycle member that
+        // also fails verification) is untested outside this fixture. The
+        // property under test is termination and a reply-count on every row —
+        // not any particular count — since a self-cycle and a closed ring need
+        // ids that disagree with their content hash, so `WrongKeyLog` (as the
+        // parent-cycle test above uses) stands in for the whole log.
+        let root = a_post_at(2, None, 1, "root");
+
+        // A post naming itself as its own parent.
+        let self_ref_id = an_id(9);
+        let self_ref_key = a_key(9);
+        let self_ref_op = Op {
+            stoa: a_stoa(),
+            author: self_ref_key.public_key(),
+            clock: Some(crate::op::OpClock {
+                counter: 50,
+                asserted_ms: 1_789_729_304_000,
+            }),
+            kind: OpKind::Post {
+                thread: Some(root.op.id()),
+                parent: Some(self_ref_id),
+                body: "names itself as its own parent".to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&self_ref_key);
+
+        // A closed two-op cycle, distinct from the self-reference above.
+        let cycle_ids = [an_id(10), an_id(11)];
+        let cycle: Vec<(OpId, Entry)> = (0..cycle_ids.len())
+            .map(|i| {
+                let next = cycle_ids[(i + 1) % cycle_ids.len()];
+                let key = a_key(20 + i as u8);
+                let op = Op {
+                    stoa: a_stoa(),
+                    author: key.public_key(),
+                    clock: Some(crate::op::OpClock {
+                        counter: 60 + i as u64,
+                        asserted_ms: 1_789_729_304_000,
+                    }),
+                    kind: OpKind::Post {
+                        thread: Some(root.op.id()),
+                        parent: Some(next),
+                        body: "cyclic".to_string(),
+                        attachments: vec![],
+                    },
+                }
+                .sign(&key);
+                WrongKeyLog::filed_at(cycle_ids[i], op)
+            })
+            .collect();
+
+        // A post naming a parent no op in the log carries.
+        let dangling_key = a_key(12);
+        let dangling = Op {
+            stoa: a_stoa(),
+            author: dangling_key.public_key(),
+            clock: Some(crate::op::OpClock {
+                counter: 70,
+                asserted_ms: 1_789_729_304_000,
+            }),
+            kind: OpKind::Post {
+                thread: Some(root.op.id()),
+                parent: Some(an_id(13)),
+                body: "parent never arrives".to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&dangling_key);
+
+        // A forged post: claims one key, signed by another.
+        let forged_op = Op {
+            stoa: a_stoa(),
+            author: a_key(14).public_key(),
+            clock: Some(crate::op::OpClock {
+                counter: 80,
+                asserted_ms: 1_789_729_304_000,
+            }),
+            kind: OpKind::Post {
+                thread: Some(root.op.id()),
+                parent: Some(root.op.id()),
+                body: "forged".to_string(),
+                attachments: vec![],
+            },
+        };
+        let forged = SignedOp {
+            signature: crate::identity::sign_op_bytes(&a_key(15), &forged_op.canonical_bytes()),
+            op: forged_op,
+        };
+        assert!(!forged.verify(), "the fixture must be a genuine forgery");
+
+        // A genuine reply, plus a revise, a vote and a moderation naming it —
+        // "ops of every other kind naming a reply".
+        let reply = a_post_at(16, Some(root.op.id()), 90, "reply");
+        let revise = Op {
+            stoa: a_stoa(),
+            author: a_key(17).public_key(),
+            clock: Some(crate::op::OpClock {
+                counter: 91,
+                asserted_ms: 1_789_729_304_000,
+            }),
+            kind: OpKind::Revise {
+                target: reply.op.id(),
+                body: "revised".to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&a_key(17));
+        let vote = Op {
+            stoa: a_stoa(),
+            author: a_key(18).public_key(),
+            clock: None,
+            kind: OpKind::Vote {
+                target: reply.op.id(),
+                direction: crate::op::VoteDirection::Down,
+            },
+        }
+        .sign(&a_key(18));
+        let moderate = a_moderation_at(reply.op.id(), ModerationAction::Hide, 92);
+
+        let mut entries: Vec<(OpId, Entry)> = vec![
+            WrongKeyLog::filed_at(root.op.id(), root.clone()),
+            WrongKeyLog::filed_at(self_ref_id, self_ref_op),
+            WrongKeyLog::filed_at(dangling.op.id(), dangling),
+            WrongKeyLog::filed_at(reply.op.id(), reply),
+            WrongKeyLog::filed_at(revise.op.id(), revise),
+            WrongKeyLog::filed_at(vote.op.id(), vote),
+            WrongKeyLog::filed_at(moderate.op.id(), moderate),
+            // The forged op does not verify, so `filed_at`'s own assertion
+            // would reject it; it is filed directly instead.
+            (
+                forged.op.id(),
+                Entry {
+                    op: forged,
+                    arrival: Arrival::unordered(),
+                },
+            ),
+        ];
+        entries.extend(cycle);
+        let log = WrongKeyLog { entries };
+
+        let page = list_threads(&log, &moderators(), &a_stoa(), 0, MAX_PER_PAGE, false)
+            .expect("an adversarial log must return an answer rather than an error");
+        assert!(
+            !page.items.is_empty(),
+            "the root itself is genuine and must still appear as a row"
+        );
+        for row in &page.items {
+            // Every row reports a reply count: `reply_count()` returning
+            // `usize` rather than `Option<usize>` means this is checked by
+            // the type, but call it to document the scenario's own assertion.
+            let _: usize = row.reply_count();
+        }
+    }
+
+    /// A log that fails every read keyed by one op id, and answers the rest.
+    ///
+    /// Keyed rather than total, so a failure can be placed on ONE reply: a log
+    /// failing everything fails at `iter_stoa` and never reaches the fold.
+    struct FailingOn {
+        log: MemoryOpLog,
+        id: OpId,
+    }
+
+    impl OpLog for FailingOn {
+        fn append(
+            &mut self,
+            op: SignedOp,
+            arrival: Arrival,
+        ) -> Result<crate::log::Appended, OpLogError> {
+            self.log.append(op, arrival)
+        }
+        fn get(&self, id: &OpId) -> Result<Option<Entry>, OpLogError> {
+            if *id == self.id {
+                return Err(OpLogError::Storage("this reply's row is unreadable".into()));
+            }
+            self.log.get(id)
+        }
+        fn iter(&self) -> Result<Vec<Entry>, OpLogError> {
+            self.log.iter()
+        }
+        fn iter_stoa(&self, stoa: &Address) -> Result<Vec<Entry>, OpLogError> {
+            self.log.iter_stoa(stoa)
+        }
+        fn iter_target(&self, target: &OpId) -> Result<Vec<Entry>, OpLogError> {
+            if *target == self.id {
+                return Err(OpLogError::Storage("this reply's row is unreadable".into()));
+            }
+            self.log.iter_target(target)
+        }
+        fn len(&self) -> Result<usize, OpLogError> {
+            self.log.len()
+        }
+    }
+
+    #[test]
+    fn a_store_failure_while_counting_is_an_error_and_not_a_zero() {
+        let root = a_post_at(2, None, 1, "root");
+        let reply = a_post_at(3, Some(root.op.id()), 2, "reply");
+
+        // The same ops with no failure: the row is there. So the error below is
+        // the one met while counting, not one met finding the head.
+        let healthy = FailingOn {
+            log: a_log(vec![root.clone(), reply.clone()]),
+            id: OpId::from_hex(&"ab".repeat(32)).unwrap(),
+        };
+        let page = list_threads(&healthy, &moderators(), &a_stoa(), 0, 20, false).unwrap();
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].reply_count(), 1);
+
+        let failing = FailingOn {
+            log: a_log(vec![root, reply.clone()]),
+            id: reply.op.id(),
+        };
+        let err = list_threads(&failing, &moderators(), &a_stoa(), 0, 20, false)
+            .expect_err("a failure while counting must not become a count of zero");
+        assert!(
+            err.to_string().contains("this reply's row is unreadable"),
+            "got {err}"
+        );
+    }
+
+    // `feed-read`, "Computing the reply fields fails as an error and never
+    // aborts": the read fails whichever reply in the Stoa the failure is met on,
+    // including one whose thread's row is on another page. The failing read here
+    // is the `get` on the reply itself, the first step of `thread_of`, so the
+    // reply's thread is not yet known when the failure is met.
+    #[test]
+    fn a_store_failure_on_a_reply_off_the_page_fails_the_page() {
+        let on_page = a_post_at(2, None, 9, "first row");
+        let off_page = a_post_at(3, None, 8, "second row");
+        let reply = a_post_at(4, Some(off_page.op.id()), 10, "reply to the second");
+
+        // The same ops with no failure: page one holds the first row. So the
+        // error below is the one met on the other page's reply, not one met
+        // finding either head.
+        let healthy = FailingOn {
+            log: a_log(vec![on_page.clone(), off_page.clone(), reply.clone()]),
+            id: OpId::from_hex(&"ab".repeat(32)).unwrap(),
+        };
+        let page = list_threads(&healthy, &moderators(), &a_stoa(), 0, 1, false)
+            .expect("the healthy store must answer");
+        assert!(!page.items.is_empty());
+        assert_eq!(page.items[0].thread, on_page.op.id().to_hex());
+
+        let failing = FailingOn {
+            log: a_log(vec![on_page, off_page, reply.clone()]),
+            id: reply.op.id(),
+        };
+        let err = list_threads(&failing, &moderators(), &a_stoa(), 0, 1, false)
+            .expect_err("the page holding only the first row still fails");
+        assert!(err.to_string().contains("unreadable"), "got {err}");
+    }
+
+    // `feed-read`, "Computing the reply fields fails as an error and never
+    // aborts": the read fails even when the failing reply's thread's row is
+    // not returned at all, because its root is hidden and hidden content is
+    // excluded — not only when the row is merely on another page.
+    #[test]
+    fn a_store_failure_on_a_reply_of_a_hidden_thread_fails_the_read() {
+        let hidden_root = a_post_at(2, None, 9, "hidden thread's root");
+        let reply = a_post_at(
+            3,
+            Some(hidden_root.op.id()),
+            10,
+            "reply to the hidden thread",
+        );
+        let hide = a_moderation_at(hidden_root.op.id(), ModerationAction::Hide, 11);
+        let visible_root = a_post_at(4, None, 8, "visible thread's root");
+
+        // Healthy-store control: with no failure, hidden content excluded
+        // returns only the visible thread's row, and no row for the hidden one.
+        let healthy = a_log(vec![
+            hidden_root.clone(),
+            reply.clone(),
+            hide.clone(),
+            visible_root.clone(),
+        ]);
+        let control = list_threads(&healthy, &moderators(), &a_stoa(), 0, MAX_PER_PAGE, false)
+            .expect("the healthy store must answer");
+        assert_eq!(control.items.len(), 1);
+        assert_eq!(control.items[0].thread, visible_root.op.id().to_hex());
+
+        let failing = FailingOn {
+            log: a_log(vec![hidden_root, reply.clone(), hide, visible_root]),
+            id: reply.op.id(),
+        };
+        let err = list_threads(&failing, &moderators(), &a_stoa(), 0, MAX_PER_PAGE, false)
+            .expect_err("a failure on a reply whose row is never returned must still fail");
+        assert!(err.to_string().contains("unreadable"), "got {err}");
     }
 
     // ─── The page-size guard ──────────────────────────────────────────────
