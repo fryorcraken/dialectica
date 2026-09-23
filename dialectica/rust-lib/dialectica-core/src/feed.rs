@@ -1631,6 +1631,228 @@ mod tests {
         assert_eq!(row_for(&after, &second).reply_count(), 1);
     }
 
+    /// A log that answers `get`/`iter`/`iter_stoa` from a table of `(id, entry)`
+    /// pairs **whose ids need not be the entries' own** — the same device
+    /// `thread.rs`'s `CyclicLog` uses, and for the same reason: an op id is the
+    /// hash of bytes that include `parent`, so a two-op cycle needs each id
+    /// computed from bytes that already carry the other, which is not mintable
+    /// against SHA-256. `MemoryOpLog` keys on `op.id()`, so no fixture over a
+    /// real log can produce a cycle; a store whose key disagrees with its bytes
+    /// is what a corrupted or hand-edited file can hold, and the fold consumes
+    /// whatever `OpLog::get`/`iter_stoa` return.
+    struct WrongKeyLog {
+        entries: Vec<(OpId, Entry)>,
+    }
+
+    impl WrongKeyLog {
+        fn filed_at(at: OpId, op: SignedOp) -> (OpId, Entry) {
+            assert!(op.verify(), "the op itself must be authentic");
+            (
+                at,
+                Entry {
+                    op,
+                    arrival: Arrival::unordered(),
+                },
+            )
+        }
+    }
+
+    impl OpLog for WrongKeyLog {
+        fn append(
+            &mut self,
+            _op: SignedOp,
+            _arrival: Arrival,
+        ) -> Result<crate::log::Appended, OpLogError> {
+            unreachable!("this fake is read-only")
+        }
+        fn get(&self, id: &OpId) -> Result<Option<Entry>, OpLogError> {
+            Ok(self
+                .entries
+                .iter()
+                .find(|(at, _)| at == id)
+                .map(|(_, e)| e.clone()))
+        }
+        fn iter(&self) -> Result<Vec<Entry>, OpLogError> {
+            Ok(self.entries.iter().map(|(_, e)| e.clone()).collect())
+        }
+        fn iter_stoa(&self, stoa: &Address) -> Result<Vec<Entry>, OpLogError> {
+            Ok(self
+                .entries
+                .iter()
+                .map(|(_, e)| e.clone())
+                .filter(|e| e.op.op.stoa == *stoa)
+                .collect())
+        }
+        fn iter_target(&self, _target: &OpId) -> Result<Vec<Entry>, OpLogError> {
+            Ok(vec![])
+        }
+        fn len(&self) -> Result<usize, OpLogError> {
+            Ok(self.entries.len())
+        }
+    }
+
+    fn an_id(seed: u8) -> OpId {
+        OpId::from_hex(&format!("{seed:02x}").repeat(32)).unwrap()
+    }
+
+    #[test]
+    fn a_post_in_a_parent_cycle_is_counted_under_no_thread() {
+        // A closed ring of three replies, each naming the next as parent and
+        // each carrying a `thread` field naming the genuine root — so a fold
+        // reading `thread` instead of walking the chain would count all three,
+        // and a walk with no visited set would spin forever. `thread_of`'s own
+        // termination over a cycle is pinned in `thread.rs`
+        // (`a_cycle_among_parents_terminates_and_places_nothing`); this pins
+        // that the feed's count and latest reply see the same "placed nowhere"
+        // answer for every op in the ring, rather than looping or crediting any
+        // of them to the root.
+        let root = a_post_at(2, None, 1, "root");
+        let ring_ids: Vec<OpId> = (0..3).map(an_id).collect();
+        let ring: Vec<(OpId, Entry)> = (0..ring_ids.len())
+            .map(|i| {
+                let next = ring_ids[(i + 1) % ring_ids.len()];
+                let key = a_key(3 + i as u8);
+                let op = Op {
+                    stoa: a_stoa(),
+                    author: key.public_key(),
+                    clock: Some(crate::op::OpClock {
+                        counter: 9 + i as u64,
+                        asserted_ms: 1_789_729_304_000,
+                    }),
+                    kind: OpKind::Post {
+                        thread: Some(root.op.id()),
+                        parent: Some(next),
+                        body: "cyclic".to_string(),
+                        attachments: vec![],
+                    },
+                }
+                .sign(&key);
+                WrongKeyLog::filed_at(ring_ids[i], op)
+            })
+            .collect();
+
+        let mut entries = ring;
+        entries.push(WrongKeyLog::filed_at(root.op.id(), root.clone()));
+        let log = WrongKeyLog { entries };
+
+        let rows = list_threads(&log, &moderators(), &a_stoa(), 0, MAX_PER_PAGE, false)
+            .unwrap()
+            .items;
+        let row = row_for(&rows, &root);
+        assert_eq!(
+            row.reply_count(),
+            0,
+            "no op in a parent cycle is placed under any thread"
+        );
+        assert_eq!(row.latest_reply(), None);
+    }
+
+    #[test]
+    fn a_reply_carrying_a_far_future_asserted_time_is_not_thereby_latest() {
+        // The reply with the LOWER counter asserts a time far in the future,
+        // and the reply with the higher counter asserts an earlier time. If the
+        // fold read the wall-clock instead of relying on arrival order, the
+        // future-dated reply would win.
+        let root = a_post_at(2, None, 1, "root");
+        let key = a_key(3);
+        let future_but_lower = Op {
+            stoa: a_stoa(),
+            author: key.public_key(),
+            clock: Some(crate::op::OpClock {
+                counter: 2,
+                asserted_ms: 9_999_999_999_000,
+            }),
+            kind: OpKind::Post {
+                thread: Some(root.op.id()),
+                parent: Some(root.op.id()),
+                body: "claims the future".to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&key);
+        let earlier_but_higher = a_post_at(4, Some(root.op.id()), 7, "earlier assertion");
+        let rows = all_of(
+            &a_log(vec![
+                root.clone(),
+                earlier_but_higher.clone(),
+                future_but_lower,
+            ]),
+            false,
+        );
+        assert_eq!(
+            row_for(&rows, &root).latest_reply(),
+            Some(earlier_but_higher.op.id().to_hex().as_str()),
+            "the higher counter wins regardless of which reply claims the later time"
+        );
+    }
+
+    #[test]
+    fn a_second_stoas_reply_naming_the_first_stoas_root_as_parent_is_not_counted() {
+        // A validly signed post whose OWN `stoa` field is a second Stoa, naming
+        // a thread root of the FIRST Stoa as its parent. `visible_replies_by_thread`
+        // is folded over `iter_stoa(stoa)`'s entries, so this op is never in the
+        // set it walks — the same boundary `only_this_stoas_threads_are_returned`
+        // pins for heads, pinned here for a reply specifically, since a reply
+        // reaches `thread_of` rather than the head filter.
+        let root = a_post_at(2, None, 1, "root");
+        let elsewhere = Genesis {
+            creator: a_key(1).public_key(),
+            policy: Policy::Open,
+            title: "Somewhere else".to_string(),
+        }
+        .address()
+        .unwrap();
+        let key = a_key(5);
+        let foreign_reply = Op {
+            stoa: elsewhere,
+            author: key.public_key(),
+            clock: Some(crate::op::OpClock {
+                counter: 9,
+                asserted_ms: 1_789_729_304_000,
+            }),
+            kind: OpKind::Post {
+                thread: Some(root.op.id()),
+                parent: Some(root.op.id()),
+                body: "from elsewhere, naming this root as parent".to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&key);
+        let rows = all_of(&a_log(vec![root.clone(), foreign_reply]), false);
+        let row = row_for(&rows, &root);
+        assert_eq!(row.reply_count(), 0);
+        assert_eq!(row.latest_reply(), None);
+    }
+
+    #[test]
+    fn two_peers_holding_different_copies_report_different_counts_without_error() {
+        // One peer holds all three of a thread's replies; another holds only
+        // two of them — the ordinary partial-set case (§3.3), not an attack or
+        // a defect. Both reads must succeed, and each reports what it holds.
+        let root = a_post_at(2, None, 1, "root");
+        let a = a_post_at(3, Some(root.op.id()), 2, "a");
+        let b = a_post_at(4, Some(root.op.id()), 3, "b");
+        let c = a_post_at(5, Some(root.op.id()), 4, "c");
+
+        let full_peer = a_log(vec![root.clone(), a.clone(), b.clone(), c.clone()]);
+        let partial_peer = a_log(vec![root.clone(), a, b]);
+
+        let full = list_threads(&full_peer, &moderators(), &a_stoa(), 0, MAX_PER_PAGE, false)
+            .expect("the first peer's read is not an error");
+        let partial = list_threads(
+            &partial_peer,
+            &moderators(),
+            &a_stoa(),
+            0,
+            MAX_PER_PAGE,
+            false,
+        )
+        .expect("the second peer's read is not an error");
+
+        assert_eq!(row_for(&full.items, &root).reply_count(), 3);
+        assert_eq!(row_for(&partial.items, &root).reply_count(), 2);
+    }
+
     #[test]
     fn the_count_agrees_with_the_thread_read() {
         // One fixture carrying every case that subtracts, read both ways.
