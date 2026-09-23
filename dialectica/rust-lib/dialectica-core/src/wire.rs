@@ -1739,10 +1739,15 @@ fn feed_page_json(page: &crate::feed::FeedPage) -> String {
                 "isHidden": row.is_hidden,
                 "replyCount": row.reply_count(),
             });
-            // `if let` rather than an unwrap, for the reason `thread_page_json`
-            // gives: a panic aborts the module process.
-            if let (Some(map), Some(latest)) = (object.as_object_mut(), row.latest_reply()) {
-                map.insert("latestReply".to_string(), serde_json::json!(latest));
+            // `as_object_mut` cannot fail on a value this closure just built as
+            // an object, but it is an `if let` rather than an `unwrap` because a
+            // panic aborts the module process (PHASE0-FINDINGS §3), as in
+            // `thread_page_json`. The inner `if let` is the one that varies: a
+            // row with no reply gets no `latestReply` key.
+            if let Some(map) = object.as_object_mut() {
+                if let Some(latest) = row.latest_reply() {
+                    map.insert("latestReply".to_string(), serde_json::json!(latest));
+                }
             }
             object
         })

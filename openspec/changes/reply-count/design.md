@@ -126,10 +126,15 @@ exhaustive destructures in `feed.rs`
 ### 4. `latestReply` is omitted, never null. `replyCount` is always present
 
 `feed_page_json` builds the row with `json!` and inserts `latestReply` through
-`as_object_mut` only when there is one. It is an `if let` rather than an
-`unwrap`, for the reason `thread_page_json` gives. Passing an `Option` straight
-to `json!` would send `null`, which the wire contract forbids for a field with
-no meaning.
+`as_object_mut` only when there is one. Passing an `Option` straight to `json!`
+would send `null`, which the wire contract forbids for a field with no meaning.
+
+The two `if let`s are nested, not matched as one tuple, which is the shape
+`thread_page_json` uses. The outer one cannot fail on an object the closure has
+just built, and is an `if let` only because a panic aborts the module process.
+The inner one is the one that varies. Written as
+`if let (Some(map), Some(latest)) = …`, the two look equally likely to be `None`.
+The tuple form behaves identically, and no test tells the two apart.
 
 The key-set test now pins two exact sets. The row with no reply has no
 `latestReply` key (`the_feed_reply_is_the_ecosystems_pagination_shape`). The row

@@ -12,7 +12,7 @@ tests pass.
 
 ## Findings
 
-- [ ] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/wire.rs:1744` —
+- [x] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/wire.rs:1744` —
       `feed_page_json`'s guard conflates a guaranteed-`Some` with the one that
       actually varies, where the file's own precedent two hundred lines away
       keeps them visibly separate.
@@ -37,6 +37,14 @@ tests pass.
       **Severity:** low — stylistic drift from an established in-file
       precedent, not a defect. Worth a one-line fix (nest the two `if let`s as
       `thread_page_json` does) rather than a required change.
+      **Fixed** in the commit "Nest feed_page_json's two if-lets as
+      thread_page_json does". The outer `if let` is on `as_object_mut` and the
+      inner one on `latest_reply()`. The comment now gives the reasoning itself
+      rather than pointing at the sibling function. `design.md` Decision 4 says
+      why the shape is nested. **No test fails without it**, because the change
+      preserves behaviour, as the finding says. The full suite (1046 + 30),
+      clippy `-D warnings` on both packages and `cargo fmt --check` are green
+      after it.
 
 ## What was clean
 
