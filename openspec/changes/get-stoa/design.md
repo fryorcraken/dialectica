@@ -292,17 +292,66 @@ and is milestone 0.0.2; bundling it would pull 0.0.2 work into 0.0.1. Until it
 lands, `getStoa` on this build falls back unless a metadata op arrives from
 elsewhere.
 
+### 16. The reply reports the parsed `Address`, so the module sets the letter case, not the request
+
+`identity`'s display-form requirement now states the rule. Parsing accepts hex
+letters in either case, and every address the module reports is the lowercase
+display form. That rule describes what every Stoa-taking call already did.
+This change adds no code for it. `getStoa` inherits the rule, because its reply
+names the address that was asked for.
+
+**How the code holds it:**
+
+- `Address` is `[u8; 32]`. `Address::from_hex` decodes through `hex::decode`,
+  which reads `a`–`f` and `A`–`F` alike, into those bytes. `to_hex` is
+  `hex::encode`, which writes lowercase. The case a request used is never
+  stored, so no reply can report it back.
+- `stoa_metadata_json` renders `stoa` as `stoa.to_hex()` from the parsed
+  `Address`, never from the request's string. `parse_stoa` is the only
+  production code that reads a request's `stoa` field.
+
+**Why accepting both cases is safe:** `from_hex` is strict so that two different
+Stoas cannot collide in what a reader sees (its own doc says so). Letter case
+has no bearing on that. An uppercase hex digit names the same four bits as its
+lowercase form, so two spellings that differ only in case decode to the same
+bytes and name the same Stoa, and no spelling names two different Stoas. The
+length and alphabet checks, which are what close off a collision, are
+unchanged. Accepting both cases also keeps an address working after something
+between copy and paste changed its case.
+
+**Considered: refusing uppercase (a parser that accepts only lowercase).**
+Rejected. It adds no collision resistance, for the reason above. It would also
+refuse an address that names a real Stoa, and it would change the behaviour of
+every Stoa-taking call, not only this one, which is too wide a change for a read
+call.
+
+**Considered: echoing the request's string in the reply.** Rejected. The reply
+would then carry a spelling the module reports nowhere else. A caller comparing
+reported addresses as strings, such as `getStoa`'s `stoa` against a
+`listStoas` row, would see one Stoa under two names.
+
+**What breaks without it:** `an_address_asked_for_in_uppercase_is_answered_in_lowercase`
+sends an uppercase address and checks both halves at the wire: the call
+succeeds, and the reply's `stoa` is lowercase. A lowercase-only `from_hex`
+would fail its first check, and a reply built from the request's string would
+fail its second. This comes from reading the code, not from running the
+mutation.
+
 ## Risks / Trade-offs
 
 - **The join preview is out of step with its spec until #143 lands** →
   `proposal.md`'s Impact section states which case obliges what; #143 is filed
   in the same milestone.
 - **The adapter opens the op log per call, which creates an empty store file on
-  a profile that has none** → the same behaviour `listThreads` and `readThread`
-  already have. It records no membership and no op, which is what the spec
-  enumerates, but it is a disk write on a read call, and the spec does not say
-  whether "MUST NOT change any state" reaches it. Reported to the spec-writer
-  rather than decided here.
+  a profile that has none** → `listThreads` and `readThread` already behave the
+  same way (`SqliteOpLog::open` on `ops.sqlite`). `stoa-metadata`'s no-state
+  requirement settles whether this counts: initialising an empty op store is
+  not a change of state, because it holds no ops and no call answers
+  differently for it than for no store. A peer with no store yet is answered
+  with a fallback, not refused. The trade-off is a disk write on a read call,
+  accepted so `getStoa` matches the other reads. It becomes a real change of
+  state only if an empty store ever answers differently from no store, and that
+  is when to revisit it.
 - **A metadata op carrying counter `u64::MAX` can never be outranked by a
   higher counter** → only the creator's key binds, so this is a creator (or
   whoever holds that key) freezing their own Stoa's title; `op-ordering`'s
