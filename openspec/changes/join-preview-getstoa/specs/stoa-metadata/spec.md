@@ -13,7 +13,9 @@ rather than amended.
 binding ops, falling back to genesis", added in this same change. Its text is
 this requirement's with these edits: a fourth binding condition, that the op's
 title is not blank as the `stoa-genesis` capability defines blank, the empty
-title included; "three" becoming "four" where the checks are counted; the
+title included, together with a statement that a blank-titled op stored as
+bytes before the `op-format` capability refused one is not an op the reader
+holds, since reading it fails; "three" becoming "four" where the checks are counted; the
 paragraph taking an empty title as the current title narrowed to the
 description; a new paragraph stating that no resolution produces a blank current
 title; and the empty-title scenario replaced by four — a blank-title op does not
@@ -44,7 +46,13 @@ hold MUST be decided each time a Stoa's metadata is resolved:
   title is not a valid title" gives it, under which the empty title is blank.
   The `op-format` capability refuses to encode or decode a metadata op with a
   blank title; this condition holds resolution to the same rule for any such op
-  a reader nonetheless holds.
+  a reader nonetheless holds, meaning one its op log returns from a read. A
+  blank-titled metadata op stored as bytes before that refusal is not held in
+  that sense and is not an op that fails to bind: the `op-log` capability's
+  requirement "A stored entry that does not decode fails every read that would
+  return it" makes the read fail, and "`getStoa` refuses what it cannot answer,
+  and never reports a fallback in place of a failure" says what `getStoa`
+  answers then.
 
 A reader MUST NOT treat a metadata op as binding because it was stored, because
 it was accepted on an earlier resolution, or because the peer that relayed it
@@ -371,13 +379,23 @@ The call MUST fail when:
 - the record does not verify against the address;
 - the peer's op store cannot be consulted. A peer that has no op store yet is
   not this case; the requirement "A Stoa's metadata is answerable from its
-  address and genesis record, joined or not" says how it is answered.
+  address and genesis record, joined or not" says how it is answered;
+- a read of the Stoa's ops reaches a stored entry the op store cannot decode,
+  as the `op-log` capability's requirement "A stored entry that does not decode
+  fails every read that would return it" defines. This includes a metadata op
+  whose title is blank that was stored before the `op-format` capability
+  refused one.
 
 **A store that cannot be consulted MUST produce the error shape and MUST NOT
 produce a fallback reply.** A fallback reply states that the peer holds no
 binding metadata op, which it cannot know when the store is unreadable. Reporting
 the founding values as `isGenesisFallback: true` would make a broken store
 indistinguishable from a Stoa nobody has renamed.
+
+**A stored entry that does not decode MUST likewise produce the error shape,
+carrying the reason the decoding gave, and MUST NOT produce a fallback reply.**
+The call MUST NOT answer as though the entry were absent, or as though it were a
+metadata op that fails to bind, and MUST NOT migrate, rewrite or remove it.
 
 A request field the call does not read MUST be ignored rather than refused, and
 a request carrying one MUST be answered as though it were absent.
@@ -412,6 +430,14 @@ a request carrying one MUST be answered as though it were absent.
 - **WHEN** `getStoa` is called with a valid address and record and the peer's op store cannot be consulted
 - **THEN** the reply is the error shape
 - **AND** it does not carry `isGenesisFallback`
+
+#### Scenario: A blank-titled metadata op stored before the refusal is an error, not a fallback
+
+- **WHEN** `getStoa` is called with a valid address and record, on a peer whose persistent op store holds, for that Stoa, an entry stored as it would have been before the `op-format` capability refused a blank title — a metadata op signed by the Stoa's creator whose title is the empty string — and no other op
+- **THEN** the reply is the error shape
+- **AND** its reason names the title as blank
+- **AND** it carries no title, description, policy or `isGenesisFallback`
+- **AND** the stored entry afterwards is the entry stored before the call
 
 #### Scenario: An unrecognised request field is ignored
 

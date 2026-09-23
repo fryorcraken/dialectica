@@ -15,6 +15,8 @@ A character outside the list is not a blank character even where it renders with
 
 **Only a title made entirely of blank characters is refused.** A title carrying at least one character that is not a blank character MUST NOT be refused on account of the blank characters it also carries, wherever in the title they sit, and MUST NOT be trimmed, normalised or otherwise altered: its encoding carries every character as given, and decoding returns every character unchanged.
 
+**A blank title is the last refusal decoding reports.** An input to which any other refusal "A tampered or truncated record is rejected" lists also applies MUST be reported as that other refusal, and MUST NOT be reported as a blank title. Only an input that is otherwise exactly one well-formed record is refused for its title being blank.
+
 #### Scenario: An empty title is refused on both sides
 
 - **WHEN** a record is given a title that is the empty string
@@ -53,6 +55,12 @@ A character outside the list is not a blank character even where it renders with
 - **WHEN** a record whose title is U+200E alone is encoded and decoded, and again one whose title is U+180E alone
 - **THEN** in each case both succeed
 - **AND** the decoded title is that character unchanged
+
+#### Scenario: A blank title followed by trailing bytes is refused as trailing bytes
+
+- **WHEN** an input that is otherwise a well-formed record whose title is the empty string is followed by one extra byte, and again one whose title is U+0020 U+200B followed by one extra byte
+- **THEN** decoding each fails with the trailing-bytes refusal
+- **AND** neither failure is the one a blank title produces
 
 ## MODIFIED Requirements
 

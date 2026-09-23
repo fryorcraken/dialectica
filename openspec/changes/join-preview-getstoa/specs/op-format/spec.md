@@ -34,6 +34,8 @@ Why no policy is a decision of the `stoa-metadata` capability, which owns the co
 
 A title carrying at least one character that is not a blank character MUST NOT be refused on account of the blank characters it also carries, and MUST NOT be trimmed or otherwise altered. The description is not held to this rule: an empty description, and a description made only of blank characters, are valid and MUST NOT be refused.
 
+**A blank title is the last refusal decoding reports.** An input to which any other refusal this capability requires of decoding also applies MUST be reported as that other refusal, and MUST NOT be reported as a blank title. Only an input that is otherwise exactly one well-formed metadata op is refused for its title being blank.
+
 #### Scenario: A metadata op's encoding accounts for exactly its declared fields
 
 - **WHEN** a metadata op is encoded
@@ -59,6 +61,12 @@ A title carrying at least one character that is not a blank character MUST NOT b
 - **THEN** encoding each fails
 - **AND** decoding an input that is otherwise a well-formed metadata op carrying that title fails
 - **AND** each failure is the same failure an empty title produces
+
+#### Scenario: A metadata op with a blank title followed by trailing bytes is refused as trailing bytes
+
+- **WHEN** an input that is otherwise a well-formed metadata op whose title is the empty string is followed by one extra byte, and again one whose title is U+0020 U+200B followed by one extra byte
+- **THEN** decoding each fails as trailing bytes
+- **AND** neither failure is the one a blank title produces
 
 #### Scenario: A metadata op whose title has one visible letter among blank characters is accepted
 

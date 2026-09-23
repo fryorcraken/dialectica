@@ -41,7 +41,10 @@ fetch. Issue #143 (milestone 0.0.1) closes that gap.
     any other call handed such a record refuses it as undecodable;
   - the op encoding refuses a metadata op whose title is blank, so one arriving
     from a peer is refused at the transport boundary, and resolution never lets
-    one bind wherever a reader meets it;
+    one bind wherever a reader holds one as an op;
+  - on decode, a blank title is the last refusal reported: an input that is
+    also wrong in another way (trailing bytes, for one) is reported as that
+    other fault, in both the genesis and the op decoder;
   - no successful `getStoa` reply carries a blank `title`;
   - on the view, a blank `title` in a `getStoa` reply is a malformed reply, a
     blank founding title in a join reply is not an available founding title,
@@ -57,6 +60,17 @@ fetch. Issue #143 (milestone 0.0.1) closes that gap.
   listing that reaches it reports the failure in the module's failure shape,
   leaving the record as it was. Before 0.1.0 only development stores can hold
   one.
+- **A persistent op store that already holds a blank-titled metadata op is
+  treated the same way.** Its stored bytes no longer decode, so every read that
+  would return it fails, reporting the decoder's reason; it is not skipped as a
+  non-binding op, and nothing migrates or removes it. `getStoa` for that Stoa
+  answers the error shape rather than a fallback. Before this change a peer
+  could have received one only from a crafted peer, since no build publishes
+  metadata ops before #125.
+- **A persistent op store refuses to append an op the op encoding refuses to
+  encode**, storing nothing, so it cannot write the row just described. An
+  in-memory log, which holds ops as values and decodes nothing on read, stores
+  such an op as it stores any other.
 - **A lookup that fails is a failure the screen renders, and not a fallback.**
   The core's reason is shown; no title is rendered from it; it is not reported
   as a refused join; and the join affordance is still offered, since the join
@@ -67,6 +81,10 @@ fetch. Issue #143 (milestone 0.0.1) closes that gap.
   a fallback or as a rename.
 - **A lookup belongs to the reference it was made for.** A title answered for
   one reference is never rendered for the next one previewed.
+- **A join reply's founding title takes the founding position from a fallback
+  reply's.** Where both carry one, the join's is rendered; the fallback's fills
+  the position only while no successful join reply carries one that is not
+  blank.
 - **Out of scope, and settled by the owner on the issue:** the same-title
   (lookalike) comparison is not extended to current titles. A Stoa renamed to
   match one the user holds reports `isGenesisFallback: false`, so no founding
@@ -93,7 +111,8 @@ title ruling amends the capabilities that already own each title.
   called, and renders the answer as what the reply says it is" (the lookup is
   made for the reference on screen, before any join and for no malformed input;
   a fallback `title` fills the founding position; a non-fallback `title` and
-  its non-empty `description` fill the current position; a fallback is stated
+  its non-empty `description` fill the current position, and a fallback
+  `title` gives way to a join reply's founding title; a fallback is stated
   as "no moderator-set title held here"; a current title is never compared
   against held Stoas); ADDED "A lookup that fails, or answers in no
   recognisable shape, renders no title and withdraws no join" (the core's
@@ -104,7 +123,9 @@ title ruling amends the capabilities that already own each title.
   its title alone" (a blank founding title still gets a row, but is no longer
   described as legal); MODIFIED "Joining shows what is being joined, and joins
   nothing until the user acts" (a blank founding title, a join reply's
-  included, is not an available founding title); MODIFIED "No current title is
+  included, is not an available founding title; where a successful join reply
+  and a fallback reply both carry a founding title, the join reply's is the one
+  rendered); MODIFIED "No current title is
   rendered until one has been resolved" (only its citation of `stoa-metadata`'s
   renamed resolution requirement changes); MODIFIED "A Stoa already held
   whose title matches is shown as a distinct Stoa, not as a duplicate" (a
@@ -115,9 +136,11 @@ title ruling amends the capabilities that already own each title.
 - `stoa-genesis`: ADDED "A blank title is not a valid title" (defines blank by
   an exact list of thirty code points; a blank title, the empty one included,
   is refused on encode and on decode with one failure; a title with any other
-  character is neither refused for its blank characters nor altered); MODIFIED
-  "A tampered or truncated record is rejected" (a blank title joins the
-  distinguishable decoding refusals).
+  character is neither refused for its blank characters nor altered; on decode
+  a blank title is the last refusal reported, so an input also carrying
+  trailing bytes is refused as trailing bytes); MODIFIED "A tampered or
+  truncated record is rejected" (a blank title joins the distinguishable
+  decoding refusals).
 - `stoa-membership`: REMOVED "A title the genesis record cannot carry is
   refused before a Stoa exists" and ADDED its replacement, "A title the genesis
   record cannot carry, a blank one included, is refused before a Stoa exists"
@@ -131,7 +154,8 @@ title ruling amends the capabilities that already own each title.
   nor migrated).
 - `op-format`: MODIFIED "A Stoa metadata op carries display fields and no
   policy" (a metadata op with a blank title is refused on encode and on
-  decode; an empty or blank description is still valid); MODIFIED "Valid text
+  decode, and on decode it is the last refusal reported; an empty or blank
+  description is still valid); MODIFIED "Valid text
   is never normalised or otherwise transformed" (its preservation scenario is
   narrowed, for a metadata op's title, to one carrying at least one character
   that is not blank, which is the ruling applied).
@@ -139,7 +163,8 @@ title ruling amends the capabilities that already own each title.
   falling back to genesis" and ADDED its replacement, "Current metadata
   resolves by last-write-wins among binding ops, falling back to genesis" (a
   metadata op carrying a blank title never binds, reversing "an empty title in
-  a binding op is the current title"; replaced rather than modified for the
+  a binding op is the current title", and one stored as bytes before the
+  refusal is not held as an op at all; replaced rather than modified for the
   same reason); MODIFIED "A displayed title is never an identifier" (its
   preservation scenario is narrowed to a title carrying at least one character
   that is not blank); MODIFIED "A Stoa's metadata is answerable from its address and
@@ -148,7 +173,16 @@ title ruling amends the capabilities that already own each title.
   says whether it fell back to genesis" (no successful reply carries a blank
   `title`); MODIFIED "`getStoa`
   refuses what it cannot answer, and never reports a fallback in place of a
-  failure" (a record whose title is blank is refused).
+  failure" (a record whose title is blank is refused, and a stored entry that
+  does not decode, a blank-titled metadata op stored before the refusal
+  included, is the error shape rather than a fallback).
+- `op-log`: MODIFIED "The log records what arrived, and decides nothing about
+  it" (a log that keeps ops as their encoding refuses to append an op the op
+  encoding refuses to encode, and stores nothing; a log that keeps ops as
+  values stores it); ADDED "A stored entry that does not decode fails every
+  read that would return it" (not skipped, not reported as absent, not
+  repaired or migrated, a blank-titled metadata op stored before the refusal
+  included).
 
 ## Impact
 
@@ -172,12 +206,14 @@ title ruling amends the capabilities that already own each title.
   title legal.
 - **A core change**, where there was none before the ruling: the genesis
   encoder and decoder, the op encoder and decoder for the metadata kind, the
-  metadata resolver, and the creation, join and `getStoa` paths in the wire
-  layer, together with the core tests that pin an empty title as accepted. The
+  metadata resolver, the persistent op log's append and the publish path, and
+  the creation, join and `getStoa` paths in the wire layer, together with the core tests that pin an empty title as accepted. The
   wire shapes do not change; which inputs are refused does.
 - **Stores already holding a blank-titled genesis record** decode differently
   once this lands, and that is decided rather than open: the record fails to
   decode, the Stoa listing reports the failure, and nothing skips or migrates
   it. A development store holding one therefore answers every listing with
-  that failure. A stored metadata op with a blank title is
-  governed by the resolution requirement, under which it never binds.
+  that failure. **A persistent op store holding a blank-titled metadata op**
+  is decided the same way: every read that would return it fails, so
+  `getStoa`, the feed and the thread for that Stoa answer the error shape until
+  the row is removed by hand. It is not skipped as a non-binding op.

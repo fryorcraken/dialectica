@@ -19,9 +19,11 @@ requirement is rendered from it.
 **A fallback reply.** Its `title` MUST be rendered in the founding-title
 position, labelled as the founding title, as "Joining shows what is being
 joined, and joins nothing until the user acts" requires of an available founding
-title. The screen MUST NOT render a current title or a description from it. It
-MUST state that this machine holds no title set by a moderator for this Stoa,
-and MUST NOT state or imply that the Stoa has not been renamed.
+title — unless that requirement gives the position to a successful join reply's
+founding title for the same reference. The screen MUST NOT render a current
+title or a description from it. It MUST state that this machine holds no title
+set by a moderator for this Stoa, and MUST NOT state or imply that the Stoa has
+not been renamed.
 
 **A non-fallback reply.** Its `title` MUST be rendered in the current-title
 position, labelled as the current title chosen by a moderator, and MUST NOT be
@@ -362,6 +364,12 @@ preview time. Which of the two a `title` is MUST be taken from
 `isGenesisFallback`, and a `title` from a reply whose `isGenesisFallback` is
 `false` MUST NOT be labelled as the founding title.
 
+**Where both a successful join reply and a fallback reply carry a founding title
+for the reference on screen, the join reply's is the one rendered.** A fallback
+reply's `title` MUST fill the founding-title position only while no successful
+join reply for that reference carries a founding title that is not blank, and
+the two MUST NOT both be rendered.
+
 **A founding title that is blank is not an available founding title**,
 whichever reply carried it, a join reply included — blank being the empty
 string, or a string made only of the blank characters `stoa-genesis`'s
@@ -426,6 +434,26 @@ rests on meanwhile.
 - **AND** the founding-title position is not rendered
 - **AND** no title caption is rendered over an empty value
 - **AND** the screen states that no founding title is available here
+
+#### Scenario: A join reply's founding title takes the place of a fallback reply's
+
+- **WHEN** the lookup answers a fallback reply whose `title` is one title that
+  is not blank, and the user then joins and the join succeeds with a reply whose
+  founding title is a different title that is not blank
+- **THEN** the join reply's founding title is rendered in the founding-title
+  position
+- **AND** the fallback reply's `title` is not rendered
+
+#### Scenario: A fallback reply's title stays when the join reply's is blank
+
+- **WHEN** the lookup answers a fallback reply whose `title` is not blank, and
+  the user then joins and the join succeeds with a reply whose founding title is
+  the empty string — and again with a join reply whose founding title is U+0020
+  U+200B
+- **THEN** in each case the fallback reply's `title` is rendered in the
+  founding-title position, labelled as founding
+- **AND** the statement that no founding title is available here is not
+  rendered
 
 ### Requirement: No current title is rendered until one has been resolved
 
