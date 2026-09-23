@@ -101,7 +101,11 @@ pub enum CurrentMetadata {
     ///
     /// **Not "nobody has renamed it."** A rename that has not reached this peer
     /// looks exactly like this. It says what this peer holds, and nothing more.
-    Founding { title: String },
+    ///
+    /// Named `Fallback` rather than `Founding`, which is the input type's name:
+    /// the variant says what happened to the resolution, not where the title
+    /// came from.
+    Fallback { title: String },
     /// The leading binding metadata op decided, and these are its values
     /// exactly as it carried them — **including an empty title**, which is a
     /// title and not an absence.
@@ -118,7 +122,7 @@ impl CurrentMetadata {
     /// The title to display.
     pub fn title(&self) -> &str {
         match self {
-            CurrentMetadata::Founding { title } | CurrentMetadata::Declared { title, .. } => title,
+            CurrentMetadata::Fallback { title } | CurrentMetadata::Declared { title, .. } => title,
         }
     }
 
@@ -126,7 +130,7 @@ impl CurrentMetadata {
     /// record carries none.
     pub fn description(&self) -> &str {
         match self {
-            CurrentMetadata::Founding { .. } => "",
+            CurrentMetadata::Fallback { .. } => "",
             CurrentMetadata::Declared { description, .. } => description,
         }
     }
@@ -134,7 +138,7 @@ impl CurrentMetadata {
     /// Whether no binding metadata op was held, so the values are the genesis
     /// record's.
     pub fn is_genesis_fallback(&self) -> bool {
-        matches!(self, CurrentMetadata::Founding { .. })
+        matches!(self, CurrentMetadata::Fallback { .. })
     }
 }
 
@@ -206,7 +210,7 @@ pub fn resolve<L: OpLog>(log: &L, founding: &Founding) -> Result<CurrentMetadata
         .iter_stoa(founding.stoa())?
         .into_iter()
         .find_map(|entry| binding_metadata(&founding.moderators, &entry));
-    Ok(leading.unwrap_or_else(|| CurrentMetadata::Founding {
+    Ok(leading.unwrap_or_else(|| CurrentMetadata::Fallback {
         title: founding.title.clone(),
     }))
 }
@@ -352,7 +356,7 @@ mod tests {
         let current = resolved(&MemoryOpLog::new(), &agora());
         assert_eq!(
             current,
-            CurrentMetadata::Founding {
+            CurrentMetadata::Fallback {
                 title: "Agora".to_string()
             }
         );
