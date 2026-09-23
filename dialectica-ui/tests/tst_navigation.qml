@@ -121,7 +121,8 @@ TestCase {
         Core.bridge = spec.bridgeFor({
             "list_stoas": spec.oneStoa,
             "list_threads": '{"items":[],"page":0,"hasMore":false}',
-            "who_am_i": '{"hasIdentity":true,"publicKey":"' + spec.keyA + '","path":0}',
+            "who_am_i": '{"hasIdentity":true,"publicKey":"' + spec.keyA
+                        + '","recoveryNeedsTheRecord":false}',
             "get_capabilities": '{"canPost":false,"reason":"the keystore is readable by others"}'
         })
         var view = mainComponent.createObject(null, {})
@@ -209,124 +210,126 @@ TestCase {
         }
     }
 
-    // ---- onboarding: in, and out both ways ------------------------------
+    // ---- acquiring an identity: the route to the Stoa list ----------------
+    //
+    // `view-navigation`, "Acquiring an identity is reached from the navigator".
+    // In this release the identity is this machine's key, created on the Stoa
+    // list; the per-Stoa onboarding screen these tests used to drive is not
+    // reachable (issue #149, `machine-identity-scope`).
 
-    function test_the_create_affordance_reaches_the_onboarding_screen() {
+    // Driven through the CHIP's own signal, not `acquireIdentity()`, because the
+    // requirement is about the affordance a user acts on: a navigator function
+    // nothing wires to the chip would pass a test that called it directly.
+    function test_a_missing_identity_offers_the_route_to_the_stoa_list() {
         Core.bridge = spec.bridgeFor({
             "list_stoas": spec.oneStoa,
             "list_threads": '{"items":[],"page":0,"hasMore":false}',
-            "who_am_i": '{"hasIdentity":false,"reason":"none"}',
-            "get_capabilities": '{"canPost":false,"reason":"none"}'
+            "who_am_i": '{"hasIdentity":false,"reason":"no keystore on this machine"}',
+            "get_capabilities": '{"canPost":false,"reason":"no keystore on this machine"}'
         })
         var view = mainComponent.createObject(null, {})
         view.open(spec.stoaA, "Nym Research", "")
         compare(view.screenShown, "feed")
 
-        var chip = spec.namedAnywhere(view, "identityChip")[0]
-        chip.createRequested()
+        var chip = spec.visibleNamed(view, "identityChip")
+        compare(chip.length, 1, "the feed offers the identity chip")
+        compare(chip[0].hasIdentity, false,
+                "and it is in its no-identity arm, the one carrying the route")
+        chip[0].createRequested()
 
-        compare(view.screenShown, "onboarding",
-                "acting on the affordance renders the screen where an identity "
-                + "is acquired")
-        var screen = spec.namedAnywhere(view, "onboarding")[0]
-        compare(screen.stoaAddress, spec.stoaA,
-                "and it is given the Stoa the identity is being chosen for — "
-                + "every core call on that screen takes one")
+        compare(view.screenShown, "list",
+                "acting on the affordance renders the Stoa list, where this "
+                + "machine's key is created")
+        compare(spec.visibleNamed(view, "stoaList").length, 1,
+                "and the list is what is on screen")
+        compare(spec.visibleNamed(view, "createIdentityButton").length, 1,
+                "with the control that creates the key reachable on it")
         view.destroy()
     }
 
-    // The route out is offered in EVERY phase, including the opening one where
-    // nothing has been asked for yet. A route out offered only on success is a
-    // route absent in exactly the cases where the user is stuck.
-    function test_the_screen_can_be_left_without_keeping_anything() {
-        Core.bridge = spec.bridgeFor({
+    // "Following the route asks the module for nothing." The house fake
+    // RECORDS, so a zero count below is "no call was made" and not "a call was
+    // made and ignored" — and the fake answers all three methods, so a call
+    // that WAS made would not have failed quietly on a missing reply.
+    function test_following_the_route_creates_no_key_requests_no_slate_and_keeps_nothing() {
+        var bridge = spec.bridgeFor({
             "list_stoas": spec.oneStoa,
             "list_threads": '{"items":[],"page":0,"hasMore":false}',
             "who_am_i": '{"hasIdentity":false,"reason":"none"}',
-            "get_capabilities": '{"canPost":false,"reason":"none"}'
-        })
-        var bridge = Core.bridge
-        var view = mainComponent.createObject(null, {})
-        view.open(spec.stoaA, "Nym Research", "")
-        view.createIdentityFor(spec.stoaA, "Nym Research", "")
-
-        var back = spec.visibleNamed(view, "onboardingBackButton")
-        compare(back.length, 1, "a way out is offered before anything is kept")
-
-        back[0].clicked()
-
-        compare(view.screenShown, "feed", "and it returns to the feed")
-        compare(spec.callsTo(bridge, "keep_identity"), 0,
-                "leaving keeps nothing")
-        view.destroy()
-    }
-
-    // A keep that came back refused, and one that failed. In each case the user
-    // is in a state they entered and must be able to leave it.
-    function test_a_refused_or_failed_keep_still_leaves_a_way_out() {
-        var outcomes = [
-            { keep: '{"kept":false,"reason":"an identity already exists"}',
-              phase: "refused" },
-            { keep: '{"error":"the keystore could not be written"}',
-              phase: "failed" }
-        ]
-        for (var i = 0; i < outcomes.length; i++) {
-            Core.bridge = spec.bridgeFor({
-                "list_stoas": spec.oneStoa,
-                "list_threads": '{"items":[],"page":0,"hasMore":false}',
-                "who_am_i": '{"hasIdentity":false,"reason":"none"}',
-                "get_capabilities": '{"canPost":false,"reason":"none"}',
-                "generate_identity_slate":
-                    '{"slate":"ab","count":1,"candidates":[{"index":0,"publicKey":"'
-                    + spec.keyA + '"}]}',
-                "keep_identity": outcomes[i].keep
-            })
-            var view = mainComponent.createObject(null, {})
-            view.createIdentityFor(spec.stoaA, "Nym Research", "")
-
-            var screen = spec.namedAnywhere(view, "onboarding")[0]
-            screen.requestSlate()
-            screen.select(0)
-            screen.keepSelected()
-            compare(screen.phase, outcomes[i].phase,
-                    "the keep came back as a " + outcomes[i].phase)
-
-            compare(spec.visibleNamed(view, "onboardingBackButton").length, 1,
-                    "a way out is still offered after a " + outcomes[i].phase
-                    + " keep — this is exactly when the user is stuck")
-            view.destroy()
-        }
-    }
-
-    // The keep signal carries no identity by design, so the navigator must
-    // re-ask the module rather than treating the signal as the answer.
-    function test_a_kept_identity_returns_to_the_feed_and_re_asks_who_i_am() {
-        Core.bridge = spec.bridgeFor({
-            "list_stoas": spec.oneStoa,
-            "list_threads": '{"items":[],"page":0,"hasMore":false}',
-            "who_am_i": '{"hasIdentity":true,"publicKey":"' + spec.keyA + '","path":0}',
-            "get_capabilities": '{"canPost":true}',
+            "get_capabilities": '{"canPost":false,"reason":"none"}',
+            "create_identity": '{"publicKey":"' + spec.keyA
+                               + '","encrypted":false,"wasNew":true}',
             "generate_identity_slate":
                 '{"slate":"ab","count":1,"candidates":[{"index":0,"publicKey":"'
                 + spec.keyA + '"}]}',
             "keep_identity": '{"kept":true,"publicKey":"' + spec.keyA
-                             + '","path":0,"encrypted":true}'
+                             + '","path":0,"encrypted":false}'
         })
-        var bridge = Core.bridge
+        Core.bridge = bridge
         var view = mainComponent.createObject(null, {})
-        view.createIdentityFor(spec.stoaA, "Nym Research", "")
+        view.open(spec.stoaA, "Nym Research", "")
+        verify(bridge.calls.length > 0,
+               "the feed did call the core, so the zeros below are this route "
+               + "making no call rather than the fake being unreachable")
 
-        var before = spec.callsTo(bridge, "who_am_i")
-        var screen = spec.namedAnywhere(view, "onboarding")[0]
-        screen.requestSlate()
-        screen.select(0)
-        screen.keepSelected()
+        spec.namedAnywhere(view, "identityChip")[0].createRequested()
 
-        compare(view.screenShown, "feed",
-                "a kept identity returns the user to a screen they can act on")
-        verify(spec.callsTo(bridge, "who_am_i") > before,
-               "and the identity shown there comes from a FRESH identity "
-               + "report, not from the keep signal — which carries no identity")
+        compare(view.screenShown, "list")
+        compare(spec.callsTo(bridge, "create_identity"), 0,
+                "the route created a key on the user's behalf")
+        compare(spec.callsTo(bridge, "generate_identity_slate"), 0,
+                "the route requested a slate")
+        compare(spec.callsTo(bridge, "keep_identity"), 0,
+                "the route kept a candidate")
+        view.destroy()
+    }
+
+    // "The per-Stoa onboarding screen is instantiated nowhere the view's root
+    // reaches." Asserted on the object TREE by type, not by `objectName`:
+    // deleting the name from a still-mounted screen would satisfy a name search,
+    // and the requirement is about instantiation. The registration half — the
+    // `# UNINSTANTIATED:` record — is `check_qml_reachable.py`'s, which reads
+    // `qmldir` rather than a tree it built.
+    function test_the_per_stoa_onboarding_screen_is_instantiated_nowhere() {
+        Core.bridge = spec.bridgeFor({
+            "list_stoas": spec.oneStoa,
+            "list_threads": '{"items":[],"page":0,"hasMore":false}',
+            "read_thread": '{"items":[],"page":0,"hasMore":false}',
+            "who_am_i": '{"hasIdentity":false,"reason":"none"}',
+            "get_capabilities": '{"canPost":false,"reason":"none"}'
+        })
+        var view = mainComponent.createObject(null, {})
+
+        function instancesOf(typeName) {
+            var found = 0
+            function walk(node) {
+                if (!node)
+                    return
+                if (String(node).indexOf(typeName + "_QMLTYPE") === 0
+                        || String(node).indexOf(typeName + "(") === 0)
+                    found++
+                var kids = node.children
+                if (kids !== undefined)
+                    for (var i = 0; i < kids.length; i++)
+                        walk(kids[i])
+            }
+            walk(view)
+            return found
+        }
+
+        // The walk can see a screen by type at all, or the zero below proves
+        // nothing: the feed screen is mounted, so it must be found.
+        verify(instancesOf("FeedScreen") > 0,
+               "the type walk found no FeedScreen, so it cannot see screens")
+
+        // Every state the navigator can enter, including the one the route
+        // lands in, so a screen mounted only on some path is still caught.
+        view.open(spec.stoaA, "Nym Research", "beef")
+        view.openThread("cc" + "11".repeat(31))
+        view.moderateIn(spec.stoaA, "Nym Research", "beef")
+        view.acquireIdentity()
+        compare(instancesOf("DOnboardingScreen"), 0,
+                "the per-Stoa onboarding screen is mounted in 0.0.1")
         view.destroy()
     }
 
@@ -594,8 +597,7 @@ TestCase {
             "get_capabilities": '{"canPost":false,"reason":"none"}'
         })
         var view = mainComponent.createObject(null, {})
-        var names = ["stoaList", "joinScreen", "feed", "thread", "onboarding",
-                     "moderation"]
+        var names = ["stoaList", "joinScreen", "feed", "thread", "moderation"]
 
         function shownCount() {
             var n = 0
@@ -615,11 +617,11 @@ TestCase {
         view.openThread("cc" + "11".repeat(31))
         compare(shownCount(), 1, "the thread alone")
 
-        view.createIdentityFor(spec.stoaA, "Nym Research", "beef")
-        compare(shownCount(), 1, "onboarding alone")
-
         view.moderateIn(spec.stoaA, "Nym Research", "beef")
         compare(shownCount(), 1, "the moderation screen alone")
+
+        view.acquireIdentity()
+        compare(shownCount(), 1, "the list alone, reached by the identity route")
         view.destroy()
     }
 
@@ -629,13 +631,14 @@ TestCase {
     //
     // This pins the list against the navigator's own `stateNames`, which is the
     // thing a new state must be added to for the navigator to work at all. It is
-    // off by one on purpose and the test says why: `stateNames` holds the five
-    // states that carry a payload, and the list screen is the sixth rendering —
-    // the one shown when every state is null, so it has no entry to hold.
+    // off by one on purpose and the test says why: `stateNames` holds the four
+    // states that carry a payload, and the list screen is the fifth rendering —
+    // the one shown when every state is null, so it has no entry to hold. It was
+    // five and six until `machine-identity-scope` removed `onboarding`.
     function test_the_screen_walk_covers_every_state_the_navigator_has() {
         Core.bridge = spec.bridgeFor({ "list_stoas": spec.oneStoa })
         var view = mainComponent.createObject(null, {})
-        compare(view.stateNames.length + 1, 6,
+        compare(view.stateNames.length + 1, 5,
                 "a state added to the navigator without a screen added to the "
                 + "walk above leaves that screen unchecked")
         view.destroy()
@@ -668,14 +671,14 @@ TestCase {
             return n
         }
 
-        verify(view.stateNames.length >= 5)
+        verify(view.stateNames.length >= 4)
 
         view.preview(spec.stoaA, "beef");            compare(setCount(), 1)
         view.open(spec.stoaA, "Nym Research", "beef"); compare(setCount(), 1)
         view.openThread("cc" + "11".repeat(31));     compare(setCount(), 1)
         view.closeThread();                          compare(setCount(), 1)
-        view.createIdentityFor(spec.stoaA, "T", ""); compare(setCount(), 1)
-        view.closeOnboarding();                      compare(setCount(), 1)
+        view.acquireIdentity();                      compare(setCount(), 0)
+        view.open(spec.stoaA, "Nym Research", "beef"); compare(setCount(), 1)
         view.moderateIn(spec.stoaA, "T", "");        compare(setCount(), 1)
         view.closeModeration();                      compare(setCount(), 1)
         view.closeFeed();                            compare(setCount(), 0)
@@ -684,20 +687,16 @@ TestCase {
 
     // The reshape that made `enterOnly` the one transition primitive removed the
     // hand-written clears, each of which had to name every sibling state. Two of
-    // them (`openThread`, `createIdentityFor`) had been written naming only
+    // them (`openThread`, and the identity route) had been written naming only
     // three of the four, so the invariant held by accident of which screens
     // could reach which rather than by anything in the code.
     //
-    // **`createIdentityFor` is the one this can drive**, and the asymmetry is
-    // worth stating rather than papering over: `openThread` refuses outright
-    // when `chosen` is null — you cannot open a thread from no feed — so it is
-    // unreachable from moderation and its missing clear could never fire. That
-    // makes `openThread`'s half satisfied by construction, not by this test.
-    //
-    // This fails against the pre-reshape `Main.qml`: entering moderation and
-    // then identity creation left `moderating` set beside `onboarding`, with
-    // `screenShown` resolving to "onboarding" purely by ternary order.
-    function test_entering_onboarding_from_moderation_clears_the_moderation_state() {
+    // The identity route is the one this drives. It is `acquireIdentity()` now,
+    // landing on the list rather than on an onboarding state
+    // (`machine-identity-scope`), and entering it from moderation must still
+    // leave nothing behind — here that is EVERY state null, since the list is
+    // the rendering with none set.
+    function test_the_identity_route_from_moderation_clears_the_moderation_state() {
         Core.bridge = spec.bridgeFor({
             "list_stoas": spec.oneStoa,
             "list_threads": '{"items":[],"page":0,"hasMore":false}',
@@ -710,10 +709,10 @@ TestCase {
         view.moderateIn(spec.stoaA, "Nym Research", "beef")
         compare(view.moderating !== null, true, "moderation is up")
 
-        view.createIdentityFor(spec.stoaA, "Nym Research", "beef")
+        view.acquireIdentity()
         compare(view.moderating, null,
-                "entering onboarding leaves no moderation state behind it")
-        compare(view.screenShown, "onboarding")
+                "the identity route leaves no moderation state behind it")
+        compare(view.screenShown, "list")
         view.destroy()
     }
 
@@ -736,7 +735,6 @@ TestCase {
             function () { view.preview(spec.stoaA, "beef") },
             function () { view.open(spec.stoaA, "Nym Research", "beef") },
             function () { view.openThread("cc" + "11".repeat(31)) },
-            function () { view.createIdentityFor(spec.stoaA, "T", "") },
             function () { view.moderateIn(spec.stoaA, "T", "") }
         ]
         for (var i = 0; i < states.length; i++) {

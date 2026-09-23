@@ -37,7 +37,14 @@ DThreadScreen 1.0 DThreadScreen.qml
 DClipboardSink 1.0 DClipboardSink.qml
 DStoaListScreen 1.0 DStoaListScreen.qml
 DJoinScreen 1.0 DJoinScreen.qml
+
+# UNINSTANTIATED: per-Stoa identity is out of scope for 0.0.1, whose identity
+# is this machine's one key, created on the Stoa list and the same in every
+# Stoa. This screen acquires a per-Stoa identity (a slate of candidates, one
+# kept for this Stoa), so reaching it in 0.0.1 was issue #149. It is built and
+# tested, and issue #108 (0.0.3) mounts it again when per-Stoa identity returns.
 DOnboardingScreen 1.0 DOnboardingScreen.qml
+
 DStatusBar 1.0 DStatusBar.qml
 
 # UNINSTANTIATED: voting is out of the MVP by owner ruling 1 (PLAN.md §9.2), so

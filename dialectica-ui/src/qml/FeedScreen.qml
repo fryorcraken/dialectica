@@ -360,13 +360,13 @@ ScreenFrame {
     // per screen, as design.md D5 argues.
     signal closed()
 
-    // The user wants an identity for this Stoa.
+    // The user wants an identity.
     //
     // A signal rather than a direct write, for the reason `closed()` is one:
     // this screen does not know what is above it, and the caller decides where
-    // identity acquisition lives. It carries no Stoa — the navigator already
-    // knows which Stoa's feed is up, and a screen telling its parent something
-    // the parent set is a second source for one value.
+    // identity acquisition lives — in this release the Stoa list, where this
+    // machine's key is created. It carries no Stoa: the identity is not for this
+    // Stoa, it is the same key in every Stoa (`machine-identity-scope`).
     signal createIdentityRequested()
 
     // A row's thread was opened.

@@ -132,7 +132,6 @@ TestCase {
             return (main.chosen !== null ? 1 : 0)
                  + (main.previewing !== null ? 1 : 0)
                  + (main.reading !== null ? 1 : 0)
-                 + (main.onboarding !== null ? 1 : 0)
         }
 
         main.open("ab".repeat(32), "Agora", "00ff")
