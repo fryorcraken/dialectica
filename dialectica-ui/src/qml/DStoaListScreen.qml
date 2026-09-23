@@ -144,8 +144,9 @@ ScreenFrame {
     // it happened in: nothing has to remember to clear it.
     //
     // **Asked, never remembered.** Set only from a reply received in this run —
-    // `askKeyState()` on each showing, `createMachineKey()` on a press. Nothing
-    // is persisted. The initial value is the least-claiming state, and it is
+    // `askKeyState()` on each showing and on "Try reading the key again",
+    // `createMachineKey()` on a press. Nothing is persisted. The initial
+    // value is the least-claiming state, and it is
     // replaced before the first frame: `askKeyState()` runs synchronously in
     // `Component.onCompleted`.
     property var machineKey: screen.unreadableKey("This machine's key has not been asked about yet.")
@@ -197,6 +198,11 @@ ScreenFrame {
     // is hidden: keeping a per-Stoa identity inside a feed also writes the
     // master key, and a screen that kept its first answer would offer that
     // user a key they already hold.
+    //
+    // Also called by "Try reading the key again", the could-not-be-read
+    // state's one action. A user who fixes the keystore has no other way back
+    // short of a restart: a peer with no Stoa and nothing to paste cannot
+    // leave this screen to come back to it.
     function askKeyState() {
         screen.machineKey = screen.keyFromQuery(Core.getMasterKey())
     }
@@ -823,7 +829,8 @@ ScreenFrame {
     // explanation, no create-key action, no create affordance, and nothing
     // saying no key is held — because a key may be held and unreadable, and
     // offering to make one is exactly the invitation the core would refuse.
-    // Where the no-key block sits, so the screen's shape does not jump.
+    // What it draws instead is what failed, the reason, and a way to ask
+    // again. Where the no-key block sits, so the screen's shape does not jump.
     Loader {
         objectName: "keyUnreadableLoader"
         active: screen.machineKey.state === "unreadable"
@@ -845,11 +852,10 @@ ScreenFrame {
                 anchors.bottomMargin: 16
                 spacing: 4
 
-                // NO SPEC: the spec requires the reason and forbids a no-key
-                // claim, and gives no copy for this state. This sentence is
-                // this change's; it states what failed and claims nothing about
-                // whether a key exists.
+                // "A key state that could not be read is told apart from both
+                // others": this statement, verbatim, above the reason.
                 Text {
+                    objectName: "keyUnreadableStatement"
                     text: "Whether this machine holds a key could not be read."
                     font: DTheme.body
                     color: DTheme.accent
@@ -869,6 +875,16 @@ ScreenFrame {
                     wrapMode: Text.WrapAnywhere
                     textFormat: Text.PlainText
                     Layout.fillWidth: true
+                }
+
+                // Asks the query again and never mints — the answer decides
+                // the state exactly as a showing's answer does. Inside this
+                // Loader, so it exists in this state and in no other.
+                FlatButton {
+                    objectName: "readKeyAgainButton"
+                    text: "Try reading the key again"
+                    Layout.topMargin: DTheme.itemGap
+                    onClicked: screen.askKeyState()
                 }
             }
         }

@@ -2931,6 +2931,161 @@ TestCase {
         }
     }
 
+    // ---- could not be read: what failed, and reading the key again ----------
+    //
+    // "A key state that could not be read is told apart from both others".
+    // Every fixture here changes the query's answer between the arrival and the
+    // press, because a fake answering the same both times cannot tell "asked
+    // again" from "kept the first answer".
+
+    readonly property string unreadableStatement:
+        "Whether this machine holds a key could not be read."
+    readonly property string readAgainLabel: "Try reading the key again"
+
+    /// Every element carrying `label` that can be acted on, visible or not.
+    ///
+    /// Keyed on the label AND on having a `clicked` signal, so the thing found
+    /// is the action the user reads rather than an element named for it: a
+    /// button whose objectName survived a relabelling would not be found, and
+    /// a caption carrying the words without an action behind it is not one.
+    /// Walks invisible elements too, because the spec's "not rendered" is met
+    /// here by the action not existing, and a hidden one would still be found.
+    function actionsLabelled(item, label) {
+        var found = []
+        function walk(node) {
+            if (!node)
+                return
+            if (node.text === label && typeof node.clicked === "function")
+                found.push(node)
+            var kids = node.children
+            if (kids !== undefined)
+                for (var i = 0; i < kids.length; i++)
+                    walk(kids[i])
+        }
+        walk(item)
+        return found
+    }
+
+    function test_the_could_not_be_read_state_states_what_failed_above_the_reason() {
+        // Both routes into the state: the failure shape, and a success stating
+        // neither boolean. The statement is the same for both.
+        var replies = ['{"error":"keystore permissions are too open (mode 0644)"}',
+                       '{"hasMasterKey":"maybe"}']
+        for (var i = 0; i < replies.length; i++) {
+            var screen = makeList({
+                "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+                "get_master_key": replies[i]
+            })
+            var statements = spec.visibleNamed(screen, "keyUnreadableStatement")
+            compare(statements.length, 1, "for " + replies[i])
+            compare(statements[0].text, spec.unreadableStatement, "verbatim, for " + replies[i])
+            var reason = spec.visibleNamed(screen, "keyUnreadableReason")[0]
+            verify(reason.text !== "" && reason.text !== spec.unreadableStatement,
+                   "the reason is a second element, not the statement: " + reason.text)
+            verify(statements[0].mapToItem(screen, 0, 0).y < reason.mapToItem(screen, 0, 0).y,
+                   "the statement sits above the reason, for " + replies[i])
+            screen.destroy()
+        }
+    }
+
+    function test_reading_the_key_again_asks_the_query_and_mints_nothing() {
+        var replies = {
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_master_key": '{"error":"keystore could not be read"}',
+            "create_identity": '{"publicKey":"' + aKeyHex() + '","encrypted":false,"wasNew":true}'
+        }
+        var screen = makeList(replies)
+        var bridge = Core.bridge
+        var before = spec.callsTo(bridge, "get_master_key")
+
+        var actions = spec.actionsLabelled(screen, spec.readAgainLabel)
+        compare(actions.length, 1, "the could-not-be-read state offers the action")
+        actions[0].clicked()
+
+        compare(spec.callsTo(bridge, "get_master_key"), before + 1, "asked exactly once more")
+        compare(spec.callsTo(bridge, "create_identity"), 0,
+                "and nothing minted, although the fake would have answered a mint")
+        screen.destroy()
+    }
+
+    function test_reading_the_key_again_reaches_the_key_held_state_once_the_key_can_be_read() {
+        var earlier = "keystore permissions are too open (mode 0644)"
+        var replies = {
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_master_key": '{"error":"' + earlier + '"}'
+        }
+        var screen = makeList(replies)
+        compare(screen.machineKey.state, "unreadable", "the fixture starts unreadable")
+
+        replies["get_master_key"] = spec.heldKeyReply(anotherKeyHex(), true)
+        spec.actionsLabelled(screen, spec.readAgainLabel)[0].clicked()
+
+        compare(screen.machineKey.state, "held")
+        compare(spec.visibleNamed(screen, "keyLineAddress")[0].address, anotherKeyHex(),
+                "naming the key the second answer named")
+        var shown = spec.visibleText(screen)
+        verify(shown.indexOf(spec.unreadableStatement) < 0, shown)
+        verify(shown.indexOf(earlier) < 0, "nor the earlier reason: " + shown)
+        screen.destroy()
+    }
+
+    function test_reading_the_key_again_reaches_the_no_key_state_when_none_is_held() {
+        // The requirement names this outcome alongside the other two ("a reply
+        // stating no key is held puts it in its no-key state"); it has no
+        // scenario of its own.
+        var replies = {
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_master_key": '{"error":"keystore could not be read"}'
+        }
+        var screen = makeList(replies)
+
+        replies["get_master_key"] = spec.noKeyReply()
+        spec.actionsLabelled(screen, spec.readAgainLabel)[0].clicked()
+
+        compare(screen.machineKey.state, "none")
+        compare(spec.visibleNamed(screen, "createKeyButton").length, 1)
+        verify(spec.visibleText(screen).indexOf(spec.unreadableStatement) < 0)
+        screen.destroy()
+    }
+
+    function test_reading_the_key_again_that_fails_again_renders_the_new_reason() {
+        var replies = {
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_master_key": '{"error":"keystore permissions are too open (mode 0644)"}'
+        }
+        var screen = makeList(replies)
+
+        replies["get_master_key"] = '{"error":"the keystore is encrypted and no passphrase is set"}'
+        spec.actionsLabelled(screen, spec.readAgainLabel)[0].clicked()
+
+        compare(screen.machineKey.state, "unreadable")
+        var reasons = spec.visibleNamed(screen, "keyUnreadableReason")
+        compare(reasons.length, 1)
+        compare(reasons[0].text, "the keystore is encrypted and no passphrase is set",
+                "the new message, unreworded")
+        verify(spec.visibleText(screen).indexOf("permissions are too open") < 0,
+               "and the earlier one is gone")
+        compare(spec.actionsLabelled(screen, spec.readAgainLabel).length, 1,
+                "the action is still offered, so a second fix can be read too")
+        screen.destroy()
+    }
+
+    function test_the_read_again_action_belongs_to_the_could_not_be_read_state_alone() {
+        var replies = [spec.noKeyReply(), spec.heldKeyReply(aKeyHex(), false)]
+        for (var i = 0; i < replies.length; i++) {
+            var screen = makeList({
+                "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+                "get_master_key": replies[i]
+            })
+            verify(screen.machineKey.state !== "unreadable", "the fixture is a readable state")
+            compare(spec.actionsLabelled(screen, spec.readAgainLabel).length, 0,
+                    "for " + replies[i])
+            verify(spec.visibleText(screen).indexOf(spec.readAgainLabel) < 0,
+                   "nor the words, for " + replies[i])
+            screen.destroy()
+        }
+    }
+
     function test_arriving_asks_the_query_once_and_mints_nothing() {
         var screen = makeList({
             "list_stoas": '{"items":[],"page":0,"hasMore":false}',
@@ -3146,9 +3301,10 @@ TestCase {
         }
     }
 
-    // NO SPEC: the spec does not say what happens to an earlier showing's mint
-    // failure. This clears it on each showing, so the no-key block starts
-    // clean rather than carrying "No key was created" from a previous visit.
+    // "A failure rendered after a press belongs to the showing in which the
+    // press was made", and its scenario "A refused mint is not rendered on a
+    // later showing". The query answers no key both times, so the refusal is
+    // gone because the showing changed, not because the key state did.
     function test_a_mint_failure_does_not_outlive_the_showing_it_happened_in() {
         var screen = makeShownList({
             "list_stoas": '{"items":[],"page":0,"hasMore":false}',

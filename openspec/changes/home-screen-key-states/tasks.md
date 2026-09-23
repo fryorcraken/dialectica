@@ -61,7 +61,18 @@
       tests and the three protection tests.
 - [x] 3.6 Invert or replace the existing tests that pinned the removed
       behaviour, and add `get_master_key` to every creation fixture. Verified:
-      `tst_stoa_screens.qml` 110 passed, and the full QML suite passes.
+      `tst_stoa_screens.qml` and the full QML suite pass.
+- [x] 3.7 Refactor, no behaviour change: carry a refused mint as `refusal`
+      inside the no-key value instead of a separate property cleared on each
+      ask (design.md Decision 13). Verified:
+      `test_a_mint_failure_does_not_outlive_the_showing_it_happened_in`, now
+      citing "A refused mint is not rendered on a later showing", and the
+      mutation Decision 13 names.
+- [x] 3.8 The could-not-be-read state's verbatim statement and its
+      "Try reading the key again" action, which calls `askKeyState()` from
+      inside that state's Loader (design.md Decision 14). Verified: the five
+      tests under "could not be read: what failed, and reading the key again",
+      and the mutation Decision 14 names.
 
 ### 4. Gates
 

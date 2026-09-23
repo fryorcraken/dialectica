@@ -32,9 +32,6 @@ See `proposal.md` for why. The constraints that shape the approach:
 **Non-Goals:**
 
 - Any change to `create_identity`'s behaviour, reply or guard.
-- A retry control on the could-not-be-read state. The spec asks for none, and
-  one would be new observable behaviour. It is reported as a finding against
-  the spec instead of being built here.
 - Launching the view under basecamp. The component suite drives the screen's
   state machine through a fake bridge and cannot see how Loaders lay out in
   the host. The owner has to check that by eye.
@@ -194,8 +191,9 @@ boolean half is not, because this question has three answers:
   Decision 2. A boolean cannot carry the third outcome without merging it into
   one of the other two.
 
-So `machineKey` is one object: `{state:"none"}`,
-`{state:"held", publicKey, encrypted}` or `{state:"unreadable", reason}`. It is
+So `machineKey` is one object: `{state:"none", refusal}`,
+`{state:"held", publicKey, encrypted}` or `{state:"unreadable", reason}`.
+Decision 13 says why a refused mint is a field of the first. It is
 one property and not a `keyState` string beside a `publicKey` string, because
 two properties can disagree, and then every block would have to check both. A
 held state with no key to show cannot be built: only `heldKey()` creates it, and
@@ -316,17 +314,64 @@ change from "Stoas you hold" to "Stoas you joined", and the new placeholder
 "Title of the new Stoa". The placeholder is a separate `Text` shown over an
 empty `TextInput`. It is never the field's `text`, so it cannot be submitted.
 
-The could-not-be-read state has no copy in the bundle or the spec. It renders
-"Whether this machine holds a key could not be read." above the reason. That
-sentence is marked `NO SPEC` in the source. It was chosen because it says what
-failed and says nothing about whether a key exists. It also avoids the key
-label, so a check for "no key line" cannot be fooled by it.
+The bundle draws only 0A and 0B, so the could-not-be-read state's two strings
+are this change's own. Both are contracted verbatim by "A key state that could
+not be read is told apart from both others": the statement "Whether this
+machine holds a key could not be read.", above the reason, and the action "Try
+reading the key again". The statement says what failed and nothing about
+whether a key exists, and it avoids the key label, so a check for "no key line"
+cannot be fooled by it.
+
+### 13. A refused mint is a field of the no-key value, so the next answer removes it
+
+The spec requires that "a failure rendered after a press belongs to the showing
+in which the press was made" (proposal: a refusal from an earlier press "would
+describe an attempt the new answer may already have overtaken"). The refusal is
+therefore stored as `machineKey.refusal`, inside the no-key value, rather than
+in a property beside `machineKey`. Every ask replaces the whole value, so a new
+answer carries no refusal unless a new press puts one there. Nothing has to
+remember to clear it.
+
+The rejected alternative is the first pass's shape: a separate `mintFailure`
+property, cleared by hand at the top of `askKeyState()`. It worked, but the
+clearing line was a guard with nothing in the data behind it. It would have to
+be repeated at every new entry to the no-key state, and a later caller of the
+ask that skipped it would reintroduce the stale refusal with every other test
+green. It landed as a refactor in its own commit that changes no behaviour.
+
+**What breaks without it:** `test_a_mint_failure_does_not_outlive_the_showing_it_happened_in`
+goes red. This was measured by making `keyFromQuery`'s no-key branch carry the
+previous value's `refusal` forward. The fixture answers "no key" on both
+showings, so only the showing changes, and the rendered "No key was created."
+and the core's reason are what the test checks.
+
+### 14. "Try reading the key again" is the showing's ask, placed inside the could-not-be-read Loader
+
+The spec requires that acting on it call the query once, never mint, and let the
+reply decide the key state "by the same rules as an answer to a showing's ask".
+So its `onClicked` is `askKeyState()`, the same function a showing calls, not a
+second function that normalises the reply. With one path, the two cannot drift:
+the strict `=== true` and `=== false` of Decision 6 apply to both, and a reply
+that fails again leaves the screen in the could-not-be-read state with the new
+reason.
+
+The reason the action exists is the proposal's. Without it, a user who fixes the
+keystore while the app runs cannot reach the key-held state short of leaving
+the screen, and a peer with no Stoa and no reference to paste has nowhere to
+go. The only other route is a restart.
+
+The button sits inside the could-not-be-read Loader (Decision 7), so "MUST NOT
+be rendered in the no-key state or the key-held state" holds because it does
+not exist there. It is not a visibility check.
+
+**What breaks without it:** `test_the_read_again_action_belongs_to_the_could_not_be_read_state_alone`
+goes red on the no-key fixture, and nothing else does. This was measured by
+changing that Loader to `active: true` with `visible:` bound to the state. The
+test finds the action by its label and its `clicked` signal, walking invisible
+elements too, so a hidden action is still found.
 
 ## Risks / Trade-offs
 
-- **[The could-not-be-read state offers no retry]** → A user who fixes the
-  permissions has to leave the home screen and come back, or restart. Reported
-  to the spec-writer as unspecified behaviour. Not built here (Non-Goals).
 - **[Loader layout under basecamp is unseen]** → The component suite checks
   element order by `mapToItem` y-coordinates, which shows the Loaders are
   measured and stacked. It says nothing about how the result looks. The owner
