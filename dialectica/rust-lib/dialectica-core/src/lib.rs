@@ -32,6 +32,7 @@ pub mod op;
 pub mod revision;
 pub mod sanitise;
 pub mod stoa;
+pub mod stoa_metadata;
 pub mod thread;
 pub mod transport;
 pub mod wire;
