@@ -4263,6 +4263,70 @@ mod tests {
     }
 
     #[test]
+    fn generating_a_slate_writes_nothing_new_on_a_peer_that_already_holds_a_machine_key() {
+        // `design.md` D2: onboarding may begin on a peer that already holds a
+        // machine key, and `generating_a_slate_writes_nothing` cannot cover that
+        // — its fixture is an empty directory throughout, so "still finds none"
+        // and "nothing new was written" happen to read the same. The spec's own
+        // wording keeps them apart: "no master key and no recorded choice are
+        // stored that were not there before" is the general claim, and "on a
+        // peer that held no master key, a caller asking who the user is still
+        // finds none" is conditioned on that starting state. This fixture starts
+        // with a machine key already on disk, so the two claims can be told
+        // apart: nothing NEW may be written, and `whoAmI` must name the
+        // EXISTING machine key rather than report nobody.
+        let dir = OnboardingDir::new("slate-writes-nothing-existing-key");
+        let minted = as_json(&create_identity(
+            "{}",
+            &dir.keystore_path(),
+            &Unlock::Unencrypted,
+        ));
+        let machine_key = minted["publicKey"].as_str().unwrap().to_string();
+        let before = std::fs::read(dir.keystore_path()).expect("the keystore reads");
+        let entries_before: std::collections::BTreeSet<_> = std::fs::read_dir(&dir.0)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+
+        let mut session = a_session();
+        for _ in 0..3 {
+            let out =
+                generate_identity_slate(&mut session, &slate_request(), || Ok(a_master_key()));
+            assert!(
+                serde_json::from_str::<serde_json::Value>(&out)
+                    .unwrap()
+                    .get("candidates")
+                    .is_some(),
+                "got {out}"
+            );
+        }
+
+        assert_eq!(
+            std::fs::read(dir.keystore_path()).unwrap(),
+            before,
+            "generating a slate rewrote the existing master key"
+        );
+        let entries_after: std::collections::BTreeSet<_> = std::fs::read_dir(&dir.0)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(
+            entries_after, entries_before,
+            "generating a slate wrote a new entry beside the existing machine key"
+        );
+
+        // The half the empty-directory test cannot exercise: a peer that
+        // already held a machine key is not "nobody" after a slate is
+        // generated and discarded — it is still the existing identity.
+        let v: serde_json::Value = serde_json::from_str(&who_am_i(&slate_request(), || {
+            Keystore::open(&dir.keystore_path(), &Unlock::Unencrypted)
+        }))
+        .unwrap();
+        assert_eq!(v["hasIdentity"], true, "got {v}");
+        assert_eq!(v["publicKey"], machine_key.as_str(), "got {v}");
+    }
+
+    #[test]
     fn two_slates_in_a_row_offer_different_candidates() {
         // The spec: "no candidate in the second set has a public key from the
         // first". Through the wire rather than only through the slate type,
@@ -4565,6 +4629,42 @@ mod tests {
         // unconditional and these assertions would still pass.
         let ok = keep_through_the_wire(&dir, nonce, Some(nonce), 4, &Unlock::Unencrypted);
         assert_eq!(ok["kept"], true, "got {ok}");
+    }
+
+    #[test]
+    fn an_out_of_range_selection_stores_nothing_new_on_a_peer_that_already_holds_a_machine_key() {
+        // `design.md` D2: the refused-selection scenario now applies to a peer
+        // that already holds a machine key too, and
+        // `a_selection_outside_the_set_is_refused_and_stores_nothing` cannot
+        // cover it — its fixture asserts `!dir.keystore_path().exists()`
+        // throughout, which would be the wrong assertion for a peer that
+        // legitimately has one. The spec's own wording is "no choice is
+        // recorded and no master key is stored that were not there before",
+        // which is a claim about NEW writes, not about the file's existence.
+        let dir = OnboardingDir::new("out-of-range-existing-key");
+        let minted = as_json(&create_identity(
+            "{}",
+            &dir.keystore_path(),
+            &Unlock::Unencrypted,
+        ));
+        assert!(
+            minted.get("error").is_none(),
+            "the fixture must start with a master key on disk: {minted}"
+        );
+        let before = std::fs::read(dir.keystore_path()).expect("the keystore reads");
+
+        let nonce = SlateNonce::generate().unwrap();
+        for index in [SLATE_SIZE as i64, SLATE_SIZE as i64 + 1, 99, 100_000] {
+            let v = keep_through_the_wire(&dir, nonce, Some(nonce), index, &Unlock::Unencrypted);
+            assert_eq!(v["kept"], false, "index {index}: {v}");
+            assert!(v.get("address").is_none(), "index {index}: {v}");
+            assert_eq!(
+                std::fs::read(dir.keystore_path()).unwrap(),
+                before,
+                "index {index} rewrote or removed the existing master key"
+            );
+            assert_eq!(dir.paths().path_for(&a_stoa()).unwrap(), None);
+        }
     }
 
     #[test]
@@ -6429,6 +6529,84 @@ mod tests {
             author,
             kept["publicKey"].as_str().unwrap(),
             "the post is signed by the key the recorded choice derives"
+        );
+    }
+
+    #[test]
+    fn an_unreadable_record_of_choices_does_not_prevent_posting() {
+        // `identity`: "An unreadable record of choices does not prevent posting" —
+        // WHEN a peer holds a machine key and the record of per-Stoa choices
+        // cannot be read, THEN the probe reports possible and names the machine
+        // key, AND a post published into a Stoa succeeds and is signed by it.
+        //
+        // `tasks.md` marks this "satisfied by construction, no test": the probe,
+        // the report and `publishing_key` take no record parameter, so no test
+        // can make a record's readability matter to them directly. This test is
+        // not that structural argument — it is the spec's own scenario, made
+        // concrete: a record that genuinely cannot be read sits at the exact path
+        // the adapter would look for it at, right beside a real machine key, and
+        // every wire entry point the scenario names is exercised through the
+        // wire, unmodified. If a later change re-adds a record parameter and
+        // wires it through, this is the test that would turn red.
+        let dir = OnboardingDir::new("record-unreadable");
+        let minted = as_json(&create_identity(
+            "{}",
+            &dir.keystore_path(),
+            &Unlock::Unencrypted,
+        ));
+        let machine_key = minted["publicKey"].as_str().unwrap().to_string();
+
+        // Garbage bytes at the record's own default path — not a missing file,
+        // which `the_identity_in_use_needs_no_choice_recorded_for_the_stoa`
+        // already covers, but one SQLite itself refuses to open.
+        let record_path = IdentityStore::default_path_in(&dir.0);
+        std::fs::write(&record_path, b"not a sqlite file at all")
+            .expect("the fixture can write a file at the record's path");
+        assert!(
+            IdentityStore::open(&record_path).is_err(),
+            "the fixture must leave a record that genuinely cannot be opened, or \
+             this proves nothing"
+        );
+
+        let open = || Keystore::open(&dir.keystore_path(), &Unlock::Unencrypted);
+        let request = format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex());
+
+        let probe = as_json(&get_capabilities_from_stores(&request, open));
+        assert_eq!(probe["canPost"], true, "got {probe}");
+        assert_eq!(probe["identity"], machine_key.as_str(), "got {probe}");
+
+        let who = as_json(&who_am_i(&request, open));
+        assert_eq!(who["hasIdentity"], true, "got {who}");
+        assert_eq!(who["publicKey"], machine_key.as_str(), "got {who}");
+
+        let mut log = MemoryOpLog::new();
+        let out = as_json(&publish_post(
+            &format!(
+                r#"{{"stoa":"{}","body":"posted beside a broken record"}}"#,
+                a_stoa().to_hex()
+            ),
+            &mut log,
+            &by(&publishing_key(&open().unwrap())),
+            &mut ignored_delivery,
+        ));
+        assert!(
+            out.get("error").is_none(),
+            "the publish must succeed: {out}"
+        );
+        let id = crate::op::OpId::from_hex(out["opId"].as_str().unwrap()).unwrap();
+        let author = log.get(&id).unwrap().unwrap().op.op.author.to_hex();
+        assert_eq!(
+            author, machine_key,
+            "the post beside an unreadable record must still be signed by the \
+             machine key"
+        );
+
+        // The record is still unreadable after all three calls — none of them
+        // repaired or replaced it, which would be a different way for this test
+        // to pass for the wrong reason.
+        assert!(
+            IdentityStore::open(&record_path).is_err(),
+            "the record changed shape during the calls above"
         );
     }
 

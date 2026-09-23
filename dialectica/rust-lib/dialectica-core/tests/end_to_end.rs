@@ -426,8 +426,8 @@ const TITLE_CAP: usize = 1024;
 /// So removing the `set_permissions` call below does not break a `create` — it
 /// breaks the *reopen* in both
 /// `a_keystore_on_disk_signs_a_post_that_a_reopened_store_still_attributes_to_it`
-/// and `the_same_keystore_posts_under_different_identities_in_two_stoas`, which is
-/// where to look when one of them starts refusing a keystore.
+/// and `the_per_stoa_derivation_still_yields_two_authors_for_the_store_to_persist`,
+/// which is where to look when one of them starts refusing a keystore.
 struct TempDir(PathBuf);
 
 impl TempDir {
@@ -775,7 +775,7 @@ fn a_keystore_on_disk_signs_a_post_that_a_reopened_store_still_attributes_to_it(
 }
 
 #[test]
-fn the_same_keystore_posts_under_different_identities_in_two_stoas() {
+fn the_per_stoa_derivation_still_yields_two_authors_for_the_store_to_persist() {
     // §5.2's per-Stoa unlinkability, proved through the store rather than at the
     // derivation function. The rival explanation excluded: that the two feeds
     // differ because two different keystores wrote them. There is ONE keystore
@@ -785,6 +785,21 @@ fn the_same_keystore_posts_under_different_identities_in_two_stoas() {
     // differ by default. So this also pins that each feed reports the key that
     // keystore derives FOR THAT STOA, which a derivation ignoring its Stoa
     // argument would fail.
+    //
+    // **This is NOT a claim about who posts in this release, and the rename is
+    // why.** It signs directly with `Keystore::stoa_key`/`stoa_public_key`,
+    // bypassing `wire::publishing_key` and `wire::posting_identity` entirely —
+    // the module's own choice of identity is untouched here. `identity`: "In
+    // this release one machine key is the identity in every Stoa", and
+    // `one_machine_key_posts_replies_and_votes_in_two_stoas` (`wire.rs`) is the
+    // test that pins THAT claim, through the wire the module actually uses.
+    // What this test pins is `design.md`'s Non-Goal: the per-Stoa derivation
+    // "stays built and tested as it is" for #108, and the store can still tell
+    // two of its authors apart when handed two distinct keys — a property the
+    // feed's read path needs regardless of which key a publish signs with.
+    // Named under its old claim, this test read as evidence against the fix it
+    // sits beside; `design.md`'s Risks section flagged the same thing
+    // (`the tester should judge the naming`).
     let dir = TempDir::new("per-stoa-identity");
     let key_path = dir.file("identity.key");
     Keystore::generate()

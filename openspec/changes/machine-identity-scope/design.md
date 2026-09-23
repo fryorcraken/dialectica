@@ -206,6 +206,17 @@ could not run the mutation that removes the flag, because the edit was refused b
 this session's permission checker. So that test's ability to fail is argued, not
 measured (see Risks).
 
+**tester, 2026-09-24: measured.** The same mutation (`if wrote_it {` → `if true {`,
+making the undo unconditional) was not refused this session. Run against the full
+`a_keep_whose*` group: `a_keep_whose_record_write_fails_keeps_a_master_key_that_was_already_there`
+failed exactly as predicted (`left: None, right: Some([…keystore bytes…])`, "a
+failed keep removed or rewrote a master key it did not write"), and
+`a_keep_whose_path_record_fails_reports_failure_and_names_no_identity` stayed
+green, since `wrote_it` is `true` on that fixture's path anyway and the mutation
+does not change its behaviour. The mutation was reverted immediately after
+(`git diff --stat` shows no implementation change). The flag's discrimination is
+now measured, not argued.
+
 ### D9. The view routes a missing identity to the Stoa list, and the onboarding state leaves the navigator
 
 `Main.qml` loses the `onboarding` state, `createIdentityFor`, `closeOnboarding`,
@@ -247,10 +258,13 @@ I confirmed it fails when a hidden `DOnboardingScreen {}` is mounted.
 - [The adapter half of D3 is visible to no test] → The core signatures carry the
   guarantee, `nix build path:./dialectica#lgx` compiles the adapter, and CI's
   adapter gate still requires the core entry points by name.
-- [D8's guard has no measured mutation] → The flag-removing mutation was refused
-  by the permission checker. The test was written to fail on it (pre-existing key,
-  byte comparison after a failed keep), but it has only been seen passing. The
-  tester should run that mutation.
+- [D8's guard has no measured mutation] → **Resolved by the tester, 2026-09-24.**
+  The flag-removing mutation (`if wrote_it {` → `if true {` in
+  `undo_a_keystore_this_keep_wrote`) was not refused this session. It was applied,
+  `a_keep_whose_record_write_fails_keeps_a_master_key_that_was_already_there`
+  failed on it (predicted failure, observed failure), and it was reverted; `git
+  diff --stat` confirms the implementation carries no change. The test's
+  discrimination is measured.
 - [`undo_a_keystore_this_keep_wrote` can itself fail] → If `remove_file` fails, the
   reply names both failures and the path, so it does not suggest nothing changed.
   That reason is chosen, not specified (`NO SPEC` in the code), and no test
@@ -260,6 +274,16 @@ I confirmed it fails when a hidden `DOnboardingScreen {}` is mounted.
   and its neighbour sign with `Keystore::stoa_key` directly, so they test the
   derivation's unlinkability, which `identity` keeps. Their names read as a claim
   about who posts. That is a naming question for the tester, not a failing test.
+  **Resolved by the tester, 2026-09-24.** Renamed the first to
+  `the_per_stoa_derivation_still_yields_two_authors_for_the_store_to_persist` and
+  added a comment stating explicitly that it signs through `Keystore::stoa_key`/
+  `stoa_public_key` directly, bypassing `wire::publishing_key` and
+  `wire::posting_identity`, and is not a claim about which key is in use in this
+  release — that claim is `wire::one_machine_key_posts_replies_and_votes_in_two_stoas`'s.
+  The neighbour,
+  `a_keystore_on_disk_signs_a_post_that_a_reopened_store_still_attributes_to_it`,
+  was left as named: it claims persistence across a restart, not who posts, so
+  its name does not contradict this release.
 
 ## Migration Plan
 

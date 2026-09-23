@@ -4,7 +4,7 @@
 
 - [x] spec — `spec-writer`
 - [x] design + code — `dev-writer`
-- [ ] tests — `tester`
+- [x] tests — `tester`
 - [ ] review: correctness — `code-reviewer`
 - [ ] review: security — `code-reviewer`
 - [ ] review: readability — `code-reviewer`
@@ -90,3 +90,15 @@
   In the adapter, none of the three paths calls `Self::paths`. No test can make
   an unreadable record matter to functions that are never given one. The
   adapter half is visible only in the diff and to `nix build`.
+
+  **tester, 2026-09-24:** added
+  `wire::tests::an_unreadable_record_of_choices_does_not_prevent_posting`, which
+  writes garbage bytes at the identity record's own default path (confirmed
+  `IdentityStore::open` refuses it), then asks the probe, the report and a
+  publish through the real wire entry points and asserts all three succeed and
+  name the machine key. This is not a mutation-backed test: `Keystore` carries
+  no path or directory, so no signature-preserving mutation of `posting_identity`,
+  `whoami_for` or `get_capabilities_from_stores` can reach a record file at all —
+  the same structural argument this bullet already makes, checked directly
+  rather than argued. The test is the spec's scenario made concrete, not
+  evidence the scenario is reachable by a narrower fault.
