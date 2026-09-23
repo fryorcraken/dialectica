@@ -532,8 +532,9 @@ jobs:
           # `core::keystore::poster_address_in`, called from the adapter's
           # `get_capabilities` closure. `identity-onboarding` replaced that with
           # `core::wire::get_capabilities_from_stores`, whose lookup is
-          # `core::wire::posting_identity` — a path-derived public key read out
-          # of the identity record. That is a STRONGER position for this gate's own
+          # `core::wire::posting_identity` — since machine-identity-scope, the
+          # machine key's public half, the same key `creator_key_in` names and
+          # `publishing_key` signs with. That is a STRONGER position for this gate's own
           # purpose: the choice is inside `core`, so `cargo test` compiles it and
           # `the_probe_and_whoami_report_the_same_identity_for_one_user_and_stoa`
           # asserts on it. What the gate still checks is that the adapter did not take
@@ -546,8 +547,10 @@ jobs:
           # came to disagree with the probe unnoticed. Losing this call from the
           # adapter is the adapter taking the choice back.
           # AND `core::stoa_of` IS REQUIRED FOR AN ORDERING REASON, not a
-          # derivation one. The adapter must read `stoa` before it can derive a
-          # per-Stoa key, and it was doing that with its own bare
+          # derivation one. The adapter reads `stoa` before it opens anything --
+          # it once needed the value to derive a per-Stoa key, and since
+          # machine-identity-scope needs only the refusal of a malformed request
+          # ahead of the keystore -- and it was doing that with its own bare
           # `serde_json::from_str` plus a four-arm ladder -- which shadowed the
           # whole request envelope on the shipped path: an array was answered
           # "missing field: stoa" here, and an N-byte request was fully parsed

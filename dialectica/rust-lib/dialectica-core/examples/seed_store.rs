@@ -66,43 +66,27 @@
 //!   module does not hold produces a Stoa its own user can never moderate, and no
 //!   later action can repair it — the address would have to change.
 //! - **`getCapabilities` would report the user cannot post.** The probe reads the
-//!   identity record, so a Stoa seeded without one renders with a disabled compose
-//!   box, which looks like a bug in whichever UI piece is being examined.
+//!   keystore, so a Stoa seeded under throwaway keys renders with a disabled
+//!   compose box, which looks like a bug in whichever UI piece is being examined.
 //!
 //! So this mints a keystore when there is none, and signs everything with it. The
 //! keystore is written **unencrypted** unless `DIALECTICA_PASSPHRASE` is set, which
 //! is [`protection_from_env`](dialectica_core::keystore::protection_from_env)'s own
 //! behaviour rather than a policy invented here.
 //!
-//! # Three derivations exist for one user, and this one follows the module
+//! # One key for one user, and this follows the module to it
 //!
-//! `createStoa` names `identity_public_key` as the creator; the publish path signs
-//! with `stoa_key`; `getCapabilities` reports `stoa_public_key_at_path`. That is three
-//! derivations for one user, it is known — `ci.yml` carries a named exemption for
-//! it — and it is a spec question this example does not get to decide.
+//! `createStoa` names the machine key as the creator, the publish path signs with
+//! it (`wire::publishing_key`), and `getCapabilities` reports it
+//! (`wire::posting_identity`). This file reaches each through the module's own
+//! function, so a seeded store behaves exactly as one the module built.
 //!
-//! What this file does is **match the module at each position**, so that a seeded
-//! store behaves exactly as one the module built: creator from `identity_*`, ops
-//! signed with `stoa_key`, and a path recorded so the probe has one to read.
-//!
-//! **`keystore.rs`'s own docstrings disagree with the adapter, and this file
-//! follows the adapter.** `Keystore::stoa_key` says it is "built and, in the MVP,
-//! not called by any handler"; `Keystore::identity_key` says "there is exactly one
-//! derivation position, so a creator and a poster cannot be two keys". The adapter
-//! *does* call `stoa_key` (`dialectica/rust-lib/src/lib.rs`), so both sentences are
-//! false of the code as it stands. This file copies the adapter because a seeder
-//! that agreed with the docstrings instead would build stores the module does not —
-//! but do not read it as having invented the divergence. Whoever resolves this
-//! should fix those two docstrings in the same change
-//! (`findings/security.md` entry 4).
-//!
-//! **The visible consequence, and the reason it is printed rather than hidden:**
-//! the *founder's* posts carry the *signing* public key as their feed `author`, and
-//! `getCapabilities` reports a *different* one. A UI developer who saw only the
-//! second would conclude the feed was attributing their own posts to a stranger.
-//! Both are printed, side by side and labelled as the known gap, and the program
-//! asserts they still disagree — so the day the spec settles it, this fails loudly
-//! and tells whoever fixed it that these paragraphs are now stale.
+//! **This section described three derivations until `machine-identity-scope`**:
+//! creator from `identity_*`, ops signed with `stoa_key`, and the probe reading a
+//! path this seeder recorded for it. The program asserted they disagreed, so that
+//! the day they stopped it would fail and name these paragraphs as stale. It did;
+//! the assertions are now that the three agree, and they are printed side by side
+//! so a reader can see it.
 //!
 //! **The visitor's ops carry the visitor's public key, and there are more of them
 //! than the founder's.** Four of the nine ops are the founder's and five are the
@@ -199,20 +183,6 @@ use dialectica_core::moderation::Moderators;
 use dialectica_core::op::VoteDirection;
 use dialectica_core::stoa::{Genesis, Policy};
 use dialectica_core::wire;
-
-/// The derivation path recorded for the seeded Stoa.
-///
-/// **Zero is not a path onboarding produces**, and an earlier version of this
-/// comment claimed the opposite — that it was "the first candidate of a slate".
-/// `onboarding::derive_path` is `SHA256(prefix || nonce || index)`, first four
-/// bytes big-endian with the top bit masked, so a slate's candidates are
-/// pseudorandom values below 2³¹ and index 0 lands on path 0 with probability
-/// ~2⁻³¹. Measured over 2000 nonces: never.
-///
-/// The value matters only in that the seeder and the probe must agree, and they
-/// agree because both read this record rather than assuming a number. `design.md`
-/// records why a fixed path was chosen over deriving a slate, and what it costs.
-const SEEDED_PATH: u32 = 0;
 
 /// The op log's filename, which is the one name here with no `core` accessor.
 ///
@@ -479,29 +449,22 @@ fn main() -> Result<(), String> {
     )?;
     why("recording the membership", memberships.join(&membership))?;
 
-    // The chosen path, so `getCapabilities` reports an identity for this Stoa rather
-    // than "no identity has been chosen". Without this row the probe answers
-    // `CannotPost` and every UI piece renders a disabled compose box, which reads as
-    // a bug in the piece rather than as an unseeded record.
-    let paths = why(
-        "opening the identity record",
-        IdentityStore::open(&IdentityStore::default_path_in(&dir)),
-    )?;
-    why(
-        "recording the chosen path",
-        paths.record_path(&address, SEEDED_PATH),
-    )?;
+    // No per-Stoa choice is recorded. This seeder used to write a `chosen_paths` row
+    // so that `getCapabilities` reported an identity rather than "no identity has
+    // been chosen"; since `machine-identity-scope` the machine key is the identity
+    // in every Stoa and no choice is needed to post, so a seeded store holds what a
+    // real 0.0.1 profile holds — a master key and nothing in the record.
 
     // ── The authors ───────────────────────────────────────────────────────
     //
-    // The founder signs with `stoa_key`, which is what the module's publish path
-    // signs with today. The second author is a generated key with no keystore behind
-    // it, and that asymmetry is deliberate: a peer holds exactly one root secret, so
-    // a SECOND local identity is not a state the module can be in. What a real store
-    // holds is one identity of its own plus ops that arrived from other peers — and
-    // an op from another peer is, as far as the log is concerned, an op signed by a
-    // key this peer does not hold. That is what this reproduces.
-    let founder = keystore.stoa_key(&address);
+    // The founder signs with `wire::publishing_key`, which is what the module's
+    // publish path signs with. The second author is a generated key with no keystore
+    // behind it, and that asymmetry is deliberate: a peer holds exactly one root
+    // secret, so a SECOND local identity is not a state the module can be in. What a
+    // real store holds is one identity of its own plus ops that arrived from other
+    // peers — and an op from another peer is, as far as the log is concerned, an op
+    // signed by a key this peer does not hold. That is what this reproduces.
+    let founder = wire::publishing_key(&keystore);
     let visitor = why("minting the visitor's key", SecretKey::generate())?;
 
     // A fixed wall-clock reading for every op this seeder publishes, so the store
@@ -716,50 +679,33 @@ fn main() -> Result<(), String> {
     // this repo's recorded "asks the implementation what it did and agrees" defect,
     // in a file whose whole job is to be evidence (`findings/correctness.md` entry 1).
     //
-    // What the assertion claimed to rule out is TRUE TODAY, and asserting the real
-    // property is what makes it visible. `Moderators::authorises` gates on
-    // `entry.op.op.author` — the SIGNING author — and the adapter signs every publish
-    // with `keystore.stoa_key(&stoa)` while the record names `identity_public_key`.
-    // Those are two keys, so:
+    // `Moderators::authorises` gates on `entry.op.op.author` — the SIGNING author.
+    // This asserted, for a while, that the signing key was NOT a moderator: the
+    // adapter signed with a per-Stoa key while the record named
+    // `identity_public_key`, so a hide published against a seeded Stoa was refused.
+    // `machine-identity-scope` made the machine key the key every publish signs
+    // with, so the founder signs as the creator and moderation binds:
     assert!(
         moderators.contains(&genesis.creator),
         "the record's creator must moderate its own Stoa"
     );
     assert!(
-        !moderators.contains(&founder.public_key()),
-        "the signing key has BECOME a moderator — the three-derivations gap is \
-         closed, which is good news. Delete this assertion, the `moderation` line \
-         in the report, and the paragraph in design.md that documents the gap."
+        moderators.contains(&founder.public_key()),
+        "the founder's signing key is not the Stoa's moderator — the three-\
+         derivations gap machine-identity-scope closed has reopened"
     );
-    // **So a hide published through the module against a seeded Stoa is REFUSED.**
-    // That is the outcome `design.md` says the real keystore was adopted to prevent,
-    // and adopting it did not prevent this half: the creator is a key the peer holds,
-    // but not the key it signs with. Measured, not inferred — pointing the first
-    // assertion at `founder.public_key()` fails, which was run.
-    //
-    // The tool cannot fix it. WHICH key a publish signs with is the spec question
-    // `ci.yml` carries a named exemption for, and closing it here would mean the
-    // seeder disagreeing with the module — which is the one thing that would make a
-    // seeded store stop being evidence of anything. So it is asserted, reported and
-    // left, in the shape that cannot rot: the day it is fixed, this fails and says
-    // what to delete.
 
     // The probe's half, THROUGH THE MODULE'S OWN FUNCTION rather than re-derived.
     //
-    // `wire::posting_identity` is what `get_capabilities` calls, it is `pub`, and it
-    // takes exactly the three values already in scope. Re-spelling its body here —
-    // `keystore.stoa_public_key_at_path(&address, recorded)` — is what this used to do,
-    // and the two agreed, which is the problem rather than the reassurance:
-    // `keystore.rs` records that "two call sites that agree is not the same thing as
-    // one derivation", after a pair of them re-diverged with every gate green. This
-    // file is compiled by no test and run by no gate, so a third hand copy here is
-    // the same shape in the same blind spot (`findings/design.md` entry 6).
-    //
-    // It reads the recorded path itself, so a path that cannot be read fails here
-    // rather than on screen — the property the hand derivation was reading it for.
-    let posting_identity = wire::posting_identity(&address, &keystore, &paths)
-        .map_err(|e| format!("asking the probe which identity it reports: {e}"))?;
-    let signing_identity = keystore.stoa_public_key(&address).to_hex();
+    // `wire::posting_identity` is what `get_capabilities` calls and it is `pub`.
+    // Re-spelling its body here is what this used to do, and the two agreed, which is
+    // the problem rather than the reassurance: `keystore.rs` records that "two call
+    // sites that agree is not the same thing as one derivation", after a pair of them
+    // re-diverged with every gate green. This file is compiled by no test and run by
+    // no gate, so a hand copy here is the same shape in the same blind spot
+    // (`findings/design.md` entry 6).
+    let posting_identity = wire::posting_identity(&keystore);
+    let signing_identity = founder.public_key().to_hex();
     let visitor_identity = visitor.public_key().to_hex();
 
     // The feed's `author` is the SIGNING key for the founder's row and the
@@ -812,23 +758,19 @@ fn main() -> Result<(), String> {
          single author for the store"
     );
 
-    // The self-invalidating half, and the operands are the MODULE's two positions.
+    // The operands are the MODULE's two positions: the probe's own answer and the
+    // key the publish path signs with. They agree, and both are the creator.
     //
-    // This used to compare the path-taking derivation against `stoa_public_key`,
-    // both called by this example on its own keystore — two HD derivations off one root,
-    // which differ for the same reason any two do. Nothing the module did was on
-    // either side, so it asserted a property of Ed25519 derivation rather than of
-    // dialectica: review closed the real gap at `wire.rs:324` and this program exited
-    // 0 with every assertion green, still printing MODERATION DOES NOT WORK about a
-    // gap that no longer existed (`findings/spec-test.md` entry 1).
-    //
-    // `posting_identity` is now `wire::posting_identity`'s own answer, so closing the
-    // gap moves it and this fires.
-    assert_ne!(
+    // This was an `assert_ne!` pinning the three-derivations gap, written to fire the
+    // day the gap closed; `machine-identity-scope` closed it.
+    assert_eq!(
         posting_identity, signing_identity,
-        "the probe and the publish path have stopped disagreeing — the \
-         three-derivations gap is closed, so this assertion and the paragraph it \
-         documents should both go"
+        "the probe reports an identity the publish path does not sign with"
+    );
+    assert_eq!(
+        posting_identity,
+        genesis.creator.to_hex(),
+        "the probe reports an identity that is not the Stoa's creator"
     );
 
     // ── Report ────────────────────────────────────────────────────────────
@@ -862,12 +804,10 @@ fn main() -> Result<(), String> {
         }
     );
     println!();
-    // EVERY identity this store has, because the three that disagree are the reason
-    // this program prints anything and the fourth is the one a reader meets in the
-    // feed without warning. The module derives a posting identity at one position and
-    // signs at another — the three-derivations gap `ci.yml` carries a named exemption
-    // for. Nothing here can close it: which key a publish signs with is a spec
-    // question.
+    // EVERY identity this store has. The first three are one key — the probe, the
+    // signing key and the creator — which the assertions above pin; they are printed
+    // separately so a reader can SEE they agree rather than take it on trust, which
+    // is what this block was for while they disagreed.
     //
     // **Every line here is a value an assertion above pinned, and none is a summary.**
     // The predecessor of this block said "every seeded op is by <one identity>", which
@@ -878,22 +818,12 @@ fn main() -> Result<(), String> {
     // `design.md` records this as a rule rather than as a one-off fix.
     let founder_ops = seeded_ops_by(&log, &signing_identity)?;
     let visitor_ops = seeded_ops_by(&log, &visitor_identity)?;
-    println!("author public keys — the first three DISAGREE, which is the known gap:");
+    println!("author public keys — the first three are this machine's one key:");
     println!("  getCapabilities reports  {posting_identity}");
     println!("  founder signs ops with   {signing_identity}  ({founder_ops} of {ops} ops)");
     println!("  record names as creator  {}", genesis.creator.to_hex());
     println!("  and a second identity, so author attribution is visible rather than uniform:");
     println!("  visitor's ops are by     {visitor_identity}  ({visitor_ops} of {ops} ops)");
-    // THE CONSEQUENCE, because the three identities above are only interesting for
-    // what they cause. `Moderators::authorises` gates on the signing author, the
-    // record names a different key, so no moderation this peer publishes binds.
-    // A UI developer whose hide button does nothing needs to read this line rather
-    // than debug their own screen.
-    println!(
-        "  => MODERATION DOES NOT WORK on a seeded Stoa: a hide published through\n\
-         \x20    the module is refused, because the signing key is not the creator\n\
-         \x20    the record names. Not a defect of this tool; see design.md."
-    );
     println!();
     println!("thread  {}", first_root.id.to_hex());
     println!("  reply  {}", reply.id.to_hex());

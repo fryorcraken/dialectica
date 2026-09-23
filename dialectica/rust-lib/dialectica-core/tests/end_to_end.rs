@@ -359,7 +359,6 @@ use dialectica_core::arrival::{Arrival, MessageId};
 use dialectica_core::authoring;
 use dialectica_core::feed::{self, FeedPage, FeedRow};
 use dialectica_core::identity::{Address, PublicKey, SecretKey};
-use dialectica_core::identity_store::IdentityStore;
 use dialectica_core::keystore::{Keystore, Unlock};
 use dialectica_core::log::sqlite::LAYOUT_VERSION;
 use dialectica_core::log::{Appended, Entry, OpLog, OpLogError, SqliteOpLog};
@@ -2622,11 +2621,10 @@ fn a_store_seeded_from_two_identities_carries_exactly_those_two_authors() {
 
 /// The seeding sequence a developer tool performs, as an integration test.
 ///
-/// Mint a keystore on disk, found a Stoa from it, record a chosen path, publish a
-/// nested thread through the public write path, restart, and read it back. This is
-/// `tasks.md`'s "the shape worth considering" for this piece, and it covers what
-/// the example's nine inline assertions cover without needing anybody to run a
-/// binary.
+/// Mint a keystore on disk, found a Stoa from it, publish a nested thread through
+/// the public write path, restart, and read it back. This is `tasks.md`'s "the
+/// shape worth considering" for this piece, and it covers what the example's
+/// inline assertions cover without needing anybody to run a binary.
 ///
 /// Three claims, each excluding a rival explanation:
 ///
@@ -2638,20 +2636,20 @@ fn a_store_seeded_from_two_identities_carries_exactly_those_two_authors() {
 ///    confused them fails here.
 /// 2. **The feed attributes the root to the key that signed it**, derived from the
 ///    keystore reopened from disk rather than read from the row.
-/// 3. **The probe and the publish path disagree about which identity this user
-///    posts under** — the three-derivations gap. Asserted as the state of the
-///    world TODAY, self-invalidatingly: the operands are `wire::posting_identity`'s
-///    own answer and the key the feed actually carries, both produced by the
-///    module, so closing the gap anywhere makes this fail and name itself.
+/// 3. **The probe reports the identity the feed carries, and it is the creator.**
+///    The operands are `wire::posting_identity`'s own answer and the author the
+///    STORE reports through `feed::list_threads`, so neither side is a derivation
+///    this test performed.
 ///
-/// **Claim 3 is why this is not just the example re-typed.** The example asserts
-/// the same inequality, and for a while asserted it between two keystore
-/// derivations it made itself — two HD paths off one root, which differ for the
-/// reason any two do, so closing the real gap left it green (`findings/spec-test.md`
-/// entry 1). Here the right operand is the author the STORE reports through
-/// `feed::list_threads`, so neither side is a derivation this test performed.
+/// **Claim 3 used to be the opposite.** It asserted the probe and the publish path
+/// DISAGREED — the three-derivations gap, pinned self-invalidatingly with a message
+/// saying to invert it once closed. `machine-identity-scope` closed it: the probe,
+/// the publish path and the creator are all the machine key. The founder here signs
+/// with `wire::publishing_key`, the key the adapter's publish path signs with,
+/// where it used to sign with `stoa_key` — which by then was no longer what the
+/// module signed with either, so the old claim held for a stale reason.
 #[test]
-fn the_seeding_sequence_builds_a_nested_thread_whose_author_the_probe_does_not_report() {
+fn the_seeding_sequence_builds_a_nested_thread_whose_author_the_probe_reports() {
     let dir = TempDir::new("seeding-sequence");
 
     // ── A keystore on disk, as the seeder mints one ──
@@ -2679,23 +2677,13 @@ fn the_seeding_sequence_builds_a_nested_thread_whose_author_the_probe_does_not_r
         "the Stoa this peer founded must be one it has joined"
     );
 
-    // ── The chosen path, so the probe has one to read ──
-    //
-    // Without this row `posting_identity` answers `NO_CHOICE_FOR_THIS_STOA` and
-    // claim 3 below would be comparing against an error rather than a key.
-    let seeded_path: u32 = 0;
-    let paths = IdentityStore::open(&IdentityStore::default_path_in(&dir.0))
-        .expect("an identity record opens");
-    paths
-        .record_path(&stoa, seeded_path)
-        .expect("a chosen path is recordable");
-
     // ── A nested thread, through the publish path ──
     //
-    // The founder signs with `stoa_key`, which is what the module's publish path
-    // signs with. A visitor with no keystore behind it stands in for an op that
-    // arrived from another peer.
-    let founder = keystore.stoa_key(&stoa);
+    // The founder signs with `wire::publishing_key`, which is what the module's
+    // publish path signs with. No per-Stoa choice is recorded: none is needed to
+    // post (`machine-identity-scope`). A visitor with no keystore behind it stands
+    // in for an op that arrived from another peer.
+    let founder = wire::publishing_key(&keystore);
     let visitor = a_key(9);
 
     let mut store = dir.store();
@@ -2762,35 +2750,32 @@ fn the_seeding_sequence_builds_a_nested_thread_whose_author_the_probe_does_not_r
     let feed_author = page.items[0].author.clone();
     assert_eq!(
         feed_author,
-        keystore.stoa_public_key(&stoa).to_hex(),
-        "the root must be attributed to the key the keystore derives for this Stoa"
+        keystore.identity_public_key().to_hex(),
+        "the root must be attributed to this peer's machine key"
     );
 
-    // ── Claim 3: the probe reports an identity the feed does not carry ──
+    // ── Claim 3: the probe reports the identity the feed carries ──
     //
     // `wire::posting_identity` is what `getCapabilities` calls. Both operands are
     // the module's own answers — the probe's, and the author the store reported —
     // so this cannot be satisfied by two derivations performed here.
-    let probe_reports =
-        wire::posting_identity(&stoa, &keystore, &paths).expect("a recorded path is readable");
-    assert_ne!(
+    let probe_reports = wire::posting_identity(&keystore);
+    assert_eq!(
         probe_reports, feed_author,
-        "the probe and the publish path have stopped disagreeing — the \
-         three-derivations gap is closed. That is good news: delete this \
-         assertion, the equivalent one in examples/seed_store.rs, and the \
-         paragraphs in openspec/changes/seed-store/design.md that document the gap"
+        "the probe reports an identity the publish path did not sign with — the \
+         three-derivations gap `machine-identity-scope` closed has reopened"
     );
 
-    // The consequence, asserted rather than left as prose: the record's creator
-    // moderates, and the key every op was signed with does not — so a hide
-    // published through the module against a seeded Stoa is refused.
+    // The consequence, asserted rather than left as prose: the key every
+    // founder op was signed with IS the record's creator, so it moderates — a
+    // hide published through the module against a seeded Stoa binds.
     assert!(
         moderators.contains(&genesis.creator),
         "the record's creator must moderate its own Stoa"
     );
     assert!(
-        !moderators.contains(&founder.public_key()),
-        "the signing key has BECOME a moderator — the same gap closing from the \
-         other side, and the same deletions apply"
+        moderators.contains(&founder.public_key()),
+        "the key the founder signs with is not the Stoa's moderator, so no \
+         moderation this peer publishes would bind"
     );
 }
