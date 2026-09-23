@@ -270,3 +270,112 @@ in that reply would describe a key that is not the one in use.
   What it asserts inverts: the identity in use derives from no path in this
   release, so the reply carries none — and a Stoa with a recorded choice is named
   because that is where a path would be available to report wrongly.
+
+### Requirement: One device holds the master key, and the record has one writer
+
+The master key MUST be held on a single device, and the record of chosen
+derivation paths MUST have exactly one writer.
+
+This is a deliberate scope limit rather than a property of the design, and taking
+it buys the absence of a whole class of problem: with one writer there is no
+reconciliation between divergent records, no question of which device's record is
+authoritative, and no per-device path allocation to keep disjoint. A restore is a
+restore onto that device, not a sync protocol between peers.
+
+**Additional devices are not this capability's concern**, and the intended shape
+is recorded so that this requirement is not mistaken for a claim that additional
+devices are impossible: a second instance — a phone, or a daemon performing
+storage backups — would generate its own key locally and have it approved by the
+device holding the master key, so that the master key never leaves the one device.
+Specifying that approval is a separate change with its own capability.
+
+**In this release a restore brings back the choices kept, not the identity in
+use.** The identity in use is the machine key in every Stoa (`identity`: *In this
+release one machine key is the identity in every Stoa*), and a recorded choice
+does not change it. A record restored beside a master key MUST reproduce each
+kept choice from that master key and the recorded path, and MUST NOT change the
+identity in use in any Stoa.
+
+#### Scenario: The record is written by one writer
+
+- **WHEN** chosen paths are recorded
+- **THEN** the module is the only writer of that record
+- **AND** no reconciliation between two versions of it is required
+
+#### Scenario: A restore targets the device holding the master key
+
+- **WHEN** a record is restored alongside a master key
+- **THEN** the key derived from the restored master key and the path the restored
+  record names for a Stoa is the identity that was kept for that Stoa
+- **AND** the identity in use in that Stoa is the restored master key's machine
+  key, not the key the restored record names
+- **AND** no other device's record participates
+
+  The scenario keeps its name because the name is how this delta addresses it.
+  It previously asserted that the identities in use are those the record names;
+  in this release the record names kept choices, and the identity in use is the
+  machine key whatever the record holds.
+
+### Requirement: Every entry point refuses malformed input rather than guessing
+
+Each method of this capability MUST reject input it cannot interpret, and MUST
+distinguish an absent field from one of the wrong type.
+
+A caller selecting a candidate supplies a value naming one. Coercing an
+out-of-range or wrongly-typed selection to a default would store an identity the
+user did not choose — which is unrecoverable, because the choice cannot be
+recomputed.
+
+A selection that does not name a candidate in the current set MUST be refused,
+and MUST NOT be satisfied by any other candidate.
+
+The module MUST NOT abort on any input. A failure on this path returns an error;
+it does not crash the process serving every other call.
+
+#### Scenario: A selection outside the current set is refused
+
+- **WHEN** a candidate is selected that the current set does not contain
+- **THEN** the attempt is refused
+- **AND** no choice is recorded and no master key is stored that were not there
+  before
+
+#### Scenario: A selection made against a superseded set is refused
+
+- **WHEN** a slate is generated, then regenerated, and a candidate from the first
+  set is selected
+- **THEN** the attempt is refused rather than storing a candidate from the second
+
+#### Scenario: A malformed request is refused by kind
+
+- **WHEN** a request is not valid JSON, or omits a required field, or supplies one
+  of the wrong type
+- **THEN** the reply is the failure shape
+- **AND** carries no result alongside it
+
+#### Scenario: No input aborts the module
+
+- **WHEN** any method of this capability is called with arbitrary input
+- **THEN** it returns a reply rather than terminating the process
+
+### Requirement: Nothing is stored before a candidate is kept
+
+Generating a slate MUST NOT write to storage.
+
+A slate that persisted would record choices the user has not made, and on the
+derivation-path model there is nothing to persist in any case: the paths are
+reproducible from the master key. If the module stops between generating a slate
+and keeping a candidate, nothing is lost, because nothing was published and no
+identity existed to lose.
+
+#### Scenario: Generating a slate writes nothing
+
+- **WHEN** a slate is generated and no candidate is kept
+- **THEN** no master key and no recorded choice are stored that were not there
+  before
+- **AND** on a peer that held no master key, a caller asking who the user is
+  still finds none
+
+#### Scenario: A discarded slate leaves no trace
+
+- **WHEN** a slate is generated and then superseded by another
+- **THEN** no record of the first remains in storage

@@ -131,10 +131,17 @@ None.
   reply; and "Keeping an identity does not replace an existing one" is narrowed
   to what the code already does — a second keep *for the same Stoa* is refused —
   because read against "the machine key is an identity in every Stoa" its old
-  wording would refuse every keep once a key exists. Two scenarios here (and one
-  in `content-authoring`) keep their names while their content changes, the
-  convention this capability already uses, because `validate` refuses a MODIFIED
-  block that drops a scenario.
+  wording would refuse every keep once a key exists. Three further requirements
+  are modified because their scenarios assumed a peer holding no key while it
+  onboards, and read against the machine key they contradicted the new `identity`
+  requirement: a restored record reproduces the kept choices and leaves the
+  identity in use as the machine key (it previously said the record names the
+  identities in use); a slate generated on a peer that already holds a key no
+  longer asserts that "who am I" finds nobody; and a refused selection is required
+  to record no choice and write no master key, rather than to store "no identity".
+  Three scenarios here (and one in `content-authoring`) keep their names while
+  their content changes, the convention this capability already uses, because
+  `validate` refuses a MODIFIED block that drops a scenario.
   `generateIdentitySlate` and `keepIdentity` themselves are unchanged.
 - `content-authoring`: the author requirement no longer says the identity is
   derived from the Stoa — it says the module decides it and the caller never
@@ -180,14 +187,10 @@ reason not to record a placeholder path, and is left as written.
 
 ### Existing data: the audit, and what happens to it
 
-**The audit of the owner's `alice` profile was not performed.** The store is at
-`module_data/dialectica/<instance-id>/identity.sqlite` beneath the profile, and
-the instance id is host-assigned; the directory could not be located without a
-directory listing, which this agent's shell rules forbid, and the id recorded in
-`first-run-identity`'s `tasks.md` (`40c5423a292f`) did not open under either
-plausible parent. The query to run, read-only, once the directory is known:
-`sqlite3 -readonly <dir>/identity.sqlite "SELECT hex(stoa), path FROM chosen_paths"`.
-Any row it returns is a Stoa where this defect was exercised.
+**The audit of the owner's `alice` profile was performed after this proposal was
+first written.** Its result, the store's location and the read-only query to
+re-run are in `design.md`'s Migration Plan ("Existing data: the audit, for
+#108"). Any row that query returns is a Stoa where this defect was exercised.
 
 **What happens to such a Stoa once this lands**, decided here because it is
 behaviour, not data repair:
