@@ -1,8 +1,15 @@
 import QtQuick
 import QtQuick.Layouts
 
-// Screen 02: the Stoas this peer is in, the create affordance, and the field a
-// user pastes a reference into.
+// The home screen: the Stoas this peer is in, the field a user pastes a
+// reference into, and — decided by one value, `machineKey` — either the block
+// that makes this machine's key (no key held, reference screen 0A) or the
+// create affordance with the key as one line at the foot (key held, 0B). A
+// third key state, "could not be read", draws neither. See `machineKey` below.
+//
+// Two independent state machines live here and neither reads the other: the
+// membership listing (`readState`, below) and the key state. Each key state
+// renders the same whatever the listing did.
 //
 // Three read states, kept apart the way FeedScreen keeps its three apart — one
 // string computed from one variable, so no combination of flags can put two on
@@ -106,55 +113,124 @@ ScreenFrame {
         screen.genesisByStoaChanged()
     }
 
-    // ---- this peer's master key -----------------------------------------
+    // ---- this machine's key: ONE value, three states --------------------
     //
-    // A FIRST-RUN step, and it is a step rather than something folded into
-    // creation on the owner's decision. `wire.rs` states the invariant creation
-    // rests on — "Creation fails without a key rather than inventing one. There
-    // is no path from here to `Keystore::generate()`" — and minting inside
-    // `create_stoa` would overturn it. So the key is made here, explicitly, and
-    // `create_stoa` keeps refusing without one.
+    // The whole screen below the listing is decided by this one property, the
+    // `hasMachineKey` flag the issue names — widened from a boolean because the
+    // question has three answers, not two:
     //
-    // "" | "minting" | "ready" | "failed"
-    property string keyState: ""
-    property string keyFailure: ""
-    // `{publicKey, encrypted, wasNew}` from the reply, or `null`.
-    property var keyHeld: null
+    //   { state: "none" }                                   no key held
+    //   { state: "held", publicKey: <hex>, encrypted: <bool|null> }
+    //   { state: "unreadable", reason: <text> }             could not be read
+    //
+    // **Why not a boolean**, which is what FeedScreen's `hasIdentity` is: that
+    // flag is normalised with `=== true`, so its failures fold into "no
+    // identity", and on the feed that is the safe direction — no composer is
+    // drawn. Here the same fold is the dangerous direction: "no key" draws
+    // "Create this machine's key", which the core then refuses for a peer whose
+    // key exists and cannot be read, and the user is asked to make a key they
+    // already hold. So the third answer needs its own state. See design.md.
+    //
+    // **Why one object and not three properties.** `held` without a key to show
+    // is not constructible: only `heldKey()` builds that state, and it is only
+    // called with a non-empty key. Separate `keyState` + `publicKey` properties
+    // could disagree, and every block below would have to check both.
+    //
+    // **Asked, never remembered.** Set only from a reply received in this run —
+    // `askKeyState()` on each showing, `createMachineKey()` on a press. Nothing
+    // is persisted. The initial value is the least-claiming state, and it is
+    // replaced before the first frame: `askKeyState()` runs synchronously in
+    // `Component.onCompleted`.
+    property var machineKey: screen.unreadableKey("This machine's key has not been asked about yet.")
 
-    // Mint this peer's master key, or report the one it already has.
-    //
-    // **Safe to press twice**, and the safety is core's rather than a guard
-    // here: an existing key comes back with `wasNew:false` and is never
-    // replaced. A disabled-button guard in this file would be a second copy of a
-    // rule core already enforces, and the copy is the one that gets forgotten.
-    function createIdentity() {
-        screen.keyState = "minting"
-        screen.keyFailure = ""
+    // Why the last press of "Create this machine's key" made no key, or "".
+    // Rendered only inside the key block, i.e. only in the no-key state, which
+    // is the one state a press can leave the screen in when it fails.
+    property string mintFailure: ""
 
+    function heldKey(publicKey, encrypted) {
+        // `encrypted` is carried only as a boolean. Anything else — absent,
+        // "false", 0 — is `null`, which renders NO claim about protection
+        // either way: the spec forbids a claim the reply did not make.
+        return { state: "held", publicKey: publicKey,
+                 encrypted: typeof encrypted === "boolean" ? encrypted : null }
+    }
+
+    function unreadableKey(reason) {
+        return { state: "unreadable", reason: reason }
+    }
+
+    // One `get_master_key` reply, as one of the three states.
+    //
+    // `=== true` and `=== false`, each strictly, and that is the point: the
+    // two affirmative states are entered only on the exact boolean, so every
+    // other reply — `"false"`, `0`, `null`, a missing field, a key claimed
+    // with no key named — is "could not be read", which instantiates neither
+    // creation affordance. The looser `!v.hasMasterKey` would put a reply
+    // stating nothing into the no-key state and draw the create-key button.
+    function keyFromQuery(reply) {
+        if (!reply.ok)
+            return screen.unreadableKey(reply.error)
+        var v = reply.value
+        if (v.hasMasterKey === false)
+            return { state: "none" }
+        if (v.hasMasterKey === true) {
+            if (typeof v.publicKey === "string" && v.publicKey !== "")
+                return screen.heldKey(v.publicKey, v.encrypted)
+            return screen.unreadableKey("The core module said this machine holds a key "
+                                        + "without naming it, so which key it holds is unknown.")
+        }
+        return screen.unreadableKey("The core module answered without saying whether "
+                                    + "this machine holds a key.")
+    }
+
+    // Ask the core whether this machine holds a key, and let the answer — and
+    // only the answer — decide the state.
+    //
+    // Called on every showing, because the key can change while this screen
+    // is hidden: keeping a per-Stoa identity inside a feed also writes the
+    // master key, and a screen that kept its first answer would offer that
+    // user a key they already hold.
+    function askKeyState() {
+        // NO SPEC: a mint failure from an earlier showing is cleared here, so a
+        // re-shown no-key state starts without the old "No key was created".
+        // The spec says an earlier answer must not decide a later showing's
+        // key state; it says nothing about a stale mint failure.
+        screen.mintFailure = ""
+        screen.machineKey = screen.keyFromQuery(Core.getMasterKey())
+    }
+
+    // Mint this machine's key, from the create-key action.
+    //
+    // **A successful reply naming a key is the key-held state whatever its
+    // `wasNew` says.** `wasNew:false` means the core found a key rather than
+    // made one, and the old screen said so ("already had a key, nothing was
+    // replaced"). That sentence now has no path to the screen: the action is
+    // drawn only in the no-key state, and should the core find a key anyway,
+    // the truthful rendering is the key-held state it is in. The core's refusal
+    // to replace a key is unchanged, and is what makes this safe.
+    //
+    // A failure leaves `machineKey` alone, so the screen stays in the no-key
+    // state and renders the reason.
+    function createMachineKey() {
+        screen.mintFailure = ""
         var reply = Core.createIdentity()
 
         if (!reply.ok) {
-            screen.keyState = "failed"
-            screen.keyFailure = reply.error
-            screen.keyHeld = null
+            screen.mintFailure = reply.error
             return
         }
 
-        // A success MUST name the key. Without this the screen would report a
-        // key that was made on the strength of `ok` alone, which is the shape
-        // `Core.qml` warns about at its `ok: true` return — and here the user
-        // would then press "Create it" and meet the deadlock's error again with
-        // nothing explaining it.
+        // A success MUST name the key. `ok` means the module answered — see the
+        // warning at `Core.qml`'s `ok: true` return — and a key-held state
+        // entered on `ok` alone would show a key nobody named.
         if (typeof reply.value.publicKey !== "string" || reply.value.publicKey === "") {
-            screen.keyState = "failed"
-            screen.keyFailure = "The core module answered without a key, so there "
-                              + "is nothing to create a Stoa with."
-            screen.keyHeld = null
+            screen.mintFailure = "The core module answered without naming a key, so no "
+                               + "key can be shown as held."
             return
         }
 
-        screen.keyHeld = reply.value
-        screen.keyState = "ready"
+        screen.machineKey = screen.heldKey(reply.value.publicKey, reply.value.encrypted)
     }
 
     // ---- creation -------------------------------------------------------
@@ -175,7 +251,20 @@ ScreenFrame {
 
     property DClipboardSink clipboard: null
 
-    Component.onCompleted: screen.reload()
+    Component.onCompleted: {
+        screen.reload()
+        if (screen.visible)
+            screen.askKeyState()
+    }
+
+    // Each later showing asks again. `Main.qml` shows and hides this screen by
+    // its `visible` binding and never destroys it, so this is the only hook a
+    // return to the list passes through. A screen first created hidden is
+    // asked here on its first showing, and not before.
+    onVisibleChanged: {
+        if (screen.visible)
+            screen.askKeyState()
+    }
 
     function reload() {
         var reply = Core.listStoas(screen.page, screen.perPage)
@@ -307,15 +396,15 @@ ScreenFrame {
         spacing: 16
 
         Text {
-            // copy.json `stoaList.title`
-            text: "Stoas you hold"
+            // copy.json `homeMachineKey.heading`, verbatim.
+            text: "Stoas you joined"
             font: DTheme.display
             color: DTheme.ink
             textFormat: Text.PlainText
         }
 
         Text {
-            // copy.json `stoaList.subtitle`
+            // copy.json `homeMachineKey.headingNote`, verbatim.
             text: "NO DIRECTORY EXISTS · JOIN BY ADDRESS"
             font: DTheme.label
             color: DTheme.inkMuted
@@ -626,274 +715,327 @@ ScreenFrame {
         Item { Layout.fillWidth: true }
     }
 
-    // ---- this peer's identity, before anything can be created ------------
+    // ---- the key-dependent blocks: INSTANTIATED, not shown ---------------
     //
-    // **The first-run step, and the reason a fresh profile was stuck.** Creating
-    // a Stoa needs a creator key and mints none; the only thing that writes one
-    // is per-Stoa onboarding, which refuses a request naming no Stoa. So a fresh
-    // install could reach neither, and "Create it" answered the keystore's own
-    // `no keystore found; create one before posting` with nothing anywhere able
-    // to create one.
+    // **Each block below is a `Loader` whose `active` is one comparison against
+    // `machineKey.state`, and that is the requirement, not a style.** The spec
+    // says of the create affordance and of the create-key action that hiding,
+    // disabling or greying out does not meet it: they must be absent from the
+    // element tree. A `visible: false` element is still in the tree — still
+    // reachable by a walker, by accessibility, by a later binding that flips
+    // it — and the bundle's rule is "never show a compose field or affordance
+    // the user cannot use". An inactive Loader has no item at all.
     //
-    // **Always shown, in every read state.** It is not conditional on the
-    // listing: a peer whose membership could not be READ may still have no key,
-    // and hiding the one affordance that unblocks them behind a successful read
-    // is how the deadlock would come back for exactly the users least able to
-    // diagnose it.
+    // Nothing here is conditional on the listing's `readState`: the key state
+    // and the membership listing are answered by different calls, and each of
+    // the three key states renders the same way whatever the listing did.
     //
-    // **Nothing here is a claim about whether a key exists.** The screen does not
-    // probe — `who_am_i` and `get_capabilities` both take a Stoa and there is no
-    // Stoa yet, which is the same reason "Create it" is always offered. So this
-    // renders what the LAST press reported and asserts nothing before one.
-    ColumnLayout {
+    // **The word "identity" is absent from every string in these blocks**, and
+    // that is a requirement rather than a style choice.
+    // `test_neither_the_list_nor_the_creation_outcome_claims_moderation_or_
+    // identity` bans it on this screen: one key signs in every Stoa in this
+    // release, so raising "identity" here would offer an unlinkability property
+    // the software does not have. The honest word is what this is — a key,
+    // belonging to this machine, used everywhere.
+
+    // ---- no key held (0A): making the key is the only task ---------------
+    //
+    // Positioned above the paste section, as the reference's 0A draws it. The
+    // strings are copy.json `homeMachineKey`, verbatim.
+    Loader {
+        objectName: "keyBlockLoader"
+        active: screen.machineKey.state === "none"
         Layout.fillWidth: true
-        spacing: DTheme.itemGap
 
-        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: DTheme.hairline; color: DTheme.ink }
+        sourceComponent: Rectangle {
+            objectName: "keyBlock"
+            implicitHeight: keyBlockBody.implicitHeight + 2 * 16
+            color: DTheme.field
+            border.width: DTheme.hairline
+            border.color: DTheme.ink
 
-        // **The word "identity" is deliberately absent from every string in
-        // this block**, and it is a requirement rather than a style choice.
-        // `test_neither_the_list_nor_the_creation_outcome_claims_moderation_or_
-        // identity` bans it on this screen: one key signs in every Stoa in this
-        // release, so raising "identity" here would offer an unlinkability
-        // property the software does not have.
-        //
-        // The honest word is what this actually is — a key, belonging to this
-        // machine, used everywhere. `DOnboardingScreen` is where a per-Stoa
-        // identity is chosen, and that screen may say so because there the claim
-        // is true.
-        Text {
-            text: "THIS MACHINE'S KEY"
-            font: DTheme.label
-            color: DTheme.inkMuted
-            textFormat: Text.PlainText
-        }
+            ColumnLayout {
+                id: keyBlockBody
+                anchors.fill: parent
+                anchors.leftMargin: 18
+                anchors.rightMargin: 18
+                anchors.topMargin: 16
+                anchors.bottomMargin: 16
+                spacing: DTheme.itemGap
 
-        Text {
-            text: "A Stoa records its creator's key, so this machine needs one "
-                + "before it can create or post. Making it writes a key here and "
-                + "tells nobody. The same key signs in every Stoa you hold."
-            font: DTheme.bodySmall
-            color: DTheme.inkSoft
-            wrapMode: Text.WordWrap
-            lineHeight: 1.55
-            textFormat: Text.PlainText
-            Layout.fillWidth: true
-        }
-
-        FlatButton {
-            objectName: "createIdentityButton"
-            text: "Create this machine's key"
-            kind: "primary"
-            onClicked: screen.createIdentity()
-        }
-
-        // What the last press reported. `wasNew` distinguishes a key just made
-        // from one that was already there — both are successes, and saying which
-        // is what stops a second press reading as a failure.
-        ColumnLayout {
-            visible: screen.keyState === "ready" && screen.keyHeld !== null
-            Layout.fillWidth: true
-            spacing: 4
-
-            Text {
-                objectName: "identityOutcomeText"
-                text: screen.keyHeld !== null && screen.keyHeld.wasNew === true
-                    ? "A key was created for this machine."
-                    : "This machine already had a key. Nothing was replaced."
-                font: DTheme.body
-                color: DTheme.ink
-                wrapMode: Text.WordWrap
-                textFormat: Text.PlainText
-                Layout.fillWidth: true
-            }
-
-            AddressLabel {
-                objectName: "identityKeyLabel"
-                address: screen.keyHeld !== null && typeof screen.keyHeld.publicKey === "string"
-                       ? screen.keyHeld.publicKey : ""
-                Layout.fillWidth: true
-                onCopyRequested: {
-                    if (screen.clipboard)
-                        screen.clipboard.copy(address)
+                Text {
+                    text: "THIS MACHINE'S KEY"
+                    font: DTheme.label
+                    color: DTheme.inkMuted
+                    textFormat: Text.PlainText
                 }
-            }
 
-            // **Stated plainly when it is true, and this is the first run's
-            // normal case.** With no passphrase set, core stores the key in the
-            // clear and says so in `encrypted`. A user whose key is unprotected
-            // should learn it from the interface rather than from a file. There
-            // is no passphrase flow here to offer instead — saying the true
-            // thing is a smaller claim than a control that does not exist.
-            Text {
-                objectName: "identityUnencryptedWarning"
-                visible: screen.keyHeld !== null && screen.keyHeld.encrypted === false
-                text: "This key is stored unencrypted on this machine. Anyone who "
-                    + "can read the file can post as you."
-                font: DTheme.bodySmall
-                color: DTheme.accent
-                wrapMode: Text.WordWrap
-                lineHeight: 1.55
-                textFormat: Text.PlainText
-                Layout.fillWidth: true
-            }
-        }
+                Text {
+                    objectName: "keyExplanation"
+                    text: "A Stoa records its creator's key, so this machine needs one "
+                        + "before it can create or post. Making it writes a key here and "
+                        + "tells nobody. The same key signs in every Stoa you hold."
+                    font: DTheme.body
+                    color: DTheme.inkSoft
+                    wrapMode: Text.WordWrap
+                    lineHeight: DTheme.lineHeightBody
+                    textFormat: Text.PlainText
+                    Layout.fillWidth: true
+                }
 
-        // The core's reason, unreworded — the keystore's own vocabulary, which
-        // names a fix and reads like the one a failed creation gives.
-        ColumnLayout {
-            visible: screen.keyState === "failed"
-            Layout.fillWidth: true
-            spacing: 4
+                FlatButton {
+                    objectName: "createKeyButton"
+                    text: "Create this machine's key"
+                    kind: "primary"
+                    onClicked: screen.createMachineKey()
+                }
 
-            Text {
-                text: "No key was created."
-                font: DTheme.body
-                color: DTheme.accent
-                textFormat: Text.PlainText
-            }
+                // The last press's refusal, the core's reason unreworded — the
+                // keystore's own vocabulary, which names a fix.
+                ColumnLayout {
+                    visible: screen.mintFailure !== ""
+                    Layout.fillWidth: true
+                    spacing: 4
 
-            Text {
-                objectName: "identityFailureText"
-                text: screen.keyFailure
-                font: DTheme.address
-                color: DTheme.ink
-                wrapMode: Text.WrapAnywhere
-                textFormat: Text.PlainText
-                Layout.fillWidth: true
+                    Text {
+                        text: "No key was created."
+                        font: DTheme.body
+                        color: DTheme.accent
+                        textFormat: Text.PlainText
+                    }
+
+                    Text {
+                        objectName: "mintFailureText"
+                        text: screen.mintFailure
+                        font: DTheme.address
+                        color: DTheme.ink
+                        wrapMode: Text.WrapAnywhere
+                        textFormat: Text.PlainText
+                        Layout.fillWidth: true
+                    }
+                }
             }
         }
     }
 
-    // ---- create ---------------------------------------------------------
+    // ---- the key state could not be read ----------------------------------
+    //
+    // Told apart from the no-key state by what it does NOT draw: no
+    // explanation, no create-key action, no create affordance, and nothing
+    // saying no key is held — because a key may be held and unreadable, and
+    // offering to make one is exactly the invitation the core would refuse.
+    // Where the no-key block sits, so the screen's shape does not jump.
+    Loader {
+        objectName: "keyUnreadableLoader"
+        active: screen.machineKey.state === "unreadable"
+        Layout.fillWidth: true
+
+        sourceComponent: Rectangle {
+            objectName: "keyUnreadable"
+            implicitHeight: keyUnreadableBody.implicitHeight + 2 * 16
+            color: DTheme.field
+            border.width: DTheme.border
+            border.color: DTheme.accent
+
+            ColumnLayout {
+                id: keyUnreadableBody
+                anchors.fill: parent
+                anchors.leftMargin: 18
+                anchors.rightMargin: 18
+                anchors.topMargin: 16
+                anchors.bottomMargin: 16
+                spacing: 4
+
+                // NO SPEC: the spec requires the reason and forbids a no-key
+                // claim, and gives no copy for this state. This sentence is
+                // this change's; it states what failed and claims nothing about
+                // whether a key exists.
+                Text {
+                    text: "Whether this machine holds a key could not be read."
+                    font: DTheme.body
+                    color: DTheme.accent
+                    wrapMode: Text.WordWrap
+                    textFormat: Text.PlainText
+                    Layout.fillWidth: true
+                }
+
+                Text {
+                    objectName: "keyUnreadableReason"
+                    // The core's message unreworded, or the view's own naming of
+                    // what was wrong with a reply that was neither shape.
+                    text: typeof screen.machineKey.reason === "string"
+                          ? screen.machineKey.reason : ""
+                    font: DTheme.address
+                    color: DTheme.ink
+                    wrapMode: Text.WrapAnywhere
+                    textFormat: Text.PlainText
+                    Layout.fillWidth: true
+                }
+            }
+        }
+    }
+
+    // ---- key held (0B): creating a Stoa, above pasting a reference --------
     //
     // A title and nothing else. There is no creator-key field and no identity
     // picker, because the creator key is what makes the creator the Stoa's sole
     // moderator and it is fixed inside the address preimage forever — a field
     // for one would be a field that mints a Stoa nobody can moderate.
     //
-    // It is ALWAYS offered, whatever the keystore holds. The posting probe takes
-    // a Stoa address and there is no Stoa yet at creation, so there is nothing to
-    // ask it about; a button hidden or disabled here would be hidden on a guess
-    // rather than on an answer the core gave.
-    ColumnLayout {
+    // **Offered only in the key-held state**, which reverses what this block
+    // used to say ("always offered ... a button hidden here would be hidden on
+    // a guess"). It is no longer a guess: `get_master_key` answers. The
+    // "a key held can still be unusable" case stays reachable — a key can be
+    // reported held and refused at creation — which is why the core's reason
+    // on a failed creation is still rendered below.
+    Loader {
+        objectName: "createBlockLoader"
+        active: screen.machineKey.state === "held"
         Layout.fillWidth: true
-        spacing: DTheme.itemGap
 
-        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: DTheme.hairline; color: DTheme.ink }
-
-        Text {
-            text: "CREATE A STOA"
-            font: DTheme.label
-            color: DTheme.inkMuted
-            textFormat: Text.PlainText
-        }
-
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 14
-
-            Rectangle {
-                Layout.fillWidth: true
-                implicitHeight: createField.implicitHeight + 10
-                color: DTheme.field
-                border.width: DTheme.hairline
-                border.color: DTheme.ink
-
-                TextInput {
-                    id: createField
-                    anchors.fill: parent
-                    anchors.margins: 5
-                    text: screen.createTitle
-                    font: DTheme.body
-                    color: DTheme.ink
-                    clip: true
-                    onTextChanged: screen.createTitle = text
-                }
-            }
-
-            FlatButton {
-                id: createButton
-                objectName: "createStoaButton"
-                text: "Create it"
-                kind: "primary"
-                onClicked: screen.create()
-            }
-        }
-
-        // The created Stoa's address. There is no registry to look a Stoa up in
-        // later, so this is the only way to name what was just made — a screen
-        // that discarded it would leave the user holding a Stoa they cannot
-        // share. Nothing here says the user moderates it: whether they still can
-        // is a question these screens cannot answer, since the creator key
-        // recorded in the record is never re-checked against the peer's current
-        // signing key.
-        ColumnLayout {
-            visible: screen.createState === "created" && screen.created !== null
-            Layout.fillWidth: true
-            spacing: 4
+        sourceComponent: ColumnLayout {
+            objectName: "createBlock"
+            spacing: DTheme.itemGap
 
             Text {
-                text: "CREATED — THIS IS ITS ADDRESS"
+                text: "CREATE A STOA"
                 font: DTheme.label
                 color: DTheme.inkMuted
                 textFormat: Text.PlainText
             }
 
-            AddressLabel {
-                objectName: "createdAddress"
-                address: screen.created !== null && typeof screen.created.stoa === "string"
-                       ? screen.created.stoa : ""
-                // A decision is being made about what to share, so the whole
-                // address is on screen rather than the recognition abbreviation.
-                full: true
+            RowLayout {
                 Layout.fillWidth: true
-                onCopyRequested: {
-                    if (screen.clipboard)
-                        screen.clipboard.copy(address)
+                spacing: 12
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    implicitHeight: createField.implicitHeight + 16
+                    color: DTheme.field
+                    border.width: DTheme.hairline
+                    border.color: DTheme.ink
+
+                    TextInput {
+                        id: createField
+                        objectName: "createTitleField"
+                        anchors.fill: parent
+                        anchors.leftMargin: 10
+                        anchors.rightMargin: 10
+                        anchors.topMargin: 8
+                        anchors.bottomMargin: 8
+                        text: screen.createTitle
+                        font: DTheme.body
+                        color: DTheme.ink
+                        clip: true
+                        onTextChanged: screen.createTitle = text
+                    }
+
+                    // The placeholder is a separate Text drawn over an EMPTY
+                    // field, never the field's own text: a TextInput has no
+                    // placeholder, and one written into `text` would be
+                    // submitted as the title. It goes the moment anything is
+                    // typed, and an empty field still submits "".
+                    Text {
+                        objectName: "createTitlePlaceholder"
+                        visible: createField.text === ""
+                        anchors.fill: createField
+                        verticalAlignment: Text.AlignVCenter
+                        text: "Title of the new Stoa"
+                        font: DTheme.note
+                        color: DTheme.inkFaint
+                        textFormat: Text.PlainText
+                    }
+                }
+
+                FlatButton {
+                    objectName: "createStoaButton"
+                    text: "Create it"
+                    kind: "primary"
+                    onClicked: screen.create()
                 }
             }
-        }
 
-        // Creation refused. The core's reason, unreworded — it is the keystore's
-        // own vocabulary and it names a fix.
-        ColumnLayout {
-            visible: screen.createState === "failed"
-            Layout.fillWidth: true
-            spacing: 4
+            // The created Stoa's address. There is no registry to look a Stoa
+            // up in later, so this is the only way to name what was just made —
+            // a screen that discarded it would leave the user holding a Stoa
+            // they cannot share. Nothing here says the user moderates it:
+            // whether they still can is a question these screens cannot answer,
+            // since the creator key recorded in the record is never re-checked
+            // against the peer's current signing key.
+            ColumnLayout {
+                visible: screen.createState === "created" && screen.created !== null
+                Layout.fillWidth: true
+                spacing: 4
 
-            Text {
-                text: "The Stoa was not created."
-                font: DTheme.body
-                color: DTheme.accent
-                textFormat: Text.PlainText
+                Text {
+                    text: "CREATED — THIS IS ITS ADDRESS"
+                    font: DTheme.label
+                    color: DTheme.inkMuted
+                    textFormat: Text.PlainText
+                }
+
+                AddressLabel {
+                    objectName: "createdAddress"
+                    address: screen.created !== null && typeof screen.created.stoa === "string"
+                           ? screen.created.stoa : ""
+                    // A decision is being made about what to share, so the
+                    // whole address is on screen rather than the recognition
+                    // abbreviation.
+                    full: true
+                    Layout.fillWidth: true
+                    onCopyRequested: {
+                        if (screen.clipboard)
+                            screen.clipboard.copy(address)
+                    }
+                }
             }
 
-            Text {
-                objectName: "createFailureText"
-                text: screen.createFailure
-                font: DTheme.address
-                color: DTheme.ink
-                wrapMode: Text.WrapAnywhere
-                textFormat: Text.PlainText
+            // Creation refused. The core's reason, unreworded — it is the
+            // keystore's own vocabulary and it names a fix. Reachable in the
+            // key-held state: a key reported held can still be unusable when
+            // creation is attempted.
+            ColumnLayout {
+                visible: screen.createState === "failed"
                 Layout.fillWidth: true
+                spacing: 4
+
+                Text {
+                    text: "The Stoa was not created."
+                    font: DTheme.body
+                    color: DTheme.accent
+                    textFormat: Text.PlainText
+                }
+
+                Text {
+                    objectName: "createFailureText"
+                    text: screen.createFailure
+                    font: DTheme.address
+                    color: DTheme.ink
+                    wrapMode: Text.WrapAnywhere
+                    textFormat: Text.PlainText
+                    Layout.fillWidth: true
+                }
             }
         }
     }
 
-    // ---- paste a reference ----------------------------------------------
+    // ---- paste a reference: in every key state -----------------------------
+    //
+    // Unconditional, and declared outside every Loader so it holds by
+    // construction: previewing a Stoa needs no key, and a peer whose key could
+    // not be read can still read.
 
     ColumnLayout {
+        objectName: "pasteSection"
         Layout.fillWidth: true
-        spacing: DTheme.itemGap
-
-        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: DTheme.hairline; color: DTheme.ink }
+        spacing: 8
 
         Text {
-            // The mockup's `PASTE AN ADDRESS` is narrowed here, and narrowing it
-            // is the point: an address alone can never join anything, so a field
-            // captioned that way asks for input whose successful-looking form
-            // cannot succeed.
+            // copy.json `homeMachineKey.pasteLabel`, verbatim — which is also
+            // the older narrowing of the mockup's `PASTE AN ADDRESS`, and for
+            // the same reason: an address alone can never join anything, so a
+            // field captioned that way asks for input whose
+            // successful-looking form cannot succeed.
             text: "PASTE A STOA REFERENCE — THE ADDRESS AND ITS FOUNDING RECORD"
             font: DTheme.label
             color: DTheme.inkMuted
@@ -902,19 +1044,23 @@ ScreenFrame {
 
         RowLayout {
             Layout.fillWidth: true
-            spacing: 14
+            spacing: 12
 
             Rectangle {
                 Layout.fillWidth: true
-                implicitHeight: pasteField.implicitHeight + 10
+                implicitHeight: pasteField.implicitHeight + 16
                 color: DTheme.field
                 border.width: DTheme.hairline
                 border.color: DTheme.ink
 
                 TextInput {
                     id: pasteField
+                    objectName: "pasteField"
                     anchors.fill: parent
-                    anchors.margins: 5
+                    anchors.leftMargin: 10
+                    anchors.rightMargin: 10
+                    anchors.topMargin: 8
+                    anchors.bottomMargin: 8
                     text: screen.pasted
                     font: DTheme.address
                     color: DTheme.ink
@@ -924,10 +1070,11 @@ ScreenFrame {
             }
 
             FlatButton {
-                // copy.json `stoaList.pasteAction`. It previews and joins
+                // copy.json `homeMachineKey.pasteAction`. It previews and joins
                 // NOTHING: an address inside a post is attacker-supplied content
                 // and an interface that joined on paste would enrol a user in a
                 // Stoa they never chose.
+                objectName: "pasteButton"
                 text: "Look at it first"
                 kind: "secondary"
                 onClicked: screen.preview()
@@ -944,6 +1091,77 @@ ScreenFrame {
             lineHeight: 1.55
             textFormat: Text.PlainText
             Layout.fillWidth: true
+        }
+    }
+
+    // ---- key held (0B): the key is a fact, one line at the foot -----------
+    //
+    // Below both the create affordance and the paste section, as the reference
+    // draws it. The key goes through `AddressLabel` — the one 8-8-6
+    // abbreviation — and nowhere else.
+    //
+    // **The unencrypted warning is conditional on the reply**, where the bundle
+    // draws it every time. That is the owner's decision: protection is taken
+    // from a reply and never assumed, so `encrypted === false` draws it,
+    // `true` does not, and a reply without the field makes no claim either way.
+    //
+    // **No "already had a key" and no "was created"**: the line renders the
+    // same text however the key-held state was reached — the query, a mint
+    // that made the key, or a mint that found one.
+    Loader {
+        objectName: "keyLineLoader"
+        active: screen.machineKey.state === "held"
+        Layout.fillWidth: true
+
+        sourceComponent: ColumnLayout {
+            objectName: "keyLine"
+            spacing: 4
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: DTheme.hairline
+                Layout.bottomMargin: 8
+                color: DTheme.rule
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 10
+
+                Text {
+                    text: "THIS MACHINE'S KEY"
+                    font: DTheme.label
+                    color: DTheme.inkMuted
+                    textFormat: Text.PlainText
+                    Layout.alignment: Qt.AlignBaseline
+                }
+
+                AddressLabel {
+                    objectName: "keyLineAddress"
+                    address: typeof screen.machineKey.publicKey === "string"
+                             ? screen.machineKey.publicKey : ""
+                    color: DTheme.ink
+                    Layout.alignment: Qt.AlignBaseline
+                    onCopyRequested: {
+                        if (screen.clipboard)
+                            screen.clipboard.copy(address)
+                    }
+                }
+
+                Item { Layout.fillWidth: true }
+            }
+
+            Text {
+                objectName: "unencryptedWarning"
+                visible: screen.machineKey.encrypted === false
+                text: "Stored unencrypted on this machine. Anyone who can read the "
+                    + "file can post as you."
+                font: DTheme.bodySmall
+                color: DTheme.accent
+                wrapMode: Text.WordWrap
+                textFormat: Text.PlainText
+                Layout.fillWidth: true
+            }
         }
     }
 

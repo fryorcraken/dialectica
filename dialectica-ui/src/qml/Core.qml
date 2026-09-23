@@ -295,6 +295,22 @@ QtObject {
         return root.call("create_identity", [JSON.stringify({})])
     }
 
+    // `{}` -> `{"hasMasterKey":true,"publicKey":hex,"encrypted":bool}` or
+    // `{"hasMasterKey":false}`.
+    //
+    // **The read-only half of `createIdentity`.** That call can tell a caller
+    // whether a key exists only by minting one; this one mints nothing, writes
+    // nothing and takes no Stoa, so the home screen can ask it on every showing.
+    //
+    // **An unreadable keystore is `ok: false` here, never `hasMasterKey:false`.**
+    // A present-but-unreadable key reported as absent would invite the screen to
+    // offer a new one, which `createIdentity` then refuses because it never
+    // replaces a key. So the answer is `hasMasterKey === true` or `=== false`
+    // on an `ok` reply, and anything else is a key state that could not be read.
+    function getMasterKey() {
+        return root.call("get_master_key", [JSON.stringify({})])
+    }
+
     // `{"stoa":hex}` -> `{"slate":hex,"count":N,"candidates":[…]}`.
     // No count parameter: a caller-supplied count is a number deciding how much
     // key derivation the module performs, so the module fixes it and reports it.
