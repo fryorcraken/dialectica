@@ -2219,8 +2219,21 @@ mod tests {
         let on_page = a_post_at(2, None, 9, "first row");
         let off_page = a_post_at(3, None, 8, "second row");
         let reply = a_post_at(4, Some(off_page.op.id()), 10, "reply to the second");
+
+        // The same ops with no failure: page one holds the first row. So the
+        // error below is the one met on the other page's reply, not one met
+        // finding either head.
+        let healthy = FailingOn {
+            log: a_log(vec![on_page.clone(), off_page.clone(), reply.clone()]),
+            id: OpId::from_hex(&"ab".repeat(32)).unwrap(),
+        };
+        let page = list_threads(&healthy, &moderators(), &a_stoa(), 0, 1, false)
+            .expect("the healthy store must answer");
+        assert!(!page.items.is_empty());
+        assert_eq!(page.items[0].thread, on_page.op.id().to_hex());
+
         let failing = FailingOn {
-            log: a_log(vec![on_page.clone(), off_page, reply.clone()]),
+            log: a_log(vec![on_page, off_page, reply.clone()]),
             id: reply.op.id(),
         };
         let err = list_threads(&failing, &moderators(), &a_stoa(), 0, 1, false)
