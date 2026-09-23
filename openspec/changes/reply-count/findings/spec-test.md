@@ -15,7 +15,7 @@ dialectica -p dialectica-core` ran throughout.
 
 Both requirements' scenarios are covered well, with two exceptions:
 
-- [ ] **`tester`** — spec.md's requirement *"A feed row reports how many of its
+- [x] **`tester`** — spec.md's requirement *"A feed row reports how many of its
       thread's replies are visible"*, scenario **"Ops that are not posts are not
       counted"** (a thread's only reply revised, voted on, and unhidden by a
       moderator without ever having been hidden — count must still be one) has no
@@ -39,8 +39,19 @@ Both requirements' scenarios are covered well, with two exceptions:
       scenario.
       Severity: moderate — a real, specific combinatorial case the spec calls out
       by name is untested.
+      **Outcome (tester): fixed.** Added
+      `a_reply_revised_voted_on_and_unhidden_with_no_prior_hide_is_counted_once`
+      in `dialectica-core/src/feed.rs`: one reply carrying a `Revise`, a `Vote`
+      and an `Unhide` with no prior `Hide` anywhere in the log, asserting a count
+      of one and that reply as latest. **Predicted-vs-observed:** predicted this
+      would catch a fold that treats any `Moderate` op naming a reply as evidence
+      of a hide, regardless of action; measured directly by replacing the
+      `moderation::resolve` call in `visible_replies_by_thread` with a local
+      check that any `Moderate` op names the reply — the test failed
+      (`left: 0, right: 1`), matching the prediction exactly. Mutation restored;
+      `git diff --stat` shows only additions to `feed.rs`.
 
-- [ ] **`tester`** — spec.md's requirement *"Computing the reply fields fails as
+- [x] **`tester`** — spec.md's requirement *"Computing the reply fields fails as
       an error and never aborts"*, scenario **"An adversarial log is read without
       aborting"** (forged posts, posts naming parents not held, a post naming
       itself as its parent, a parent cycle, and ops of every other kind naming a
@@ -64,6 +75,33 @@ Both requirements' scenarios are covered well, with two exceptions:
       Severity: low-moderate — the individual mechanisms are well covered
       elsewhere; the combined-log termination property named by the scenario is
       not.
+      **Outcome (tester): fixed.** Added `an_adversarial_log_is_read_without_aborting`
+      in `dialectica-core/src/feed.rs`: one `WrongKeyLog` holding a
+      self-referencing post, a two-op parent cycle, a post whose parent is never
+      held, a forged post, and a genuine reply named by a `Revise`, a `Vote` and
+      a `Moderate` op, read once, asserting `list_threads` returns `Ok` with a
+      non-empty page and every row reports a `reply_count()`. **Predicted-vs-observed:**
+      predicted this would catch a `feed.rs`-local re-implementation of the
+      parent walk that omits a visited set (the exact trap the existing cycle
+      test's own comment names — "a walk with no visited set would spin
+      forever"); measured directly by replacing the fold's `thread_of(log, &id)?`
+      call with a naive unguarded walk starting from each entry's own `parent`
+      field. Run under a 15-second timeout, the test hung (`exit 124`) rather
+      than failing an assertion — a non-termination catch, which is what this
+      scenario is actually about, distinct from a `left != right` failure.
+      Restored; re-ran clean at 0.27s. `git diff --stat` shows only additions to
+      `feed.rs`.
+      A third scenario the spec gained since this finding was written —
+      *"A store failure on a reply of a thread whose row is not returned fails
+      the read"* (commit `4eaa19c`) — also had no test; added
+      `a_store_failure_on_a_reply_of_a_hidden_thread_fails_the_read`, a hidden
+      root with a reply whose store read fails, with a healthy-store control
+      confirming the healthy read returns only the visible thread's row.
+      Predicted to catch a fold that swallows a store failure met while placing
+      a reply instead of propagating it (the shape design.md Decision 5
+      forbids); measured by making `thread_of`'s error branch map to `None`
+      instead of `?`-propagating — the test failed with the swallowed-error page
+      printed in the panic message, exactly as predicted. Restored.
 
 Everything else scans clean: zero-reply rows, every-depth counting, the ordering
 rule's first-met reply (both insertion directions), hidden-reply exclusion (with

@@ -1573,6 +1573,55 @@ mod tests {
     }
 
     #[test]
+    fn a_reply_revised_voted_on_and_unhidden_with_no_prior_hide_is_counted_once() {
+        // spec.md's "Ops that are not posts are not counted" names all three
+        // non-post kinds against a SINGLE reply, and the unhide carries no
+        // prior hide of that reply anywhere in the log. Each kind has its own
+        // isolated test elsewhere (a revision alone, a restore after a real
+        // hide), but a fold that treated any `Moderate` op naming the reply as
+        // evidence of a resolved-hidden state, or that let an unmatched
+        // unhide leave a stray mark, would not be caught by those — only a
+        // reply carrying a revise, a vote AND an unhide together, with the
+        // count still landing on exactly one, tells them apart.
+        let root = a_post_at(2, None, 1, "root");
+        let reply = a_post_at(3, Some(root.op.id()), 2, "reply");
+        let revise = Op {
+            stoa: a_stoa(),
+            author: a_key(3).public_key(),
+            clock: Some(crate::op::OpClock {
+                counter: 3,
+                asserted_ms: 1_789_729_304_000,
+            }),
+            kind: OpKind::Revise {
+                target: reply.op.id(),
+                body: "revised".to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&a_key(3));
+        let vote = Op {
+            stoa: a_stoa(),
+            author: a_key(6).public_key(),
+            clock: None,
+            kind: OpKind::Vote {
+                target: reply.op.id(),
+                direction: crate::op::VoteDirection::Up,
+            },
+        }
+        .sign(&a_key(6));
+        // No hide of `reply` anywhere in this log: this unhide matches nothing.
+        let unhide = a_moderation_at(reply.op.id(), ModerationAction::Unhide, 4);
+
+        let rows = all_of(
+            &a_log(vec![root.clone(), reply.clone(), revise, vote, unhide]),
+            false,
+        );
+        let row = row_for(&rows, &root);
+        assert_eq!(row.reply_count(), 1);
+        assert_eq!(row.latest_reply(), Some(reply.op.id().to_hex().as_str()));
+    }
+
+    #[test]
     fn the_include_hidden_flag_changes_no_rows_reply_fields() {
         let root = a_post_at(2, None, 1, "root");
         let visible = a_post_at(3, Some(root.op.id()), 2, "visible");
@@ -1931,6 +1980,168 @@ mod tests {
         assert!(reply_ids.contains(&row.latest_reply().unwrap().to_string()));
     }
 
+    #[test]
+    fn an_adversarial_log_is_read_without_aborting() {
+        // spec.md's "An adversarial log is read without aborting" puts every
+        // named shape in ONE log, read ONCE: a forged post, a post naming a
+        // parent not held, a post naming itself as its parent, a parent cycle,
+        // and ops of every other kind naming a reply. Each shape has its own
+        // isolated test elsewhere in this file; none combines them, so an
+        // interaction between two shapes at once (e.g. a cycle member that
+        // also fails verification) is untested outside this fixture. The
+        // property under test is termination and a reply-count on every row —
+        // not any particular count — since a self-cycle and a closed ring need
+        // ids that disagree with their content hash, so `WrongKeyLog` (as the
+        // parent-cycle test above uses) stands in for the whole log.
+        let root = a_post_at(2, None, 1, "root");
+
+        // A post naming itself as its own parent.
+        let self_ref_id = an_id(9);
+        let self_ref_key = a_key(9);
+        let self_ref_op = Op {
+            stoa: a_stoa(),
+            author: self_ref_key.public_key(),
+            clock: Some(crate::op::OpClock {
+                counter: 50,
+                asserted_ms: 1_789_729_304_000,
+            }),
+            kind: OpKind::Post {
+                thread: Some(root.op.id()),
+                parent: Some(self_ref_id),
+                body: "names itself as its own parent".to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&self_ref_key);
+
+        // A closed two-op cycle, distinct from the self-reference above.
+        let cycle_ids = [an_id(10), an_id(11)];
+        let cycle: Vec<(OpId, Entry)> = (0..cycle_ids.len())
+            .map(|i| {
+                let next = cycle_ids[(i + 1) % cycle_ids.len()];
+                let key = a_key(20 + i as u8);
+                let op = Op {
+                    stoa: a_stoa(),
+                    author: key.public_key(),
+                    clock: Some(crate::op::OpClock {
+                        counter: 60 + i as u64,
+                        asserted_ms: 1_789_729_304_000,
+                    }),
+                    kind: OpKind::Post {
+                        thread: Some(root.op.id()),
+                        parent: Some(next),
+                        body: "cyclic".to_string(),
+                        attachments: vec![],
+                    },
+                }
+                .sign(&key);
+                WrongKeyLog::filed_at(cycle_ids[i], op)
+            })
+            .collect();
+
+        // A post naming a parent no op in the log carries.
+        let dangling_key = a_key(12);
+        let dangling = Op {
+            stoa: a_stoa(),
+            author: dangling_key.public_key(),
+            clock: Some(crate::op::OpClock {
+                counter: 70,
+                asserted_ms: 1_789_729_304_000,
+            }),
+            kind: OpKind::Post {
+                thread: Some(root.op.id()),
+                parent: Some(an_id(13)),
+                body: "parent never arrives".to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&dangling_key);
+
+        // A forged post: claims one key, signed by another.
+        let forged_op = Op {
+            stoa: a_stoa(),
+            author: a_key(14).public_key(),
+            clock: Some(crate::op::OpClock {
+                counter: 80,
+                asserted_ms: 1_789_729_304_000,
+            }),
+            kind: OpKind::Post {
+                thread: Some(root.op.id()),
+                parent: Some(root.op.id()),
+                body: "forged".to_string(),
+                attachments: vec![],
+            },
+        };
+        let forged = SignedOp {
+            signature: crate::identity::sign_op_bytes(&a_key(15), &forged_op.canonical_bytes()),
+            op: forged_op,
+        };
+        assert!(!forged.verify(), "the fixture must be a genuine forgery");
+
+        // A genuine reply, plus a revise, a vote and a moderation naming it —
+        // "ops of every other kind naming a reply".
+        let reply = a_post_at(16, Some(root.op.id()), 90, "reply");
+        let revise = Op {
+            stoa: a_stoa(),
+            author: a_key(17).public_key(),
+            clock: Some(crate::op::OpClock {
+                counter: 91,
+                asserted_ms: 1_789_729_304_000,
+            }),
+            kind: OpKind::Revise {
+                target: reply.op.id(),
+                body: "revised".to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&a_key(17));
+        let vote = Op {
+            stoa: a_stoa(),
+            author: a_key(18).public_key(),
+            clock: None,
+            kind: OpKind::Vote {
+                target: reply.op.id(),
+                direction: crate::op::VoteDirection::Down,
+            },
+        }
+        .sign(&a_key(18));
+        let moderate = a_moderation_at(reply.op.id(), ModerationAction::Hide, 92);
+
+        let mut entries: Vec<(OpId, Entry)> = vec![
+            WrongKeyLog::filed_at(root.op.id(), root.clone()),
+            WrongKeyLog::filed_at(self_ref_id, self_ref_op),
+            WrongKeyLog::filed_at(dangling.op.id(), dangling),
+            WrongKeyLog::filed_at(reply.op.id(), reply),
+            WrongKeyLog::filed_at(revise.op.id(), revise),
+            WrongKeyLog::filed_at(vote.op.id(), vote),
+            WrongKeyLog::filed_at(moderate.op.id(), moderate),
+            // The forged op does not verify, so `filed_at`'s own assertion
+            // would reject it; it is filed directly instead.
+            (
+                forged.op.id(),
+                Entry {
+                    op: forged,
+                    arrival: Arrival::unordered(),
+                },
+            ),
+        ];
+        entries.extend(cycle);
+        let log = WrongKeyLog { entries };
+
+        let page = list_threads(&log, &moderators(), &a_stoa(), 0, MAX_PER_PAGE, false)
+            .expect("an adversarial log must return an answer rather than an error");
+        assert!(
+            !page.items.is_empty(),
+            "the root itself is genuine and must still appear as a row"
+        );
+        for row in &page.items {
+            // Every row reports a reply count: `reply_count()` returning
+            // `usize` rather than `Option<usize>` means this is checked by
+            // the type, but call it to document the scenario's own assertion.
+            let _: usize = row.reply_count();
+        }
+    }
+
     /// A log that fails every read keyed by one op id, and answers the rest.
     ///
     /// Keyed rather than total, so a failure can be placed on ONE reply: a log
@@ -2014,6 +2225,44 @@ mod tests {
         };
         let err = list_threads(&failing, &moderators(), &a_stoa(), 0, 1, false)
             .expect_err("the page holding only the first row still fails");
+        assert!(err.to_string().contains("unreadable"), "got {err}");
+    }
+
+    // `feed-read`, "Computing the reply fields fails as an error and never
+    // aborts": the read fails even when the failing reply's thread's row is
+    // not returned at all, because its root is hidden and hidden content is
+    // excluded — not only when the row is merely on another page.
+    #[test]
+    fn a_store_failure_on_a_reply_of_a_hidden_thread_fails_the_read() {
+        let hidden_root = a_post_at(2, None, 9, "hidden thread's root");
+        let reply = a_post_at(
+            3,
+            Some(hidden_root.op.id()),
+            10,
+            "reply to the hidden thread",
+        );
+        let hide = a_moderation_at(hidden_root.op.id(), ModerationAction::Hide, 11);
+        let visible_root = a_post_at(4, None, 8, "visible thread's root");
+
+        // Healthy-store control: with no failure, hidden content excluded
+        // returns only the visible thread's row, and no row for the hidden one.
+        let healthy = a_log(vec![
+            hidden_root.clone(),
+            reply.clone(),
+            hide.clone(),
+            visible_root.clone(),
+        ]);
+        let control = list_threads(&healthy, &moderators(), &a_stoa(), 0, MAX_PER_PAGE, false)
+            .expect("the healthy store must answer");
+        assert_eq!(control.items.len(), 1);
+        assert_eq!(control.items[0].thread, visible_root.op.id().to_hex());
+
+        let failing = FailingOn {
+            log: a_log(vec![hidden_root, reply.clone(), hide, visible_root]),
+            id: reply.op.id(),
+        };
+        let err = list_threads(&failing, &moderators(), &a_stoa(), 0, MAX_PER_PAGE, false)
+            .expect_err("a failure on a reply whose row is never returned must still fail");
         assert!(err.to_string().contains("unreadable"), "got {err}");
     }
 
