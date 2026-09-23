@@ -102,7 +102,11 @@ unless it states so with the boolean false.
 
 The screen MUST ask the query when it is first shown. It MUST ask again each
 time it is shown after being hidden, and an answer received for an earlier
-showing MUST NOT decide the key state of a later one. The key state MUST NOT be
+showing MUST NOT decide the key state of a later one. It MUST also ask when the
+user acts on the action that reads the key again, offered in the
+could-not-be-read state under "A key state that could not be read is told apart
+from both others"; the answer to that ask decides the key state by the same
+rules as an answer to a showing's ask. The key state MUST NOT be
 decided by any value the view persisted across runs.
 
 The screen MUST NOT call the operation that creates a master key in order to
@@ -196,6 +200,10 @@ MUST follow the reply:
   failure shape. The screen does not reach the key-held state and renders a
   failure naming what was wrong with the reply.
 
+A failure rendered after a press belongs to the showing in which the press was
+made. It MUST NOT be rendered on any later showing of the screen, whatever key
+state that showing's answer puts the screen in.
+
 #### Scenario: The no-key state renders the key block and the paste section
 
 - **WHEN** the home screen is in its no-key state
@@ -238,6 +246,15 @@ MUST follow the reply:
   carrying no public key
 - **THEN** the screen is not in its key-held state
 - **AND** no key is rendered as held
+
+#### Scenario: A refused mint is not rendered on a later showing
+
+- **WHEN** the user acts on the create-key action and the reply is the failure
+  shape, and the screen is then hidden and shown again while the master-key
+  query still replies that no key is held
+- **THEN** the screen is in its no-key state
+- **AND** neither the statement that no key was created nor the core's reason
+  from the earlier press is rendered
 
 ### Requirement: With a key held, the key is a line at the foot of the card and making one is not offered
 
@@ -321,14 +338,66 @@ created the key, or from one that says it did not.
 
 ### Requirement: A key state that could not be read is told apart from both others
 
-In the could-not-be-read state the screen MUST render the reason. That is the
-core's message unreworded when the query answered with the failure shape, or
-otherwise a failure naming what was wrong with the reply.
+In the could-not-be-read state the screen MUST render the statement
+`Whether this machine holds a key could not be read.`, exactly as given, and
+below it the reason. The reason is the core's message unreworded when the query
+answered with the failure shape, or otherwise a failure naming what was wrong
+with the reply.
+
+In this state the screen MUST render an action labelled
+`Try reading the key again`, exactly as given. Acting on it MUST call the
+master-key query exactly once and MUST NOT call the operation that creates a
+master key. The reply decides the key state under "The home screen's key state
+is one value, taken from the core's answer in this run", so a reply naming a
+held key puts the screen in its key-held state, a reply stating no key is held
+puts it in its no-key state, and a failure leaves it in the could-not-be-read
+state rendering the new reason. The action MUST NOT be rendered in the no-key
+state or the key-held state.
 
 In this state the screen MUST NOT instantiate the action that creates this
 machine's key, and MUST NOT instantiate the create affordance. It MUST NOT
 render the key block's explanation, anything stating that no key is held, or a
 key line. The paste section MUST be rendered and usable.
+
+#### Scenario: The could-not-be-read state states what failed above the reason
+
+- **WHEN** the master-key query answers with the failure shape, and again when
+  it replies successfully with neither the boolean true nor the boolean false as
+  its statement of whether a key is held
+- **THEN** in both cases `Whether this machine holds a key could not be read.`
+  is rendered
+- **AND** it is positioned above the reason
+
+#### Scenario: Reading the key again asks the query and mints nothing
+
+- **WHEN** the home screen is in its could-not-be-read state and the user acts
+  on `Try reading the key again`
+- **THEN** the master-key query has been called once more than before the action
+- **AND** the operation that creates a master key has not been called
+
+#### Scenario: Reading the key again reaches the key-held state once the key can be read
+
+- **WHEN** the home screen is in its could-not-be-read state, the query now
+  replies that a key is held naming its public key, and the user acts on
+  `Try reading the key again`
+- **THEN** the screen is in its key-held state
+- **AND** neither the statement that the key state could not be read nor the
+  earlier reason is rendered
+
+#### Scenario: Reading the key again that fails again renders the new reason
+
+- **WHEN** the home screen is in its could-not-be-read state, the query now
+  answers with the failure shape carrying a different message, and the user
+  acts on `Try reading the key again`
+- **THEN** the screen is in its could-not-be-read state
+- **AND** the new message is rendered unreworded
+- **AND** the earlier message is not rendered
+
+#### Scenario: The read-again action belongs to the could-not-be-read state alone
+
+- **WHEN** the home screen is in its no-key state, and separately in its
+  key-held state
+- **THEN** in neither is an action labelled `Try reading the key again` rendered
 
 #### Scenario: A failed query renders the core's reason and offers neither creation
 

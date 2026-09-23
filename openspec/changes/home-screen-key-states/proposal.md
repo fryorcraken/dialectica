@@ -42,6 +42,17 @@ first without a read-only answer from the core. So this change adds one.
   unencrypted-storage warning in accent red **when the core reports the key
   unencrypted**. The bundle draws the warning unconditionally. This change keeps
   the existing rule that protection is taken from a reply and never assumed.
+- **Could not be read:** neither the key block nor the create affordance is
+  instantiated, and nothing says that no key is held. The screen states
+  "Whether this machine holds a key could not be read." above the reason, and
+  offers "Try reading the key again", which asks the query again and never
+  mints. The bundle draws only 0A and 0B, so both strings are this change's own.
+  Without the action, a user who fixes the keystore while the app runs has no
+  way to reach the key-held state short of leaving the screen, which a peer with
+  no Stoa and no reference to paste cannot do, or restarting.
+- **A refused mint is reported only in the showing where it happened.** The key
+  state is asked again on the next showing, and a refusal from an earlier press
+  would describe an attempt the new answer may already have overtaken.
 - **The "already had a key, nothing was replaced" message has no path to the
   screen.** A successful mint reply leads to the key-held state whether or not
   it says the call created the key. The backend guard (`create_identity` never
@@ -86,7 +97,8 @@ key already belongs to `identity-onboarding`.
 - `stoa-navigation-view`: the "always offered" create requirement is removed and
   replaced with one that offers creation only once the core reports a key.
   Requirements are added for the three key states, what each draws and does not
-  instantiate, the key line, the re-read on each showing, and the verbatim copy.
+  instantiate, the key line, the re-read on each showing and on the
+  could-not-be-read state's read-again action, and the verbatim copy.
 
 ## Impact
 
