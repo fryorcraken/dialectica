@@ -10374,7 +10374,11 @@ mod tests {
         // object and not a panic", and passed, because the handler *succeeded*.
         // Asserting the absence of a panic cannot see a wrongful success.
         for entry in log.iter().expect("the sweep's log must still be readable") {
-            crate::op::SignedOp::from_bytes(&entry.op.to_bytes())
+            let bytes = entry
+                .op
+                .to_bytes()
+                .expect("an op a publish accepted must have an encoding");
+            crate::op::SignedOp::from_bytes(&bytes)
                 .expect("an op a publish accepted must decode again");
         }
     }

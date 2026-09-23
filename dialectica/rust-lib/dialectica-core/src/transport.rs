@@ -517,11 +517,22 @@ pub enum PublishError {
     /// the Stoa-lifecycle capability's; a publish is not how a peer comes to be in
     /// a Stoa.
     NoChannel { stoa: Address, id: OpId },
+    /// The op has no encoding, so there is nothing to store or send.
+    ///
+    /// Refused before the append, like [`PublishError::NotStored`] it loses the
+    /// op — but here there was never a wire form to lose. Distinct from it
+    /// because the store is not at fault: the op is one the format does not
+    /// admit, and every peer's decoder would refuse it.
+    Unencodable(OpError),
 }
 
 impl std::fmt::Display for PublishError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            PublishError::Unencodable(e) => write!(
+                f,
+                "the op was not published because the format has no encoding for it: {e}"
+            ),
             PublishError::NotStored(e) => {
                 write!(
                     f,
@@ -623,7 +634,10 @@ pub fn publish<L: OpLog>(
     // is the same bytes either way — `to_bytes` is a pure function of the op. The
     // spec's "the payload handed to the transport is the op's wire form as
     // stored" is therefore not a property that could drift.
-    let payload = op.to_bytes();
+    //
+    // It is also taken before the append for a second reason: an op with no
+    // encoding is refused here, having touched nothing.
+    let payload = op.to_bytes().map_err(PublishError::Unencodable)?;
 
     // FIRST. A store failure means nothing goes out.
     log.append(op, Arrival::unordered())
@@ -1059,7 +1073,7 @@ mod tests {
         let (channels, mut log, identity) = peer_in(stoa);
         let real_author = a_key(2);
         let op = a_post_in(stoa, "mine").sign(&real_author);
-        let payload = op.to_bytes();
+        let payload = op.to_bytes().unwrap();
 
         let impostor = a_key(99).public_key();
         let admitted = receive(
@@ -1135,7 +1149,7 @@ mod tests {
             InboundMessage {
                 channel_id: identity.channel_id(),
                 sender_id: &creator.public_key().to_hex(),
-                payload: &forged.to_bytes(),
+                payload: &forged.to_bytes().unwrap(),
                 timestamp: 5,
             },
             &channels,
@@ -1151,7 +1165,7 @@ mod tests {
     fn one_op_under_two_sender_identifiers_is_one_op() {
         let stoa = a_stoa("Agora");
         let (channels, mut log, identity) = peer_in(stoa);
-        let payload = signed_post_in(stoa, "arrives twice").to_bytes();
+        let payload = signed_post_in(stoa, "arrives twice").to_bytes().unwrap();
 
         let first = receive(
             InboundMessage {
@@ -1191,7 +1205,7 @@ mod tests {
         let stoa = a_stoa("Agora");
         let (channels, mut log, identity) = peer_in(stoa);
         let sender_id = "zzyzx-sender-identifier";
-        let payload = signed_post_in(stoa, "stored").to_bytes();
+        let payload = signed_post_in(stoa, "stored").to_bytes().unwrap();
 
         let admitted = receive(
             InboundMessage {
@@ -1206,7 +1220,7 @@ mod tests {
         .unwrap();
 
         let stored = log.get(&admitted.id).unwrap().unwrap();
-        let bytes = stored.op.to_bytes();
+        let bytes = stored.op.to_bytes().unwrap();
         assert!(
             !bytes
                 .windows(sender_id.len())
@@ -1222,7 +1236,7 @@ mod tests {
     fn the_arrival_timestamp_is_not_recorded_as_ordering_metadata() {
         let stoa = a_stoa("Agora");
         let (channels, mut log, identity) = peer_in(stoa);
-        let payload = signed_post_in(stoa, "timed").to_bytes();
+        let payload = signed_post_in(stoa, "timed").to_bytes().unwrap();
 
         let admitted = receive(
             InboundMessage {
@@ -1263,7 +1277,7 @@ mod tests {
             9_000_000_000_000_000_000,
         ] {
             let (channels, mut log, identity) = peer_in(stoa);
-            let payload = signed_post_in(stoa, "same op").to_bytes();
+            let payload = signed_post_in(stoa, "same op").to_bytes().unwrap();
             let admitted = receive(
                 InboundMessage {
                     channel_id: identity.channel_id(),
@@ -1301,7 +1315,7 @@ mod tests {
             let (channels, mut log, identity) = peer_in(stoa);
             let mut out = Vec::new();
             for (i, op) in order.into_iter().enumerate() {
-                let payload = op.to_bytes();
+                let payload = op.to_bytes().unwrap();
                 let admitted = receive(
                     InboundMessage {
                         channel_id: identity.channel_id(),
@@ -1368,7 +1382,7 @@ mod tests {
                 kind,
             }
             .sign(&author);
-            let payload = op.to_bytes();
+            let payload = op.to_bytes().unwrap();
             let admitted = receive(
                 inbound(identity.channel_id(), &payload),
                 &channels,
@@ -1392,7 +1406,7 @@ mod tests {
     fn a_payload_on_an_unknown_channel_is_refused() {
         let stoa = a_stoa("Agora");
         let (channels, mut log, _) = peer_in(stoa);
-        let payload = signed_post_in(stoa, "valid").to_bytes();
+        let payload = signed_post_in(stoa, "valid").to_bytes().unwrap();
 
         // A well-formed, verifying op for a Stoa this peer HAS a channel for —
         // arriving on a channel id it does not hold. So the only thing that can
@@ -1441,7 +1455,7 @@ mod tests {
             op: a_post_in(stoa, "tampered"),
             signature: signed.signature.clone(),
         };
-        let payload = tampered.to_bytes();
+        let payload = tampered.to_bytes().unwrap();
         // The fixture must decode, or this test is the decode test again.
         assert!(SignedOp::from_bytes(&payload).is_ok());
 
@@ -1483,7 +1497,7 @@ mod tests {
             signature: sign_op_bytes(&attacker, &op.canonical_bytes()),
             op,
         };
-        let payload = forged.to_bytes();
+        let payload = forged.to_bytes().unwrap();
         assert!(
             SignedOp::from_bytes(&payload).is_ok(),
             "the fixture must decode, or this is the decode test"
@@ -1532,7 +1546,7 @@ mod tests {
         let stoa = a_stoa("Agora");
         let (channels, mut log, identity) = peer_in(stoa);
         let op = signed_post_in(stoa, "valid");
-        let mut payload = op.to_bytes();
+        let mut payload = op.to_bytes().unwrap();
         payload.push(0);
 
         let refusal = receive(
@@ -1558,7 +1572,7 @@ mod tests {
         let stoa = a_stoa("Agora");
         let (channels, mut log, identity) = peer_in(stoa);
         let op = signed_post_in(stoa, "admitted");
-        let payload = op.to_bytes();
+        let payload = op.to_bytes().unwrap();
 
         let admitted = receive(
             inbound(identity.channel_id(), &payload),
@@ -1582,12 +1596,12 @@ mod tests {
         let elsewhere = a_stoa("Lyceum");
         let (channels, mut log, identity) = peer_in(stoa);
 
-        let mut oversized = signed_post_in(stoa, "big").to_bytes();
+        let mut oversized = signed_post_in(stoa, "big").to_bytes().unwrap();
         oversized.resize(MAX_MESSAGE_BYTES + 1, 0);
         let refusals: Vec<Vec<u8>> = vec![
             b"junk".to_vec(),
             oversized,
-            signed_post_in(elsewhere, "wrong stoa").to_bytes(),
+            signed_post_in(elsewhere, "wrong stoa").to_bytes().unwrap(),
         ];
         for payload in &refusals {
             assert!(
@@ -1602,7 +1616,7 @@ mod tests {
         );
 
         let good = signed_post_in(stoa, "after the refusals");
-        let payload = good.to_bytes();
+        let payload = good.to_bytes().unwrap();
         let admitted = receive(
             inbound(identity.channel_id(), &payload),
             &channels,
@@ -1705,7 +1719,7 @@ mod tests {
 
         let op = signed_post_in(stoa, "arrives while the disk is unwritable");
         assert!(op.verify(), "the fixture op must pass every earlier guard");
-        let bytes = op.to_bytes();
+        let bytes = op.to_bytes().unwrap();
         let refusal =
             receive(inbound(identity.channel_id(), &bytes), &channels, &mut log).unwrap_err();
 
@@ -1739,7 +1753,7 @@ mod tests {
             elsewhere.verify(),
             "the fixture must be authentic, or this is the verification test"
         );
-        let payload = elsewhere.to_bytes();
+        let payload = elsewhere.to_bytes().unwrap();
 
         let refusal = receive(
             inbound(identity.channel_id(), &payload),
@@ -1788,7 +1802,7 @@ mod tests {
 
         let (channels, mut log, identity) = peer_in(here);
         let elsewhere = signed_post_in(there, "next door");
-        let payload = elsewhere.to_bytes();
+        let payload = elsewhere.to_bytes().unwrap();
 
         let refusal = receive(
             inbound(identity.channel_id(), &payload),
@@ -1809,7 +1823,7 @@ mod tests {
         // And the op for THIS Stoa is admitted, so the comparison is not simply
         // refusing everything.
         let mine = signed_post_in(here, "at home");
-        let mine_payload = mine.to_bytes();
+        let mine_payload = mine.to_bytes().unwrap();
         assert!(receive(
             inbound(identity.channel_id(), &mine_payload),
             &channels,
@@ -1826,7 +1840,7 @@ mod tests {
         // the natural place for a prefix comparison to appear.
         let here = a_stoa("Agora");
         let (channels, mut log, identity) = peer_in(here);
-        let payload = signed_post_in(here, "valid").to_bytes();
+        let payload = signed_post_in(here, "valid").to_bytes().unwrap();
 
         // The open channel's id with one character appended, and with one
         // removed. Neither is the open channel.
@@ -1852,7 +1866,9 @@ mod tests {
         let (channels, mut log, identity) = peer_in(here);
         let before = channels.len();
 
-        let payload = signed_post_in(unjoined, "from elsewhere").to_bytes();
+        let payload = signed_post_in(unjoined, "from elsewhere")
+            .to_bytes()
+            .unwrap();
         assert!(receive(
             inbound(identity.channel_id(), &payload),
             &channels,
@@ -1977,10 +1993,10 @@ mod tests {
         let stoa = a_stoa("Agora");
         let (channels, mut log, identity) = peer_in(stoa);
 
-        let overhead = signed_post_in(stoa, "").to_bytes().len();
+        let overhead = signed_post_in(stoa, "").to_bytes().unwrap().len();
         let body_len = MAX_MESSAGE_BYTES - overhead;
         let op = signed_post_in(stoa, &"x".repeat(body_len));
-        let payload = op.to_bytes();
+        let payload = op.to_bytes().unwrap();
         assert_eq!(
             payload.len(),
             MAX_MESSAGE_BYTES,
@@ -2020,9 +2036,9 @@ mod tests {
         let stoa = a_stoa("Agora");
         let (channels, mut log, identity) = peer_in(stoa);
 
-        let overhead = signed_post_in(stoa, "").to_bytes().len();
+        let overhead = signed_post_in(stoa, "").to_bytes().unwrap().len();
         let at_cap = signed_post_in(stoa, &"x".repeat(crate::authoring::MAX_BODY_LEN));
-        let payload = at_cap.to_bytes();
+        let payload = at_cap.to_bytes().unwrap();
 
         assert_eq!(
             payload.len(),
@@ -2066,7 +2082,7 @@ mod tests {
         // only at the boundary that field happens to straddle.
         let stoa = a_stoa("Agora");
         let (channels, mut log, identity) = peer_in(stoa);
-        let valid = signed_post_in(stoa, "the basis").to_bytes();
+        let valid = signed_post_in(stoa, "the basis").to_bytes().unwrap();
 
         let mut payloads: Vec<Vec<u8>> = vec![
             vec![],
@@ -2118,7 +2134,7 @@ mod tests {
         // is the clause a reader has to parse to know what is untested.
         let stoa = a_stoa("Agora");
         let (channels, mut log, identity) = peer_in(stoa);
-        let payload = signed_post_in(stoa, "valid").to_bytes();
+        let payload = signed_post_in(stoa, "valid").to_bytes().unwrap();
 
         let hostile = [
             String::new(),
@@ -2154,7 +2170,7 @@ mod tests {
 
         assert!(receive(inbound(identity.channel_id(), b""), &channels, &mut log).is_err());
         let good = signed_post_in(stoa, "after");
-        let payload = good.to_bytes();
+        let payload = good.to_bytes().unwrap();
         let admitted = receive(
             inbound(identity.channel_id(), &payload),
             &channels,
@@ -2190,7 +2206,7 @@ mod tests {
         let stoa = a_stoa("Agora");
         let (channels, mut log, _) = peer_in(stoa);
         let op = signed_post_in(stoa, "exact bytes");
-        let expected = op.to_bytes();
+        let expected = op.to_bytes().unwrap();
 
         let publishable = publish(op, &channels, &mut log).unwrap();
         assert_eq!(
@@ -2200,7 +2216,7 @@ mod tests {
         // And the same bytes as what the store holds, so a receiving peer's
         // decode of the payload yields the op its author stored.
         let stored = log.get(&publishable.id).unwrap().unwrap();
-        assert_eq!(publishable.payload, stored.op.to_bytes());
+        assert_eq!(publishable.payload, stored.op.to_bytes().unwrap());
     }
 
     #[test]
@@ -2218,7 +2234,7 @@ mod tests {
         let publishable = publish(mine.clone(), &channels, &mut log).unwrap();
 
         let theirs = signed_post_in(stoa, "authored elsewhere");
-        let payload = theirs.to_bytes();
+        let payload = theirs.to_bytes().unwrap();
         let received = receive(
             inbound(identity.channel_id(), &payload),
             &channels,
@@ -2376,7 +2392,7 @@ mod tests {
         let stoa = a_stoa("Agora");
         let (channels, mut log, _) = peer_in(stoa);
         let op = signed_post_in(stoa, "the send will fail");
-        let expected_bytes = op.to_bytes();
+        let expected_bytes = op.to_bytes().unwrap();
         let id = op.op.id();
 
         let publishable = publish(op.clone(), &channels, &mut log).unwrap();
@@ -2386,7 +2402,7 @@ mod tests {
         let stored = log.get(&id).unwrap().unwrap();
         assert_eq!(stored.op, op);
         assert_eq!(
-            stored.op.to_bytes(),
+            stored.op.to_bytes().unwrap(),
             expected_bytes,
             "the stored op is not byte-identical to what was published"
         );
@@ -2459,7 +2475,7 @@ mod tests {
         let _ = publish(op.clone(), &channels, &mut log).unwrap();
         let first_arrival = log.get(&id).unwrap().unwrap().arrival;
 
-        let payload = op.to_bytes();
+        let payload = op.to_bytes().unwrap();
         let admitted = receive(
             inbound(identity.channel_id(), &payload),
             &channels,
@@ -2514,7 +2530,7 @@ mod tests {
         }
         .sign(&random_peer);
         assert!(hide.verify(), "authentic, and carrying no authority");
-        let payload = hide.to_bytes();
+        let payload = hide.to_bytes().unwrap();
 
         let admitted = receive(
             inbound(identity.channel_id(), &payload),
@@ -2550,7 +2566,7 @@ mod tests {
             signature: sign_op_bytes(&attacker, &op.canonical_bytes()),
             op,
         };
-        let payload = forged.to_bytes();
+        let payload = forged.to_bytes().unwrap();
 
         assert_eq!(
             receive(
@@ -2698,7 +2714,7 @@ mod tests {
         let stoa = a_stoa("Agora");
         let (mut channels, mut log, identity) = peer_in(stoa);
         let op = signed_post_in(stoa, "received before leaving");
-        let payload = op.to_bytes();
+        let payload = op.to_bytes().unwrap();
         receive(
             inbound(identity.channel_id(), &payload),
             &channels,

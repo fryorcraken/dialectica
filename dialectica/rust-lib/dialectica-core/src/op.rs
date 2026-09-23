@@ -720,6 +720,14 @@ impl Op {
     /// to exactly the id it always had. The migration needs no rewrite, no
     /// re-signing and no recomputation, and it holds by construction rather than
     /// by a test comparing against a recorded constant.
+    ///
+    /// # This is the layout, and [`Op::encode`] is the encoding
+    ///
+    /// Total over every `Op` value: it lays out whatever the struct holds, and it
+    /// is what an op id and a signature are computed over. Whether an op *has an
+    /// encoding* — whether the format admits it at all — is [`Op::encode`]'s
+    /// question, and [`SignedOp::to_bytes`] goes through that one. For an op the
+    /// format admits, the two return the same bytes.
     pub fn canonical_bytes(&self) -> Vec<u8> {
         let mut out = Vec::new();
         // The version says whether the clock fields are present, so the two are
@@ -789,6 +797,17 @@ impl Op {
             }
         }
         out
+    }
+
+    /// The op's encoding: its canonical bytes, for an op the format admits.
+    ///
+    /// Fallible so that the encoder refuses exactly what [`Op::decode`] refuses
+    /// — the symmetry `stoa.rs` keeps for the genesis record, where a record the
+    /// decoder would reject must not be one the encoder will produce. Everything
+    /// that writes an op's bytes out of this process goes through here, by way
+    /// of [`SignedOp::to_bytes`].
+    pub fn encode(&self) -> Result<Vec<u8>, OpError> {
+        Ok(self.canonical_bytes())
     }
 
     /// Decode a canonical encoding, refusing anything else.
@@ -948,10 +967,14 @@ impl SignedOp {
     /// The signature trails rather than leads so that the signed preimage is a
     /// prefix of the message — a decoder never has to skip over the signature
     /// to find the bytes it covers.
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut out = self.op.canonical_bytes();
+    ///
+    /// Fallible because [`Op::encode`] is: an op the format has no encoding for
+    /// has no wire form either, so it can be neither published nor stored as
+    /// bytes a later read would refuse.
+    pub fn to_bytes(&self) -> Result<Vec<u8>, OpError> {
+        let mut out = self.op.encode()?;
         out.extend_from_slice(&self.signature.to_bytes());
-        out
+        Ok(out)
     }
 
     /// Decode the wire form.
@@ -1811,7 +1834,7 @@ mod tests {
         let key = a_key(2);
         for op in one_of_each_kind() {
             let signed = op.sign(&key);
-            let restored = SignedOp::from_bytes(&signed.to_bytes()).unwrap();
+            let restored = SignedOp::from_bytes(&signed.to_bytes().unwrap()).unwrap();
             assert_eq!(restored, signed);
             assert!(
                 restored.verify(),
@@ -1824,7 +1847,7 @@ mod tests {
     fn the_signed_preimage_is_a_prefix_of_the_wire_form() {
         // So a decoder never skips over the signature to find what it covers.
         let signed = a_post().sign(&a_key(2));
-        let wire = signed.to_bytes();
+        let wire = signed.to_bytes().unwrap();
         assert!(wire.starts_with(&signed.op.canonical_bytes()));
         assert_eq!(wire.len(), signed.op.canonical_bytes().len() + 64);
     }
@@ -1843,7 +1866,7 @@ mod tests {
         // what is read as the signature and leaves a byte over in the op —
         // which `Op::decode`'s own check catches.
         let signed = a_post().sign(&a_key(2));
-        let mut wire = signed.to_bytes();
+        let mut wire = signed.to_bytes().unwrap();
         wire.push(0);
         assert_eq!(SignedOp::from_bytes(&wire), Err(OpError::TrailingBytes));
     }

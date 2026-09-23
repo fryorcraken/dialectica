@@ -1464,7 +1464,7 @@ fn a_stored_op_reads_back_byte_identical_across_a_restart() {
     let stoa = genesis.address().expect("a short title encodes");
 
     let op = a_post(&stoa, &author, "exactly these bytes");
-    let expected_bytes = op.to_bytes();
+    let expected_bytes = op.to_bytes().expect("a post has an encoding");
     let expected_id = op.op.id();
     let expected_signature = op.signature.to_bytes();
 
@@ -1477,7 +1477,7 @@ fn a_stored_op_reads_back_byte_identical_across_a_restart() {
         .expect("readable")
         .expect("the op is in the store");
     assert_eq!(
-        back.op.to_bytes(),
+        back.op.to_bytes().expect("a stored op has an encoding"),
         expected_bytes,
         "the stored op must read back byte-identical"
     );
@@ -1778,7 +1778,9 @@ fn an_over_cap_body_signs_and_appends_and_then_poisons_every_read_forever() {
     // The encoder produced bytes the decoder refuses. Asserting both directions
     // is what names this as an ASYMMETRY rather than as a decoder limit: the
     // encode succeeded, so the two halves disagree.
-    let encoded = over.to_bytes();
+    let encoded = over
+        .to_bytes()
+        .expect("the encoder does not check the field cap");
     assert!(
         encoded.len() > FIELD_CAP,
         "the fixture must actually exceed the cap"

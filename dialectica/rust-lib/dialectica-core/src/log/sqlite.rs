@@ -728,6 +728,14 @@ impl OpLog for SqliteOpLog {
         // produced `sort_has_counter`.
         let score_epoch = entry.op.op.clock.map(|c| c.counter as i64);
 
+        // BEFORE the write, and the reason is the read path: `decode_entry`
+        // refuses what the encoder refuses, so an op with no encoding written
+        // anyway is a row every later read of its Stoa fails on.
+        let op_bytes = entry
+            .op
+            .to_bytes()
+            .map_err(|e| OpLogError::Unencodable(e.to_string()))?;
+
         let changed = self
             .conn
             .execute(
@@ -739,7 +747,7 @@ impl OpLog for SqliteOpLog {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 rusqlite::params![
                     id.as_bytes().as_slice(),
-                    entry.op.to_bytes(),
+                    op_bytes,
                     entry.op.op.stoa.as_bytes().as_slice(),
                     entry.target().map(|t| t.as_bytes().to_vec()),
                     entry.op.op.author.to_bytes().as_slice(),
@@ -1275,7 +1283,7 @@ mod tests {
 
         let reopened = SqliteOpLog::open(&path).unwrap();
         let entry = reopened.get(&id).unwrap().unwrap();
-        assert_eq!(entry.op.to_bytes(), op.to_bytes());
+        assert_eq!(entry.op.to_bytes().unwrap(), op.to_bytes().unwrap());
         assert_eq!(entry.op, op);
         assert!(entry.op.verify(), "storage must not disturb the signature");
         assert_eq!(entry.arrival, arrival, "the recorded arrival must survive");
@@ -2027,6 +2035,10 @@ mod tests {
             }
             .to_string(),
             OpLogError::CorruptEntry("bytes".to_string()).to_string(),
+            // Beside `CorruptEntry` on purpose: both are about an op's bytes, and
+            // one says the store is damaged while the other says nothing was
+            // written. A reader told the first would go looking at the file.
+            OpLogError::Unencodable("bytes".to_string()).to_string(),
         ];
         for (i, a) in rendered.iter().enumerate() {
             for b in rendered.iter().skip(i + 1) {

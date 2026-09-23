@@ -241,6 +241,18 @@ pub enum OpLogError {
     /// hand-edited file rather than at the disk, and calls for a different
     /// response.
     CorruptEntry(String),
+    /// The op handed to [`OpLog::append`] has no encoding, so a store that keeps
+    /// ops as bytes cannot keep it.
+    ///
+    /// **Refused at the write rather than discovered at every read.** A store
+    /// holding bytes stores [`crate::op::SignedOp::to_bytes`], and reads them
+    /// back through [`crate::op::SignedOp::from_bytes`], which refuses what the
+    /// encoder refuses. Writing such an op anyway would leave a row every later
+    /// read of its Stoa fails on as [`OpLogError::CorruptEntry`] — a store
+    /// poisoning itself. Distinct from that variant because nothing was stored
+    /// and nothing is corrupt: the caller handed over an op the format does not
+    /// admit.
+    Unencodable(String),
 }
 
 impl fmt::Display for OpLogError {
@@ -265,6 +277,10 @@ impl fmt::Display for OpLogError {
                 f,
                 "an op stored in this log could not be read back: {why}; the storage is \
                  readable but its contents are not what this build wrote"
+            ),
+            OpLogError::Unencodable(why) => write!(
+                f,
+                "the op was not stored because the format has no encoding for it: {why}"
             ),
         }
     }
