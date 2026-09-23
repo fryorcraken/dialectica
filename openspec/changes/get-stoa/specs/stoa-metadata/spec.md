@@ -59,7 +59,6 @@ current metadata, whatever sequence those ops were received in.
 - **WHEN** a reader holds a metadata op for a Stoa, authentically signed by that Stoa's creator and naming that Stoa
 - **THEN** the current title and description are the op's
 - **AND** the resolution reports that it did not fall back
-- **AND** the founding title is still the genesis record's
 
 #### Scenario: A later rename supersedes an earlier one
 
@@ -193,16 +192,14 @@ for a Stoa the peer is in.
 - **THEN** the call succeeds
 - **AND** the record is not refused as malformed or as failing to match the address
 
-### Requirement: The reply carries current and founding values side by side, and says where the current ones came from
+### Requirement: The reply carries the current metadata and says whether it fell back to genesis
 
 A successful `getStoa` reply MUST carry every one of the following fields:
 
 - `stoa`: the address that was asked for.
-- `foundingTitle`: the title in the genesis record, on every reply, whatever
-  the current metadata is.
 - `title` and `description`: the current metadata, as resolved. Where the
-  resolution fell back, `title` is the founding title and `description` is the
-  empty string.
+  resolution fell back, `title` is the genesis record's title and `description`
+  is the empty string.
 - `policy`: the genesis record's posting policy, reported by the stable name the
   `stoa-membership` capability uses for it — `"open"` for the policy every
   current Stoa declares. A metadata op carries no policy, so this field never
@@ -210,37 +207,40 @@ A successful `getStoa` reply MUST carry every one of the following fields:
 - `isGenesisFallback`: a boolean. It is `true` exactly when no binding metadata
   op was held for the Stoa, and `false` whenever one was.
 
-The founding title MUST remain reported under its own name even when a current
-title has been resolved. The current title MUST NOT replace it, and it MUST NOT
-replace the current title.
+**The reply MUST NOT carry the founding title in a field of its own.** The
+founding title is in the genesis record the caller supplied, and the
+`stoa-membership` capability's calls are what report it under a name of its own;
+this call leaves that to them. A `title` in a reply whose `isGenesisFallback` is
+`true` is the founding title. A `title` in a reply whose
+`isGenesisFallback` is `false` is a current title, and the reply does not report
+the founding title beside it.
 
 **`isGenesisFallback` is the only field that says whether a resolution fell
-back, and a caller MUST NOT need to infer that from the values.** `title` equal
-to `foundingTitle` does not establish a fallback, because a binding op may carry
-the founding title. An empty `description` does not establish one either,
-because a binding op may carry an empty description.
+back, and a caller MUST NOT need to infer that from the values.** A `title` equal
+to the genesis record's title does not establish a fallback, because a binding op
+may carry the founding title. An empty `description` does not establish one
+either, because a binding op may carry an empty description.
 
-The title, founding title and description MUST be reported exactly as the
-op or the record carries them, with no character removed, replaced or added.
+The title and description MUST be reported exactly as the op or the record
+carries them, with no character removed, replaced or added.
 
 #### Scenario: A Stoa with no binding metadata op reports its founding values as a fallback
 
 - **WHEN** `getStoa` is called for a Stoa the peer holds no binding metadata op for
-- **THEN** `title` equals `foundingTitle`, which is the genesis record's title
+- **THEN** `title` is the genesis record's title
 - **AND** `description` is the empty string
 - **AND** `isGenesisFallback` is `true`
 
-#### Scenario: A renamed Stoa reports both titles
+#### Scenario: A renamed Stoa reports its current title
 
 - **WHEN** `getStoa` is called for a Stoa whose leading binding metadata op carries a title different from its founding title
 - **THEN** `title` is the op's title
-- **AND** `foundingTitle` is the genesis record's title
 - **AND** `isGenesisFallback` is `false`
 
 #### Scenario: A binding op carrying the founding title is not reported as a fallback
 
 - **WHEN** `getStoa` is called for a Stoa whose leading binding metadata op carries exactly the founding title and an empty description
-- **THEN** `title` equals `foundingTitle`
+- **THEN** `title` is the genesis record's title
 - **AND** `description` is the empty string
 - **AND** `isGenesisFallback` is `false`
 
@@ -253,7 +253,13 @@ op or the record carries them, with no character removed, replaced or added.
 #### Scenario: Every field is present on every successful reply
 
 - **WHEN** `getStoa` succeeds, once for a Stoa that falls back and once for a Stoa that does not
-- **THEN** both replies carry `stoa`, `foundingTitle`, `title`, `description`, `policy` and `isGenesisFallback`
+- **THEN** both replies carry `stoa`, `title`, `description`, `policy` and `isGenesisFallback`
+
+#### Scenario: No reply carries the founding title in a field of its own
+
+- **WHEN** `getStoa` succeeds, once for a Stoa that falls back and once for a Stoa whose leading binding metadata op carries a title and a description that both differ from its founding title
+- **THEN** neither reply carries a `foundingTitle` field
+- **AND** no field of the second reply holds the founding title
 
 #### Scenario: Display text is reported unaltered
 

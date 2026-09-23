@@ -24,9 +24,15 @@ the system actually uses before anything implements it.
   the one `moderation-resolution` already makes; it is not respecified.
 - **A new wire method, `getStoa`.** It takes a Stoa address and the genesis
   record that address names, as `listThreads` and `readThread` already do, and
-  answers `{stoa, foundingTitle, title, description, policy, isGenesisFallback}`.
-  It works for a Stoa the peer has not joined, so a preview can use it before
-  a join.
+  answers `{stoa, title, description, policy, isGenesisFallback}`, the shape the
+  issue sketches. It works for a Stoa the peer has not joined, so a preview can
+  use it before a join.
+- **The reply carries no founding title of its own.** Where it falls back,
+  `title` is the founding title; where it does not, `title` is the current one
+  and the founding title is not reported beside it. `stoa-metadata`'s
+  requirement that both remain readable does not need `getStoa` to carry the
+  founding value: the caller supplies the genesis record that holds it, and
+  `listStoas`, `createStoa` and `joinStoa` already report it.
 - **The request carries the genesis record, which departs from the issue's
   `getStoa({stoa})` sketch.** The moderator set, and therefore which metadata
   ops bind, is derived from the record, and an address cannot be turned back
@@ -36,14 +42,22 @@ the system actually uses before anything implements it.
   transport-order wording and the "not implemented" disclaimer are replaced by
   the rule as built. Its "never an identifier" requirement loses one stale
   clause, which said that any peer's metadata op takes effect.
-- **Two stale sentences are corrected in other capabilities**, and neither
-  changes their behaviour. `stoa-membership` said that nothing resolves metadata
-  ops. `stoa-navigation-view` gave "resolution is not implemented" as its reason
-  for not rendering a current title. The requirements themselves still hold.
+- **A stale sentence in `stoa-membership` is corrected** without changing its
+  behaviour: it said that nothing resolves metadata ops.
+- **`stoa-navigation-view` is brought in line with what `getStoa` answers.**
+  That capability made the join preview's founding title conditional on a core
+  call answering one before a join, and expected `getStoa` to lift the
+  condition. With this reply shape it lifts it only for a Stoa `getStoa`
+  reports as falling back, whose `title` is the founding title. For a Stoa it
+  reports as renamed, `title` is a current title, and the founding title stays
+  unavailable until a join. The three requirements that relied on the old
+  expectation are restated to say which case is which, and which reply field
+  decides it. The same-title comparison, which runs over founding titles, runs
+  at preview time for the first case only.
 - **Not in this change:** publishing a `StoaMetadata` op (issue #125, milestone
-  0.0.2), and any view that calls `getStoa`. Until #125 lands this build
-  publishes no metadata op, so `getStoa` falls back to the genesis values unless
-  a metadata op arrives from elsewhere. The resolver does not depend on who
+  0.0.2), and any view that calls `getStoa` (issue #143, milestone 0.0.1).
+  Until #125 lands this build publishes no metadata op, so `getStoa` falls back
+  to the genesis values unless a metadata op arrives from elsewhere. The resolver does not depend on who
   published the op: it reads what the log holds, and the tests stage those ops
   directly. It can therefore be built and tested without #125.
 
@@ -68,9 +82,17 @@ wire method.
 - `stoa-membership`: MODIFIED "A listed title is a founding title, and is
   identified as such" — one sentence citing `stoa-metadata` as saying nothing
   resolves metadata ops; behaviour unchanged.
-- `stoa-navigation-view`: MODIFIED "No current title is rendered until one has
-  been resolved" — its reasoning paragraph cited resolution as unimplemented;
-  behaviour and scenarios unchanged.
+- `stoa-navigation-view`: MODIFIED "Joining shows what is being joined, and
+  joins nothing until the user acts" (a founding title is available before a
+  join exactly when `getStoa` reports `isGenesisFallback: true`, as its
+  `title`; a `title` from a non-fallback reply is never labelled founding; the
+  no-title note says no *founding* title is available, since a current one may
+  be); MODIFIED "No current title is rendered until one has been resolved"
+  (only a non-fallback reply supplies a current title; the stale "resolution is
+  not implemented" reasoning is replaced); MODIFIED "A Stoa already held whose
+  title matches is shown as a distinct Stoa, not as a duplicate" (`getStoa`
+  lets the founding-title comparison run at preview time for a fallback Stoa
+  only, where the old text said it closed the gap outright).
 
 ## Impact
 
@@ -82,8 +104,12 @@ wire method.
   following the `module-wire-contract` envelope and error shape. It does not
   change any existing method's request or reply. `listStoas`, `joinStoa` and
   `createStoa` keep reporting `foundingTitle` alone.
-- `stoa-navigation-view`'s join preview currently renders a founding title
-  only "where one is available", and it says that condition lasts only until
-  a core call answers one for an un-joined `(address, record)` pair.
-  `getStoa` is that call. Once this change lands, the preview is obliged to
-  render the founding title, and a later view change has to wire it.
+- **The join preview falls out of step with its spec until #143 lands.** Once
+  `getStoa` exists, a founding title is available before a join for every Stoa
+  it reports as falling back, so the preview is obliged to render it — as
+  `title`, labelled founding — and to run the same-title comparison against it.
+  The current view calls nothing before a join and says no title is known, so
+  it does neither. For a Stoa `getStoa` reports as renamed, the view's present
+  rendering (no founding title, the comparison stated as not made) still meets
+  the spec; rendering the current title is permitted there but not required.
+  Wiring the preview is issue #143 (milestone 0.0.1), not this change.
