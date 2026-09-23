@@ -3156,13 +3156,17 @@ TestCase {
             "create_identity": '{"error":"the keystore directory is not writable"}'
         })
         spec.visibleNamed(screen, "createKeyButton")[0].clicked()
-        compare(screen.mintFailure, "the keystore directory is not writable")
+        compare(spec.visibleNamed(screen, "mintFailureText")[0].text,
+                "the keystore directory is not writable",
+                "the fixture must render the refusal before the re-showing")
 
         screen.visible = false
         screen.visible = true
 
-        compare(screen.mintFailure, "")
-        verify(spec.visibleText(screen).indexOf("No key was created.") < 0)
+        compare(screen.machineKey.state, "none")
+        var shown = spec.visibleText(screen)
+        verify(shown.indexOf("No key was created.") < 0, shown)
+        verify(shown.indexOf("the keystore directory is not writable") < 0, shown)
         screen.destroy()
     }
 

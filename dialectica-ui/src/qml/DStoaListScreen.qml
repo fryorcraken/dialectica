@@ -119,7 +119,7 @@ ScreenFrame {
     // `hasMachineKey` flag the issue names — widened from a boolean because the
     // question has three answers, not two:
     //
-    //   { state: "none" }                                   no key held
+    //   { state: "none", refusal: <text> }                  no key held
     //   { state: "held", publicKey: <hex>, encrypted: <bool|null> }
     //   { state: "unreadable", reason: <text> }             could not be read
     //
@@ -136,6 +136,13 @@ ScreenFrame {
     // called with a non-empty key. Separate `keyState` + `publicKey` properties
     // could disagree, and every block below would have to check both.
     //
+    // **A refused mint lives inside the no-key state it was refused in.**
+    // `refusal` is why the last press of "Create this machine's key" made no
+    // key, or "". It is a field of the no-key value rather than a property
+    // beside it, so the next answer — which replaces the whole value — takes
+    // the refusal with it. That is what makes a refusal belong to the showing
+    // it happened in: nothing has to remember to clear it.
+    //
     // **Asked, never remembered.** Set only from a reply received in this run —
     // `askKeyState()` on each showing, `createMachineKey()` on a press. Nothing
     // is persisted. The initial value is the least-claiming state, and it is
@@ -143,10 +150,9 @@ ScreenFrame {
     // `Component.onCompleted`.
     property var machineKey: screen.unreadableKey("This machine's key has not been asked about yet.")
 
-    // Why the last press of "Create this machine's key" made no key, or "".
-    // Rendered only inside the key block, i.e. only in the no-key state, which
-    // is the one state a press can leave the screen in when it fails.
-    property string mintFailure: ""
+    function noKey(refusal) {
+        return { state: "none", refusal: refusal }
+    }
 
     function heldKey(publicKey, encrypted) {
         // `encrypted` is carried only as a boolean. Anything else — absent,
@@ -173,7 +179,7 @@ ScreenFrame {
             return screen.unreadableKey(reply.error)
         var v = reply.value
         if (v.hasMasterKey === false)
-            return { state: "none" }
+            return screen.noKey("")
         if (v.hasMasterKey === true) {
             if (typeof v.publicKey === "string" && v.publicKey !== "")
                 return screen.heldKey(v.publicKey, v.encrypted)
@@ -192,11 +198,6 @@ ScreenFrame {
     // master key, and a screen that kept its first answer would offer that
     // user a key they already hold.
     function askKeyState() {
-        // NO SPEC: a mint failure from an earlier showing is cleared here, so a
-        // re-shown no-key state starts without the old "No key was created".
-        // The spec says an earlier answer must not decide a later showing's
-        // key state; it says nothing about a stale mint failure.
-        screen.mintFailure = ""
         screen.machineKey = screen.keyFromQuery(Core.getMasterKey())
     }
 
@@ -210,14 +211,12 @@ ScreenFrame {
     // the truthful rendering is the key-held state it is in. The core's refusal
     // to replace a key is unchanged, and is what makes this safe.
     //
-    // A failure leaves `machineKey` alone, so the screen stays in the no-key
-    // state and renders the reason.
+    // A failure keeps the screen in the no-key state, now carrying the reason.
     function createMachineKey() {
-        screen.mintFailure = ""
         var reply = Core.createIdentity()
 
         if (!reply.ok) {
-            screen.mintFailure = reply.error
+            screen.machineKey = screen.noKey(reply.error)
             return
         }
 
@@ -225,8 +224,8 @@ ScreenFrame {
         // warning at `Core.qml`'s `ok: true` return — and a key-held state
         // entered on `ok` alone would show a key nobody named.
         if (typeof reply.value.publicKey !== "string" || reply.value.publicKey === "") {
-            screen.mintFailure = "The core module answered without naming a key, so no "
-                               + "key can be shown as held."
+            screen.machineKey = screen.noKey("The core module answered without naming a "
+                                             + "key, so no key can be shown as held.")
             return
         }
 
@@ -793,7 +792,7 @@ ScreenFrame {
                 // The last press's refusal, the core's reason unreworded — the
                 // keystore's own vocabulary, which names a fix.
                 ColumnLayout {
-                    visible: screen.mintFailure !== ""
+                    visible: screen.machineKey.refusal !== ""
                     Layout.fillWidth: true
                     spacing: 4
 
@@ -806,7 +805,7 @@ ScreenFrame {
 
                     Text {
                         objectName: "mintFailureText"
-                        text: screen.mintFailure
+                        text: screen.machineKey.refusal
                         font: DTheme.address
                         color: DTheme.ink
                         wrapMode: Text.WrapAnywhere
