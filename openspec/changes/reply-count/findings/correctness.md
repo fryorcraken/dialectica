@@ -119,12 +119,15 @@ observation, not a box to tick.
 
 ## What I did not check
 
-Full `cargo mutants` on `feed.rs` did not complete in the time this review
-allows; the four targeted mutations above cover the properties the spec and
-design.md identify as the ones most likely to be silently wrong (ordering
-direction, membership boundary, moderation boundary, and the one place a
-redundant check exists). I did not attempt mutations in `wire.rs` beyond
-reading it, since the `json!`-macro construction there is straightforward
-enough that manual reading was conclusive (an object literal cannot fail
-`.as_object_mut()`, so the `if let` guard is unreachable-dead defensive code,
-not a bug).
+**Update:** the `cargo mutants --file dialectica-core/src/feed.rs` run above was
+abandoned as not finished within budget, but it completed shortly afterward in
+the background: **19 mutants tested in 8m: 17 caught, 2 unviable, 0 missed.**
+Zero survivors is consistent with the four hand-picked mutations above finding
+no gap — `cargo mutants` found nothing beyond what manual testing already
+covered on this file. "Unviable" means those two mutants failed to compile, not
+that they passed undetected.
+
+I did not attempt mutations in `wire.rs` beyond reading it, since the
+`json!`-macro construction there is straightforward enough that manual reading
+was conclusive (an object literal cannot fail `.as_object_mut()`, so the `if
+let` guard is unreachable-dead defensive code, not a bug).
