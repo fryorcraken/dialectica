@@ -964,14 +964,18 @@ pub fn keep_selection(
     // source differs between the two branches and only this code knows which
     // branch it took. Deciding it below would mean re-deriving that, which is the
     // second copy of a fact that CLAUDE.md's guard rule is about.
-    let encrypted = if targets.keystore_path.exists() {
+    //
+    // `wrote_the_keystore` is settled in the same branch for the same reason: only
+    // this code knows whether the file on disk after this line is one it created,
+    // and the undo below depends on exactly that fact.
+    let (encrypted, wrote_the_keystore) = if targets.keystore_path.exists() {
         // This call wrote nothing, so the protection that is true is the FILE's,
         // and reading it is the only way to know. Note this is not the re-read the
         // `design.md` decision rejects: that one is about re-reading a file this
         // call just wrote, where the value this code used is the authority. Here
         // there is no value this code used — the file predates the call.
         match crate::keystore::Keystore::is_encrypted(targets.keystore_path) {
-            Ok(v) => v,
+            Ok(v) => (v, false),
             // The keystore is on disk and unreadable. Refusing rather than
             // guessing: a keep that reported an identity while unable to tell
             // whether its master key is protected has answered a question it does
@@ -992,7 +996,10 @@ pub fn keep_selection(
         // Re-reading would report the protection of whatever is at the path now,
         // which on a directory an attacker can write to is not necessarily the
         // file just written. The value that is true is the one this code used.
-        matches!(targets.unlock, crate::keystore::Unlock::Passphrase(_))
+        (
+            matches!(targets.unlock, crate::keystore::Unlock::Passphrase(_)),
+            true,
+        )
     };
 
     // The refusal for a second choice in ONE Stoa. `chosen_paths`' primary key
@@ -1000,15 +1007,64 @@ pub fn keep_selection(
     // here — and it is per-Stoa, which is the scope the spec asks for and the
     // keystore's one-file-per-install scope could not express.
     if let Err(e) = targets.paths.record_path(stoa, candidate.path) {
-        return Kept::Refused {
-            reason: e.to_string(),
-        };
+        return undo_a_keystore_this_keep_wrote(targets.keystore_path, wrote_the_keystore, e);
     }
 
     Kept::Stored {
         public_key: candidate.public_key.to_hex(),
         path: candidate.path,
         encrypted,
+    }
+}
+
+/// A keep's record write failed: remove the master key this same keep wrote, and
+/// never one it did not.
+///
+/// # Why a failed keep has anything to undo now
+///
+/// `identity-onboarding` requires a keep to "either complete or change nothing",
+/// and a failed one to leave "no recorded choice and no master key that were not
+/// there before". The keystore is written first and the record second, so a
+/// record failure on a fresh install used to leave a master key on disk with no
+/// path pointing at it. That was harmless only while `whoAmI` read the record —
+/// the orphaned key named no identity. Once the machine key is the identity in
+/// use in every Stoa (`machine-identity-scope`), that file IS an identity, handed
+/// to the user by a call that reported failure.
+///
+/// # Only a file this keep created, and the flag is how that is known
+///
+/// A master key that predates the keep is the user's identity everywhere; removing
+/// it would discard every op it signed. `wrote_it` is set by [`keep_selection`]'s
+/// own branch that called `create`, so it cannot be true for a file that was
+/// already there. The two tests that pin the pair are
+/// `a_keep_whose_path_record_fails_reports_failure_and_names_no_identity` (the file
+/// this keep wrote is gone) and
+/// `a_keep_whose_record_write_fails_keeps_a_master_key_that_was_already_there` (a
+/// file it did not write is byte-identical).
+///
+/// Nothing can have signed with the removed key: it existed only between two lines
+/// of this call, inside one dispatch.
+fn undo_a_keystore_this_keep_wrote(
+    keystore_path: &std::path::Path,
+    wrote_it: bool,
+    record_failure: crate::identity_store::IdentityStoreError,
+) -> Kept {
+    if wrote_it {
+        if let Err(e) = std::fs::remove_file(keystore_path) {
+            // NO SPEC: the spec does not say what a keep reports when its own
+            // undo fails. This names both failures, so the reason says that a
+            // master key was left behind rather than implying nothing changed.
+            return Kept::Refused {
+                reason: format!(
+                    "{record_failure}; the master key this attempt wrote could not \
+                     be removed ({e}), so one now exists at {}",
+                    keystore_path.display()
+                ),
+            };
+        }
+    }
+    Kept::Refused {
+        reason: record_failure.to_string(),
     }
 }
 
@@ -5480,12 +5536,21 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
 
         // The fixture must actually fail the RECORD write and not something
-        // earlier, or this test proves nothing. The keystore file existing is
-        // what says the first write got through.
-        assert!(
-            dir.keystore_path().exists(),
-            "the fixture failed before the keystore write, so it does not \
-             exercise the partial state: {out}"
+        // earlier, or this test proves nothing. The refusal carrying the very
+        // message a record write on this store produces is what says the keep
+        // got past the keystore write and failed at the record.
+        //
+        // This used to be `dir.keystore_path().exists()`, which is the one
+        // witness this test can no longer use: the keystore file surviving the
+        // failure is now the defect (see the assertion after `whoAmI` below).
+        let record_failure = paths
+            .record_path(&a_stoa(), 0)
+            .expect_err("the sabotaged record must refuse every write")
+            .to_string();
+        assert_eq!(
+            v["reason"], record_failure,
+            "the fixture failed somewhere other than the record write, so it \
+             does not exercise the partial state: {out}"
         );
 
         // The spec: "no identity is reported as kept".
@@ -5517,6 +5582,71 @@ mod tests {
             "a keep that did not complete left an identity reportable: {who}"
         );
         assert!(who.get("address").is_none(), "got {who}");
+
+        // `machine-identity-scope`'s wording of the same scenario: "a subsequent
+        // load finds no recorded choice AND NO MASTER KEY that were not there
+        // before". The directory started with no keystore, so none may be left.
+        //
+        // This is the half the `whoAmI` assertion above could not see while
+        // `whoAmI` read the record: a master key the failed keep wrote stayed on
+        // disk, invisible only because no path pointed at it. Once the machine
+        // key is the identity in use, that file IS an identity.
+        assert!(
+            !dir.keystore_path().exists(),
+            "a keep whose record write failed left the master key it wrote on \
+             disk — a master key that was not there before: {out}"
+        );
+    }
+
+    #[test]
+    fn a_keep_whose_record_write_fails_keeps_a_master_key_that_was_already_there() {
+        // THE OTHER DIRECTION of the undo above, and the one that matters more.
+        // Removing the keystore on a failed record write is right only for a
+        // file THIS keep wrote. A master key that predates the keep is the
+        // user's machine identity in every Stoa, and deleting it would discard
+        // every op it signed — the loss `identity-onboarding` names as the
+        // reason a keep may never replace a key.
+        //
+        // Without this test, an undo that removed the file unconditionally
+        // passes the test above and this one is the only thing that fails.
+        let dir = OnboardingDir::new("record-fails-existing-key");
+        let minted = create_identity("{}", &dir.keystore_path(), &Unlock::Unencrypted);
+        assert!(
+            as_json(&minted).get("error").is_none(),
+            "the fixture must start with a master key on disk: {minted}"
+        );
+        let before = std::fs::read(dir.keystore_path()).expect("the keystore reads");
+
+        let paths = dir.paths();
+        rusqlite::Connection::open(IdentityStore::default_path_in(&dir.0))
+            .expect("the record file opens")
+            .execute_batch("DROP TABLE chosen_paths;")
+            .expect("the table is droppable");
+
+        let nonce = SlateNonce::generate().unwrap();
+        let mut session = a_session();
+        session.set_live_slate_for_test(Some(nonce));
+        let out = keep_identity(
+            &mut session,
+            &format!(
+                r#"{{"stoa":"{}","slate":"{}","index":0}}"#,
+                a_stoa().to_hex(),
+                nonce.to_hex()
+            ),
+            || Keystore::open(&dir.keystore_path(), &Unlock::Unencrypted),
+            KeepTargets {
+                keystore_path: &dir.keystore_path(),
+                unlock: &Unlock::Unencrypted,
+                paths: &paths,
+            },
+        );
+        assert_eq!(as_json(&out)["kept"], false, "got {out}");
+
+        assert_eq!(
+            std::fs::read(dir.keystore_path()).ok(),
+            Some(before),
+            "a failed keep removed or rewrote a master key it did not write"
+        );
     }
 
     #[test]
