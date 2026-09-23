@@ -419,9 +419,9 @@ pub fn list_threads<L: OpLog>(
 /// Every reply in `entries` is placed and resolved, whether or not its thread
 /// ends up on the page asked for. The head loop in [`list_threads`] already
 /// resolves every head in the Stoa on every call, so this keeps the read in the
-/// same cost class rather than adding a second shape of work. It also means a
-/// store failure met on any reply fails the read, including one under a thread
-/// that is not on this page.
+/// same cost class rather than adding a second shape of work. A store failure
+/// met on any reply fails the read, including one under a thread that is not
+/// on this page, and `feed-read` requires that.
 ///
 /// # Terminates, and cannot abort, over whatever the log holds
 ///
@@ -1998,10 +1998,11 @@ mod tests {
         );
     }
 
-    // NO SPEC: `feed-read` requires a store failure met while computing a row's
-    // reply fields to fail the read, and says nothing about a failure met on a
-    // reply whose thread is NOT on the requested page. The fold runs over the
-    // whole Stoa, so this fails the page too; `design.md` records why.
+    // `feed-read`, "Computing the reply fields fails as an error and never
+    // aborts": the read fails whichever reply in the Stoa the failure is met on,
+    // including one whose thread's row is on another page. The failing read here
+    // is the `get` on the reply itself, the first step of `thread_of`, so the
+    // reply's thread is not yet known when the failure is met.
     #[test]
     fn a_store_failure_on_a_reply_off_the_page_fails_the_page() {
         let on_page = a_post_at(2, None, 9, "first row");

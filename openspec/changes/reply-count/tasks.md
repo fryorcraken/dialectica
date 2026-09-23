@@ -39,7 +39,9 @@
       forged, the thread-field claim, a parent that is not held, revision,
       include-hidden invariance, a hidden thread's row, row order unchanged,
       agreement with the thread read, and a store failure while counting.
-- [x] 2.2 Pin the unspecified failure scope with a `NO SPEC:` test. Verify:
+- [x] 2.2 Pin the failure scope: a store failure on a reply whose thread is on
+      another page fails the read. `feed-read` contracts this (commit `4eaa19c`),
+      so the test no longer carries a `NO SPEC:` marker. Verify:
       `a_store_failure_on_a_reply_off_the_page_fails_the_page` passes.
 
 ## 3. The wire

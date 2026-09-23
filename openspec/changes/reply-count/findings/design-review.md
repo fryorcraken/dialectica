@@ -38,7 +38,7 @@ items below are worth flipping before merge, and one is a plain observation.
       as measured. The architecture, correctness and security reviews each got
       the same six independently.
 
-- [ ] **`dev-writer`** — Decision 5's `NO SPEC:` marker is accurate but its
+- [x] **`dev-writer`** — Decision 5's `NO SPEC:` marker is accurate but its
       companion spec-side obligation is still open, and design.md doesn't say
       who owns closing it. Decision 5 states plainly "It is still a choice the
       spec should either make or refuse," and Risks repeats "The spec-writer is
@@ -52,6 +52,20 @@ items below are worth flipping before merge, and one is a plain observation.
       tasks.md names it. Recommend adding one line to proposal.md's handoff
       list (or tasks.md) naming this open question explicitly, so it isn't
       only findable by reading design.md's Risks section.
+      **Fixed**, which closes the question rather than handing it off. The
+      spec-writer contracted the behaviour in `4eaa19c`. `feed-read`'s
+      requirement *"Computing the reply fields fails as an error and never
+      aborts"* now requires the read to fail whichever reply in the Stoa the
+      failure is met on, and `proposal.md`'s What Changes lists it. The commit
+      "Align the off-page store-failure marker and Decision 5 with feed-read"
+      does the rest. It removes the `NO SPEC:` marker from
+      `a_store_failure_on_a_reply_off_the_page_fails_the_page` and replaces it
+      with a pointer to the requirement. It rewrites Decision 5 and the Risks
+      entry to say the behaviour is required rather than open, and records why
+      page-scoping was refused: a failure inside `thread_of` is met before the
+      reply's thread is known. Task 2.2 no longer calls the scope unspecified.
+      No new handoff is needed. The spec's new scenario for a hidden thread's
+      reply has no test yet, and that is the `tester`'s.
 
 No issue-contradiction findings: issue #100's scope ("a fold, per thread, over
 its replies... counts non-hidden replies, finds the most recent non-hidden

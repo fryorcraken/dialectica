@@ -164,14 +164,25 @@ threads. Getting that saving means building rows before replies can be attached,
 which needs a two-stage row type like `thread.rs`'s `Placed`. That is too much
 structure to add before anything shows the cost matters.
 
-**Observable consequence, not in the spec:** a store failure met on *any* reply
-fails the read. That includes a reply whose thread is not on the page asked for,
-or is hidden and not being returned. `feed-read` requires a failure met while
-computing a row's reply fields to fail the read, and says nothing about these
-cases. `a_store_failure_on_a_reply_off_the_page_fails_the_page` carries a
-`NO SPEC:` marker and pins what the code does. The head loop already fails the
-same way when an off-page head cannot be resolved, so the behaviour is
-consistent. It is still a choice the spec should either make or refuse.
+**A store failure on any reply fails the read, and `feed-read` requires it.**
+That includes a reply whose thread's row is on another page, and one whose
+thread's row is not returned because its root is hidden and hidden content is
+excluded. The requirement *"Computing the reply fields fails as an error and
+never aborts"* says this. It forbids skipping a failure because its reply
+belongs to no row of the page returned.
+`a_store_failure_on_a_reply_off_the_page_fails_the_page` covers the off-page
+case.
+
+Scoping failures to the page was refused, and not only because the fold is
+whole-Stoa. When the failure is met inside `thread_of`, the reply's thread is not
+yet known. The walk's first read is `get` on the reply's own id, and every later
+link is another `get`. So nothing can show that the failing reply is off the
+page. Skipping it would silently undercount whichever row it really belongs to,
+and that row may be on the page. A failure met later, in `moderation::resolve`,
+does come after the thread is known. But scoping only those would make the
+outcome depend on which of two reads failed, which is two failure rules for one
+requirement. The head loop fails the same way when an off-page head cannot be
+resolved, so the read has one rule for heads and replies.
 
 ### 6. The argument in `feed.rs` against a reply count is withdrawn
 
@@ -218,9 +229,10 @@ gap, and nobody deletes `thread_of`'s check thinking this one covers it.
   walk written in `feed.rs` would be a second membership rule. Deferred until a
   slow feed is measured, and recorded here so that measurement has somewhere to
   start.
-- **[A store failure anywhere in the Stoa fails every page]** See Decision 5. →
-  Consistent with how the head loop already behaves. The spec-writer is to
-  decide whether it stands.
+- **[A store failure anywhere in the Stoa fails every page]** One unreadable
+  reply makes the whole feed unreadable, not only its own thread's row. →
+  Accepted, and `feed-read` requires it. Decision 5 says why a page-scoped
+  failure was refused.
 - **[The count reads as a total once rendered]** → Out of scope here, because no
   view renders it. `proposal.md` puts the obligation on whichever change first
   does.
