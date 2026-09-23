@@ -169,6 +169,13 @@ unjoined Stoa MUST be resolved exactly as they would be for a joined one.
 Stoa, MUST NOT append or publish any op, and MUST NOT alter anything retained
 for a Stoa the peer is in.
 
+**Initialising an empty op store for a peer that has none is not a change of
+state under this requirement.** A store initialised that way holds no ops, and
+no call of this module answers differently for it than for a peer that has no
+store. A peer that has never stored an op MUST be answered as holding no
+metadata op for the Stoa — a fallback reply — and MUST NOT be refused because no
+op store existed before the call.
+
 #### Scenario: A joined Stoa's metadata is answered
 
 - **WHEN** a peer that has created a Stoa calls `getStoa` with that Stoa's address and the record its creation reported
@@ -192,11 +199,19 @@ for a Stoa the peer is in.
 - **THEN** the call succeeds
 - **AND** the record is not refused as malformed or as failing to match the address
 
+#### Scenario: A peer that has never stored an op is answered with a fallback
+
+- **WHEN** `getStoa` is called with a valid address and record on a peer that has no op store yet
+- **THEN** the call succeeds
+- **AND** `title` is the genesis record's title and `isGenesisFallback` is `true`
+
 ### Requirement: The reply carries the current metadata and says whether it fell back to genesis
 
 A successful `getStoa` reply MUST carry every one of the following fields:
 
-- `stoa`: the address that was asked for.
+- `stoa`: the address that was asked for, in the display form the `identity`
+  capability's requirement "A Stoa address's display form parses strictly"
+  defines — lowercase, whatever case the request spelled it in.
 - `title` and `description`: the current metadata, as resolved. Where the
   resolution fell back, `title` is the genesis record's title and `description`
   is the empty string.
@@ -250,6 +265,12 @@ carries them, with no character removed, replaced or added.
 - **THEN** `policy` is `"open"`
 - **AND** it is `"open"` whether or not a binding metadata op is held
 
+#### Scenario: An address asked for in uppercase is reported in its display form
+
+- **WHEN** `getStoa` is called with a Stoa's address with every letter uppercased, and that Stoa's genesis record
+- **THEN** the call succeeds
+- **AND** `stoa` is the address in lowercase
+
 #### Scenario: Every field is present on every successful reply
 
 - **WHEN** `getStoa` succeeds, once for a Stoa that falls back and once for a Stoa that does not
@@ -279,7 +300,9 @@ The call MUST fail when:
 - `genesis` is not a record the genesis encoding decodes, including when it is
   longer than the largest record that encoding can hold;
 - the record does not verify against the address;
-- the peer's op store cannot be consulted.
+- the peer's op store cannot be consulted. A peer that has no op store yet is
+  not this case; the requirement "A Stoa's metadata is answerable from its
+  address and genesis record, joined or not" says how it is answered.
 
 **A store that cannot be consulted MUST produce the error shape and MUST NOT
 produce a fallback reply.** A fallback reply states that the peer holds no

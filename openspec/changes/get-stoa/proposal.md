@@ -42,6 +42,18 @@ the system actually uses before anything implements it.
   transport-order wording and the "not implemented" disclaimer are replaced by
   the rule as built. Its "never an identifier" requirement loses one stale
   clause, which said that any peer's metadata op takes effect.
+- **How a reported Stoa address is spelled is stated once, for every call.**
+  `getStoa`'s reply names the address that was asked for, and a request may
+  spell that address in uppercase: every call taking a Stoa address already
+  accepts either case, and every reply carrying one already spells it in
+  lowercase. No requirement said either. `identity`'s display-form requirement
+  now says both, so `getStoa`'s reply inherits the rule rather than carrying
+  one of its own. Behaviour is unchanged.
+- **What "MUST NOT change any state" covers is stated.** Opening the op store on
+  a peer that has none initialises an empty one, as `listThreads` and
+  `readThread` already do. That is not a change of state under `getStoa`'s
+  requirement, and a peer with no op store yet is answered with a fallback
+  rather than refused.
 - **A stale sentence in `stoa-membership` is corrected** without changing its
   behaviour: it said that nothing resolves metadata ops.
 - **`stoa-navigation-view` is brought in line with what `getStoa` answers.**
@@ -79,6 +91,11 @@ wire method.
   unimplemented); MODIFIED "A displayed title is never an identifier" (stale
   claim that no authority check exists); ADDED requirements for the `getStoa`
   call, the shape of its reply, its failure cases, and its never aborting.
+- `identity`: MODIFIED "A Stoa address's display form parses strictly" (the
+  display form is lowercase hexadecimal; parsing accepts the letters in either
+  case as naming the same address; every reported Stoa address is in the
+  display form). This states behaviour every Stoa-taking call already has; it
+  changes none.
 - `stoa-membership`: MODIFIED "A listed title is a founding title, and is
   identified as such" — one sentence citing `stoa-metadata` as saying nothing
   resolves metadata ops; behaviour unchanged.
