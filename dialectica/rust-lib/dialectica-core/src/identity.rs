@@ -995,6 +995,31 @@ mod tests {
     }
 
     #[test]
+    fn an_address_in_uppercase_or_mixed_case_parses_to_the_same_address() {
+        // `identity`'s "An address in uppercase or mixed case parses to the same
+        // address": letter case is not part of what parsing checks, and
+        // rendering either parse gives the lowercase display form back.
+        let addr = stoa_address(b"a genesis record");
+        let lower = addr.to_hex();
+        let upper = lower.to_uppercase();
+        // Mixed: alternating case, so a parser that only special-cased "all
+        // uppercase" or "all lowercase" is still caught.
+        let mixed: String = lower
+            .chars()
+            .enumerate()
+            .map(|(i, c)| if i % 2 == 0 { c.to_ascii_uppercase() } else { c })
+            .collect();
+        assert_ne!(mixed, lower, "the fixture must actually mix case");
+
+        for spelling in [&upper, &mixed] {
+            let parsed = Address::from_hex(spelling)
+                .unwrap_or_else(|e| panic!("{spelling} must parse: {e}"));
+            assert_eq!(parsed, addr);
+            assert_eq!(parsed.to_hex(), lower, "rendering must give the lowercase form");
+        }
+    }
+
+    #[test]
     fn address_parsing_rejects_attacker_supplied_junk() {
         // §4.8 puts addresses inside posts, so this parser meets hostile input
         // by design. A truncated address that parsed would let two Stoas

@@ -12678,6 +12678,29 @@ mod tests {
     }
 
     #[test]
+    fn a_join_reply_reports_an_address_in_its_display_form_whatever_case_it_was_asked_in() {
+        // `identity`'s "A reply reports an address in its display form whatever
+        // case it was asked in" — `getStoa` has this test already
+        // (`an_address_asked_for_in_uppercase_is_answered_in_lowercase`); this is
+        // the same rule pinned through the other Stoa-taking call that reports an
+        // address back, `joinStoa`.
+        let mut store = a_membership_store();
+        let g = a_joinable_record("Somebody else's Stoa");
+        let address = g.address().unwrap();
+        let lower = address.to_hex();
+        let request = serde_json::json!({
+            "stoa": lower.to_uppercase(),
+            "genesis": hex::encode(g.canonical_bytes().unwrap()),
+        })
+        .to_string();
+
+        let out = join_stoa(&request, &mut store);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v.get("error").is_none(), "got {out}");
+        assert_eq!(v["stoa"].as_str(), Some(lower.as_str()));
+    }
+
+    #[test]
     fn a_record_that_does_not_match_the_address_is_refused_and_joins_neither_stoa() {
         // The self-authenticating check, at the wire. Every field in turn, because
         // a check comparing only one would pass a substitution in the other.
@@ -15521,11 +15544,10 @@ mod tests {
         assert_eq!(with, without);
     }
 
-    // NO SPEC: the spec says the reply's `stoa` is "the address that was asked
-    // for" and does not say how it is spelled. `Address::from_hex` accepts
-    // uppercase hex, and the reply spells the address the way every other reply
-    // does — lowercase — so an uppercase request is answered with a different
-    // string naming the same address.
+    // Pins `stoa-metadata`'s "An address asked for in uppercase is reported in
+    // its display form" scenario, and `identity`'s "Wherever the module reports
+    // a Stoa address, it MUST report the display form" requirement. No longer a
+    // NO SPEC choice: commit 6bd55f1 added both.
     #[test]
     fn an_address_asked_for_in_uppercase_is_answered_in_lowercase() {
         let lower = feed_genesis().address().unwrap().to_hex();
@@ -15537,6 +15559,27 @@ mod tests {
         let v = ask(&request, MemoryOpLog::new());
         assert!(v.get("error").is_none(), "got {v}");
         assert_eq!(v["stoa"].as_str(), Some(lower.as_str()));
+    }
+
+    #[test]
+    fn a_peer_that_has_never_stored_an_op_is_answered_with_a_fallback() {
+        // "A peer that has never stored an op MUST be answered as holding no
+        // metadata op for the Stoa — a fallback reply — and MUST NOT be refused
+        // because no op store existed before the call." `ask()`'s `MemoryOpLog`
+        // fixture cannot see this: it starts empty by construction and never
+        // touches a filesystem. `SqliteOpLog::open` against a path inside a fresh
+        // temp dir is the real thing a peer with no op store yet hits — the
+        // adapter's `storage_dir()` opener behaves the same way (design.md's
+        // "an empty store file on a profile that has none").
+        let dir = WireTempDir::new("get-stoa-no-store-yet");
+        let path = dir.path().join("ops.sqlite");
+        assert!(!path.exists(), "the fixture must be a path with no file yet");
+
+        let out = get_stoa(&full_request(), || crate::log::SqliteOpLog::open(&path));
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v.get("error").is_none(), "got {out}");
+        assert_eq!(v["title"], "Agora", "the genesis record's title");
+        assert_eq!(v["isGenesisFallback"], true);
     }
 
     // ─── getStoa never aborts ─────────────────────────────────────────────
