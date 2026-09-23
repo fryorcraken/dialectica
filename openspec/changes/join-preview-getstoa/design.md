@@ -121,6 +121,11 @@ blank check.
 
 ### 3. `SignedOp::to_bytes` is fallible, and the SQLite log refuses at the write
 
+The contract is `op-log`'s MODIFIED "The log records what arrived, and decides
+nothing about it": a log that keeps ops as their encoding refuses an op the
+encoding refuses, and a log that keeps ops as values stores it. This decision is
+how the two logs meet that, and why the line falls between them.
+
 If `to_bytes` stayed total, a blank-title op could be written to the SQLite log.
 `decode_entry` reads rows through `SignedOp::from_bytes`, which refuses it, so
 every later read of that Stoa would fail as `CorruptEntry`: the store would
@@ -129,7 +134,8 @@ guards with `body_within_cap`. So `append` encodes first and answers
 `OpLogError::Unencodable` without writing. `transport::publish` does the same
 before its append, as `PublishError::Unencodable`.
 
-**`MemoryOpLog` does not refuse, and that difference is deliberate.** It holds
+**`MemoryOpLog` does not refuse, and that difference is deliberate.** The
+requirement's "keeps ops as values" clause is this log. It holds
 `SignedOp` values, not bytes, so it has no read path that could be poisoned.
 It is the "reader that nonetheless holds one" the resolver requirement is
 written for. No production path hands a log a blank-title op anyway: the
@@ -159,6 +165,13 @@ shown to be exactly one record. A blank title with trailing bytes therefore
 reports `TrailingBytes`: the structural fault comes first, which is the
 answer that points at the right half of the problem. The op decoder does the same,
 through `check_admitted` on the built op.
+
+The ordering is specified now: "A blank title is the last refusal decoding
+reports", in both `stoa-genesis` and `op-format`, with a trailing-bytes scenario
+in each. It was chosen before the spec said so, and the two tests that pinned it
+still carry `NO SPEC:` markers that the spec now covers:
+`a_blank_title_followed_by_trailing_bytes_reports_the_trailing_bytes` in
+`stoa.rs` and in `op.rs`.
 
 Nothing in `wire.rs` checks titles, because the codec answers every path:
 
@@ -253,6 +266,7 @@ lookup.
 
 Where a join has succeeded, its reply's founding title is used first. A
 fallback lookup's title is used where the join supplied none that is not blank.
+`stoa-navigation-view` specifies this precedence.
 The two can only disagree if the core answers the same record two ways.
 
 **What breaks if `foundingTitle` takes any successful lookup's title rather
@@ -349,13 +363,18 @@ Only the comment claiming an empty title is legal has changed.
 ## Risks / Trade-offs
 
 - **A stored blank-titled metadata op in a SQLite log fails every read of that
-  Stoa** → reported to the spec-writer. `stoa-metadata` says such an op "never
-  binds", which reads as "resolves to the fallback". But a SQLite log cannot
-  hand the op to the resolver at all: `decode_entry` refuses it, so `getStoa`,
-  the feed and the thread for that Stoa all answer `CorruptEntry`. No build
+  Stoa.** This is specified. `op-log`'s "A stored entry that does not decode
+  fails every read that would return it" names this entry, and `stoa-metadata`'s
+  "`getStoa` refuses what it cannot answer, and never reports a fallback in
+  place of a failure" makes `getStoa`'s answer the error shape, carrying the
+  decoder's reason, rather than a fallback. The resolver's "never binds"
+  condition does not reach such an op, because the log never hands it over:
+  `decode_entry` refuses it, so `getStoa`, the feed and the thread for that
+  Stoa all answer `CorruptEntry`, and the row stays as it was. No build
   publishes a metadata op before #125, so only a crafted peer could have
-  delivered one before this change. This is a finding about the spec, not a
-  choice made here.
+  delivered one before this change. The cost is a Stoa that is unreadable on
+  that peer until the row is removed by hand, as decision 6 accepts for genesis
+  records.
 - **Two copies of the blank list, one per language.** Each side's tests pin
   every member and the two non-members the spec names, so drift shows up as a
   red test on whichever side moved.
