@@ -4221,8 +4221,10 @@ mod tests {
 
     #[test]
     fn generating_a_slate_writes_nothing() {
-        // The spec: "Generating a slate SHALL NOT write to storage", and
-        // "a caller asking who the user is still finds none".
+        // The spec: "Generating a slate MUST NOT write to storage", "no master key
+        // and no recorded choice are stored that were not there before", and "on
+        // a peer that held no master key, a caller asking who the user is still
+        // finds none". The fixture is such a peer: the directory starts empty.
         //
         // Checked by generating several slates against a real directory and then
         // asserting the directory is still EMPTY — which is stronger than
@@ -4543,7 +4545,8 @@ mod tests {
 
     #[test]
     fn a_selection_outside_the_set_is_refused_and_stores_nothing() {
-        // The spec: "the attempt is refused, AND no identity is stored". Coercing
+        // The spec: "the attempt is refused, AND no choice is recorded and no
+        // master key is stored that were not there before". Coercing
         // an out-of-range selection would store an identity the user did not
         // choose, which the spec calls unrecoverable.
         let dir = OnboardingDir::new("out-of-range");
@@ -5414,8 +5417,8 @@ mod tests {
         //
         // That case is what the spec's "A failed keep records nothing" actually
         // costs, and the spec is checkable on it: "no identity is reported as
-        // kept, AND a subsequent load finds no identity that was not there
-        // before". Both halves are asserted here.
+        // kept, AND a subsequent load finds no recorded choice and no master key
+        // that were not there before". Both halves are asserted here.
         //
         // The record write is made to fail by handing the keep a store whose
         // TABLE has been dropped out from under it — the connection is live, so
@@ -5481,8 +5484,8 @@ mod tests {
         assert!(v.get("address").is_none(), "got {out}");
         assert!(v.get("path").is_none(), "got {out}");
 
-        // The spec: "a subsequent load finds no identity that was not there
-        // before". `whoAmI` must not name one — and since `machine-identity-scope`
+        // The spec: "a subsequent load finds no recorded choice and no master
+        // key that were not there before". `whoAmI` must not name one — and since `machine-identity-scope`
         // it names whatever master key is on disk, so this reads the KEYSTORE
         // through the real opener. Before that change it was true only because
         // `whoAmI` read the record, which hid the orphaned key asserted on below.
@@ -5672,8 +5675,8 @@ mod tests {
     #[test]
     fn a_failed_keep_leaves_the_record_no_fuller_than_it_found_it() {
         // The spec's "A failed keep records nothing" has a second clause the
-        // tests above read past: "a subsequent load finds no identity THAT WAS
-        // NOT THERE BEFORE". That is a statement about the record as a whole, not
+        // tests above read past: "a subsequent load finds no recorded choice and
+        // no master key THAT WERE NOT THERE BEFORE". That is a statement about the record as a whole, not
         // about the Stoa being kept — so it is checkable by counting rows across
         // a failure, which nothing else here does.
         //
@@ -6537,10 +6540,13 @@ mod tests {
     #[test]
     fn a_record_restored_beside_a_master_key_reproduces_the_kept_choice() {
         // The spec's "A restore targets the device holding the master key": "the
-        // identities in use are those the record names, AND no other device's
-        // record participates". Nothing in this change covered it — the restore
-        // path is not a code path, it is the property that a record and a master
-        // key which never met each other in one process still agree.
+        // key derived from the restored master key and the path the restored
+        // record names for a Stoa is the identity that was kept for that Stoa,
+        // AND the identity in use in that Stoa is the restored master key's
+        // machine key, not the key the restored record names, AND no other
+        // device's record participates". The restore path is not a code path, it
+        // is the property that a record and a master key which never met each
+        // other in one process still agree.
         //
         // The fixture is a restore in the only sense that is checkable now: a
         // record file written by one store, COPIED to a fresh directory, and read
@@ -6574,17 +6580,11 @@ mod tests {
         )
         .unwrap();
 
-        // SPEC CONFLICT: `identity-onboarding`'s "A restore targets the device
-        // holding the master key" still reads "THEN the identities in use are
-        // those the record names", and `machine-identity-scope` does not modify
-        // it — while that change's `identity` requirement says a recorded choice
-        // MUST NOT change the key in use. The two cannot both hold. This test
-        // follows the newer, more specific requirement and is reported to the
-        // spec-writer; see `design.md` under Open Questions.
-        //
-        // So a restore is asserted as two separate facts. The RECORD restored
-        // beside the master key reproduces the choice that was kept, read from
-        // the copies alone ...
+        // A restore is two separate facts, because in this release a recorded
+        // choice does not change the key in use (`identity`: "In this release one
+        // machine key is the identity in every Stoa"). The RECORD restored beside
+        // the master key reproduces the choice that was kept, read from the
+        // copies alone ...
         let restored_master = Keystore::open(&restored.keystore_path(), &Unlock::Unencrypted)
             .expect("the restored master key opens");
         let restored_path = restored

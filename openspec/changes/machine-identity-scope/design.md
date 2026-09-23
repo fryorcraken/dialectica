@@ -74,6 +74,25 @@ against a caller that does not exist: the view was the only caller, and D9 stops
 it calling. The contract that does change: a keep no longer changes the identity
 in use (`a_recorded_per_stoa_choice_does_not_change_the_key_in_use`).
 
+The same fact reaches three more `identity-onboarding` requirements, which the
+delta modifies:
+
+- **A restore brings back the kept choices, not the identity in use.** A record
+  restored beside a master key reproduces each kept choice from that key and the
+  recorded path, and the identity in use stays the restored machine key.
+  `a_record_restored_beside_a_master_key_reproduces_the_kept_choice` asserts the
+  two as separate facts, so neither can stand in for the other: the restored
+  master key and record reproduce the kept key, and `whoAmI` on the restored
+  device names the machine key and not the kept one.
+- **Onboarding may begin on a peer that already holds a key.** A generated slate
+  and a refused selection are each required to store no master key and no choice
+  that were not there before, rather than "no identity" at all. Only a peer that
+  held no master key still finds nobody when asked who the user is. The existing
+  tests (`generating_a_slate_writes_nothing`,
+  `a_selection_outside_the_set_is_refused_and_stores_nothing`) start from an empty
+  directory, which is that keyless peer; neither covers a peer that already holds
+  a key.
+
 ### D3. The identity-in-use functions take no Stoa and no record, so the record cannot decide who posts
 
 `posting_identity(keystore)`, `publishing_key(keystore)`, `whoami_for(master)`,
@@ -272,12 +291,4 @@ stays open. Re-run the query rather than trusting this table. It is a snapshot.
 
 ## Open Questions
 
-- **Spec conflict, reported to the spec-writer:** `identity-onboarding`'s
-  unmodified scenario "A restore targets the device holding the master key" says
-  "THEN the identities in use are those the record names". This delta's
-  `identity` requirement says a recorded choice MUST NOT change the key in use.
-  Both cannot hold. The code and
-  `a_record_restored_beside_a_master_key_reproduces_the_kept_choice` follow the
-  newer requirement: the restored record reproduces the kept choice, and the
-  identity in use is the machine key. The scenario needs a MODIFIED block in this
-  delta. This changes no code, only which spec text is true.
+None.
