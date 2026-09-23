@@ -1,7 +1,7 @@
 ## Stages
 
 - [x] spec — `spec-writer`
-- [ ] design + code — `dev-writer`
+- [x] design + code — `dev-writer`
 - [ ] tests — `tester`
 - [ ] review: correctness — `code-reviewer`
 - [ ] review: security — `code-reviewer`
@@ -29,13 +29,13 @@
 
 ### 3. The view
 
-- [ ] 3.1 Add `Core.getStoa`, `Core.isBlankTitle` (same 30 code points) and `Core.stoaMetadataFrom`, treating a misshapen or blank-titled reply as a failure. Verify: QML spec over the normaliser, including all 30 blank characters and U+200E/U+180E.
-- [ ] 3.2 In `DJoinScreen`, look up the reference on screen, keyed to that reference; derive `foundingTitle` from the join or a fallback lookup and `currentTitle`/description from a non-fallback lookup; render the fallback note, the lookup failure panel and the rewritten no-founding-title note; correct the `currentTitle` comment. Verify: `tst_stoa_screens.qml` specs for fallback, non-fallback, description, failure, malformed and blank replies, and a second reference.
-- [ ] 3.3 Keep the lookalike comparison over founding titles only and treat a blank join title as unavailable. Verify: QML specs that a current title is not compared and a blank title matches nothing.
-- [ ] 3.4 Update the specs that pinned the superseded behaviour (no call at preview, an empty title accepted at creation) and correct `DStoaListScreen`'s empty-title comment. Verify: `sh dialectica-ui/tests/run-qml-tests.sh dialectica-ui/tests/tst_stoa_screens.qml` passes.
+- [x] 3.1 Add `Core.getStoa`, `Core.isBlankTitle` (same 30 code points) and `Core.stoaMetadataFrom`, treating a misshapen or blank-titled reply as a failure. Verify: QML spec over the normaliser, including all 30 blank characters and U+200E/U+180E.
+- [x] 3.2 In `DJoinScreen`, look up the reference on screen, keyed to that reference; derive `foundingTitle` from the join or a fallback lookup and `currentTitle`/description from a non-fallback lookup; render the fallback note, the lookup failure panel and the rewritten no-founding-title note; correct the `currentTitle` comment. Verify: `tst_stoa_screens.qml` specs for fallback, non-fallback, description, failure, malformed and blank replies, and a second reference.
+- [x] 3.3 Keep the lookalike comparison over founding titles only and treat a blank join title as unavailable. Verify: QML specs that a current title is not compared and a blank title matches nothing.
+- [x] 3.4 Update the specs that pinned the superseded behaviour (no call at preview, an empty title accepted at creation) and correct `DStoaListScreen`'s empty-title comment. Verify: `sh dialectica-ui/tests/run-qml-tests.sh dialectica-ui/tests/tst_stoa_screens.qml` passes.
 
 ### 4. Gates
 
-- [ ] 4.1 `cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p dialectica -p dialectica-core`, `cargo clippy … -D warnings` and `cargo fmt --check` pass.
-- [ ] 4.2 `nix build .#lgx` succeeds.
-- [ ] 4.3 Every QML spec passes through `run-qml-tests.sh`.
+- [x] 4.1 `cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p dialectica -p dialectica-core`, `cargo clippy … -D warnings` and the workspace `cargo fmt --check` CI runs pass. A direct `fmt --check` on `dialectica-core` reports only drift that predates this change (`identity.rs`, one site in `wire.rs`).
+- [x] 4.2 `nix build ./dialectica#lgx` succeeds. The flake is under `dialectica/`, and there is none at the repository root.
+- [x] 4.3 Every QML spec passes through `run-qml-tests.sh`, and the `check_qml_members`, `check_qml_names` and `check_qml_reachable` gates and qmllint are clean.

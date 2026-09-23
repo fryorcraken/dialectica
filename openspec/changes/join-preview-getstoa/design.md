@@ -218,6 +218,19 @@ every assertion in the suite wait on the event loop, and a callback outliving a
 destroyed screen is a warning that the `check_bindings` gate turns into a
 failure.
 
+The two change handlers wait for `Component.onCompleted`, through a
+`constructed` flag. Without it, a screen created with both halves already set
+asks once per property and then once more on completion, so the counts in the
+lookup specs would depend on QML's order of initial assignment.
+
+**The reference filter on `currentLookup` cannot be seen through the shipped
+routes.** Every reference on screen gets a fresh lookup before anything renders,
+so a stale answer is always replaced. It is kept because the join outcome needs
+the same shape for the same reason, and because making lookups asynchronous
+would make the stale state reachable. **What breaks without it:**
+`test_a_lookup_answered_for_one_address_is_not_rendered_over_another`, and only
+that. It drives a half-reference that `Main.qml` never produces, and says so.
+
 ### 8. `isGenesisFallback` alone decides which panel `title` fills
 
 The issue asks that the flag be "surfaced or at least not discarded", because it
@@ -241,6 +254,12 @@ lookup.
 Where a join has succeeded, its reply's founding title is used first. A
 fallback lookup's title is used where the join supplied none that is not blank.
 The two can only disagree if the core answers the same record two ways.
+
+**What breaks if `foundingTitle` takes any successful lookup's title rather
+than only a fallback's** (measured): the non-fallback spec, the real-route
+preview spec, the blank-join-title spec, and
+`test_the_lookalike_warning_cannot_be_claimed_before_a_join_happens`. The last
+is the owner's renamed-to-match case in decision 11.
 
 ### 9. The description is shown only from a non-fallback reply, and only when non-empty
 
@@ -272,9 +291,10 @@ comparison does not run. That is accepted for now: the creator's key, the
 identicon and whether the user already joined it are enough signal at this
 stage, and on-chain Stoas after 0.1.0 are what will fix a Stoa's identity.
 `lookalikes` reads only `foundingTitle`, which a non-fallback reply never
-fills. So a current title cannot reach the comparison, and
-`a_current_title_is_not_compared_against_held_stoas` pins that rather than
-leaving it to be inferred.
+fills. So a current title cannot reach the comparison.
+`test_the_lookalike_warning_cannot_be_claimed_before_a_join_happens` pins that
+rather than leaving it to be inferred: its lookup answers a current title equal
+to a held Stoa's founding title, and no lookalike is rendered.
 
 **A blank held title cannot match, by construction.** `foundingTitle` is never
 blank: a blank join title and a blank lookup title are both discarded before it.
@@ -304,6 +324,13 @@ gates to police, for one function.
 points are in the Basic Multilingual Plane. A character outside it is a
 surrogate pair, and no surrogate is in the list, so such a character is never
 blank. That is the correct answer.
+
+**What breaks without the blank check in the normaliser** (measured):
+`test_a_blank_looked_up_title_is_a_failure_naming_it_blank`,
+`test_the_views_blank_list_is_the_thirty_the_core_lists`, and
+`test_a_blank_title_matches_no_held_stoa` for its whitespace case. The empty
+case of that last test stays green either way, because an empty
+`foundingTitle` already means "none available".
 
 ### 13. Creation passes a blank title to the core unchanged
 

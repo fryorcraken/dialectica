@@ -210,6 +210,22 @@ QtObject {
         return root.call("join_stoa", [JSON.stringify({ stoa: stoa, genesis: genesis })])
     }
 
+    // What a Stoa is called, asked about a reference this peer may not have
+    // joined: `{stoa, genesis}` -> `{stoa, title, description, policy,
+    // isGenesisFallback}`.
+    //
+    // BOTH halves, for `joinStoa`'s reason: the moderator set that decides
+    // which renames bind comes from the record, and an address cannot rebuild
+    // one. Asking changes nothing in the core — it joins nothing and publishes
+    // nothing — which is what lets the join preview ask before the user acts.
+    //
+    // Read the reply through `stoaMetadataFrom` below, not directly: a success
+    // the view cannot place in a panel is a failure, and that judgement is made
+    // once, there.
+    function getStoa(stoa, genesis) {
+        return root.call("get_stoa", [JSON.stringify({ stoa: stoa, genesis: genesis })])
+    }
+
     // One page of the Stoas this peer is in.
     //
     // `perPage` is the caller's rather than defaulted here. This wrapper's job
@@ -414,6 +430,80 @@ QtObject {
                     && typeof probe.value.reason === "string"
                 ? probe.value.reason
                 : (probe.ok ? "" : probe.error)
+        }
+    }
+
+    // ---- what a blank title is ------------------------------------------
+    //
+    // The thirty code points `stoa-genesis`'s "A blank title is not a valid
+    // title" lists, and nothing else: the twenty-five `White_Space` code
+    // points, then five zero-width ones. A title is blank when every character
+    // is one of them, so "" is blank.
+    //
+    // **The core holds the same list** (`stoa::BLANK_CHARACTERS`), and the view
+    // needs its own because it has to judge titles the core hands it: a
+    // `getStoa` reply's, and a join reply's founding title. Both sides pin every
+    // member in their tests, so a list edited on one side goes red there.
+    //
+    // **A list, not a regex.** JavaScript's `\s` is a third set: it includes
+    // U+FEFF, but not U+0085 or four of the zero-width characters. The view
+    // would then disagree with the core in both directions. The change's
+    // `design.md` decision 1 has the reasons for the membership.
+    readonly property var blankCodeUnits: [
+        0x0009, 0x000A, 0x000B, 0x000C, 0x000D, 0x0020, 0x0085, 0x00A0,
+        0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006,
+        0x2007, 0x2008, 0x2009, 0x200A, 0x2028, 0x2029, 0x202F, 0x205F,
+        0x3000, 0x200B, 0x200C, 0x200D, 0x2060, 0xFEFF
+    ]
+
+    // Whether every character of `title` is in `blankCodeUnits`.
+    //
+    // **UTF-16 code units, and that is exact for this list.** Every one of the
+    // thirty is in the Basic Multilingual Plane. A character outside it is a
+    // surrogate pair, and no surrogate is in the list, so such a character is
+    // never blank, which is the right answer. A test, not a transformation:
+    // nothing here trims.
+    function isBlankTitle(title) {
+        var s = String(title)
+        for (var i = 0; i < s.length; i++)
+            if (root.blankCodeUnits.indexOf(s.charCodeAt(i)) < 0)
+                return false
+        return true
+    }
+
+    // One `get_stoa` reply, normalised to exactly one of:
+    //   { ok: true,  isGenesisFallback: <bool>, title: <string>, description: <string> }
+    //   { ok: false, error: <string> }
+    //
+    // **A success the view cannot place is a failure**, the same rule the Stoa
+    // list applies to a success with no items array. `isGenesisFallback` is what
+    // decides which panel `title` fills, so a reply without it as a boolean has
+    // no panel. A `title` or `description` that is not a string has nothing to
+    // render. And a BLANK `title` is not a founding title and not a current one:
+    // `stoa-metadata` says no successful reply carries one, so a reply that does
+    // is not one the contract describes. Each failure's reason is the view's own
+    // and names what was wrong, because there is no core reason to show.
+    function stoaMetadataFrom(reply) {
+        if (!reply.ok)
+            return { ok: false, error: reply.error }
+        var v = reply.value
+        if (typeof v.isGenesisFallback !== "boolean")
+            return { ok: false, error: "The core's answer about this Stoa did not say "
+                     + "whether it fell back to the founding title, so it is not shown." }
+        if (typeof v.title !== "string")
+            return { ok: false, error: "The core's answer about this Stoa carried no title "
+                     + "as text, so it is not shown." }
+        if (typeof v.description !== "string")
+            return { ok: false, error: "The core's answer about this Stoa carried no "
+                     + "description as text, so it is not shown." }
+        if (root.isBlankTitle(v.title))
+            return { ok: false, error: "The core's answer about this Stoa carried a blank "
+                     + "title, which no valid Stoa has, so it is not shown." }
+        return {
+            ok: true,
+            isGenesisFallback: v.isGenesisFallback,
+            title: v.title,
+            description: v.description
         }
     }
 }
