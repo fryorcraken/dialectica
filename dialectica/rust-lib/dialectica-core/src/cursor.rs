@@ -144,8 +144,9 @@ mod tests {
 
     #[test]
     fn take_of_zero_bytes_is_allowed_and_moves_nothing() {
-        // An empty variable-length field is legitimate — a genesis record with
-        // an empty title encodes a zero prefix — so this must not be an error.
+        // An empty variable-length field is legitimate — a metadata op with an
+        // empty description encodes a zero prefix, as does a post with an empty
+        // body — so this must not be an error.
         let mut c = Cursor::new(b"ab");
         assert_eq!(c.take(0).unwrap(), b"");
         assert_eq!(c.take(2).unwrap(), b"ab");

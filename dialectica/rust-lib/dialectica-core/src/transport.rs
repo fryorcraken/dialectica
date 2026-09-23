@@ -1567,6 +1567,53 @@ mod tests {
         assert_eq!(log.len().unwrap(), 0);
     }
 
+    /// An authentic metadata op for `stoa` whose title is blank, signed by its
+    /// creator-shaped author. Built by struct literal, the only way to build one.
+    fn a_blank_titled_rename_in(stoa: Address) -> SignedOp {
+        let key = a_key(2);
+        Op {
+            stoa,
+            author: key.public_key(),
+            clock: None,
+            kind: OpKind::StoaMetadata {
+                title: String::new(),
+                description: String::new(),
+            },
+        }
+        .sign(&key)
+    }
+
+    #[test]
+    fn a_blank_titled_metadata_op_from_a_peer_is_refused_at_the_boundary() {
+        // `op-format` requires the refusal "before the input reaches any state
+        // machine". The payload is what a hostile or older peer sends: the
+        // layout plus a VALID signature, so decoding is the only thing refusing it.
+        let stoa = a_stoa("Agora");
+        let (channels, mut log, identity) = peer_in(stoa);
+        let op = a_blank_titled_rename_in(stoa);
+        assert!(op.verify(), "the fixture must be authentic");
+        let mut payload = op.op.canonical_bytes();
+        payload.extend_from_slice(&op.signature.to_bytes());
+
+        let refusal = receive(
+            inbound(identity.channel_id(), &payload),
+            &channels,
+            &mut log,
+        )
+        .unwrap_err();
+        assert_eq!(refusal, InboundRefusal::Undecodable(OpError::BlankTitle));
+        assert_eq!(log.len().unwrap(), 0, "nothing reached the log");
+    }
+
+    #[test]
+    fn a_blank_titled_metadata_op_is_not_published_or_stored() {
+        let stoa = a_stoa("Agora");
+        let (channels, mut log, _) = peer_in(stoa);
+        let err = publish(a_blank_titled_rename_in(stoa), &channels, &mut log).unwrap_err();
+        assert_eq!(err, PublishError::Unencodable(OpError::BlankTitle));
+        assert_eq!(log.len().unwrap(), 0, "refused before the append");
+    }
+
     #[test]
     fn a_valid_op_is_stored_and_recorded_as_unordered() {
         let stoa = a_stoa("Agora");

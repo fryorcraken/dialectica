@@ -2013,6 +2013,45 @@ mod tests {
     }
 
     #[test]
+    fn an_op_with_no_encoding_is_refused_and_nothing_is_written() {
+        // The guard in `append`. Without it the row is written, and every later
+        // read of the Stoa fails as `CorruptEntry` because `decode_entry` refuses
+        // what the encoder refuses: a store poisoning itself on one op.
+        //
+        // The op is authentic and built the only way one can be: by struct
+        // literal and `sign()`. No production path hands a log one, because the
+        // transport decodes (which refuses it) and nothing authors a metadata op.
+        let author = a_key(2);
+        let stoa = a_stoa("Agora");
+        let blank = Op {
+            stoa,
+            author: author.public_key(),
+            clock: None,
+            kind: crate::op::OpKind::StoaMetadata {
+                title: String::new(),
+                description: String::new(),
+            },
+        }
+        .sign(&author);
+        assert!(blank.verify(), "the fixture must be authentic");
+
+        let mut log = SqliteOpLog::in_memory().unwrap();
+        log.append(signed(a_post("already here")), Arrival::unordered())
+            .unwrap();
+
+        match log.append(blank, Arrival::unordered()) {
+            Err(OpLogError::Unencodable(why)) => assert!(why.contains("blank"), "{why}"),
+            other => panic!("expected Unencodable, got {other:?}"),
+        }
+        assert_eq!(log.len().unwrap(), 1, "nothing was written");
+        assert_eq!(
+            log.iter_stoa(&stoa).unwrap().len(),
+            1,
+            "and the Stoa is still readable, which is the property the guard protects"
+        );
+    }
+
+    #[test]
     fn every_error_variant_renders_differently() {
         // Two errors that read the same are one error with two names, and a
         // reader cannot act on the difference. `keystore.rs` pins the same

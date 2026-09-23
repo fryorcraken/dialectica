@@ -24,8 +24,8 @@
 //! **Decoding is strict.** A genesis record arrives from a peer, so it is
 //! attacker-controlled (CLAUDE.md's security posture: validate at the boundary,
 //! before anything reaches a state machine). Truncation, trailing bytes, a
-//! lying length prefix, an unknown policy and an unknown version are each
-//! refused rather than absorbed.
+//! lying length prefix, an unknown policy, an unknown version and a blank title
+//! are each refused rather than absorbed.
 //!
 //! **Two different bounds govern the title length prefix**, and confusing them
 //! is how one of them silently stops being checked.
@@ -119,6 +119,52 @@ const MAX_TITLE_BYTES: usize = 1024;
 /// argument `op.rs`'s field cap makes about putting a bound where the format is
 /// known.
 pub const MAX_CANONICAL_BYTES: usize = 1 + 32 + 1 + 4 + MAX_TITLE_BYTES;
+
+/// The characters a **blank** title is made of: exactly these thirty, and no
+/// others.
+///
+/// The `stoa-genesis` spec's "A blank title is not a valid title" defines the
+/// list, and this is that list verbatim: the twenty-five code points carrying
+/// Unicode's `White_Space` property, then five zero-width characters.
+///
+/// **A frozen list, not [`char::is_whitespace`], and the difference matters.**
+/// Whether a title is blank decides whether a record is valid, which decides
+/// whether a Stoa exists at all. `is_whitespace` follows `White_Space` as of
+/// the toolchain that built this peer, so two peers built against different
+/// Unicode tables would disagree about which Stoas exist, and neither would
+/// see an error. The property has moved before: U+180E MONGOLIAN VOWEL
+/// SEPARATOR left it in Unicode 6.3, and the spec names it as not blank.
+///
+/// **The view holds the same thirty values** (`Core.blankCodeUnits` in
+/// `dialectica-ui`), because it has to decide whether a reply's title is blank
+/// and it cannot ask this module. Each side's tests pin every member, so a
+/// change to one list turns that side's tests red. The change's `design.md`
+/// decision 1 has the reasons for the membership: why WORD JOINER is in, and why
+/// the bidirectional controls are out.
+///
+/// In the spec's order: the first twenty-five, U+0009 to U+3000, are the
+/// `White_Space` code points; the last five, U+200B to U+FEFF, are the
+/// zero-width ones.
+pub const BLANK_CHARACTERS: [char; 30] = [
+    '\u{0009}', '\u{000A}', '\u{000B}', '\u{000C}', '\u{000D}', '\u{0020}', '\u{0085}', '\u{00A0}',
+    '\u{1680}', '\u{2000}', '\u{2001}', '\u{2002}', '\u{2003}', '\u{2004}', '\u{2005}', '\u{2006}',
+    '\u{2007}', '\u{2008}', '\u{2009}', '\u{200A}', '\u{2028}', '\u{2029}', '\u{202F}', '\u{205F}',
+    '\u{3000}', '\u{200B}', '\u{200C}', '\u{200D}', '\u{2060}', '\u{FEFF}',
+];
+
+/// Whether every character of `title` is one of [`BLANK_CHARACTERS`].
+///
+/// The empty title is blank: it has no character that is not a blank one.
+/// A title with even one other character is not blank, wherever its blank
+/// characters sit, and nothing here trims or normalises it. It is a test, not a
+/// transformation.
+///
+/// **Shared by every place a Stoa title is judged**: the genesis codec here, the
+/// metadata op codec in `op.rs`, and the metadata resolver. One predicate means
+/// "is it blank?" has one answer across the three.
+pub fn is_blank_title(title: &str) -> bool {
+    title.chars().all(|c| BLANK_CHARACTERS.contains(&c))
+}
 
 /// How a Stoa decides who may post.
 ///
@@ -225,6 +271,12 @@ pub enum GenesisError {
     /// The title exceeds [`MAX_TITLE_BYTES`]. Carries the length found, since
     /// "too long" without a number leaves the caller guessing by how much.
     TitleTooLong(usize),
+    /// The title is blank: empty, or made only of [`BLANK_CHARACTERS`].
+    ///
+    /// **One variant for every blank title**, the empty one included. The
+    /// owner's ruling makes a whitespace-only title invalid "in the same way as
+    /// `""`", and a caller has nothing different to do for the two.
+    BlankTitle,
 }
 
 impl std::fmt::Display for GenesisError {
@@ -248,6 +300,11 @@ impl std::fmt::Display for GenesisError {
             GenesisError::TitleTooLong(n) => {
                 write!(f, "title is {n} bytes, the maximum is {MAX_TITLE_BYTES}")
             }
+            GenesisError::BlankTitle => write!(
+                f,
+                "title is blank: it has no character other than whitespace or \
+                 zero-width characters"
+            ),
         }
     }
 }
@@ -285,13 +342,22 @@ impl Genesis {
     /// variable-length field (an invite list, a token identifier) can be added
     /// in a later version without the boundary between them becoming ambiguous.
     ///
-    /// Fails for a title over [`MAX_TITLE_BYTES`]. Encoding is fallible so the
-    /// bound holds on both sides: a record the decoder would reject must not be
-    /// one the encoder will produce, or the two disagree about what is valid.
+    /// Fails for a title over [`MAX_TITLE_BYTES`], and for a blank one. Encoding
+    /// is fallible so each bound holds on both sides: a record the decoder would
+    /// reject must not be one the encoder will produce, or the two disagree
+    /// about what is valid.
+    ///
+    /// **A blank title has no encoding, so it has no address.** That is what
+    /// makes "a blank-titled Stoa" unrepresentable everywhere downstream:
+    /// [`Genesis::address`], [`Genesis::matches`], `Moderators::of` and
+    /// `Membership::verified` all go through here.
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, GenesisError> {
         let title = self.title.as_bytes();
         if title.len() > MAX_TITLE_BYTES {
             return Err(GenesisError::TitleTooLong(title.len()));
+        }
+        if is_blank_title(&self.title) {
+            return Err(GenesisError::BlankTitle);
         }
         let mut out = Vec::with_capacity(1 + 32 + 1 + 4 + title.len());
         out.push(VERSION_1);
@@ -339,6 +405,15 @@ impl Genesis {
 
         // Nothing may follow a complete record.
         cursor.finish()?;
+
+        // AFTER the structure, so an input wrong in two ways reports the
+        // structural fault: a blank title followed by trailing bytes is
+        // `TrailingBytes`, which points at the bytes rather than at the text.
+        // The encoder refuses the same titles, so no record this peer writes can
+        // fail here.
+        if is_blank_title(&title) {
+            return Err(GenesisError::BlankTitle);
+        }
 
         Ok(Genesis {
             creator,
@@ -465,7 +540,9 @@ mod tests {
 
     #[test]
     fn decode_of_encode_is_the_identity() {
-        for title in ["", "Agora", "Ἀγορά — the marketplace", "🏛"] {
+        // No empty title: it has no encoding (`an_empty_title_is_refused_on_both_sides`
+        // below), so it has no round trip to take.
+        for title in ["a", "Agora", "Ἀγορά — the marketplace", "🏛"] {
             let g = Genesis {
                 title: title.to_string(),
                 ..a_record()
@@ -526,6 +603,7 @@ mod tests {
                 // it is a second path worth covering rather than a repeat.
                 GenesisError::InvalidCreator(KeyError::WeakPublicKey),
                 GenesisError::TitleTooLong(2000),
+                GenesisError::BlankTitle,
             ];
             // Non-exhaustive match => compile error when a variant is added.
             // Never executed; it exists only to make the compiler check the
@@ -539,7 +617,8 @@ mod tests {
                     | GenesisError::LengthMismatch
                     | GenesisError::InvalidTitle
                     | GenesisError::InvalidCreator(_)
-                    | GenesisError::TitleTooLong(_) => {}
+                    | GenesisError::TitleTooLong(_)
+                    | GenesisError::BlankTitle => {}
                 }
             }
             all
@@ -1075,7 +1154,7 @@ mod tests {
         // A field cannot be dropped while another silently slides into its
         // place. Complements the known-answer test above: that one catches a
         // changed VALUE, this one catches a changed SHAPE for any title.
-        for title in ["", "Agora", "🏛"] {
+        for title in ["a", "Agora", "🏛"] {
             let g = Genesis {
                 title: title.to_string(),
                 ..a_record()
@@ -1086,5 +1165,172 @@ mod tests {
                 "unexpected encoding length for title {title:?}"
             );
         }
+    }
+
+    // ─── A blank title ────────────────────────────────────────────────────
+
+    /// A well-formed record carrying `title`, built by hand.
+    ///
+    /// **Not through `canonical_bytes`, which refuses a blank title**. This is
+    /// the record a peer on an older build, or a hostile one, could hand over,
+    /// and it is what the decode half of every test below needs. The prefix is
+    /// taken from a real encoding so it cannot drift from the layout.
+    fn a_raw_record_titled(title: &str) -> Vec<u8> {
+        let mut bytes = a_record().canonical_bytes().unwrap();
+        bytes.truncate(TITLE_LEN_AT);
+        bytes.extend_from_slice(&(title.len() as u32).to_be_bytes());
+        bytes.extend_from_slice(title.as_bytes());
+        bytes
+    }
+
+    fn titled(title: &str) -> Genesis {
+        Genesis {
+            title: title.to_string(),
+            ..a_record()
+        }
+    }
+
+    #[test]
+    fn the_blank_characters_are_exactly_the_thirty_the_spec_lists() {
+        // Hardcoded, not read back from the constant: an assertion written
+        // against `BLANK_CHARACTERS` itself would pass whatever it held. The
+        // view holds the same thirty (`Core.blankCodeUnits`), and its own spec
+        // pins them the same way, so drift on either side goes red there.
+        let listed: [u32; 30] = [
+            0x0009, 0x000A, 0x000B, 0x000C, 0x000D, 0x0020, 0x0085, 0x00A0, 0x1680, 0x2000, 0x2001,
+            0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009, 0x200A, 0x2028, 0x2029,
+            0x202F, 0x205F, 0x3000, 0x200B, 0x200C, 0x200D, 0x2060, 0xFEFF,
+        ];
+        let held: Vec<u32> = BLANK_CHARACTERS.iter().map(|c| *c as u32).collect();
+        assert_eq!(held, listed.to_vec());
+    }
+
+    #[test]
+    fn blank_means_every_character_is_listed_and_nothing_else_does() {
+        assert!(
+            is_blank_title(""),
+            "the empty title has no unlisted character"
+        );
+        for c in BLANK_CHARACTERS {
+            assert!(is_blank_title(&c.to_string()), "U+{:04X} alone", c as u32);
+        }
+        // Characters that render as nothing and are NOT in the list. U+180E was
+        // `White_Space` until Unicode 6.3, which is why the list is frozen.
+        for c in ['\u{200E}', '\u{200F}', '\u{180E}', '\u{202E}', '\u{2066}'] {
+            assert!(!is_blank_title(&c.to_string()), "U+{:04X}", c as u32);
+        }
+        assert!(!is_blank_title(" \u{200B}a\u{3000}\u{FEFF}"));
+        assert!(!is_blank_title("a"));
+    }
+
+    #[test]
+    fn an_empty_title_is_refused_on_both_sides() {
+        assert_eq!(titled("").canonical_bytes(), Err(GenesisError::BlankTitle));
+        assert_eq!(
+            Genesis::decode(&a_raw_record_titled("")),
+            Err(GenesisError::BlankTitle)
+        );
+    }
+
+    #[test]
+    fn each_blank_character_alone_is_refused_on_both_sides_with_the_empty_titles_failure() {
+        for c in BLANK_CHARACTERS {
+            let title = c.to_string();
+            assert_eq!(
+                titled(&title).canonical_bytes(),
+                Err(GenesisError::BlankTitle),
+                "encoding U+{:04X}",
+                c as u32
+            );
+            assert_eq!(
+                Genesis::decode(&a_raw_record_titled(&title)),
+                Err(GenesisError::BlankTitle),
+                "decoding U+{:04X}",
+                c as u32
+            );
+        }
+    }
+
+    #[test]
+    fn a_title_mixing_blank_characters_is_refused_on_both_sides() {
+        let title = "\u{0020}\u{200B}\u{3000}\u{FEFF}\u{0009}";
+        assert_eq!(
+            titled(title).canonical_bytes(),
+            Err(GenesisError::BlankTitle)
+        );
+        assert_eq!(
+            Genesis::decode(&a_raw_record_titled(title)),
+            Err(GenesisError::BlankTitle)
+        );
+    }
+
+    #[test]
+    fn a_title_of_one_letter_round_trips() {
+        let g = titled("a");
+        assert_eq!(Genesis::decode(&g.canonical_bytes().unwrap()).unwrap(), g);
+    }
+
+    #[test]
+    fn one_visible_letter_among_blank_characters_is_kept_exactly_as_given() {
+        // Asserted against the hand-built bytes too, so a decoder that trimmed
+        // would be caught even if the encoder trimmed identically.
+        let title = "\u{0020}\u{200B}a\u{3000}\u{FEFF}";
+        let g = titled(title);
+        let bytes = g.canonical_bytes().unwrap();
+        assert_eq!(
+            bytes,
+            a_raw_record_titled(title),
+            "nothing trimmed on encode"
+        );
+        assert_eq!(Genesis::decode(&bytes).unwrap().title, title);
+    }
+
+    #[test]
+    fn a_title_only_of_characters_outside_the_list_is_not_blank() {
+        for title in ["\u{200E}", "\u{180E}"] {
+            let g = titled(title);
+            let bytes = g.canonical_bytes().unwrap();
+            assert_eq!(Genesis::decode(&bytes).unwrap().title, title);
+        }
+    }
+
+    #[test]
+    fn a_blank_title_is_distinguishable_from_every_other_refusal() {
+        // `every_error_renders_without_leaking_rust_syntax` pins that the
+        // rendered strings differ. This pins that the decoder REACHES the blank
+        // variant for a zero-length title rather than one of its neighbours: a
+        // zero-length prefix is also the shape a truncation check or a
+        // length check could claim first.
+        let err = Genesis::decode(&a_raw_record_titled("")).unwrap_err();
+        for other in [
+            GenesisError::Truncated,
+            GenesisError::LengthMismatch,
+            GenesisError::InvalidTitle,
+            GenesisError::TitleTooLong(0),
+        ] {
+            assert_ne!(err, other);
+        }
+    }
+
+    // NO SPEC: the spec requires a blank title and trailing bytes each to be
+    // refused, and does not say which an input carrying both reports. This
+    // reports the structural fault first, so the reason points at the bytes.
+    #[test]
+    fn a_blank_title_followed_by_trailing_bytes_reports_the_trailing_bytes() {
+        let mut bytes = a_raw_record_titled("");
+        bytes.push(0);
+        assert_eq!(Genesis::decode(&bytes), Err(GenesisError::TrailingBytes));
+    }
+
+    #[test]
+    fn a_blank_titled_record_has_no_address_and_matches_none() {
+        // Downstream the whole "blank-titled Stoa" case rests on this: a record
+        // with no encoding has no address, so `Membership::verified`,
+        // `Moderators::of` and `Founding::of` all refuse it without a check of
+        // their own.
+        let blank = titled("");
+        assert_eq!(blank.address(), Err(GenesisError::BlankTitle));
+        let address_of_its_bytes = stoa_address(&a_raw_record_titled(""));
+        assert!(!blank.matches(&address_of_its_bytes));
     }
 }
