@@ -93,13 +93,21 @@ Because only posts are tallied, a reply's place is its own post's. A revision is
 a different op, skipped by its kind, so revising an old reply cannot lift it to
 the front. The id recorded is the post's for the same reason.
 
-**What breaks without it:** replacing `or_insert_with` with an insert that
-overwrites would make the last reply met win. That should turn
-`the_latest_reply_is_the_one_the_ordering_rule_places_first`,
-`replies_at_every_depth_are_counted_and_a_deeper_one_can_be_latest` and
-`a_hidden_reply_is_neither_counted_nor_latest` red. **This is a prediction and
-has not been measured.** The mutation was refused in the implementing session,
-and the tester's run is what establishes it.
+**What breaks without it, measured:** if `and_modify` also overwrites
+`latest` with each later reply met, the last reply met wins. That turns exactly
+these six tests red across `dialectica` and `dialectica-core`, all in
+`feed::tests`, and no test in `wire.rs` or `tests/end_to_end.rs`:
+
+- `the_latest_reply_is_the_one_the_ordering_rule_places_first`
+- `replies_at_every_depth_are_counted_and_a_deeper_one_can_be_latest`
+- `a_hidden_reply_is_neither_counted_nor_latest`
+- `a_hidden_threads_row_counts_its_visible_replies`
+- `a_reply_carrying_a_far_future_asserted_time_is_not_thereby_latest`
+- `a_revision_does_not_move_a_reply_or_change_the_id_reported`
+
+The architecture, correctness and security reviews each got the same six
+independently. Run over `feed.rs` during review, `cargo mutants` found no
+mutant that survived.
 
 ### 3. `FeedRow::replies: Option<Replies>`, with a `NonZeroUsize` count
 

@@ -10,7 +10,7 @@ rejected alternatives and what it costs, and the code was read directly rather
 than trusted — nothing found contradicts what is written down. Two smaller
 items below are worth flipping before merge, and one is a plain observation.
 
-- [ ] **`dev-writer`** — Decision 2's mutation evidence is honestly marked
+- [x] **`dev-writer`** — Decision 2's mutation evidence is honestly marked
       unmeasured, and still is after the tester's last commit. Decision 2 says
       replacing `or_insert_with` with an overwriting insert "should turn
       `the_latest_reply_is_the_one_the_ordering_rule_places_first`,
@@ -29,6 +29,14 @@ items below are worth flipping before merge, and one is a plain observation.
       checked whether the tests actually catch it. Low cost to close: swap
       `or_insert_with` for `.entry(root).or_insert(...)`-with-overwrite for a
       moment, run the three named tests, and record which went red (or didn't).
+      **Fixed** in the commit "Record the measured first-met-wins mutation in
+      design.md Decision 2". The mutation measured is `and_modify` also
+      overwriting `latest`, not an overwriting `insert`. An overwriting insert
+      would also reset the count to one, so it would test the count as well as
+      the latest-reply rule. Run over the whole suite, it turned exactly six
+      tests red: the three predicted and three more. Decision 2 lists all six
+      as measured. The architecture, correctness and security reviews each got
+      the same six independently.
 
 - [ ] **`dev-writer`** — Decision 5's `NO SPEC:` marker is accurate but its
       companion spec-side obligation is still open, and design.md doesn't say
