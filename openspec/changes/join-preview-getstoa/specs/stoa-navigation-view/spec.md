@@ -65,12 +65,22 @@ text and MUST NOT pass through any rich-text or markup-interpreting path.
 
 #### Scenario: A fallback title is rendered as the founding title
 
-- **WHEN** the lookup answers a fallback reply with a non-empty `title`
+- **WHEN** the lookup answers a fallback reply whose `title` is not blank
 - **THEN** that title is rendered in the founding-title position, labelled as
   founding
 - **AND** no current title is rendered
 - **AND** the statement that no founding title is available here is not
   rendered
+
+#### Scenario: A looked-up title with one visible letter among blank characters is a title
+
+- **WHEN** the lookup answers a fallback reply whose `title` is U+0020 U+200B,
+  the letter `a`, U+3000 U+FEFF, and again a non-fallback reply with that
+  `title`
+- **THEN** in each case the title is rendered in the position the reply's
+  `isGenesisFallback` decides
+- **AND** the letter `a` is in what is rendered there
+- **AND** no failure is rendered for the lookup
 
 #### Scenario: A fallback is stated as no moderator-set title held here
 
@@ -133,12 +143,20 @@ position MUST NOT be filled from it, and the statement that this machine holds
 no moderator-set title MUST NOT be rendered.
 
 A successful lookup reply whose `isGenesisFallback` is not a boolean, or whose
-`title` or `description` is not a string, or whose `title` is the empty string,
-MUST be treated as a failed lookup, with a reason of the view's own naming what
-was wrong with the reply in place of the core's. It MUST NOT be rendered as a
-fallback reply or as a non-fallback one. An empty `title` is not a founding
-title and not a current title, whatever `isGenesisFallback` says: `stoa-metadata`
+`title` or `description` is not a string, or whose `title` is blank, MUST be
+treated as a failed lookup, with a reason of the view's own naming what was
+wrong with the reply in place of the core's. It MUST NOT be rendered as a
+fallback reply or as a non-fallback one. A blank `title` is not a founding title
+and not a current title, whatever `isGenesisFallback` says: `stoa-metadata`
 requires that no successful `getStoa` reply carries one.
+
+**Blank, on this screen, is exactly what the `stoa-genesis` capability's
+requirement "A blank title is not a valid title" defines**: a title every
+character of which is one of the thirty blank characters that requirement lists,
+the empty title included. The view MUST test a title against that list, no wider
+and no narrower. A title carrying at least one character outside the list is not
+blank, however many blank characters it also carries or wherever they sit, and
+MUST NOT be treated as blank or as a malformed reply.
 
 A failed lookup, from any of these causes, MUST NOT be reported as a join having been attempted or refused, and MUST NOT withdraw
 the join affordance. The join is a separate call and its outcome is reported
@@ -178,13 +196,14 @@ from its own reply.
   position
 - **AND** the join affordance is offered
 
-#### Scenario: A lookup reply carrying an empty title is a failure
+#### Scenario: A lookup reply carrying a blank title is a failure
 
 - **WHEN** the lookup answers a successful reply whose `title` is the empty
-  string, once with `isGenesisFallback` `true` and once with it `false`, and no
-  join has been made
+  string, once with `isGenesisFallback` `true` and once with it `false`, and
+  again whose `title` is U+0020 U+200B U+3000, once with `isGenesisFallback`
+  `true` and once with it `false`, and no join has been made
 - **THEN** in each case the screen renders a failure of its own naming the
-  title as empty
+  title as blank
 - **AND** neither the founding-title position nor the current-title position
   is rendered
 - **AND** no description from that reply is rendered
@@ -192,6 +211,17 @@ from its own reply.
   rendered
 - **AND** the screen states that no founding title is available here
 - **AND** the join affordance is offered
+
+#### Scenario: The view's blank test is the stoa-genesis list, no wider and no narrower
+
+- **WHEN** the lookup answers a fallback reply whose `title` consists of exactly
+  one of the thirty blank characters, in turn for every one of them, and again
+  a fallback reply whose `title` is U+200E alone, and again one whose `title`
+  is U+180E alone
+- **THEN** each of the thirty is rendered as a failure of the view's own naming
+  the title as blank
+- **AND** neither the U+200E reply nor the U+180E reply is rendered as a
+  failure, and each fills the founding-title position
 
 ### Requirement: A lookup's answer is rendered only for the reference it was made for
 
@@ -203,7 +233,7 @@ reference, and nothing answered for the previous one MUST be rendered for it.
 #### Scenario: A second preview renders nothing from the first one's lookup
 
 - **WHEN** a reference is previewed and its lookup answers a fallback reply
-  with a non-empty title, and a second reference at a different address is
+  with a title that is not blank, and a second reference at a different address is
   then previewed and its lookup is answered with the error shape
 - **THEN** a `getStoa` call has been made carrying the second reference's
   address and record
@@ -240,12 +270,15 @@ written: an elision that keeps only a head and a tail is the shape vanity-addres
 generators are built to defeat, and a second implementation is how one screen
 quietly acquires the weaker form.
 
-A Stoa whose founding title is **empty** MUST render as a row carrying its
-address, MUST NOT be omitted, and MUST NOT be given a substitute title. An empty
-title is not a valid founding title — `stoa-genesis` refuses a record carrying
-one, and `stoa-membership` refuses to create or join one — so the core does not
-list one; a listing that carries one anyway still names a Stoa the core reports
-this peer as being in.
+A Stoa whose founding title is **blank** — the empty string, or a string made
+only of the blank characters `stoa-genesis`'s requirement "A blank title is not
+a valid title" lists — MUST render as a row carrying its address, MUST NOT be
+omitted, and MUST NOT be given a substitute title. A blank title is not a valid
+founding title — `stoa-genesis` refuses a record carrying one, and
+`stoa-membership` refuses to create or join one and reports a listing that
+reaches a retained one as a failure — so the core does not list one; a listing
+that carries one anyway still names a Stoa the core reports this peer as being
+in.
 
 A founding title MUST be rendered as plain text and MUST NOT be rendered through
 any rich-text or markup-interpreting path. It carries whatever characters its
@@ -272,6 +305,13 @@ would change the address and split one Stoa into two.
 - **THEN** a row is rendered for it
 - **AND** the row carries that Stoa's address
 - **AND** no substitute title is rendered in place of the empty one
+
+#### Scenario: A Stoa whose founding title is made only of blank characters still gets a row
+
+- **WHEN** the listing returns a Stoa whose founding title is U+0020 U+200B
+- **THEN** a row is rendered for it
+- **AND** the row carries that Stoa's address
+- **AND** no substitute title is rendered in place of the blank one
 
 #### Scenario: A title is not interpreted as markup
 
@@ -322,12 +362,14 @@ preview time. Which of the two a `title` is MUST be taken from
 `isGenesisFallback`, and a `title` from a reply whose `isGenesisFallback` is
 `false` MUST NOT be labelled as the founding title.
 
-**A founding title that is the empty string is not an available founding
-title**, whichever reply carried it, a join reply included. It MUST NOT be
-rendered in the founding-title position or labelled as the founding title, and
-the screen MUST render that Stoa as one no founding title is available for. An
-empty title is not a valid title: `stoa-genesis` refuses a record carrying one,
-and no core reply carries one.
+**A founding title that is blank is not an available founding title**,
+whichever reply carried it, a join reply included — blank being the empty
+string, or a string made only of the blank characters `stoa-genesis`'s
+requirement "A blank title is not a valid title" lists. It MUST NOT be rendered
+in the founding-title position or labelled as the founding title, and the screen
+MUST render that Stoa as one no founding title is available for. A blank title
+is not a valid title: `stoa-genesis` refuses a record carrying one, and no core
+reply carries one.
 
 **Where no founding title is available, the preview MUST NOT render a title
 caption over an empty value, and MUST state that no founding title is available
@@ -375,11 +417,12 @@ rests on meanwhile.
 - **AND** nothing is rendered as an error for the missing title
 - **AND** the address is still rendered in full
 
-#### Scenario: An empty founding title from a join is not rendered as a founding title
+#### Scenario: A blank founding title from a join is not rendered as a founding title
 
 - **WHEN** the lookup answers a non-fallback reply, and the user then joins and
-  the join succeeds with a reply whose founding title is the empty string
-- **THEN** the screen reports the Stoa as joined
+  the join succeeds with a reply whose founding title is the empty string — and
+  again with a join reply whose founding title is U+0020 U+200B
+- **THEN** in each case the screen reports the Stoa as joined
 - **AND** the founding-title position is not rendered
 - **AND** no title caption is rendered over an empty value
 - **AND** the screen states that no founding title is available here
@@ -449,12 +492,18 @@ other title for the missing one, from a previous preview or otherwise: comparing
 a title the user already trusts against an untrusted address is the impersonation
 this requirement exists to expose, performed by the interface.
 
-**An empty founding title matches nothing.** A previewed Stoa whose founding
-title is empty is one no founding title is available for, as "Joining shows what
-is being joined, and joins nothing until the user acts" states, so the
-comparison does not run for it. A held Stoa whose founding title is empty MUST
-NOT be rendered beside any preview as a same-title Stoa. Two empty titles are
-not equal titles for this comparison.
+**A blank founding title matches nothing** — blank being the empty string, or a
+string made only of the blank characters `stoa-genesis`'s requirement "A blank
+title is not a valid title" lists. A previewed Stoa whose founding title is
+blank is one no founding title is available for, as "Joining shows what is being
+joined, and joins nothing until the user acts" states, so the comparison does
+not run for it. A held Stoa whose founding title is blank MUST NOT be rendered
+beside any preview as a same-title Stoa. Two blank titles are not equal titles
+for this comparison, even when they are the same characters.
+
+Titles that are not blank are compared as they are carried, with no character
+removed, replaced or added on either side: the comparison MUST NOT trim or
+normalise them.
 
 The comparison is **late, not absent**: once a founding title is available for
 the previewed Stoa, it runs and the already-held Stoa is rendered as above. What
@@ -517,16 +566,28 @@ not on address comparison as such.
   that of a Stoa the peer already holds, at a different address
 - **THEN** the already-held Stoa is rendered alongside it, with both addresses
 
-#### Scenario: An empty title is not a same-title match
+#### Scenario: A blank title is not a same-title match
 
 - **WHEN** the peer holds a Stoa at a different address whose founding title is
   the empty string, and the previewed reference's lookup answers a fallback
   reply whose `title` is the empty string — and again when that lookup answers a
   non-fallback reply and the user then joins and the join reply carries an empty
-  founding title
+  founding title — and again with the held Stoa's founding title, the lookup's
+  fallback `title` and the join reply's founding title each U+0020 U+200B in
+  place of the empty string
 - **THEN** in each case no already-held Stoa is rendered beside the preview
 - **AND** the screen states that the same-title comparison against the Stoas
   already held has not been made
+
+#### Scenario: A title with one visible letter among blank characters is compared as it is
+
+- **WHEN** the peer holds a Stoa at a different address whose founding title is
+  U+0020 U+200B, the letter `a`, U+3000, and the previewed reference's lookup
+  answers a fallback reply whose `title` is those same four characters
+- **THEN** the already-held Stoa is rendered alongside the preview, with both
+  addresses
+- **AND** when the held Stoa's founding title is instead the letter `a` alone,
+  no already-held Stoa is rendered beside the preview
 
 ### Requirement: Creating a Stoa asks for a title and nothing else, and is always offered
 
@@ -550,10 +611,13 @@ the core gave. That reason is `posting-capability`'s vocabulary — it names a f
 and rendering it unreworded is what makes a creation failure read the same as a
 posting failure, which is deliberate.
 
-An **empty title MUST be passed through to the core** by the field rather than
-refused by the view, and the core's reply MUST decide the outcome.
-`stoa-membership` refuses an empty title, so the screen MUST NOT report a Stoa
-as created for one, and MUST render the reason the core gave, unreworded.
+A **blank title MUST be passed through to the core** by the field, exactly as
+typed, rather than refused or altered by the view, and the core's reply MUST
+decide the outcome. Blank is what `stoa-genesis`'s requirement "A blank title is
+not a valid title" defines: the empty string, or a string made only of the blank
+characters it lists. `stoa-membership` refuses a blank title, so the screen MUST
+NOT report a Stoa as created for one, and MUST render the reason the core gave,
+unreworded.
 
 #### Scenario: The create affordance offers a title and no key
 
@@ -579,10 +643,18 @@ as created for one, and MUST render the reason the core gave, unreworded.
 - **THEN** the create call is made
 - **AND** the reply decides the outcome rather than a check in the view
 
-#### Scenario: A creation refused for an empty title renders the core's reason
+#### Scenario: A title made only of blank characters reaches the core as typed
 
-- **WHEN** the user creates a Stoa with an empty title and the core answers with
-  the error shape
+- **WHEN** the user creates a Stoa with a title of three U+0020 spaces, and again
+  with the title U+200B U+3000
+- **THEN** in each case the create call is made
+- **AND** the title it carries is exactly what was typed
+- **AND** the reply decides the outcome rather than a check in the view
+
+#### Scenario: A creation refused for a blank title renders the core's reason
+
+- **WHEN** the user creates a Stoa with an empty title, and again with a title of
+  three U+0020 spaces, and the core answers with the error shape
 - **THEN** the screen renders the reason the core gave
 - **AND** it does not report a Stoa as created
 - **AND** no address is rendered as that of a Stoa just created

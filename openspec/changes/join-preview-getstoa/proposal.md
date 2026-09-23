@@ -28,29 +28,42 @@ fetch. Issue #143 (milestone 0.0.1) closes that gap.
   moderator sets it in the same op as a current title, a fallback reply always
   carries an empty one, and the bundle's preview has no description position.
   So it is shown only from a non-fallback reply, and only when non-empty.
-- **A Stoa title of `""` is invalid, everywhere a title enters or is
-  answered** (owner ruling, given while this change was in progress). This
-  reverses the contracts that made an empty title legal:
-  - the genesis encoding refuses a record whose title is empty, on encode and
-    on decode, so creation refuses an empty title and a join, a `getStoa` or
+- **A blank Stoa title is invalid, everywhere a title enters or is answered**
+  (owner rulings, given while this change was in progress). A title is
+  **blank** when it is `""` or is made only of whitespace or zero-width
+  characters. `stoa-genesis` defines the term with an exact list of thirty
+  code points — the twenty-five Unicode `White_Space` code points, and U+200B,
+  U+200C, U+200D, U+2060 and U+FEFF — so that the core and the view test the
+  same set and a test can pin every member. This reverses the contracts that
+  made an empty title legal:
+  - the genesis encoding refuses a record whose title is blank, on encode and
+    on decode, so creation refuses a blank title and a join, a `getStoa` or
     any other call handed such a record refuses it as undecodable;
-  - the op encoding refuses a metadata op whose title is empty, so one arriving
+  - the op encoding refuses a metadata op whose title is blank, so one arriving
     from a peer is refused at the transport boundary, and resolution never lets
     one bind wherever a reader meets it;
-  - no successful `getStoa` reply carries an empty `title`;
-  - on the view, an empty `title` in a `getStoa` reply is a malformed reply, an
-    empty founding title in a join reply is not an available founding title,
-    an empty title is never a same-title (lookalike) match, and an empty title
-    at creation is passed to the core and its refusal rendered.
-  Whether a whitespace-only title also counts as empty is **not ruled**, and
-  this change does not decide it.
+  - no successful `getStoa` reply carries a blank `title`;
+  - on the view, a blank `title` in a `getStoa` reply is a malformed reply, a
+    blank founding title in a join reply is not an available founding title,
+    a blank title is never a same-title (lookalike) match, and a blank title
+    at creation is passed to the core as typed and its refusal rendered.
+  Only a title made **entirely** of those characters is refused. A title that
+  carries them beside at least one other character — at its edges or inside
+  it — is neither refused for them nor trimmed or normalised. A character
+  outside the list is not blank, even one that renders invisibly, such as a
+  bidirectional control.
+- **A store that already holds a blank-titled genesis record is neither
+  migrated nor skipped** (owner ruling). The record fails to decode, and a
+  listing that reaches it reports the failure in the module's failure shape,
+  leaving the record as it was. Before 0.1.0 only development stores can hold
+  one.
 - **A lookup that fails is a failure the screen renders, and not a fallback.**
   The core's reason is shown; no title is rendered from it; it is not reported
   as a refused join; and the join affordance is still offered, since the join
   is a separate call the core answers for itself.
 - **A reply shape that is neither success nor the error shape is a failure.**
   A reply missing `isGenesisFallback` as a boolean, or `title` or
-  `description` as a string, or carrying an empty `title`, is not rendered as
+  `description` as a string, or carrying a blank `title`, is not rendered as
   a fallback or as a rename.
 - **A lookup belongs to the reference it was made for.** A title answered for
   one reference is never rendered for the next one previewed.
@@ -71,7 +84,7 @@ fetch. Issue #143 (milestone 0.0.1) closes that gap.
 
 ### New Capabilities
 
-None. The join preview's contract is `stoa-navigation-view`'s, and the empty
+None. The join preview's contract is `stoa-navigation-view`'s, and the blank
 title ruling amends the capabilities that already own each title.
 
 ### Modified Capabilities
@@ -88,41 +101,54 @@ title ruling amends the capabilities that already own each title.
   join affordance remains, and an empty `title` is one of the unrecognisable
   shapes); ADDED "A lookup's answer is rendered only for the reference it was
   made for". MODIFIED "A listed Stoa is rendered with its address, never with
-  its title alone" (an empty founding title still gets a row, but is no longer
+  its title alone" (a blank founding title still gets a row, but is no longer
   described as legal); MODIFIED "Joining shows what is being joined, and joins
-  nothing until the user acts" (an empty founding title, a join reply's
+  nothing until the user acts" (a blank founding title, a join reply's
   included, is not an available founding title); MODIFIED "No current title is
   rendered until one has been resolved" (only its citation of `stoa-metadata`'s
   renamed resolution requirement changes); MODIFIED "A Stoa already held
-  whose title matches is shown as a distinct Stoa, not as a duplicate" (an
-  empty title matches nothing); MODIFIED "Creating a Stoa asks for a title and
-  nothing else, and is always offered" (an empty title still reaches the core,
-  whose refusal is rendered).
-- `stoa-genesis`: MODIFIED "A tampered or truncated record is rejected" (an
-  empty title is refused on encode and on decode, distinguishably).
+  whose title matches is shown as a distinct Stoa, not as a duplicate" (a
+  blank title matches nothing, and titles that are not blank are compared
+  untrimmed); MODIFIED "Creating a Stoa asks for a title and nothing else, and
+  is always offered" (a blank title still reaches the core as typed, and its
+  refusal is rendered).
+- `stoa-genesis`: ADDED "A blank title is not a valid title" (defines blank by
+  an exact list of thirty code points; a blank title, the empty one included,
+  is refused on encode and on decode with one failure; a title with any other
+  character is neither refused for its blank characters nor altered); MODIFIED
+  "A tampered or truncated record is rejected" (a blank title joins the
+  distinguishable decoding refusals).
 - `stoa-membership`: REMOVED "A title the genesis record cannot carry is
   refused before a Stoa exists" and ADDED its replacement, "A title the genesis
-  record cannot carry, an empty one included, is refused before a Stoa exists"
-  (an empty title is refused, reversing the requirement that it be accepted; a
-  MODIFIED block cannot drop the accepting scenario, so the requirement is
-  replaced); MODIFIED "Joining takes an address and the record it names, and
-  verifies rather than trusts" (a record with an empty title is refused without
-  a membership).
+  record cannot carry, a blank one included, is refused before a Stoa exists"
+  (a blank title is refused, reversing the requirement that an empty one be
+  accepted; a MODIFIED block cannot drop the accepting scenario, so the
+  requirement is replaced); MODIFIED "Joining takes an address and the record
+  it names, and verifies rather than trusts" (a record with a blank title is
+  refused without a membership); MODIFIED "A joined Stoa's genesis record is
+  retained, not only its address" (a retained record that fails to decode, a
+  blank-titled one included, is reported as a failure and is neither skipped
+  nor migrated).
 - `op-format`: MODIFIED "A Stoa metadata op carries display fields and no
-  policy" (a metadata op with an empty title is refused on encode and on
-  decode; an empty description is still valid).
+  policy" (a metadata op with a blank title is refused on encode and on
+  decode; an empty or blank description is still valid); MODIFIED "Valid text
+  is never normalised or otherwise transformed" (its preservation scenario is
+  narrowed, for a metadata op's title, to one carrying at least one character
+  that is not blank, which is the ruling applied).
 - `stoa-metadata`: REMOVED "Current metadata resolves by last-write-wins,
   falling back to genesis" and ADDED its replacement, "Current metadata
   resolves by last-write-wins among binding ops, falling back to genesis" (a
-  metadata op carrying an empty title never binds, reversing "an empty title in
+  metadata op carrying a blank title never binds, reversing "an empty title in
   a binding op is the current title"; replaced rather than modified for the
-  same reason); MODIFIED "A Stoa's metadata is answerable from its address and
+  same reason); MODIFIED "A displayed title is never an identifier" (its
+  preservation scenario is narrowed to a title carrying at least one character
+  that is not blank); MODIFIED "A Stoa's metadata is answerable from its address and
   genesis record, joined or not" (its citation of the replaced requirement
   follows the rename); MODIFIED "The reply carries the current metadata and
-  says whether it fell back to genesis" (no successful reply carries an empty
+  says whether it fell back to genesis" (no successful reply carries a blank
   `title`); MODIFIED "`getStoa`
   refuses what it cannot answer, and never reports a fallback in place of a
-  failure" (a record whose title is empty is refused).
+  failure" (a record whose title is blank is refused).
 
 ## Impact
 
@@ -136,9 +162,12 @@ title ruling amends the capabilities that already own each title.
 - `dialectica-ui/src/qml/Main.qml` if the preview's entry point is where the
   lookup is triggered.
 - `dialectica-ui/tests/tst_stoa_screens.qml`: QML specs driving the preview
-  against fake `getStoa` replies — fallback, non-fallback, empty `title`,
+  against fake `getStoa` replies — fallback, non-fallback, blank `title`,
   failure, malformed shape, and a second reference after the first — and the
   existing specs that pin an empty title as legal, which now pin the reverse.
+- The view needs the blank-character list too, for the lookup reply, the join
+  reply, the listing row and the lookalike comparison; it is the same thirty
+  code points the core tests.
 - `dialectica-ui/src/qml/DStoaListScreen.qml`: the comment calling an empty
   title legal.
 - **A core change**, where there was none before the ruling: the genesis
@@ -146,8 +175,9 @@ title ruling amends the capabilities that already own each title.
   metadata resolver, and the creation, join and `getStoa` paths in the wire
   layer, together with the core tests that pin an empty title as accepted. The
   wire shapes do not change; which inputs are refused does.
-- **Stores already holding an empty-titled record or metadata op** decode
-  differently once this lands. What a listing answers for such a retained
-  record is left to the requirements that already govern a retained record the
-  build cannot read, and is recorded as an open question rather than decided
-  here.
+- **Stores already holding a blank-titled genesis record** decode differently
+  once this lands, and that is decided rather than open: the record fails to
+  decode, the Stoa listing reports the failure, and nothing skips or migrates
+  it. A development store holding one therefore answers every listing with
+  that failure. A stored metadata op with a blank title is
+  governed by the resolution requirement, under which it never binds.
