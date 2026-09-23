@@ -2093,16 +2093,18 @@ fn thread_page_json(page: &crate::thread::ThreadPage) -> String {
 ///
 /// **`foundingTitle` and never `title`**, and the name is the requirement rather
 /// than a preference. `stoa-metadata` puts the *current* title in a
-/// moderator-signed op that nothing resolves yet, so every title this capability
-/// reports is the founding one — what the Stoa was created as, possibly long ago.
+/// moderator-signed op, which [`get_stoa`] resolves and these replies do not, so
+/// every title this capability reports is the founding one — what the Stoa was
+/// created as, possibly long ago.
 ///
 /// The alternative shape, `{"title":…,"isFounding":true}`, was rejected: it leaves
 /// a view one forgotten branch away from rendering a founding title as current,
 /// and makes `title` mean two things depending on a sibling field. A name that
 /// cannot be misread costs nothing.
 ///
-/// When metadata resolution lands it adds `title` and `isGenesisFallback` **beside**
-/// this field rather than redefining it — PLAN.md §9.1's own shape for `getStoa`.
+/// **`getStoa` does not add to these replies.** It is a separate call with its
+/// own shape — `title` plus `isGenesisFallback`, and no `foundingTitle` at all —
+/// and the create, join and list replies are unchanged by it.
 const FOUNDING_TITLE: &str = "foundingTitle";
 
 /// The genesis record itself, hex-encoded.
@@ -2162,6 +2164,102 @@ fn stoa_reply(stoa: &crate::identity::Address, genesis: &crate::stoa::Genesis) -
         FOUNDING_TITLE: genesis.title,
         "policy": policy_name(genesis.policy),
         GENESIS: hex::encode(bytes),
+    })
+    .to_string()
+}
+
+// ─── What a Stoa is called today ──────────────────────────────────────────
+//
+// The contract is the `stoa-metadata` spec's `getStoa` requirements; the
+// reasoning is in the `get-stoa` change's `design.md`. `crate::stoa_metadata`
+// decides which op, if any, supplies the current values; this parses, verifies,
+// and turns the answer into the wire shape.
+
+/// `{"stoa":"…","genesis":"…"}` ->
+/// `{"stoa":…,"title":…,"description":…,"policy":…,"isGenesisFallback":bool}`.
+///
+/// # The record travels with the address, so an unjoined Stoa is answerable
+///
+/// The moderator set — and so which metadata ops bind — comes from the genesis
+/// record, and an address is a one-way hash of one. So the caller supplies the
+/// record, as `listThreads` and `readThread` already require, and it is verified
+/// against the address by the same [`genesis_for`] before anything else happens.
+/// Nothing here consults the membership store, which is what lets a preview ask
+/// about a Stoa before joining it.
+///
+/// # It changes nothing, because it holds nothing it could change anything with
+///
+/// There is no membership store among the parameters, so no join can be
+/// recorded. The log is handed to the resolver as `&L`, and appending needs
+/// `&mut`. `design.md` decision 9.
+///
+/// # No founding title of its own
+///
+/// Where the resolution fell back, `title` IS the founding title and
+/// `isGenesisFallback` says so. Where it did not, the founding title is not
+/// reported beside the current one: the caller holds it already, in the record
+/// it sent. `design.md` decision 11.
+///
+/// # A store that cannot be consulted is the error shape, never a fallback
+///
+/// A fallback reply says the peer holds no binding metadata op, which it cannot
+/// know when the store is unreadable. §11.1 obligation 5 again, one call over.
+pub fn get_stoa<L: crate::log::OpLog>(
+    request: &str,
+    store: impl FnOnce() -> Result<L, crate::log::OpLogError>,
+) -> String {
+    guarded("get_stoa", || {
+        let parsed = match Request::parse(request) {
+            Ok(r) => r,
+            Err(e) => return e,
+        };
+        let stoa = match parse_stoa(&parsed) {
+            Ok(s) => s,
+            Err(e) => return e,
+        };
+        // Verified BEFORE the store is opened, so a malformed or mismatched
+        // request never reaches the disk.
+        let genesis = match genesis_for(&parsed, &stoa) {
+            Ok(m) => m.genesis,
+            Err(e) => return e,
+        };
+        // Unreachable for a record `genesis_for` accepted — the decoder enforces
+        // the same title cap `Founding::of` refuses — and reported rather than
+        // unwrapped, because a panic here aborts the module process.
+        let founding = match crate::stoa_metadata::Founding::of(&genesis) {
+            Ok(f) => f,
+            Err(e) => return error_json(&format!("genesis: {e}")),
+        };
+        let log = match store() {
+            Ok(l) => l,
+            Err(e) => return error_json(&e.to_string()),
+        };
+        match crate::stoa_metadata::resolve(&log, &founding) {
+            Ok(current) => stoa_metadata_json(&stoa, &genesis, &current),
+            Err(e) => error_json(&e.to_string()),
+        }
+    })
+}
+
+/// The `getStoa` reply, built in one place.
+///
+/// **Every field on every success**, and no `foundingTitle`: the spec requires
+/// both. `policy` is the genesis record's, through the same [`policy_name`] the
+/// membership replies use, because a metadata op carries no policy.
+///
+/// `stoa` is the address as this module spells it — lowercase hex — which is
+/// the address that was asked for, whatever case the request used.
+fn stoa_metadata_json(
+    stoa: &crate::identity::Address,
+    genesis: &crate::stoa::Genesis,
+    current: &crate::stoa_metadata::CurrentMetadata,
+) -> String {
+    serde_json::json!({
+        "stoa": stoa.to_hex(),
+        "title": current.title(),
+        "description": current.description(),
+        "policy": policy_name(genesis.policy),
+        "isGenesisFallback": current.is_genesis_fallback(),
     })
     .to_string()
 }
@@ -10383,6 +10481,16 @@ mod tests {
         fn display_name_m(r: &str) -> String {
             display_name(r)
         }
+        // `get-stoa`'s one method. It reads `stoa` and `genesis`, so it is inside
+        // the envelope rule's first case. A fresh log per call, holding a rename,
+        // so the served fixture exercises the resolver rather than only the
+        // fallback.
+        fn get_stoa_m(r: &str) -> String {
+            get_stoa(
+                r,
+                || Ok::<_, crate::log::OpLogError>(a_log_renaming_agora()),
+            )
+        }
         vec![
             ("ping", ping_m),
             ("get_capabilities", caps_m),
@@ -10402,6 +10510,7 @@ mod tests {
             ("publish_reply", publish_reply_m),
             ("publish_vote", publish_vote_m),
             ("display_name", display_name_m),
+            ("get_stoa", get_stoa_m),
         ]
     }
 
@@ -11008,6 +11117,9 @@ mod tests {
                 r#"{{"publicKey":"{}"}}"#,
                 feed_key(13).public_key().to_hex()
             ),
+            // The `stoa`/`genesis` pair the feed's request already carries, for
+            // `feed_genesis()` — which is the Stoa `get_stoa_m`'s log renames.
+            "get_stoa" => full_request(),
             other => panic!("no served request known for {other}"),
         }
     }
@@ -11130,7 +11242,14 @@ mod tests {
             for not_an_object in ["[]", "7", "null"] {
                 let out = method(not_an_object);
                 let v: serde_json::Value = serde_json::from_str(&out).unwrap();
-                for result_field in ["items", "pong", "canPost", "identity", "channelId"] {
+                for result_field in [
+                    "items",
+                    "pong",
+                    "canPost",
+                    "identity",
+                    "channelId",
+                    "isGenesisFallback",
+                ] {
                     assert!(
                         v.get(result_field).is_none(),
                         "{name} carried both an error and {result_field} for \
@@ -14999,5 +15118,560 @@ mod tests {
             );
             assert!(v.get("name").is_none(), "{field} reached a name: {out}");
         }
+    }
+
+    // ─── What a Stoa is called today ──────────────────────────────────────
+
+    /// A metadata op for `genesis`'s Stoa, signed by `signer` and naming it as
+    /// author. The wall-clock is fixed, so nothing here can be ordered by it.
+    fn a_rename_of(
+        genesis: &Genesis,
+        signer: &crate::identity::SecretKey,
+        counter: u64,
+        title: &str,
+        description: &str,
+    ) -> crate::op::SignedOp {
+        Op {
+            stoa: genesis.address().unwrap(),
+            author: signer.public_key(),
+            clock: Some(crate::op::OpClock {
+                counter,
+                asserted_ms: 1_789_729_304_000,
+            }),
+            kind: OpKind::StoaMetadata {
+                title: title.to_string(),
+                description: description.to_string(),
+            },
+        }
+        .sign(signer)
+    }
+
+    fn a_log_holding(ops: impl IntoIterator<Item = crate::op::SignedOp>) -> MemoryOpLog {
+        let mut log = MemoryOpLog::new();
+        for op in ops {
+            log.append(op, Arrival::unordered()).unwrap();
+        }
+        log
+    }
+
+    /// `feed_genesis()`'s Stoa, renamed by its creator. What the envelope sweep's
+    /// `get_stoa` wrapper serves from.
+    fn a_log_renaming_agora() -> MemoryOpLog {
+        a_log_holding([a_rename_of(
+            &feed_genesis(),
+            &feed_key(1),
+            1,
+            "Stoa Poikile",
+            "the painted porch",
+        )])
+    }
+
+    /// A `getStoa` request for a record, under its own address.
+    fn stoa_request(genesis: &Genesis) -> String {
+        serde_json::json!({
+            "stoa": genesis.address().unwrap().to_hex(),
+            "genesis": hex::encode(genesis.canonical_bytes().unwrap()),
+        })
+        .to_string()
+    }
+
+    /// Ask `get_stoa` over a log, and parse the reply.
+    fn ask(request: &str, log: MemoryOpLog) -> serde_json::Value {
+        let out = get_stoa(request, || Ok::<_, crate::log::OpLogError>(log));
+        serde_json::from_str(&out)
+            .unwrap_or_else(|e| panic!("get_stoa emitted invalid JSON ({e}): {out}"))
+    }
+
+    /// The five fields the spec requires on every success.
+    const GET_STOA_FIELDS: [&str; 5] = [
+        "stoa",
+        "title",
+        "description",
+        "policy",
+        "isGenesisFallback",
+    ];
+
+    #[test]
+    fn a_stoa_created_here_is_answered_from_the_record_its_creation_reported() {
+        let mut store = a_membership_store();
+        let created = create(&mut store, "Agora");
+        let request = serde_json::json!({
+            "stoa": created["stoa"],
+            "genesis": created[GENESIS],
+        })
+        .to_string();
+
+        let v = ask(&request, MemoryOpLog::new());
+        assert!(v.get("error").is_none(), "got {v}");
+        assert_eq!(v["stoa"], created["stoa"]);
+        assert_eq!(v["title"], "Agora");
+        assert_eq!(v["isGenesisFallback"], true);
+    }
+
+    #[test]
+    fn a_record_reported_by_a_listing_is_accepted_as_it_is() {
+        let mut store = a_membership_store();
+        create(&mut store, "Listed");
+        let items = listed(&store, 10);
+        assert_eq!(items.len(), 1);
+        let request = serde_json::json!({
+            "stoa": items[0]["stoa"],
+            "genesis": items[0][GENESIS],
+        })
+        .to_string();
+
+        let v = ask(&request, MemoryOpLog::new());
+        assert!(
+            v.get("error").is_none(),
+            "a listed record must not be refused: {v}"
+        );
+        assert_eq!(v["stoa"], items[0]["stoa"]);
+        assert_eq!(v["title"], "Listed");
+    }
+
+    #[test]
+    fn a_stoa_the_peer_is_not_in_is_answered_from_the_ops_it_holds() {
+        // No membership store exists in this test at all: the record is one this
+        // peer never joined, and the op is its creator's.
+        let theirs = a_joinable_record("Somebody else's Stoa");
+        let log = a_log_holding([a_rename_of(&theirs, &feed_key(5), 4, "Renamed", "by them")]);
+
+        let v = ask(&stoa_request(&theirs), log);
+        assert!(v.get("error").is_none(), "got {v}");
+        assert_eq!(v["title"], "Renamed");
+        assert_eq!(v["description"], "by them");
+        assert_eq!(v["isGenesisFallback"], false);
+    }
+
+    #[test]
+    fn a_stoa_with_no_binding_op_reports_its_founding_values_as_a_fallback() {
+        // The log is not empty: it holds a rename by someone who is not the
+        // creator, which must not bind, so the answer is the fallback rather than
+        // the outsider's title.
+        let log = a_log_holding([a_rename_of(
+            &feed_genesis(),
+            &feed_key(9),
+            50,
+            "Hijacked",
+            "no",
+        )]);
+
+        let v = ask(&full_request(), log);
+        assert!(v.get("error").is_none(), "got {v}");
+        assert_eq!(v["title"], "Agora");
+        assert_eq!(v["description"], "");
+        assert_eq!(v["isGenesisFallback"], true);
+        assert_eq!(v["policy"], "open");
+    }
+
+    #[test]
+    fn a_renamed_stoa_reports_its_current_title() {
+        let v = ask(&full_request(), a_log_renaming_agora());
+        assert!(v.get("error").is_none(), "got {v}");
+        assert_eq!(v["title"], "Stoa Poikile");
+        assert_eq!(v["description"], "the painted porch");
+        assert_eq!(v["isGenesisFallback"], false);
+        assert_eq!(
+            v["policy"], "open",
+            "the policy is the record's, whatever the op"
+        );
+    }
+
+    #[test]
+    fn a_binding_op_carrying_the_founding_title_is_not_reported_as_a_fallback() {
+        // The values are exactly what a fallback reports; only the flag differs,
+        // which is why the flag exists.
+        let log = a_log_holding([a_rename_of(&feed_genesis(), &feed_key(1), 1, "Agora", "")]);
+        let v = ask(&full_request(), log);
+        assert_eq!(v["title"], "Agora");
+        assert_eq!(v["description"], "");
+        assert_eq!(v["isGenesisFallback"], false);
+    }
+
+    #[test]
+    fn every_field_is_present_and_no_founding_title_is_reported() {
+        let fallback = ask(&full_request(), MemoryOpLog::new());
+        let renamed = ask(&full_request(), a_log_renaming_agora());
+        for (case, v) in [("fallback", &fallback), ("renamed", &renamed)] {
+            for field in GET_STOA_FIELDS {
+                assert!(v.get(field).is_some(), "{case}: {field} missing from {v}");
+            }
+            assert!(
+                v.get(FOUNDING_TITLE).is_none(),
+                "{case}: getStoa carries no foundingTitle field: {v}"
+            );
+        }
+        // The renamed reply's title and description both differ from the
+        // founding title, so no field of it may hold "Agora".
+        for (field, value) in renamed.as_object().unwrap() {
+            assert_ne!(
+                value, "Agora",
+                "{field} carries the founding title: {renamed}"
+            );
+        }
+    }
+
+    #[test]
+    fn display_text_is_reported_unaltered() {
+        // Bidi overrides, isolates and zero-width characters: the renderer's to
+        // mitigate, never this call's to strip.
+        let title = "\u{202e}arogA\u{202c} \u{200b}Stoa\u{2066}";
+        let description = "\u{2067}\u{200d}desc\u{2069}\u{feff}";
+        let log = a_log_holding([a_rename_of(
+            &feed_genesis(),
+            &feed_key(1),
+            1,
+            title,
+            description,
+        )]);
+        let v = ask(&full_request(), log);
+        assert_eq!(v["title"].as_str(), Some(title));
+        assert_eq!(v["description"].as_str(), Some(description));
+    }
+
+    // ─── getStoa's refusals ───────────────────────────────────────────────
+
+    /// A refusal is the error shape carrying a reason, with no success field.
+    fn assert_refused(out: &str, what: &str) {
+        let v: serde_json::Value = serde_json::from_str(out)
+            .unwrap_or_else(|e| panic!("{what}: reply must be JSON ({e}): {out}"));
+        let reason = v
+            .get("error")
+            .and_then(|e| e.as_str())
+            .unwrap_or_else(|| panic!("{what}: expected the error shape, got {out}"));
+        assert!(!reason.is_empty(), "{what}: the error must carry a reason");
+        for field in GET_STOA_FIELDS {
+            assert!(
+                v.get(field).is_none(),
+                "{what}: {field} beside an error: {out}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_record_that_does_not_match_the_address_is_refused() {
+        let other = a_joinable_record("Another Stoa");
+        let request = serde_json::json!({
+            "stoa": feed_genesis().address().unwrap().to_hex(),
+            "genesis": hex::encode(other.canonical_bytes().unwrap()),
+        })
+        .to_string();
+        let out = get_stoa(&request, || {
+            Ok::<_, crate::log::OpLogError>(a_log_renaming_agora())
+        });
+        assert_refused(&out, "a mismatched record");
+    }
+
+    #[test]
+    fn a_request_that_fails_verification_never_opens_the_store() {
+        // Design decision 10: the record is verified BEFORE the store is opened.
+        // The opener here records that it ran; for each refused request it must
+        // not have. A handler that opened the store first would refuse the same
+        // requests with the same messages, so only this can see the order.
+        let other = a_joinable_record("Another Stoa");
+        let mismatched = serde_json::json!({
+            "stoa": feed_genesis().address().unwrap().to_hex(),
+            "genesis": hex::encode(other.canonical_bytes().unwrap()),
+        })
+        .to_string();
+        for request in [mismatched.as_str(), "[]", "{}", r#"{"stoa":"00"}"#] {
+            let opened = std::cell::Cell::new(false);
+            let out = get_stoa(request, || {
+                opened.set(true);
+                Ok::<_, crate::log::OpLogError>(MemoryOpLog::new())
+            });
+            assert_refused(&out, request);
+            assert!(
+                !opened.get(),
+                "{request} opened the store before being refused"
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_requests_are_refused_in_the_error_shape() {
+        let stoa = feed_genesis().address().unwrap().to_hex();
+        let genesis = genesis_hex();
+        let oversized_genesis = "00".repeat(crate::stoa::MAX_CANONICAL_BYTES + 1);
+        let cases: Vec<(&str, String)> = vec![
+            ("not an object", "[]".to_string()),
+            ("not JSON", "not json".to_string()),
+            ("stoa missing", format!(r#"{{"genesis":"{genesis}"}}"#)),
+            ("genesis missing", format!(r#"{{"stoa":"{stoa}"}}"#)),
+            (
+                "stoa a number",
+                format!(r#"{{"stoa":7,"genesis":"{genesis}"}}"#),
+            ),
+            (
+                "genesis a number",
+                format!(r#"{{"stoa":"{stoa}","genesis":7}}"#),
+            ),
+            (
+                "stoa null",
+                format!(r#"{{"stoa":null,"genesis":"{genesis}"}}"#),
+            ),
+            (
+                "stoa too short",
+                format!(r#"{{"stoa":"{}","genesis":"{genesis}"}}"#, &stoa[..62]),
+            ),
+            (
+                "stoa too long",
+                format!(r#"{{"stoa":"{stoa}00","genesis":"{genesis}"}}"#),
+            ),
+            (
+                "stoa not hex",
+                format!(r#"{{"stoa":"{}","genesis":"{genesis}"}}"#, "zz".repeat(32)),
+            ),
+            (
+                "genesis not hex",
+                format!(r#"{{"stoa":"{stoa}","genesis":"zz"}}"#),
+            ),
+            (
+                "genesis not a record",
+                format!(r#"{{"stoa":"{stoa}","genesis":"00"}}"#),
+            ),
+            (
+                "genesis empty",
+                format!(r#"{{"stoa":"{stoa}","genesis":""}}"#),
+            ),
+            (
+                "genesis longer than any record",
+                format!(r#"{{"stoa":"{stoa}","genesis":"{oversized_genesis}"}}"#),
+            ),
+        ];
+        for (what, request) in cases {
+            let out = get_stoa(&request, || {
+                Ok::<_, crate::log::OpLogError>(a_log_renaming_agora())
+            });
+            assert_refused(&out, what);
+        }
+    }
+
+    /// A log whose every read fails, as a disk that has gone away does.
+    struct UnreadableOpLog;
+
+    impl OpLog for UnreadableOpLog {
+        fn append(
+            &mut self,
+            _op: crate::op::SignedOp,
+            _arrival: Arrival,
+        ) -> Result<crate::log::Appended, crate::log::OpLogError> {
+            Err(crate::log::OpLogError::Storage("disk I/O error".into()))
+        }
+        fn get(
+            &self,
+            _id: &crate::op::OpId,
+        ) -> Result<Option<crate::log::Entry>, crate::log::OpLogError> {
+            Err(crate::log::OpLogError::Storage("disk I/O error".into()))
+        }
+        fn iter(&self) -> Result<Vec<crate::log::Entry>, crate::log::OpLogError> {
+            Err(crate::log::OpLogError::Storage("disk I/O error".into()))
+        }
+        fn iter_stoa(
+            &self,
+            _stoa: &Address,
+        ) -> Result<Vec<crate::log::Entry>, crate::log::OpLogError> {
+            Err(crate::log::OpLogError::Storage("disk I/O error".into()))
+        }
+        fn iter_target(
+            &self,
+            _target: &crate::op::OpId,
+        ) -> Result<Vec<crate::log::Entry>, crate::log::OpLogError> {
+            Err(crate::log::OpLogError::Storage("disk I/O error".into()))
+        }
+        fn len(&self) -> Result<usize, crate::log::OpLogError> {
+            Err(crate::log::OpLogError::Storage("disk I/O error".into()))
+        }
+    }
+
+    #[test]
+    fn an_unreadable_store_is_the_error_shape_and_never_a_fallback() {
+        // Both ways a store can fail to be consulted: it cannot be opened, and it
+        // opens and cannot be read. Either way the reason reaches the caller, and
+        // no `isGenesisFallback` does — a fallback would say this peer holds no
+        // rename, which it cannot know.
+        let unopenable = get_stoa(&full_request(), || {
+            Err::<MemoryOpLog, _>(crate::log::OpLogError::Storage("no such directory".into()))
+        });
+        assert_refused(&unopenable, "an unopenable store");
+        assert!(unopenable.contains("no such directory"), "got {unopenable}");
+
+        let unreadable = get_stoa(&full_request(), || {
+            Ok::<_, crate::log::OpLogError>(UnreadableOpLog)
+        });
+        assert_refused(&unreadable, "an unreadable store");
+        assert!(unreadable.contains("disk I/O error"), "got {unreadable}");
+    }
+
+    #[test]
+    fn an_unrecognised_field_is_ignored_and_changes_nothing() {
+        // Stronger than the envelope sweep's "not refused": the reply must be the
+        // one the request gets without the field, byte for byte.
+        let without = get_stoa(&full_request(), || {
+            Ok::<_, crate::log::OpLogError>(a_log_renaming_agora())
+        });
+        let with = get_stoa(
+            &with_extra_field(
+                &full_request(),
+                "foundingTitle",
+                serde_json::json!("Forged"),
+            ),
+            || Ok::<_, crate::log::OpLogError>(a_log_renaming_agora()),
+        );
+        assert_eq!(with, without);
+    }
+
+    // NO SPEC: the spec says the reply's `stoa` is "the address that was asked
+    // for" and does not say how it is spelled. `Address::from_hex` accepts
+    // uppercase hex, and the reply spells the address the way every other reply
+    // does — lowercase — so an uppercase request is answered with a different
+    // string naming the same address.
+    #[test]
+    fn an_address_asked_for_in_uppercase_is_answered_in_lowercase() {
+        let lower = feed_genesis().address().unwrap().to_hex();
+        let request = serde_json::json!({
+            "stoa": lower.to_uppercase(),
+            "genesis": genesis_hex(),
+        })
+        .to_string();
+        let v = ask(&request, MemoryOpLog::new());
+        assert!(v.get("error").is_none(), "got {v}");
+        assert_eq!(v["stoa"].as_str(), Some(lower.as_str()));
+    }
+
+    // ─── getStoa never aborts ─────────────────────────────────────────────
+
+    #[test]
+    fn a_panicking_store_is_the_error_shape_and_the_next_call_is_answered() {
+        struct PanickingOpLog;
+        impl OpLog for PanickingOpLog {
+            fn append(
+                &mut self,
+                _op: crate::op::SignedOp,
+                _arrival: Arrival,
+            ) -> Result<crate::log::Appended, crate::log::OpLogError> {
+                panic!("the storage layer exploded")
+            }
+            fn get(
+                &self,
+                _id: &crate::op::OpId,
+            ) -> Result<Option<crate::log::Entry>, crate::log::OpLogError> {
+                panic!("the storage layer exploded")
+            }
+            fn iter(&self) -> Result<Vec<crate::log::Entry>, crate::log::OpLogError> {
+                panic!("the storage layer exploded")
+            }
+            fn iter_stoa(
+                &self,
+                _stoa: &Address,
+            ) -> Result<Vec<crate::log::Entry>, crate::log::OpLogError> {
+                panic!("the storage layer exploded")
+            }
+            fn iter_target(
+                &self,
+                _target: &crate::op::OpId,
+            ) -> Result<Vec<crate::log::Entry>, crate::log::OpLogError> {
+                panic!("the storage layer exploded")
+            }
+            fn len(&self) -> Result<usize, crate::log::OpLogError> {
+                panic!("the storage layer exploded")
+            }
+        }
+
+        let out = get_stoa(&full_request(), || {
+            Ok::<_, crate::log::OpLogError>(PanickingOpLog)
+        });
+        assert_refused(&out, "a panicking store");
+        let next = ask(&full_request(), a_log_renaming_agora());
+        assert_eq!(
+            next["title"], "Stoa Poikile",
+            "the next call must be answered"
+        );
+    }
+
+    #[test]
+    fn an_adversarial_log_is_answered_rather_than_aborting() {
+        // Forged, non-moderator, cross-Stoa and other-kind ops, the maximum
+        // counter, no counter, and fields at the maximum length — every one of
+        // which arrived from a peer.
+        let agora = feed_genesis();
+        let creator = feed_key(1);
+        let longest = "\u{200b}".repeat(crate::op::MAX_FIELD_LEN / "\u{200b}".len());
+
+        let forged = {
+            let op = Op {
+                stoa: agora.address().unwrap(),
+                author: creator.public_key(),
+                clock: Some(crate::op::OpClock {
+                    counter: u64::MAX,
+                    asserted_ms: 0,
+                }),
+                kind: OpKind::StoaMetadata {
+                    title: "Forged".to_string(),
+                    description: String::new(),
+                },
+            };
+            crate::op::SignedOp {
+                signature: crate::identity::sign_op_bytes(&feed_key(9), &op.canonical_bytes()),
+                op,
+            }
+        };
+        assert!(!forged.verify(), "the fixture must be a forgery");
+        let uncounted = Op {
+            stoa: agora.address().unwrap(),
+            author: creator.public_key(),
+            clock: None,
+            kind: OpKind::StoaMetadata {
+                title: longest.clone(),
+                description: longest.clone(),
+            },
+        }
+        .sign(&creator);
+        let a_post = Op {
+            stoa: agora.address().unwrap(),
+            author: creator.public_key(),
+            clock: Some(crate::op::OpClock {
+                counter: u64::MAX,
+                asserted_ms: u64::MAX,
+            }),
+            kind: OpKind::Post {
+                thread: None,
+                parent: None,
+                body: longest.clone(),
+                attachments: vec![],
+            },
+        }
+        .sign(&creator);
+        let log = a_log_holding([
+            forged,
+            uncounted,
+            a_post,
+            a_rename_of(&agora, &feed_key(9), u64::MAX, &longest, &longest),
+            a_rename_of(
+                &a_joinable_record("Elsewhere"),
+                &feed_key(5),
+                u64::MAX,
+                "X",
+                "",
+            ),
+            a_rename_of(&agora, &creator, 0, "Zero", ""),
+        ]);
+
+        let v = ask(&full_request(), log);
+        assert!(
+            v.get("error").is_none(),
+            "got an error rather than an answer: {v}"
+        );
+        assert_eq!(
+            v["title"], "Zero",
+            "the only binding op carrying a counter leads"
+        );
+        assert_eq!(v["isGenesisFallback"], false);
+
+        let next = ask(&full_request(), MemoryOpLog::new());
+        assert_eq!(
+            next["isGenesisFallback"], true,
+            "the next call must be answered"
+        );
     }
 }
