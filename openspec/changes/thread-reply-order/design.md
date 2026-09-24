@@ -89,10 +89,10 @@ and break every other reader of the rule. `revision::current_version` takes
 the first valid revision in the rule's order as the current version.
 `moderation::resolve` is decided by the leading binding op, and its one
 exception, the `Hide` preference, applies only to ops without a counter. The
-feed's `latestReply` is defined as the rule's "places first". So the rule keeps its direction and the thread read presents
-it in reverse. The spec states the same thing: *"This capability MUST NOT
-define an order of its own"*. Reversing the rule's sequence does not define a
-new order.
+feed's `latestReply` is defined as the rule's "places first". So the rule
+keeps its direction and the thread read presents it in reverse. The spec
+states the same thing: *"This capability MUST NOT define an order of its own"*.
+Reversing the rule's sequence does not define a new order.
 
 ### 3. The asserted-times test is rebuilt so its fixture can tell the orders apart
 
@@ -136,8 +136,8 @@ membership and not position, so it is unaffected. It passes unchanged.
     `cmp_ops` still orders the op by that counter. An honest peer answering it
     signs one above its own clock, which is lower. Any author can reach this by
     choosing a counter over the bound, and their reply then sits last in the
-    thread, after every answer to it. The bound, and ordering by an over-bound counter, are
-    `op-ordering`'s; this change only reverses what they produce.
+    thread, after every answer to it. The bound, and ordering by an over-bound
+    counter, are `op-ordering`'s; this change only reverses what they produce.
 
   → Accepted, and specified: `thread-read` states the conditions *"A reply
   orders after the reply it answers"* depends on, requires the reversed

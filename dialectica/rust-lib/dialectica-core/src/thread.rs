@@ -61,12 +61,10 @@
 //! advanced the answerer's clock — the reversed sequence stands and the reply
 //! comes first. `thread-read` forbids moving it after its parent, and doing so
 //! would need exactly the comparison this module does not make. There is no
-//! `sort`, no `cmp` and no
-//! `max_by` — the same
-//! discipline [`crate::revision`], [`crate::moderation`] and [`crate::feed`]
-//! hold, and for the same reason: a second implementation of the ordering rule
-//! could disagree with the first, and two orders that disagree produce no error
-//! anywhere.
+//! `sort`, no `cmp` and no `max_by` — the same discipline [`crate::revision`],
+//! [`crate::moderation`] and [`crate::feed`] hold, and for the same reason: a
+//! second implementation of the ordering rule could disagree with the first,
+//! and two orders that disagree produce no error anywhere.
 //!
 //! **What that order guarantees is convergence, not recency** — and a Lamport
 //! counter reaching every op this build publishes does not change that. The
@@ -74,9 +72,10 @@
 //! N, never *when*, so two counters five apart are not five of anything apart.
 //! Among ops carrying none — the population predating the clock fields —
 //! `cmp_ops` falls back to ascending op id, so this read returns them in
-//! DESCENDING op id, a hash carrying no temporal meaning at all. Two peers holding the same ops return the same sequence; neither can
-//! say which reply was written first. Nothing in this module may be reported to a
-//! caller as chronological.
+//! DESCENDING op id, a hash carrying no temporal meaning at all. Two peers
+//! holding the same ops return the same sequence; neither can say which reply
+//! was written first. Nothing in this module may be reported to a caller as
+//! chronological.
 //!
 //! The op's wall-clock does not rescue that and must not be reached for: it is
 //! the author's own assertion, display-only, and it reaches a caller only as
@@ -687,11 +686,11 @@ pub fn read_thread<L: OpLog>(
     // (#147). A reply lands after the reply it answers only where its counter is
     // the greater; where it is not, it lands before, and nothing here moves it —
     // the spec forbids that, and see the module header. Reversed rather than
-    // re-sorted: this read compares
-    // no value itself, so it cannot become a second implementation of the rule
-    // that disagrees with the first. A re-sort by ascending counter would — on
-    // equal counters and on counter-less ops, where the rule's tiebreaks are not
-    // symmetric. `design.md` (thread-reply-order) records which tests say so.
+    // re-sorted: this read compares no value itself, so it cannot become a
+    // second implementation of the rule that disagrees with the first. A re-sort
+    // by ascending counter would — on equal counters and on counter-less ops,
+    // where the rule's tiebreaks are not symmetric. `design.md`
+    // (thread-reply-order) records which tests say so.
     //
     // Nothing below depends on the walk's direction except where each reply
     // lands: membership, moderation and the root's placement are per-entry.

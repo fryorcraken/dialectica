@@ -8,7 +8,7 @@ prose (`proposal.md`, `design.md`, `specs/thread-read/spec.md`) plus the amended
 
 ## Findings
 
-- [ ] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/thread.rs:63-65`,
+- [x] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/thread.rs:63-65`,
       `:77`, `:690`; `openspec/changes/thread-reply-order/design.md:92`, `:139`
       — prose edited in place without re-flowing the paragraph, leaving ragged
       short/long lines against the file's own wrap width.
@@ -44,6 +44,15 @@ prose (`proposal.md`, `design.md`, `specs/thread-read/spec.md`) plus the amended
       tests cleanly, `cargo fmt --check` does not touch doc comments' prose.
       Not blocking on its own; worth a pass to re-wrap the five spans named
       above.
+      **Fixed** in this commit ("Re-wrap the paragraphs #147's edits left
+      ragged"). Each of the five spans named is re-wrapped as a paragraph
+      and now fits the surrounding width: the module header's "No comparison
+      is written here" and "convergence, not recency" paragraphs, the "THE
+      REPLY ORDER IS DECIDED HERE" block in `read_thread`, and `design.md`
+      Decision 2 and the over-bound-parent Risk. No words were changed, only
+      where the lines break. There is no test for this: `rustfmt --check`
+      does not re-wrap comment prose, and it passes on `thread.rs` either
+      way.
 
 ## Clean
 
