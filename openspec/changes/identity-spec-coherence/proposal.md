@@ -131,6 +131,14 @@ The unarchived `first-run-identity` change carries an `ADDED` delta for
 `identity-onboarding`. That delta names no Purpose and does not touch this
 change's requirement, so it does not matter which of the two archives first.
 
+It is also where the operation that creates a master key is contracted: *A peer
+with no master key can obtain one without naming a Stoa*. The new paragraph in
+this change's requirement names the operation by that requirement, and
+`identity-onboarding`'s Purpose says the capability defines "how a peer obtains
+its master key" on the strength of it. Until `first-run-identity` is archived,
+neither reference resolves in `openspec/specs/`. Archiving it is not part of
+#157; it is left to a separate issue.
+
 ## Capabilities
 
 ### New Capabilities

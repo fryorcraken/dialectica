@@ -77,7 +77,7 @@ exactly.
 
 ## Spec soundness (part 5)
 
-- [ ] **`spec-writer`** — the `identity-onboarding` Purpose paragraph this
+- [x] **`spec-writer`** — the `identity-onboarding` Purpose paragraph this
       piece edits directly claims more than the capability's Requirements
       establish. **Where:** `openspec/specs/identity-onboarding/spec.md`,
       line 4, the clause newly added by commit `43622b9`: "Defines how a user
@@ -108,6 +108,34 @@ exactly.
       the mutation above), but the Purpose edit overclaims coverage the
       Requirements section doesn't have, and the new scenario's own
       disambiguating prose now depends on that overclaim being true.
+
+      **Outcome (`spec-writer`): premise rejected, cross-reference fixed, the
+      real gap deferred to a separate issue.** The requirement does exist. It is
+      *A peer with no master key can obtain one without naming a Stoa* (with
+      *Obtaining a master key never replaces one* beside it), in
+      `openspec/changes/first-run-identity/specs/identity-onboarding/spec.md`.
+      It specifies what the operation does with no key held, its reply (key,
+      protection, whether this call created it) and that a repeat call succeeds
+      without replacing. `first-run-identity` merged in #128 and was never
+      archived. `git ls-tree origin/main openspec/changes/` still lists it. So
+      the search above, scoped to `openspec/specs/`, could not see it. The
+      Purpose's "how a peer obtains its master key" describes that
+      requirement, which even uses the word "obtain". Removing the phrase would
+      make the Purpose wrong once that change archives, so the Purpose is left
+      as it is.
+
+      The finding's second half holds, though. The delta's prose pointed at the
+      operation by a description, and a reader of the promoted spec could not
+      follow it anywhere. Fixed: the paragraph now names both requirements it
+      distinguishes, *A peer with no master key can obtain one without naming a
+      Stoa* and *Whether this peer holds a master key is reportable without
+      creating one*. A `git grep -F` for the first name now finds the dangling
+      reference until `first-run-identity` archives. `proposal.md` records the
+      dependency beside its existing note on that change. This is a prose edit
+      to the requirement. The scenario is unchanged, so no new test is needed.
+
+      Deferred: archiving `first-run-identity` is not #157's scope. The closer
+      of this piece archives this change only. The runner is to raise an issue.
 
 ## Areas checked and clean
 

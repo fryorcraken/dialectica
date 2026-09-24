@@ -41,8 +41,10 @@ Calling the operation that creates a master key while one is held MUST leave the
 identity in use unchanged: the identity report MUST name the same public key
 afterwards as before, and an op published afterwards MUST be signed by that same
 key. The operation meant is the one `identity-onboarding` provides for a peer to
-obtain its master key, not the one that reports whether a master key is held,
-which writes nothing by its own requirement.
+obtain its master key (*A peer with no master key can obtain one without naming
+a Stoa*), not the one that reports whether a master key is held (*Whether this
+peer holds a master key is reportable without creating one*), which writes
+nothing by its own requirement.
 
 A key that can be discarded at will is a key nothing can be attached to:
 rotation lets a user shed whatever has accumulated against their identity, and
