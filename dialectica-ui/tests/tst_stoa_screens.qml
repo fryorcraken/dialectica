@@ -1855,8 +1855,18 @@ TestCase {
         var low = notes[0].text.toLowerCase()
         verify(/\bmoderator\b/.test(low) && /\bno\b/.test(low),
                "it says no moderator-set title is held here: " + notes[0].text)
-        verify(!/\b(has not|hasn't|never) been renamed\b|\bnot renamed\b/.test(low),
-               "and never that the Stoa has not been renamed: " + notes[0].text)
+        // The word "not" may be modified by an adverb ("has definitely not
+        // been renamed"), so the earlier form of this check —
+        // `/\b(has not|hasn't|never) been renamed\b/` — is defeated by a
+        // single inserted word while still asserting exactly the false claim
+        // the requirement forbids. `\bnot\b[^.]{0,20}\brenamed\b` catches
+        // "not" and "renamed" within twenty characters of each other in
+        // EITHER order, which a synonym-only rewrite cannot dodge by
+        // rearranging or padding.
+        verify(!/\bnot\b[^.]{0,20}\brenamed\b/.test(low)
+               && !/\brenamed\b[^.]{0,20}\bnot\b/.test(low),
+               "and never that the Stoa has not been renamed, however phrased: "
+               + notes[0].text)
         screen.destroy()
     }
 
@@ -2074,6 +2084,73 @@ TestCase {
         screen.destroy()
     }
 
+    // `stoa-navigation-view`'s "Joining shows what is being joined" requirement:
+    // "Where both a successful join reply and a fallback reply carry a founding
+    // title for the reference on screen, the join reply's is the one rendered."
+    // Neither existing test drives BOTH a non-blank fallback lookup AND a
+    // subsequent non-blank join reply for the SAME reference —
+    // `test_a_resolved_current_title_fills_that_position_when_one_exists` starts
+    // from a NON-fallback lookup (no founding title available before the join),
+    // and `test_a_blank_founding_title_from_a_join_is_not_a_founding_title` also
+    // starts from a non-fallback lookup. This is the precedence scenario itself.
+    function test_a_join_replys_founding_title_takes_the_place_of_a_fallback_replys() {
+        var addr = "b02d5e77" + "cd".repeat(28)
+        var screen = makeJoin({
+            "get_stoa": spec.getStoaReply(addr, true, "Agora", ""),
+            "join_stoa": JSON.stringify({
+                stoa: addr, foundingTitle: "Agora Renamed At Founding", policy: "open"
+            })
+        }, { stoaAddress: addr, stoaGenesis: "00ff" })
+
+        // Before the join: the fallback's title fills the founding position.
+        compare(screen.foundingTitle, "Agora", "the fallback fills the position first")
+
+        screen.join()
+
+        compare(screen.joinState, "joined")
+        compare(screen.foundingTitle, "Agora Renamed At Founding",
+                "the join reply's founding title takes the place of the fallback's")
+        compare(spec.visibleNamed(screen, "foundingTitleText")[0].text,
+                "Agora Renamed At Founding")
+        verify(spec.visibleText(screen).indexOf("Agora Renamed At Founding") >= 0)
+        // The fallback's own title must not still be on screen anywhere,
+        // which is what "the two MUST NOT both be rendered" requires.
+        verify(spec.bodyText(screen).indexOf("Agora") < 0 ||
+               spec.bodyText(screen).indexOf("Agora Renamed At Founding") >= 0,
+               "the fallback's bare title must not linger beside the join's")
+        screen.destroy()
+    }
+
+    // The other half of the same precedence rule: "A fallback reply's `title`
+    // MUST fill the founding-title position only while no successful join reply
+    // for that reference carries a founding title that is not blank." So when
+    // the join succeeds with a BLANK founding title, the fallback's earlier,
+    // non-blank title must stay rather than being cleared.
+    function test_a_fallback_replys_title_stays_when_the_join_replys_is_blank() {
+        var addr = "b02d5e77" + "ef".repeat(28)
+        var blanks = ["", " ​"]
+        for (var i = 0; i < blanks.length; i++) {
+            var screen = makeJoin({
+                "get_stoa": spec.getStoaReply(addr, true, "Nym Research", ""),
+                "join_stoa": JSON.stringify({ stoa: addr, foundingTitle: blanks[i], policy: "open" })
+            }, { stoaAddress: addr, stoaGenesis: "00ff" })
+
+            compare(screen.foundingTitle, "Nym Research", "the fallback fills it first")
+
+            screen.join()
+
+            compare(screen.joinState, "joined", "blank " + i + ": the join itself succeeded")
+            compare(screen.foundingTitle, "Nym Research",
+                    "blank " + i + ": the fallback's title stays when the join's is blank")
+            compare(spec.visibleNamed(screen, "foundingTitlePanel").length, 1,
+                    "blank " + i + ": the founding panel is still rendered")
+            compare(spec.visibleNamed(screen, "foundingTitleText")[0].text, "Nym Research")
+            compare(spec.visibleNamed(screen, "titleUnknownNote").length, 0,
+                    "blank " + i + ": a founding title IS available, from the fallback")
+            screen.destroy()
+        }
+    }
+
     function test_a_blank_founding_title_from_a_join_is_not_a_founding_title() {
         var addr = "b02d5e77" + "9a".repeat(28)
         var blanks = ["", " ​"]
@@ -2103,6 +2180,18 @@ TestCase {
             var screen = previewAnswered(
                 spec.getStoaReply("x", true, blanks[i], ""),
                 { heldStoas: [{ stoa: held, foundingTitle: blanks[i] }] })
+
+            // The load-bearing assertion for the EMPTY case: `foundingTitle`
+            // is "" whether the normaliser's blank check ran and refused the
+            // lookup, or was deleted and let an empty-titled fallback through
+            // — an empty fallback title is ALSO "". Only the lookup's own `ok`
+            // flag tells the two apart, and only this assertion depends on it:
+            // deleting `Core.stoaMetadataFrom`'s blank check turns this
+            // green-either-way for blank "" without it.
+            compare(screen.currentLookup.ok, false,
+                    "blank " + i + " must be a FAILED lookup, not a fallback " +
+                    "whose title happens to be empty")
+
             compare(screen.lookalikes.length, 0, "blank " + i + " matches nothing")
             compare(spec.visibleNamed(screen, "lookalikePanel").length, 0)
             compare(spec.visibleNamed(screen, "titleUnknownText").length, 1,

@@ -583,6 +583,14 @@ mod tests {
     //!   cannot express;
     //! - `an_entry_reports_the_target_its_kind_names` is about `Entry::target`,
     //!   a plain function on a struct, and needs no log at all.
+    //! - `a_blank_titled_op_is_stored_and_read_back_unchanged` is a behaviour
+    //!   only `MemoryOpLog` can exhibit — `op-log`'s "The log records what
+    //!   arrived, and decides nothing about it" MODIFIED requirement's "a log
+    //!   that keeps ops as values ... MUST store such an op as it stores any
+    //!   other." `SqliteOpLog` refuses the same op at `append`
+    //!   (`an_op_with_no_encoding_is_refused_and_nothing_is_written` in
+    //!   `sqlite.rs`), so this cannot be a two-implementation `contract.rs`
+    //!   behaviour: there is only one implementation for it to hold of.
     //!
     //! **Nothing else belongs here.** The copies that used to live alongside
     //! these were the same behaviour names asserted of `MemoryOpLog` alone,
@@ -623,6 +631,60 @@ mod tests {
         let b: Vec<OpId> = backwards.iter().unwrap().iter().map(|e| e.id()).collect();
         assert_eq!(a, b);
         assert_eq!(a.len(), 4, "the fixture must exercise all four");
+    }
+
+    #[test]
+    fn a_blank_titled_op_is_stored_and_read_back_unchanged() {
+        // `MemoryOpLog` holds `SignedOp` VALUES, never bytes, so it has no
+        // decode path a blank title could poison — it is the "reader that
+        // nonetheless holds one" `stoa_metadata`'s resolver is written for
+        // (design.md decision 3). The op is built by struct literal and
+        // `sign()`, the only way one can be, since `Op::encode` refuses it.
+        let author = a_key(2);
+        let stoa = a_stoa("Agora");
+        let blank = Op {
+            stoa,
+            author: author.public_key(),
+            clock: None,
+            kind: OpKind::StoaMetadata {
+                title: String::new(),
+                description: "a description".to_string(),
+            },
+        }
+        .sign(&author);
+        assert!(blank.verify(), "the fixture must be authentic");
+        let id = blank.op.id();
+
+        let mut log = MemoryOpLog::new();
+        assert_eq!(
+            log.append(blank.clone(), Arrival::unordered()).unwrap(),
+            Appended::Stored
+        );
+
+        // Read back UNCHANGED, through every read this log offers: the value
+        // is not re-encoded and re-decoded on the way out, so there is no
+        // decode step to refuse it at.
+        assert_eq!(
+            log.get(&id).unwrap(),
+            Some(Entry {
+                op: blank.clone(),
+                arrival: Arrival::unordered()
+            })
+        );
+        assert_eq!(log.iter().unwrap(), vec![Entry {
+            op: blank.clone(),
+            arrival: Arrival::unordered()
+        }]);
+        let from_stoa = log.iter_stoa(&stoa).unwrap();
+        assert_eq!(from_stoa.len(), 1);
+        assert_eq!(from_stoa[0].op, blank, "the title must be unchanged");
+        match &from_stoa[0].op.op.kind {
+            OpKind::StoaMetadata { title, description } => {
+                assert_eq!(title, "");
+                assert_eq!(description, "a description");
+            }
+            other => panic!("expected StoaMetadata, got {other:?}"),
+        }
     }
 
     #[test]

@@ -1312,14 +1312,21 @@ mod tests {
         }
     }
 
-    // NO SPEC: the spec requires a blank title and trailing bytes each to be
-    // refused, and does not say which an input carrying both reports. This
-    // reports the structural fault first, so the reason points at the bytes.
+    // Specified: "A blank title followed by trailing bytes is refused as
+    // trailing bytes" names both the empty title and the mixed blank title
+    // U+0020 U+200B. The structural fault is reported first, so the reason
+    // points at the bytes rather than at the text.
     #[test]
     fn a_blank_title_followed_by_trailing_bytes_reports_the_trailing_bytes() {
-        let mut bytes = a_raw_record_titled("");
-        bytes.push(0);
-        assert_eq!(Genesis::decode(&bytes), Err(GenesisError::TrailingBytes));
+        for title in ["", "\u{0020}\u{200B}"] {
+            let mut bytes = a_raw_record_titled(title);
+            bytes.push(0);
+            assert_eq!(
+                Genesis::decode(&bytes),
+                Err(GenesisError::TrailingBytes),
+                "title {title:?}"
+            );
+        }
     }
 
     #[test]

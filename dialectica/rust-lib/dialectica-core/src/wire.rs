@@ -13161,6 +13161,90 @@ mod tests {
     }
 
     #[test]
+    fn a_blank_titled_op_stored_before_the_refusal_is_an_error_not_a_fallback() {
+        // `stoa-metadata`'s "`getStoa` refuses what it cannot answer, and never
+        // reports a fallback in place of a failure": "This includes a metadata
+        // op whose title is blank that was stored before the `op-format`
+        // capability refused one." Unlike the `MemoryOpLog` test above, this
+        // is the persistent store, holding the op AS BYTES — the row a real
+        // peer's disk could carry from before the format refused this title,
+        // written directly into `ops` because `append` now refuses to write
+        // one.
+        let dir = WireTempDir::new("get-stoa-blank-titled-row");
+        let path = dir.path().join("ops.sqlite");
+
+        let author = feed_key(1); // feed_genesis()'s creator, so the op is by that Stoa's moderator.
+        let stoa = feed_genesis().address().unwrap();
+        let op = Op {
+            stoa,
+            author: author.public_key(),
+            clock: None,
+            kind: OpKind::StoaMetadata {
+                title: String::new(),
+                description: String::new(),
+            },
+        };
+        let signed_op = op.clone().sign(&author);
+        assert!(signed_op.verify(), "the fixture must be authentic");
+        let mut raw_bytes = op.canonical_bytes();
+        raw_bytes.extend_from_slice(&signed_op.signature.to_bytes());
+        let op_id = op.id();
+
+        // Open once to create the schema, then write the row directly.
+        drop(crate::log::SqliteOpLog::open(&path).unwrap());
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute(
+            "INSERT INTO ops
+                 (op_id, op_bytes, stoa, target, author,
+                  arrival_lamport, arrival_msg,
+                  sort_has_counter, sort_counter, score_epoch)
+             VALUES (?1, ?2, ?3, NULL, ?4, NULL, NULL, 1, 0, NULL)",
+            rusqlite::params![
+                op_id.as_bytes().as_slice(),
+                raw_bytes,
+                stoa.as_bytes().as_slice(),
+                author.public_key().to_bytes().as_slice(),
+            ],
+        )
+        .unwrap();
+        drop(conn);
+
+        let before = {
+            let conn = rusqlite::Connection::open(&path).unwrap();
+            conn.query_row(
+                "SELECT op_bytes FROM ops WHERE op_id = ?1",
+                rusqlite::params![op_id.as_bytes().as_slice()],
+                |row| row.get::<_, Vec<u8>>(0),
+            )
+            .unwrap()
+        };
+
+        let out = get_stoa(&full_request(), || crate::log::SqliteOpLog::open(&path));
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let reason = v["error"]
+            .as_str()
+            .unwrap_or_else(|| panic!("expected the error shape, got {out}"));
+        assert!(
+            reason.to_lowercase().contains("blank"),
+            "the reason must name the title as blank: {reason}"
+        );
+        for field in GET_STOA_FIELDS {
+            assert!(v.get(field).is_none(), "{field} beside an error: {v}");
+        }
+
+        let after = {
+            let conn = rusqlite::Connection::open(&path).unwrap();
+            conn.query_row(
+                "SELECT op_bytes FROM ops WHERE op_id = ?1",
+                rusqlite::params![op_id.as_bytes().as_slice()],
+                |row| row.get::<_, Vec<u8>>(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(before, after, "the stored entry must be unchanged by the call");
+    }
+
+    #[test]
     fn a_title_carrying_control_or_bidirectional_characters_is_not_rejected_for_that_reason() {
         // Not rejected, and not altered. The record is hashed to produce the
         // address, so normalising a title would change the address and split one

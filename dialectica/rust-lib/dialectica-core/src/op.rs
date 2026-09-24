@@ -2844,14 +2844,21 @@ mod tests {
         assert_eq!(post.encode(), Ok(post.canonical_bytes()));
     }
 
-    // NO SPEC: the spec requires a blank title and trailing bytes each to be
-    // refused, and does not say which an input carrying both reports. This
-    // reports the structural fault, as the genesis decoder does.
+    // Specified: "A metadata op with a blank title followed by trailing bytes
+    // is refused as trailing bytes" names both the empty title and the mixed
+    // blank title U+0020 U+200B. The structural fault is reported first, as
+    // the genesis decoder does.
     #[test]
     fn a_blank_title_followed_by_trailing_bytes_reports_the_trailing_bytes() {
-        let mut bytes = a_metadata_op_titled("", "").canonical_bytes();
-        bytes.push(0);
-        assert_eq!(Op::decode(&bytes), Err(OpError::TrailingBytes));
+        for title in ["", "\u{0020}\u{200B}"] {
+            let mut bytes = a_metadata_op_titled(title, "").canonical_bytes();
+            bytes.push(0);
+            assert_eq!(
+                Op::decode(&bytes),
+                Err(OpError::TrailingBytes),
+                "title {title:?}"
+            );
+        }
     }
 
     #[test]
