@@ -43,16 +43,13 @@ Item {
     // **Set it through `preview()` rather than by assignment.** See below.
     property var previewing: null
 
-    // The Stoa an identity is being acquired for, or `null`. `{stoa,
-    // foundingTitle, genesis}` — the same shape `chosen` carries, and carrying
-    // the whole thing rather than a bare address is what lets the return land
-    // back on the feed the user left.
-    //
-    // **Not a bool plus a separate "which Stoa".** Two values that can disagree
-    // — one set, the other stale — is the unrepresentable-state problem that
-    // produced `chosen` and `previewing` in the first place. One object, or
-    // null. (design.md D5.)
-    property var onboarding: null
+    // There is no onboarding state. There was — `{stoa, foundingTitle,
+    // genesis}`, the Stoa a per-Stoa identity was being chosen for — and
+    // `machine-identity-scope` removed it with the route into `DOnboardingScreen`:
+    // in this release the identity is this machine's key, the same in every
+    // Stoa, and it is created on the Stoa list. `acquireIdentity()` below is the
+    // route now. The release that restores per-Stoa identity (#108) puts the
+    // state back; `view-navigation`'s removed requirement names what it restores.
 
     // The thread being read, or `null`. `{stoa, foundingTitle, genesis,
     // rootOp}` — the feed it was opened from, plus the root post's identifier.
@@ -72,14 +69,14 @@ Item {
     // The Stoa whose moderation screen is open, or `null`. `{stoa,
     // foundingTitle, genesis}` — the same shape `chosen` carries, and carrying
     // the whole thing rather than a bare address is what lets the return land
-    // back on the feed the user left, exactly as `onboarding` does.
+    // back on the feed the user left, exactly as a thread's return does.
     //
     // **The screen it opens publishes nothing**, which changes nothing about how
     // it is routed to: an inert screen is reached and left like any other, and
     // the navigator is not the layer that knows what a screen can do.
     property var moderating: null
 
-    // A six-screen navigator, and it still needs no StackView: its entire
+    // A five-screen navigator, and it still needs no StackView: its entire
     // state is which of these properties is non-null, and a push/pop
     // lifecycle alongside that is a second source of truth that can disagree
     // with it. One `visible:` binding each cannot. (design.md D5.)
@@ -98,14 +95,13 @@ Item {
     // and got silence. Now it gets the preview.
     //
     // **Identity is not in this expression, and must not be put in it.** The
-    // routing to onboarding happens on a SIGNAL — an event — never on a retained
+    // route to acquiring one happens on a SIGNAL — an event — never on a retained
     // "does this user have an identity" answer. A navigation layer holding that
     // boolean is wrong for every screen at once the moment a keystore changes
     // under it, which is `FeedScreen`'s own no-caching rule one level up.
     // (design.md D4.)
     readonly property string screenShown:
-        root.onboarding !== null ? "onboarding"
-      : root.moderating !== null ? "moderation"
+        root.moderating !== null ? "moderation"
       : root.reading !== null ? "thread"
       : root.chosen !== null ? "feed"
       : root.previewing !== null ? "join"
@@ -122,16 +118,17 @@ Item {
     // must be got right at every call site, which is the shape CLAUDE.md says to
     // replace with one the data enforces. **It was already wrong**: adding this
     // change's `moderation` state required editing five functions, and two of
-    // them (`openThread`, `createIdentityFor`) had been written with only three
+    // them (`openThread`, and the identity route) had been written with only three
     // of the four clears in the first place, so the invariant held by accident
     // of which screens could reach which rather than by anything in the code.
     // A seventh state would have meant getting six more edits right.
     //
     // Here the list of states is written ONCE, and entering one is "write this
-    // one, null everything else in the list". A sixth state is one entry in
+    // one, null everything else in the list". A new state is one entry in
     // `stateNames` plus one line in `screenShown`; no existing function changes,
     // and there is no call site at which the clearing can be got wrong, because
-    // no call site does any clearing.
+    // no call site does any clearing. Removing one is the same edit backwards,
+    // which is how `onboarding` left (`machine-identity-scope`).
     //
     // Behaviour is unchanged for every transition that was correct before. The
     // two that were not are now correct, which is the point.
@@ -141,7 +138,7 @@ Item {
     // an upper case letter", which takes `Main.qml` out entirely rather than
     // failing locally.
     readonly property var stateNames: ["previewing", "chosen", "reading",
-                                       "onboarding", "moderating"]
+                                       "moderating"]
 
     // Enter `name` carrying `payload`, and leave every other state empty.
     //
@@ -207,24 +204,31 @@ Item {
                                        genesis: was.genesis })
     }
 
-    // Into identity acquisition, from the feed of the Stoa the identity is for.
+    // To where an identity is acquired: the Stoa list, where this machine's key
+    // is created.
     //
-    // **The Stoa is not optional and cannot be defaulted.** `who_am_i`,
-    // `get_capabilities`, `generate_identity_slate` and `keep_identity` all take
-    // `{"stoa":"<hex>"}` and `wire.rs`'s `parse_stoa` refuses a missing or
-    // unparseable one — there is no "am I anybody in general" call on the trait.
-    // So onboarding is reachable only from a state that holds a Stoa, which is
-    // the feed. (design.md D2.)
-    function createIdentityFor(stoa, foundingTitle, genesis) {
-        root.enterOnly("onboarding", { stoa: stoa, foundingTitle: foundingTitle,
-                                       genesis: genesis })
+    // **In this release the identity is the machine key, the same in every
+    // Stoa** (`identity`, `machine-identity-scope`), so there is no per-Stoa
+    // choice to route to and nothing about the Stoa the user came from travels.
+    // This used to be `createIdentityFor(stoa, …)`, entering the per-Stoa
+    // onboarding screen with that Stoa — issue #149: the per-Stoa slate that
+    // #108 schedules for 0.0.3, reachable in 0.0.1.
+    //
+    // **It reaches the module for nothing.** Rendering the list is the whole
+    // route; creating the key is an action the user takes there, and the route
+    // creates no key, requests no slate and keeps no candidate on their behalf.
+    // `enterOnly("", null)` is the list by the navigator's own definition, so
+    // this is the same transition `closeFeed()` makes — named for what the user
+    // asked for rather than for what it happens to share with leaving a feed.
+    function acquireIdentity() {
+        root.enterOnly("", null)
     }
 
     // Into the moderation screen, from the feed of the Stoa it is about.
     //
-    // **The whole feed context travels**, exactly as it does into onboarding and
-    // a thread, because the way back is "the feed this was opened from" and the
-    // navigator is the only layer holding it.
+    // **The whole feed context travels**, exactly as it does into a thread,
+    // because the way back is "the feed this was opened from" and the navigator
+    // is the only layer holding it.
     //
     // **The screen this opens publishes nothing.** That is the screen's business
     // and not the navigator's: routing to an inert screen is routing, and a
@@ -237,9 +241,9 @@ Item {
 
     // Out of moderation, back to the feed it was entered from.
     //
-    // **Unconditional on what the user did there**, for the reason
-    // `closeOnboarding` is: a route out offered only on some outcomes is a route
-    // absent in exactly the cases where the user is stuck. On this screen that
+    // **Unconditional on what the user did there**: a route out offered only on
+    // some outcomes is a route absent in exactly the cases where the user is
+    // stuck. On this screen that
     // is sharper than elsewhere, because every other control does nothing — so
     // this is the only control that answers a press at all.
     function closeModeration() {
@@ -256,36 +260,6 @@ Item {
     // a user on the first Stoa they opened.
     function closeFeed() {
         root.enterOnly("", null)
-    }
-
-    // Out of onboarding, back to the feed it was entered from.
-    //
-    // **Unconditional on what happened there**, which is the requirement rather
-    // than a convenience: a user who decided against a key, or whose keep
-    // failed, is in a state they entered and must be able to leave it. A route
-    // out offered only on success is a route absent in exactly the cases where
-    // the user is stuck. Nothing in this function reads a phase, and the
-    // affordance that calls it is declared where no phase is in scope.
-    function closeOnboarding() {
-        var was = root.onboarding
-        if (was === null)
-            root.enterOnly("", null)
-        else
-            root.enterOnly("chosen", { stoa: was.stoa, foundingTitle: was.foundingTitle,
-                                       genesis: was.genesis })
-    }
-
-    // A keep reported that something was stored.
-    //
-    // The signal carries NO identity by design — `DOnboardingScreen`'s
-    // `identityKept()` is "an operation completed", not "the store now holds
-    // X" — so this re-asks the module rather than treating the signal as the
-    // answer. `closeOnboarding()` returns to the feed and `feed.reload()` is
-    // what re-reads `who_am_i` and `get_capabilities`, so the identity that then
-    // appears in the footer came from a fresh reply.
-    function identityWasKept() {
-        root.closeOnboarding()
-        feed.reload()
     }
 
     Rectangle {
@@ -382,13 +356,12 @@ Item {
                 // the return costs the user nothing.
                 onClosed: root.closeFeed()
 
-                // The route INTO identity acquisition, from the one state that
-                // holds a Stoa to probe with. The feed's footer chip raises this
-                // when the identity report says there is nobody here.
-                onCreateIdentityRequested: root.createIdentityFor(
-                    root.chosen !== null ? root.chosen.stoa : "",
-                    root.chosen !== null ? root.chosen.foundingTitle : "",
-                    root.chosen !== null ? root.chosen.genesis : "")
+                // The route to acquiring an identity. The feed's footer chip
+                // raises this when the identity report says there is nobody
+                // here, and it lands on the Stoa list, where this machine's key
+                // is created. Nothing about this Stoa travels: the key is not for
+                // it, it is for every Stoa.
+                onCreateIdentityRequested: root.acquireIdentity()
 
                 // The route into a thread. The root op travels with the signal;
                 // the Stoa and its record come from `chosen`, which the
@@ -404,49 +377,14 @@ Item {
                     root.chosen !== null ? root.chosen.genesis : "")
             }
 
-            // ---- the onboarding route ------------------------------------
+            // ---- no onboarding screen ---------------------------------------
             //
-            // The way out is rendered HERE rather than inside the screen, and
-            // that placement is the requirement rather than a layout choice.
-            // `view-identity-onboarding` contracts that the screen "SHALL NOT
-            // navigate anywhere itself" and that its only outward signal is
-            // `identityKept()`. A `showBack` property on the screen would be a
-            // navigation concern inside a screen contracted not to have one, and
-            // a screen author could bind it to a phase without anything failing.
-            //
-            // Declared outside the card, so there is no phase in scope at the
-            // point the affordance exists: "always offered" holds by
-            // construction rather than by a binding somebody has to keep right.
-            // (design.md D6.)
-            ColumnLayout {
-                visible: root.screenShown === "onboarding"
-                Layout.alignment: Qt.AlignHCenter
-                Layout.preferredWidth: Math.min(DTheme.cardWidth, root.width - 2 * DTheme.cardPaddingX)
-                spacing: DTheme.itemGap
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: DTheme.itemGap
-
-                    FlatButton {
-                        objectName: "onboardingBackButton"
-                        text: "Back"
-                        kind: "secondary"
-                        onClicked: root.closeOnboarding()
-                    }
-
-                    Item { Layout.fillWidth: true }
-                }
-
-                DOnboardingScreen {
-                    id: onboarding
-                    objectName: "onboarding"
-                    stoaAddress: root.onboarding !== null ? root.onboarding.stoa : ""
-                    Layout.fillWidth: true
-
-                    onIdentityKept: root.identityWasKept()
-                }
-            }
+            // `DOnboardingScreen` — the per-Stoa candidate slate — is not
+            // mounted, and `qmldir` records why. It stood here with a Back
+            // button declared outside it (so the screen, contracted to navigate
+            // nowhere itself, had no phase-bound way out to get wrong). The
+            // release that restores per-Stoa identity mounts it again, and that
+            // arrangement is the one to restore.
 
             // ---- the thread screen -----------------------------------------
             DThreadScreen {

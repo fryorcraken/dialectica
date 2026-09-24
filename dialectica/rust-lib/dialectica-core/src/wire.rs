@@ -211,10 +211,11 @@ impl Capability {
 /// Both the unlock state and the Stoa are the caller's to supply. This crate
 /// cannot read the environment or know the host's persistence path, and a probe
 /// that went looking would be doing discovery at a moment its caller does not
-/// control — the adapter has both and passes them in. The `stoa` is needed
-/// because there is no such thing as "the" identity: §5.2 gives a user one
-/// identity *per Stoa*, so "who would post" has no answer until a Stoa is
-/// named.
+/// control — the adapter has both and passes them in. The `stoa` is part of the
+/// question — "who would post *here*" — even though in this release the answer
+/// is the machine key whichever Stoa is named (`machine-identity-scope`,
+/// `design.md` D7). The lookup is still handed the Stoa, so the release that
+/// restores per-Stoa identity changes what the lookup does, not this signature.
 ///
 /// # `Fn`, not `FnOnce`
 ///
@@ -243,9 +244,11 @@ impl Capability {
 ///
 /// It was `Result<String, KeystoreError>`, which said the only thing that can stop a
 /// user posting is the keystore. That stopped being true when the probe began
-/// consulting the path record: "a master key exists and this Stoa has no choice
-/// recorded" is a real `CannotPost` state and not a keystore failure at all. The
-/// alternative was an `Other(String)` arm on `KeystoreError`, rejected because that
+/// consulting the path record, and is true again in this release, in which nothing
+/// the probe reads is the record (`machine-identity-scope`). The `String` stays: it
+/// is what a lookup that fails for any reason reduces to, and narrowing it back
+/// would move a signature the release restoring per-Stoa identity then has to move
+/// again. The alternative was an `Other(String)` arm on `KeystoreError`, rejected because that
 /// enum's arms are documented as distinguishable *so that a reason can name a fix*,
 /// and a catch-all carrying another module's failure is what that doctrine exists to
 /// prevent. A `String` is what `capability_for` reduced the error to on the very next
@@ -318,26 +321,31 @@ pub fn capability_for(
 /// there. Moving the choice into `core` is what makes
 /// `the_probe_and_whoami_report_the_same_identity_for_one_user_and_stoa` possible.
 ///
-/// # The record is consulted, and its absence is not an error
+/// # In this release it is the machine key, and it is derived from the signing key
 ///
-/// A master key with no recorded choice for this Stoa cannot post *as anyone*: there
-/// is no path, so there is no identity, so there is nothing to attribute an op to.
-/// That is reported as `CannotPost` with a reason naming the missing choice — the
-/// same state `whoAmI`'s fourth row names, so the two methods agree about it rather
-/// than one inventing an identity the other does not have.
-pub fn posting_identity(
-    stoa: &crate::identity::Address,
-    keystore: &crate::keystore::Keystore,
-    paths: &crate::identity_store::IdentityStore,
-) -> Result<String, String> {
-    match paths.path_for(stoa) {
-        Ok(Some(path)) => Ok(keystore.stoa_public_key_at_path(stoa, path).to_hex()),
-        Ok(None) => Err(NO_CHOICE_FOR_THIS_STOA.to_string()),
-        Err(e) => Err(e.to_string()),
-    }
+/// `identity`: *"In this release one machine key is the identity in every Stoa."*
+/// So this is [`publishing_key`]'s public half and nothing else — computed FROM the
+/// key a publish signs with rather than beside it, so the probe cannot report one
+/// key while a publish signs with another. That is the requirement above, held by
+/// there being one derivation rather than by two that agree.
+///
+/// # It takes no Stoa and no record, and that is the fix for issue #149
+///
+/// This took `(stoa, keystore, paths)` and answered
+/// `stoa_public_key_at_path(stoa, recorded_path)`, refusing where no path was
+/// recorded — the per-Stoa model scheduled for a later release, wired live. A
+/// Stoa's creator was the machine key while its posts came from a per-Stoa key,
+/// and a user in two Stoas was two keys.
+///
+/// **The parameters are gone rather than ignored.** A function handed the record
+/// and told not to read it is one edit from reading it again; a function that is
+/// not handed it cannot. `design.md` D3 records the alternatives and what turns red
+/// without this shape.
+pub fn posting_identity(keystore: &crate::keystore::Keystore) -> String {
+    publishing_key(keystore).public_key().to_hex()
 }
 
-/// The secret key a publish into this Stoa signs with.
+/// The secret key a publish signs with, in whichever Stoa it is published into.
 ///
 /// # This is the same derivation [`posting_identity`] reports, and that is the
 /// whole requirement
@@ -345,8 +353,24 @@ pub fn posting_identity(
 /// `content-authoring` contracts it directly — *"WHEN the posting-capability
 /// probe reports an identity for a Stoa and a post is then published into that
 /// Stoa, THEN the published op's author is the identity the probe reported"* —
-/// and the probe reports [`posting_identity`], which is
-/// `stoa_public_key_at_path(stoa, recorded_path)`.
+/// and the probe reports [`posting_identity`], which is this key's public half.
+///
+/// # In this release it is the machine key, the Stoa's creator key
+///
+/// [`crate::keystore::Keystore::identity_key`]: the root used directly, the same
+/// position [`crate::keystore::creator_key_in`] names as a Stoa's creator. So a
+/// Stoa's creator posts as its creator — the pairing `creator_key_in`'s own doc
+/// records as having shipped wrong once — and a user is one key in every Stoa.
+/// Until `machine-identity-scope` this was
+/// `stoa_key_at_path(stoa, recorded_path)`, refusing with a "no identity has been
+/// chosen for this Stoa" reason where no path was recorded; see
+/// [`posting_identity`] for why the parameters went rather than being ignored.
+///
+/// Infallible, because a keystore that opened has a root and the root is always a
+/// valid key. Every refusal a publish gives for identity is the keystore's own,
+/// raised by the adapter when it cannot open one.
+///
+/// # History: the pathless scheme this replaced before that
 ///
 /// The publish path signed with `keystore.stoa_key(&stoa)` instead: the
 /// **pathless** per-Stoa scheme, under a different salt. `identity.rs`'s own
@@ -372,63 +396,31 @@ pub fn posting_identity(
 /// the identity the probe reports while the two lived on opposite sides of that
 /// boundary. Moving it here is what makes
 /// `the_key_a_publish_signs_with_is_the_identity_the_probe_reports` possible.
-///
-/// # A missing choice is a refusal, not a fallback
-///
-/// [`posting_identity`] reports `CannotPost` when no path is recorded for this
-/// Stoa, because there is no identity to attribute an op to. Signing with
-/// *anything* here would contradict that: the probe would say the user cannot
-/// post and the publish would succeed, under a key the probe refuses to name.
-/// So the same state is the same answer, carrying
-/// [`NO_CHOICE_FOR_THIS_STOA`] — one constant, because it is one state.
-pub fn publishing_key(
-    stoa: &crate::identity::Address,
-    keystore: &crate::keystore::Keystore,
-    paths: &crate::identity_store::IdentityStore,
-) -> Result<crate::identity::SecretKey, String> {
-    match paths.path_for(stoa) {
-        Ok(Some(path)) => Ok(keystore.stoa_key_at_path(stoa, path)),
-        Ok(None) => Err(NO_CHOICE_FOR_THIS_STOA.to_string()),
-        Err(e) => Err(e.to_string()),
-    }
+pub fn publishing_key(keystore: &crate::keystore::Keystore) -> crate::identity::SecretKey {
+    keystore.identity_key()
 }
 
-/// The reason both `getCapabilities` and `whoAmI` give for "a master key exists and
-/// this Stoa has no choice recorded".
-///
-/// One constant because it is one state, and the two methods reporting it in
-/// different words would be two methods disagreeing about the user's situation in the
-/// one place they are meant to agree. The state itself is what the two-store split
-/// creates, and the wording names the fix rather than the fault, per
-/// `KeystoreError::Display`'s obligation.
-pub const NO_CHOICE_FOR_THIS_STOA: &str =
-    "a master key exists but no identity has been chosen for this Stoa; \
-     generate a slate and keep one of its candidates";
-
-/// `{"stoa":"<hex>"}` -> whether the user can post there, from the two stores.
+/// `{"stoa":"<hex>"}` -> whether the user can post there, from the keystore.
 ///
 /// The shape [`get_capabilities`] has, with the *derivation* moved inside so it can
 /// be tested. See [`posting_identity`] for why that move was necessary and what it
-/// fixed. The openers are closures for the reason every other one in this file is:
+/// fixed. The opener is a closure for the reason every other one in this file is:
 /// this crate cannot read the environment or know the host's layout.
+///
+/// **One opener, the keystore's.** This took a second, for the record of per-Stoa
+/// choices, and a record that could not be opened was a `CannotPost`. In this
+/// release nothing the probe reports comes from that record, so an unreadable one
+/// cannot close the gate — which `identity` requires — and it cannot because
+/// there is no way to hand it here (`design.md` D3).
 pub fn get_capabilities_from_stores(
     request: &str,
     open_keystore: impl Fn() -> Result<crate::keystore::Keystore, crate::keystore::KeystoreError>,
-    open_paths: impl Fn() -> Result<
-        crate::identity_store::IdentityStore,
-        crate::identity_store::IdentityStoreError,
-    >,
 ) -> String {
-    get_capabilities(request, |stoa| {
-        // Each error keeps its OWN type's message rather than being folded into one
-        // of them. Adding an `Other(String)` arm to `KeystoreError` so this could
-        // return that type was the obvious move and is rejected: that enum's arms
-        // are documented as distinguishable so a reason can name a fix, and a
-        // catch-all carrying another module's failure is the collapse the
-        // distinguishability doctrine exists to prevent.
+    get_capabilities(request, |_stoa| {
+        // The keystore's OWN message is the reason, because `KeystoreError`'s
+        // arms are documented as distinguishable so that a reason names a fix.
         let keystore = open_keystore().map_err(|e| e.to_string())?;
-        let paths = open_paths().map_err(|e| e.to_string())?;
-        posting_identity(stoa, &keystore, &paths)
+        Ok(posting_identity(&keystore))
     })
 }
 
@@ -964,14 +956,18 @@ pub fn keep_selection(
     // source differs between the two branches and only this code knows which
     // branch it took. Deciding it below would mean re-deriving that, which is the
     // second copy of a fact that CLAUDE.md's guard rule is about.
-    let encrypted = if targets.keystore_path.exists() {
+    //
+    // `wrote_the_keystore` is settled in the same branch for the same reason: only
+    // this code knows whether the file on disk after this line is one it created,
+    // and the undo below depends on exactly that fact.
+    let (encrypted, wrote_the_keystore) = if targets.keystore_path.exists() {
         // This call wrote nothing, so the protection that is true is the FILE's,
         // and reading it is the only way to know. Note this is not the re-read the
         // `design.md` decision rejects: that one is about re-reading a file this
         // call just wrote, where the value this code used is the authority. Here
         // there is no value this code used — the file predates the call.
         match crate::keystore::Keystore::is_encrypted(targets.keystore_path) {
-            Ok(v) => v,
+            Ok(v) => (v, false),
             // The keystore is on disk and unreadable. Refusing rather than
             // guessing: a keep that reported an identity while unable to tell
             // whether its master key is protected has answered a question it does
@@ -992,7 +988,10 @@ pub fn keep_selection(
         // Re-reading would report the protection of whatever is at the path now,
         // which on a directory an attacker can write to is not necessarily the
         // file just written. The value that is true is the one this code used.
-        matches!(targets.unlock, crate::keystore::Unlock::Passphrase(_))
+        (
+            matches!(targets.unlock, crate::keystore::Unlock::Passphrase(_)),
+            true,
+        )
     };
 
     // The refusal for a second choice in ONE Stoa. `chosen_paths`' primary key
@@ -1000,15 +999,67 @@ pub fn keep_selection(
     // here — and it is per-Stoa, which is the scope the spec asks for and the
     // keystore's one-file-per-install scope could not express.
     if let Err(e) = targets.paths.record_path(stoa, candidate.path) {
-        return Kept::Refused {
-            reason: e.to_string(),
-        };
+        return undo_a_keystore_this_keep_wrote(targets.keystore_path, wrote_the_keystore, e);
     }
 
     Kept::Stored {
         public_key: candidate.public_key.to_hex(),
         path: candidate.path,
         encrypted,
+    }
+}
+
+/// A keep's record write failed: remove the master key this same keep wrote, and
+/// never one it did not.
+///
+/// # Why a failed keep has anything to undo now
+///
+/// `identity-onboarding` requires a keep to "either complete or change nothing",
+/// and a failed one to leave "no recorded choice and no master key that were not
+/// there before" wherever storage permits the removal — the one exception being
+/// a removal storage refuses, which the reply must then report. The keystore is written first and the record second, so a
+/// record failure on a fresh install used to leave a master key on disk with no
+/// path pointing at it. That was harmless only while `whoAmI` read the record —
+/// the orphaned key named no identity. Once the machine key is the identity in
+/// use in every Stoa (`machine-identity-scope`), that file IS an identity, handed
+/// to the user by a call that reported failure.
+///
+/// # Only a file this keep created, and the flag is how that is known
+///
+/// A master key that predates the keep is the user's identity everywhere; removing
+/// it would discard every op it signed. `wrote_it` is set by [`keep_selection`]'s
+/// own branch that called `create`, so it cannot be true for a file that was
+/// already there. The two tests that pin the pair are
+/// `a_keep_whose_path_record_fails_reports_failure_and_names_no_identity` (the file
+/// this keep wrote is gone) and
+/// `a_keep_whose_record_write_fails_keeps_a_master_key_that_was_already_there` (a
+/// file it did not write is byte-identical).
+///
+/// Nothing can have signed with the removed key: it existed only between two lines
+/// of this call, inside one dispatch.
+fn undo_a_keystore_this_keep_wrote(
+    keystore_path: &std::path::Path,
+    wrote_it: bool,
+    record_failure: crate::identity_store::IdentityStoreError,
+) -> Kept {
+    if wrote_it {
+        if let Err(e) = std::fs::remove_file(keystore_path) {
+            // `identity-onboarding`, "A failed keep that cannot remove the
+            // master key it stored says so": the refusal shape, a reason and
+            // no identity, and a reason that states a master key was left
+            // stored — so it differs from the bare `record_failure` below,
+            // which is what the same failure reports when the removal worked.
+            return Kept::Refused {
+                reason: format!(
+                    "{record_failure}; the master key this attempt wrote could not \
+                     be removed ({e}), so one now exists at {}",
+                    keystore_path.display()
+                ),
+            };
+        }
+    }
+    Kept::Refused {
+        reason: record_failure.to_string(),
     }
 }
 
@@ -1027,19 +1078,23 @@ pub enum Whoami {
     /// identity by its public key and SHALL NOT carry an author address"*, the
     /// public key being the sole author identifier and what the generated display
     /// name and the visual mark are both derived from.
+    ///
+    /// **No `path`.** It carried the recorded derivation path while the identity in
+    /// use was a per-Stoa key. In this release it is the machine key, which derives
+    /// from no path, so any path here would describe a key that is not the one in
+    /// use — `identity-onboarding` now forbids one in this reply.
     Identity {
         public_key: String,
-        path: u32,
         /// Whether recovering this identity needs more than the master key.
         ///
-        /// **Always `true` in this change**, because no export or remote backup
-        /// exists — so the recorded path lives only in local storage and losing
-        /// that store loses the identity even with the master key preserved. The
-        /// spec confines the requirement to *"what is checkable now: that the
-        /// module reports the unbacked state"*.
+        /// **`false` in this release**, because the identity in use is the
+        /// machine key and the master key alone recovers it
+        /// (`machine-identity-scope`). It was `true` while the identity in use was
+        /// a per-Stoa key whose path lived only in the local record.
         ///
-        /// A boolean rather than only prose, so the change that implements backup
-        /// flips a value rather than changing a shape.
+        /// A boolean rather than only prose, so the change that restores per-Stoa
+        /// identity — and later the one that implements backup — flips a value
+        /// rather than changing a shape.
         recovery_needs_the_record: bool,
     },
     /// There is nobody. The reason names the fix.
@@ -1052,12 +1107,10 @@ impl Whoami {
         match self {
             Whoami::Identity {
                 public_key,
-                path,
                 recovery_needs_the_record,
             } => serde_json::json!({
                 "hasIdentity": true,
                 "publicKey": public_key,
-                "path": path,
                 "recoveryNeedsTheRecord": recovery_needs_the_record,
             })
             .to_string(),
@@ -1077,31 +1130,29 @@ impl Whoami {
 /// currently be used."* A caller with only the posting probe would have to render
 /// "you are nobody" to a user who has an identity and a fixable problem.
 ///
-/// This handler therefore reports the identity where one is recorded and the
-/// keystore opens, and a **distinguishable reason** in each of the four ways that
-/// can fail: the keystore does not open, the record does not open, the record read
-/// fails, and — the one the two-store split creates — a master key with no recorded
-/// path for this Stoa. That last one's reason names the record, so it does not read
-/// as "you are nobody", and it is the same string `getCapabilities` gives for the
-/// same state.
+/// This handler therefore reports the machine key where the keystore opens, and the
+/// keystore's own **distinguishable reason** where it does not.
+///
+/// # The Stoa is parsed and then not consulted, in this release
+///
+/// "Who am I in this Stoa" is the question the feed asks, and in this release its
+/// answer is the machine key in every Stoa (`machine-identity-scope`). The field
+/// stays required, and a malformed one is still the error shape: the wire does not
+/// widen what it accepts, and the release that restores per-Stoa identity turns the
+/// answer back into a per-Stoa one without the question changing (`design.md` D7).
 pub fn who_am_i(
     request: &str,
     master: impl Fn() -> Result<crate::keystore::Keystore, crate::keystore::KeystoreError>,
-    paths: impl Fn() -> Result<
-        crate::identity_store::IdentityStore,
-        crate::identity_store::IdentityStoreError,
-    >,
 ) -> String {
     guarded("who_am_i", || {
         let parsed = match Request::parse(request) {
             Ok(r) => r,
             Err(e) => return e,
         };
-        let stoa = match parse_stoa(&parsed) {
-            Ok(s) => s,
-            Err(e) => return e,
-        };
-        whoami_for(&stoa, master, paths).to_json()
+        if let Err(e) = parse_stoa(&parsed) {
+            return e;
+        }
+        whoami_for(master).to_json()
     })
 }
 
@@ -1115,65 +1166,31 @@ pub fn who_am_i(
 /// sensible rendering. §2.5's error shape stays reachable for the one failure that
 /// is not about identity — a request this code could not interpret — which is
 /// [`who_am_i`]'s job rather than this one's.
+///
+/// **It takes no Stoa and no record**, for the reason [`posting_identity`] takes
+/// neither: in this release the identity in use is the machine key in every Stoa,
+/// and a function that is not handed the record cannot come to depend on it. The
+/// three states the record used to add — the record would not open, would not
+/// read, or held no choice for this Stoa — are gone with it.
 pub fn whoami_for(
-    stoa: &crate::identity::Address,
     master: impl Fn() -> Result<crate::keystore::Keystore, crate::keystore::KeystoreError>,
-    paths: impl Fn() -> Result<
-        crate::identity_store::IdentityStore,
-        crate::identity_store::IdentityStoreError,
-    >,
 ) -> Whoami {
-    // The keystore is asked first, because "there is no master key" is the state a
-    // fresh install is in and it needs no record consulted to establish. Asking
-    // the record first would report a missing record for a user who has no
-    // identity at all, which sends them to fix the wrong thing.
-    let keystore = match master() {
-        Ok(k) => k,
+    match master() {
+        // Through `posting_identity`, not a second call to a keystore accessor, so
+        // the report and the probe are one derivation and cannot name two keys.
+        Ok(keystore) => Whoami::Identity {
+            public_key: posting_identity(&keystore),
+            // The master key alone recovers the machine key. See the field's own
+            // documentation.
+            recovery_needs_the_record: false,
+        },
         // The reason IS the error's message. `KeystoreError::Display` already
         // names the fix for each case with a test holding it to that, so
         // paraphrasing here would maintain the same guidance twice and watch the
         // two drift — the argument `capability_for` records.
-        Err(e) => {
-            return Whoami::Nobody {
-                reason: e.to_string(),
-            }
-        }
-    };
-    let store = match paths() {
-        Ok(s) => s,
-        Err(e) => {
-            return Whoami::Nobody {
-                reason: e.to_string(),
-            }
-        }
-    };
-    let path = match store.path_for(stoa) {
-        Ok(Some(p)) => p,
-        // The state the two-store split creates: a master key exists and this Stoa
-        // has no choice recorded. Named as such rather than reported as "no
-        // identity", because the fix is different — choose one here, not create a
-        // key.
-        Ok(None) => {
-            return Whoami::Nobody {
-                // The same constant `getCapabilities` reports for this state, so
-                // the two methods cannot describe one situation in two ways.
-                reason: NO_CHOICE_FOR_THIS_STOA.to_string(),
-            };
-        }
-        Err(e) => {
-            return Whoami::Nobody {
-                reason: e.to_string(),
-            }
-        }
-    };
-
-    let public_key = keystore.stoa_public_key_at_path(stoa, path);
-    Whoami::Identity {
-        public_key: public_key.to_hex(),
-        path,
-        // Always true in this change: no export or remote backup exists, so the
-        // record lives only here. See the field's own documentation.
-        recovery_needs_the_record: true,
+        Err(e) => Whoami::Nobody {
+            reason: e.to_string(),
+        },
     }
 }
 
@@ -1245,16 +1262,19 @@ impl Minted {
 /// install and stoa-independent — `Keystore::identity_key` signs with the root
 /// directly, the MVP's one-identity shortcut (PLAN.md §9.2). The **chosen path**
 /// (`chosen_paths`) is strictly per-Stoa. Creating a Stoa needs layer 1 alone
-/// (`creator_key_in` → `identity_public_key`); posting needs layer 2
-/// (`publishing_key` → `path_for(stoa)`, else [`NO_CHOICE_FOR_THIS_STOA`]).
+/// (`creator_key_in` → `identity_public_key`), and **in this release so does
+/// posting** ([`publishing_key`] → `identity_key`): `machine-identity-scope` made
+/// the machine key the identity in use in every Stoa, so layer 2 is recorded by a
+/// keep and consulted by nothing.
 ///
 /// So minting under a placeholder Stoa — the obvious shortcut, since
 /// `keep_identity` already mints — would record a path for a Stoa that does not
-/// exist. Creation would then succeed and **posting into the real Stoa would
-/// still be refused**, which is a worse failure than the deadlock: it looks
-/// fixed. This handler touches `chosen_paths` not at all, so per-Stoa onboarding
-/// is exactly as it was and `keep_identity` remains the only thing that records a
-/// choice.
+/// exist. When this was written, posting needed layer 2, so creation would then
+/// have succeeded while posting into the real Stoa stayed refused — a failure
+/// that looks fixed. That reason is retired with per-Stoa posting; the rule it
+/// produced is not; a placeholder row is still a false record. This handler
+/// touches `chosen_paths` not at all, and `keep_identity` remains the only thing
+/// that records a choice.
 ///
 /// # Idempotent, and never destructive
 ///
@@ -4204,8 +4224,10 @@ mod tests {
 
     #[test]
     fn generating_a_slate_writes_nothing() {
-        // The spec: "Generating a slate SHALL NOT write to storage", and
-        // "a caller asking who the user is still finds none".
+        // The spec: "Generating a slate MUST NOT write to storage", "no master key
+        // and no recorded choice are stored that were not there before", and "on
+        // a peer that held no master key, a caller asking who the user is still
+        // finds none". The fixture is such a peer: the directory starts empty.
         //
         // Checked by generating several slates against a real directory and then
         // asserting the directory is still EMPTY — which is stronger than
@@ -4236,13 +4258,75 @@ mod tests {
         );
 
         // And who-am-i still finds nobody, which is the half a view would notice.
-        let v: serde_json::Value = serde_json::from_str(&who_am_i(
-            &slate_request(),
-            || Keystore::open(&dir.keystore_path(), &Unlock::Unencrypted),
-            || Ok(dir.paths()),
-        ))
+        let v: serde_json::Value = serde_json::from_str(&who_am_i(&slate_request(), || {
+            Keystore::open(&dir.keystore_path(), &Unlock::Unencrypted)
+        }))
         .unwrap();
         assert_eq!(v["hasIdentity"], false, "got {v}");
+    }
+
+    #[test]
+    fn generating_a_slate_writes_nothing_new_on_a_peer_that_already_holds_a_machine_key() {
+        // `design.md` D2: onboarding may begin on a peer that already holds a
+        // machine key, and `generating_a_slate_writes_nothing` cannot cover that
+        // — its fixture is an empty directory throughout, so "still finds none"
+        // and "nothing new was written" happen to read the same. The spec's own
+        // wording keeps them apart: "no master key and no recorded choice are
+        // stored that were not there before" is the general claim, and "on a
+        // peer that held no master key, a caller asking who the user is still
+        // finds none" is conditioned on that starting state. This fixture starts
+        // with a machine key already on disk, so the two claims can be told
+        // apart: nothing NEW may be written, and `whoAmI` must name the
+        // EXISTING machine key rather than report nobody.
+        let dir = OnboardingDir::new("slate-writes-nothing-existing-key");
+        let minted = as_json(&create_identity(
+            "{}",
+            &dir.keystore_path(),
+            &Unlock::Unencrypted,
+        ));
+        let machine_key = minted["publicKey"].as_str().unwrap().to_string();
+        let before = std::fs::read(dir.keystore_path()).expect("the keystore reads");
+        let entries_before: std::collections::BTreeSet<_> = std::fs::read_dir(&dir.0)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+
+        let mut session = a_session();
+        for _ in 0..3 {
+            let out =
+                generate_identity_slate(&mut session, &slate_request(), || Ok(a_master_key()));
+            assert!(
+                serde_json::from_str::<serde_json::Value>(&out)
+                    .unwrap()
+                    .get("candidates")
+                    .is_some(),
+                "got {out}"
+            );
+        }
+
+        assert_eq!(
+            std::fs::read(dir.keystore_path()).unwrap(),
+            before,
+            "generating a slate rewrote the existing master key"
+        );
+        let entries_after: std::collections::BTreeSet<_> = std::fs::read_dir(&dir.0)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(
+            entries_after, entries_before,
+            "generating a slate wrote a new entry beside the existing machine key"
+        );
+
+        // The half the empty-directory test cannot exercise: a peer that
+        // already held a machine key is not "nobody" after a slate is
+        // generated and discarded — it is still the existing identity.
+        let v: serde_json::Value = serde_json::from_str(&who_am_i(&slate_request(), || {
+            Keystore::open(&dir.keystore_path(), &Unlock::Unencrypted)
+        }))
+        .unwrap();
+        assert_eq!(v["hasIdentity"], true, "got {v}");
+        assert_eq!(v["publicKey"], machine_key.as_str(), "got {v}");
     }
 
     #[test]
@@ -4404,27 +4488,36 @@ mod tests {
     }
 
     #[test]
-    fn a_kept_identity_survives_a_restart_and_is_the_one_reported() {
-        // The spec: "the identity reported is the one that was kept", after "the
-        // stored state is then loaded afresh" — and twice, because the spec
-        // requires it survive more than one restart and a store that consumed its
-        // content on read would pass a single reload.
+    fn a_kept_identity_survives_a_restart_and_is_the_one_the_record_reproduces() {
+        // The spec, as `machine-identity-scope` words it: "the key derived from
+        // the stored master key and the path recorded for that Stoa is the
+        // identity that was kept", after "the stored state is then loaded afresh"
+        // — and twice, because the spec requires it survive more than one restart
+        // and a store that consumed its content on read would pass a single reload.
+        //
+        // This asserted against `whoAmI` until that change. `whoAmI` now names the
+        // machine key in every Stoa, so it is no longer where a kept choice is
+        // visible; the record is, and this reads the record.
         let dir = OnboardingDir::new("keep-survives");
         let nonce = SlateNonce::generate().unwrap();
         let kept = keep_through_the_wire(&dir, nonce, Some(nonce), 1, &Unlock::Unencrypted);
         let kept_key = kept["publicKey"].as_str().unwrap().to_string();
 
         for reload in 0..2 {
-            let v: serde_json::Value = serde_json::from_str(&who_am_i(
-                &slate_request(),
-                || Keystore::open(&dir.keystore_path(), &Unlock::Unencrypted),
-                || Ok(dir.paths()),
-            ))
-            .unwrap();
-            assert_eq!(v["hasIdentity"], true, "reload {reload}: {v}");
+            // Both stores reopened from disk each time, so neither handle the
+            // keep used participates.
+            let master = Keystore::open(&dir.keystore_path(), &Unlock::Unencrypted)
+                .expect("the stored master key reopens");
+            let path = dir
+                .paths()
+                .path_for(&a_stoa())
+                .expect("the record reads")
+                .unwrap_or_else(|| panic!("reload {reload}: no path is recorded"));
             assert_eq!(
-                v["publicKey"], kept_key,
-                "reload {reload} reported a different identity than was kept"
+                master.stoa_public_key_at_path(&a_stoa(), path).to_hex(),
+                kept_key,
+                "reload {reload}: the stored master key and the recorded path do not \
+                 reproduce the identity that was kept"
             );
         }
     }
@@ -4519,7 +4612,8 @@ mod tests {
 
     #[test]
     fn a_selection_outside_the_set_is_refused_and_stores_nothing() {
-        // The spec: "the attempt is refused, AND no identity is stored". Coercing
+        // The spec: "the attempt is refused, AND no choice is recorded and no
+        // master key is stored that were not there before". Coercing
         // an out-of-range selection would store an identity the user did not
         // choose, which the spec calls unrecoverable.
         let dir = OnboardingDir::new("out-of-range");
@@ -4538,6 +4632,42 @@ mod tests {
         // unconditional and these assertions would still pass.
         let ok = keep_through_the_wire(&dir, nonce, Some(nonce), 4, &Unlock::Unencrypted);
         assert_eq!(ok["kept"], true, "got {ok}");
+    }
+
+    #[test]
+    fn an_out_of_range_selection_stores_nothing_new_on_a_peer_that_already_holds_a_machine_key() {
+        // `design.md` D2: the refused-selection scenario now applies to a peer
+        // that already holds a machine key too, and
+        // `a_selection_outside_the_set_is_refused_and_stores_nothing` cannot
+        // cover it — its fixture asserts `!dir.keystore_path().exists()`
+        // throughout, which would be the wrong assertion for a peer that
+        // legitimately has one. The spec's own wording is "no choice is
+        // recorded and no master key is stored that were not there before",
+        // which is a claim about NEW writes, not about the file's existence.
+        let dir = OnboardingDir::new("out-of-range-existing-key");
+        let minted = as_json(&create_identity(
+            "{}",
+            &dir.keystore_path(),
+            &Unlock::Unencrypted,
+        ));
+        assert!(
+            minted.get("error").is_none(),
+            "the fixture must start with a master key on disk: {minted}"
+        );
+        let before = std::fs::read(dir.keystore_path()).expect("the keystore reads");
+
+        let nonce = SlateNonce::generate().unwrap();
+        for index in [SLATE_SIZE as i64, SLATE_SIZE as i64 + 1, 99, 100_000] {
+            let v = keep_through_the_wire(&dir, nonce, Some(nonce), index, &Unlock::Unencrypted);
+            assert_eq!(v["kept"], false, "index {index}: {v}");
+            assert!(v.get("address").is_none(), "index {index}: {v}");
+            assert_eq!(
+                std::fs::read(dir.keystore_path()).unwrap(),
+                before,
+                "index {index} rewrote or removed the existing master key"
+            );
+            assert_eq!(dir.paths().path_for(&a_stoa()).unwrap(), None);
+        }
     }
 
     #[test]
@@ -4616,13 +4746,17 @@ mod tests {
              in the wrong order"
         );
 
-        // And the spec's "a subsequent load finds no identity that was not there
-        // before": who-am-i must still find nobody.
-        let who: serde_json::Value = serde_json::from_str(
-            &whoami_for(&a_stoa(), || Ok(a_master_key()), || Ok(dir.paths())).to_json(),
-        )
-        .unwrap();
-        assert_eq!(who["hasIdentity"], false, "got {who}");
+        // And the spec's "a subsequent load finds no recorded choice and no master
+        // key that were not there before": the master-key half, read off the
+        // disk. This asked `whoAmI` until `machine-identity-scope`, and the opener
+        // it was handed answers `a_master_key()` whatever is on disk — so once
+        // `whoAmI` stopped reading the record it would have named that key and
+        // proved nothing about this keep. What sits at the keystore path is still
+        // the directory the fixture put there, so no keystore was written.
+        assert!(
+            dir.keystore_path().is_dir(),
+            "a failed keep replaced what was at the keystore path"
+        );
     }
 
     #[test]
@@ -4787,20 +4921,26 @@ mod tests {
 
     #[test]
     fn who_am_i_reports_an_identity_by_its_public_key_and_no_address() {
-        // The spec: "the reply states that there is an identity, AND carries its
-        // public key, AND carries no author address, AND carries no reason".
+        // The spec: "the reply states that there is an identity, AND carries the
+        // machine key's public key, AND carries no author address, AND carries no
+        // reason".
+        //
+        // The keystore is MINTED, so its key is random: a report hardcoded to any
+        // one key cannot satisfy the equality below. `create_identity`'s reply is
+        // the spec's "the key a request for this peer's master key reports".
         let dir = OnboardingDir::new("whoami-yes");
-        let nonce = SlateNonce::generate().unwrap();
-        let kept = keep_through_the_wire(&dir, nonce, Some(nonce), 2, &Unlock::Unencrypted);
+        let minted = as_json(&create_identity(
+            "{}",
+            &dir.keystore_path(),
+            &Unlock::Unencrypted,
+        ));
 
-        let v: serde_json::Value = serde_json::from_str(&who_am_i(
-            &slate_request(),
-            || Keystore::open(&dir.keystore_path(), &Unlock::Unencrypted),
-            || Ok(dir.paths()),
-        ))
+        let v: serde_json::Value = serde_json::from_str(&who_am_i(&slate_request(), || {
+            Keystore::open(&dir.keystore_path(), &Unlock::Unencrypted)
+        }))
         .unwrap();
         assert_eq!(v["hasIdentity"], true, "got {v}");
-        assert_eq!(v["publicKey"], kept["publicKey"], "got {v}");
+        assert_eq!(v["publicKey"], minted["publicKey"], "got {v}");
         assert!(v.get("reason").is_none(), "got {v}");
         assert!(v.get("address").is_none(), "got {v}");
 
@@ -4813,22 +4953,12 @@ mod tests {
         // since `whoami_for` computed the address by calling `.address()` on the
         // very key it reported. With the address deleted, what is left to check is
         // that the surviving value is the right KIND and the right one — and the
-        // equality above, against a key derived through the keep, is what pins
-        // which key it is.
+        // equality above, against the key the mint reported, is what pins which
+        // key it is.
         let key = hex::decode(v["publicKey"].as_str().unwrap()).unwrap();
         assert!(
             crate::identity::PublicKey::from_bytes(&key).is_ok(),
             "the reported identity does not parse as a public key: {v}"
-        );
-        // And it is the key the recorded path derives, computed here from the
-        // fixed master key rather than read back from either reply.
-        let path = v["path"].as_u64().unwrap() as u32;
-        assert_eq!(
-            v["publicKey"].as_str().unwrap(),
-            crate::identity::derive_stoa_key_at_path(&[7u8; 32], &a_stoa(), path)
-                .public_key()
-                .to_hex(),
-            "the reported identity is not the one the recorded path derives: {v}"
         );
     }
 
@@ -4837,11 +4967,9 @@ mod tests {
         // The spec: "the reply states that there is none, AND carries a reason,
         // AND carries no identity".
         let dir = OnboardingDir::new("whoami-none");
-        let v: serde_json::Value = serde_json::from_str(&who_am_i(
-            &slate_request(),
-            || Keystore::open(&dir.keystore_path(), &Unlock::Unencrypted),
-            || Ok(dir.paths()),
-        ))
+        let v: serde_json::Value = serde_json::from_str(&who_am_i(&slate_request(), || {
+            Keystore::open(&dir.keystore_path(), &Unlock::Unencrypted)
+        }))
         .unwrap();
         assert_eq!(v["hasIdentity"], false, "got {v}");
         assert!(v.get("address").is_none(), "got {v}");
@@ -4856,132 +4984,105 @@ mod tests {
         // open is a real identity that cannot currently be used", and a caller
         // told "you are nobody" would render the wrong thing.
         //
-        // Four states, and all four reasons must differ.
-        let absent = whoami_for(
-            &a_stoa(),
-            || Err(crate::keystore::KeystoreError::NotFound),
-            || Ok(IdentityStore::in_memory().unwrap()),
-        );
-        let unusable = whoami_for(
-            &a_stoa(),
-            || Err(crate::keystore::KeystoreError::PermissionsTooOpen { mode: 0o644 }),
-            || Ok(IdentityStore::in_memory().unwrap()),
-        );
-        let locked = whoami_for(
-            &a_stoa(),
-            || Err(crate::keystore::KeystoreError::Locked),
-            || Ok(IdentityStore::in_memory().unwrap()),
-        );
-        // The state the two-store split creates: a master key with no recorded
-        // path for this Stoa.
-        let unchosen = whoami_for(
-            &a_stoa(),
-            || Ok(a_master_key()),
-            || Ok(IdentityStore::in_memory().unwrap()),
-        );
+        // Three states, and all three reasons must differ.
+        //
+        // There were four. The fourth was "a master key exists and no choice is
+        // recorded for this Stoa", which `machine-identity-scope` makes an
+        // identity rather than a reason — see
+        // `the_identity_in_use_needs_no_choice_recorded_for_the_stoa`.
+        let absent = whoami_for(|| Err(crate::keystore::KeystoreError::NotFound));
+        let unusable =
+            whoami_for(|| Err(crate::keystore::KeystoreError::PermissionsTooOpen { mode: 0o644 }));
+        let locked = whoami_for(|| Err(crate::keystore::KeystoreError::Locked));
 
         let reason = |w: &Whoami| match w {
             Whoami::Nobody { reason } => reason.clone(),
             Whoami::Identity { .. } => panic!("expected nobody, got an identity"),
         };
-        let reasons = [
-            reason(&absent),
-            reason(&unusable),
-            reason(&locked),
-            reason(&unchosen),
-        ];
+        let reasons = [reason(&absent), reason(&unusable), reason(&locked)];
         for (i, a) in reasons.iter().enumerate() {
             for b in reasons.iter().skip(i + 1) {
                 assert_ne!(a, b, "two states produced the same reason");
             }
         }
-        // And the unchosen state's reason names the record rather than reading as
-        // "you have no identity", which is the whole point of listing it.
-        assert!(
-            reason(&unchosen).contains("chosen") || reason(&unchosen).contains("slate"),
-            "the unchosen reason must name what is missing, got {}",
-            reason(&unchosen)
-        );
     }
 
     #[test]
-    fn who_am_i_reports_that_recovery_needs_more_than_the_master_key() {
-        // The spec: "a caller asking whether recovery needs more than the master
-        // key is told that it does", while paths are recorded and no export
-        // exists. A user who believes their exported master key is a complete
-        // backup "has been misled by omission", and the caller has no filesystem
-        // access to discover it for itself.
+    fn who_am_i_reports_that_the_master_key_alone_recovers_the_identity_in_use() {
+        // `machine-identity-scope`'s "The unbacked state is reportable": for a
+        // Stoa WITH a recorded per-Stoa choice and for one without, "each reply
+        // states that recovering the identity needs nothing beyond the master
+        // key". The identity in use is the machine key, so a user holding their
+        // master key holds everything that recovers it.
+        //
+        // The Stoa with a recorded choice is the one that matters: its choice
+        // WOULD need the record, and a report that described the choice rather
+        // than the identity in use would say `true` there.
         let dir = OnboardingDir::new("whoami-recovery");
         let nonce = SlateNonce::generate().unwrap();
-        keep_through_the_wire(&dir, nonce, Some(nonce), 0, &Unlock::Unencrypted);
-
-        let v: serde_json::Value = serde_json::from_str(&who_am_i(
-            &slate_request(),
-            || Keystore::open(&dir.keystore_path(), &Unlock::Unencrypted),
-            || Ok(dir.paths()),
-        ))
-        .unwrap();
+        let kept = keep_through_the_wire(&dir, nonce, Some(nonce), 0, &Unlock::Unencrypted);
         assert_eq!(
-            v["recoveryNeedsTheRecord"], true,
-            "the unbacked state must be reported, got {v}"
+            kept["kept"], true,
+            "the fixture must record a choice: {kept}"
         );
-    }
 
-    #[test]
-    fn distinct_stoas_report_distinct_identities() {
-        // §5.2 gives a user one identity PER STOA, and the path record is keyed by
-        // Stoa. A handler that ignored the field would report one Stoa's identity
-        // while the user posted under another's.
-        let dir = OnboardingDir::new("whoami-per-stoa");
-        let store = dir.paths();
-        let here = a_stoa();
-        let elsewhere = stoa_address(b"another stoa");
-        store.record_path(&here, 1).unwrap();
-        store.record_path(&elsewhere, 2).unwrap();
-
-        let ask = |stoa: &Address| whoami_for(stoa, || Ok(a_master_key()), || Ok(dir.paths()));
-        let (a, b) = (ask(&here), ask(&elsewhere));
-        match (&a, &b) {
-            (
-                Whoami::Identity {
-                    public_key: key_a,
-                    path: path_a,
-                    ..
-                },
-                Whoami::Identity {
-                    public_key: key_b,
-                    path: path_b,
-                    ..
-                },
-            ) => {
-                assert_eq!(*path_a, 1);
-                assert_eq!(*path_b, 2);
-                assert_ne!(key_a, key_b, "two Stoas reported one identity");
-                // And each key is the one the recorded path derives, computed
-                // here rather than read from the reply.
-                for (stoa, path, key) in [(&here, 1u32, key_a), (&elsewhere, 2, key_b)] {
-                    assert_eq!(
-                        key,
-                        &crate::identity::derive_stoa_key_at_path(&[7u8; 32], stoa, path)
-                            .public_key()
-                            .to_hex()
-                    );
-                }
-            }
-            other => panic!("expected two identities, got {other:?}"),
+        let chosen = format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex());
+        let unchosen = format!(
+            r#"{{"stoa":"{}"}}"#,
+            stoa_address(b"a stoa with no choice").to_hex()
+        );
+        for request in [chosen, unchosen] {
+            let v = as_json(&who_am_i(&request, || {
+                Keystore::open(&dir.keystore_path(), &Unlock::Unencrypted)
+            }));
+            assert_eq!(v["hasIdentity"], true, "for {request}: {v}");
+            assert_eq!(
+                v["recoveryNeedsTheRecord"], false,
+                "the identity in use is the machine key, which the master key alone \
+                 recovers — for {request}: {v}"
+            );
         }
     }
 
     #[test]
+    fn the_identity_in_use_needs_no_choice_recorded_for_the_stoa() {
+        // `identity-onboarding`, "No per-Stoa choice is needed for an identity to
+        // be reported": a stored, readable machine key and NO choice recorded for
+        // the Stoa asked about. This was the fourth `Nobody` state — "a master key
+        // exists but no identity has been chosen for this Stoa" — and it is the
+        // one the owner met in the running app (issue #149).
+        //
+        // Minted, so the expected key is random and a hardcoded report cannot
+        // match it. No `IdentityStore` is ever opened in this directory.
+        let dir = OnboardingDir::new("whoami-no-choice");
+        let minted = as_json(&create_identity(
+            "{}",
+            &dir.keystore_path(),
+            &Unlock::Unencrypted,
+        ));
+        let v = as_json(&who_am_i(&slate_request(), || {
+            Keystore::open(&dir.keystore_path(), &Unlock::Unencrypted)
+        }));
+        assert_eq!(v["hasIdentity"], true, "got {v}");
+        assert_eq!(v["publicKey"], minted["publicKey"], "got {v}");
+        assert!(
+            !IdentityStore::default_path_in(&dir.0).exists(),
+            "the fixture must hold no record of choices at all"
+        );
+    }
+
+    #[test]
     fn the_whoami_json_is_pinned_to_the_exact_shape_a_view_is_written_against() {
+        // No `path`: `machine-identity-scope` removes it from this reply, and the
+        // closed-field-set requirement makes its presence a failure rather than a
+        // harmless extra.
         assert_eq!(
             Whoami::Identity {
                 public_key: "bb".into(),
-                path: 7,
-                recovery_needs_the_record: true,
+                recovery_needs_the_record: false,
             }
             .to_json(),
-            r#"{"hasIdentity":true,"path":7,"publicKey":"bb","recoveryNeedsTheRecord":true}"#
+            r#"{"hasIdentity":true,"publicKey":"bb","recoveryNeedsTheRecord":false}"#
         );
         assert_eq!(
             Whoami::Nobody {
@@ -5001,11 +5102,11 @@ mod tests {
             r#"{"stoa":"nothex"}"#,
             r#"{"stoa":"00ff"}"#,
         ] {
-            let out = who_am_i(
-                bad,
-                || Ok(a_master_key()),
-                || Ok(IdentityStore::in_memory().unwrap()),
-            );
+            // The opener SUCCEEDS, and that is what makes this discriminating now
+            // that the answer no longer depends on the Stoa: a handler that
+            // stopped parsing `stoa` would answer `hasIdentity:true` here rather
+            // than the error shape (`design.md` D7).
+            let out = who_am_i(bad, || Ok(a_master_key()));
             let v: serde_json::Value = serde_json::from_str(&out).unwrap();
             assert!(v.get("error").is_some(), "for {bad:?}, got {out}");
             assert!(
@@ -5029,39 +5130,22 @@ mod tests {
             || crate::keystore::KeystoreError::Truncated,
         ];
         for make in makers {
-            let out = who_am_i(
-                &slate_request(),
-                || Err(make()),
-                || Ok(IdentityStore::in_memory().unwrap()),
-            );
+            let out = who_am_i(&slate_request(), || Err(make()));
             let v: serde_json::Value = serde_json::from_str(&out).unwrap();
             assert!(
                 v.get("error").is_none(),
                 "a storage state became the error shape: {out}"
             );
             assert_eq!(v["hasIdentity"], false, "got {out}");
+            // The keystore's own message is the reason, so the fix reaches the
+            // view.
+            assert_eq!(v["reason"], make().to_string(), "got {out}");
         }
 
-        // And a failure of the RECORD, not only of the keystore.
-        let out = who_am_i(
-            &slate_request(),
-            || Ok(a_master_key()),
-            || {
-                Err(crate::identity_store::IdentityStoreError::Storage(
-                    "unable to open database file".into(),
-                ))
-            },
-        );
-        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
-        assert!(v.get("error").is_none(), "got {out}");
-        assert_eq!(v["hasIdentity"], false);
-        assert!(
-            v["reason"]
-                .as_str()
-                .unwrap()
-                .contains("unable to open database file"),
-            "the reason must reach the view, got {out}"
-        );
+        // A failure of the RECORD used to be a sixth state here. It is not a
+        // state `whoAmI` can reach any more: `who_am_i` is handed no record
+        // opener (`machine-identity-scope`, `design.md` D3), so an unreadable
+        // record is satisfied by construction rather than by a branch.
     }
 
     #[test]
@@ -5108,11 +5192,7 @@ mod tests {
                         paths: &paths,
                     },
                 ),
-                who_am_i(
-                    input,
-                    || Ok(a_master_key()),
-                    || Ok(IdentityStore::in_memory().unwrap()),
-                ),
+                who_am_i(input, || Ok(a_master_key())),
             ] {
                 serde_json::from_str::<serde_json::Value>(&out).unwrap_or_else(|e| {
                     panic!("a handler emitted invalid JSON for {input:?} ({e}): {out}")
@@ -5154,11 +5234,12 @@ mod tests {
             "§2.5: never a partial success, got {out}"
         );
 
-        let out = who_am_i(
-            &slate_request(),
-            || Ok(a_master_key()),
-            || panic!("the record layer exploded"),
-        );
+        // `whoAmI`'s one dependency now is the keystore — the record opener it
+        // used to panic through here is gone — so the keystore opener is the one
+        // that panics.
+        let out = who_am_i(&slate_request(), || {
+            panic!("the keystore layer exploded during a report")
+        });
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert!(v.get("error").is_some(), "got {out}");
         assert!(v.get("hasIdentity").is_none());
@@ -5349,10 +5430,11 @@ mod tests {
         // unchanged and `keep_identity` stays the only thing that records a
         // choice.
         //
-        // This is what rules out the tempting shortcut of minting under a
+        // This is what ruled out the tempting shortcut of minting under a
         // placeholder Stoa: that would record a path, creation would succeed, and
-        // posting into the REAL Stoa would still be refused for
-        // NO_CHOICE_FOR_THIS_STOA — a failure that looks fixed.
+        // posting into the REAL Stoa would still have been refused for want of a
+        // choice there — a failure that looks fixed. `machine-identity-scope`
+        // retired that refusal; a placeholder row would still be a false record.
         let dir = OnboardingDir::new("mint-no-paths");
         create_identity("{}", &dir.keystore_path(), &Unlock::Unencrypted);
 
@@ -5438,8 +5520,8 @@ mod tests {
         //
         // That case is what the spec's "A failed keep records nothing" actually
         // costs, and the spec is checkable on it: "no identity is reported as
-        // kept, AND a subsequent load finds no identity that was not there
-        // before". Both halves are asserted here.
+        // kept, AND a subsequent load finds no recorded choice and no master key
+        // that were not there before". Both halves are asserted here.
         //
         // The record write is made to fail by handing the keep a store whose
         // TABLE has been dropped out from under it — the connection is live, so
@@ -5480,12 +5562,21 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
 
         // The fixture must actually fail the RECORD write and not something
-        // earlier, or this test proves nothing. The keystore file existing is
-        // what says the first write got through.
-        assert!(
-            dir.keystore_path().exists(),
-            "the fixture failed before the keystore write, so it does not \
-             exercise the partial state: {out}"
+        // earlier, or this test proves nothing. The refusal carrying the very
+        // message a record write on this store produces is what says the keep
+        // got past the keystore write and failed at the record.
+        //
+        // This used to be `dir.keystore_path().exists()`, which is the one
+        // witness this test can no longer use: the keystore file surviving the
+        // failure is now the defect (see the assertion after `whoAmI` below).
+        let record_failure = paths
+            .record_path(&a_stoa(), 0)
+            .expect_err("the sabotaged record must refuse every write")
+            .to_string();
+        assert_eq!(
+            v["reason"], record_failure,
+            "the fixture failed somewhere other than the record write, so it \
+             does not exercise the partial state: {out}"
         );
 
         // The spec: "no identity is reported as kept".
@@ -5496,27 +5587,150 @@ mod tests {
         assert!(v.get("address").is_none(), "got {out}");
         assert!(v.get("path").is_none(), "got {out}");
 
-        // The spec: "a subsequent load finds no identity that was not there
-        // before". `whoAmI` must not name one — which is only true because it
-        // reads the RECORD, not the keystore.
-        //
-        // The store is opened here rather than through `OnboardingDir::paths`,
-        // because the sabotaged file no longer opens and `paths` panics on that.
-        // A load that CANNOT read the record is still a load that must not name
-        // an identity, so the failure is handed to the handler as the answer it
-        // is — which is the state a real user would be in.
-        let record_path = IdentityStore::default_path_in(&dir.0);
-        let who: serde_json::Value = serde_json::from_str(&who_am_i(
-            &slate_request(),
-            || Keystore::open(&dir.keystore_path(), &Unlock::Unencrypted),
-            || IdentityStore::open(&record_path),
-        ))
+        // The spec: "a subsequent load finds no recorded choice and no master
+        // key that were not there before". `whoAmI` must not name one — and since `machine-identity-scope`
+        // it names whatever master key is on disk, so this reads the KEYSTORE
+        // through the real opener. Before that change it was true only because
+        // `whoAmI` read the record, which hid the orphaned key asserted on below.
+        let who: serde_json::Value = serde_json::from_str(&who_am_i(&slate_request(), || {
+            Keystore::open(&dir.keystore_path(), &Unlock::Unencrypted)
+        }))
         .unwrap();
         assert_eq!(
             who["hasIdentity"], false,
             "a keep that did not complete left an identity reportable: {who}"
         );
         assert!(who.get("address").is_none(), "got {who}");
+
+        // `machine-identity-scope`'s wording of the same scenario: "a subsequent
+        // load finds no recorded choice AND NO MASTER KEY that were not there
+        // before". The directory started with no keystore, so none may be left.
+        //
+        // Asserted on the file as well as through `whoAmI`, because the file is
+        // the fact and `whoAmI` is one reader of it: a master key the failed keep
+        // wrote stayed on disk, invisible only while no path pointed at it. Once
+        // the machine key is the identity in use, that file IS an identity.
+        assert!(
+            !dir.keystore_path().exists(),
+            "a keep whose record write failed left the master key it wrote on \
+             disk — a master key that was not there before: {out}"
+        );
+    }
+
+    #[test]
+    fn a_keep_whose_record_write_fails_keeps_a_master_key_that_was_already_there() {
+        // THE OTHER DIRECTION of the undo above, and the one that matters more.
+        // Removing the keystore on a failed record write is right only for a
+        // file THIS keep wrote. A master key that predates the keep is the
+        // user's machine identity in every Stoa, and deleting it would discard
+        // every op it signed — the loss `identity-onboarding` names as the
+        // reason a keep may never replace a key.
+        //
+        // Without this test, an undo that removed the file unconditionally
+        // passes the test above and this one is the only thing that fails.
+        let dir = OnboardingDir::new("record-fails-existing-key");
+        let minted = create_identity("{}", &dir.keystore_path(), &Unlock::Unencrypted);
+        assert!(
+            as_json(&minted).get("error").is_none(),
+            "the fixture must start with a master key on disk: {minted}"
+        );
+        let before = std::fs::read(dir.keystore_path()).expect("the keystore reads");
+
+        let paths = dir.paths();
+        rusqlite::Connection::open(IdentityStore::default_path_in(&dir.0))
+            .expect("the record file opens")
+            .execute_batch("DROP TABLE chosen_paths;")
+            .expect("the table is droppable");
+
+        let nonce = SlateNonce::generate().unwrap();
+        let mut session = a_session();
+        session.set_live_slate_for_test(Some(nonce));
+        let out = keep_identity(
+            &mut session,
+            &format!(
+                r#"{{"stoa":"{}","slate":"{}","index":0}}"#,
+                a_stoa().to_hex(),
+                nonce.to_hex()
+            ),
+            || Keystore::open(&dir.keystore_path(), &Unlock::Unencrypted),
+            KeepTargets {
+                keystore_path: &dir.keystore_path(),
+                unlock: &Unlock::Unencrypted,
+                paths: &paths,
+            },
+        );
+        assert_eq!(as_json(&out)["kept"], false, "got {out}");
+
+        assert_eq!(
+            std::fs::read(dir.keystore_path()).ok(),
+            Some(before),
+            "a failed keep removed or rewrote a master key it did not write"
+        );
+    }
+
+    #[test]
+    fn a_failed_keep_that_cannot_remove_the_master_key_it_stored_says_so() {
+        // `identity-onboarding`, "A failed keep that cannot remove the master key
+        // it stored says so". Forcing this through the real `keep_identity` path
+        // needs a filesystem race (something holding the just-written keystore
+        // file open, or a permissions change between the two writes) that no
+        // fixture here can win reliably — so this calls
+        // `undo_a_keystore_this_keep_wrote` directly, the one function that
+        // decides this reply, exactly as the finding that asked for this test
+        // suggested.
+        //
+        // A directory in place of the keystore path makes `std::fs::remove_file`
+        // fail deterministically (a directory is never removable as a file),
+        // with `wrote_it: true` — the state the code is in immediately after
+        // `keep_selection` wrote a fresh master key and the record write then
+        // failed.
+        let dir = OnboardingDir::new("undo-cannot-remove-master-key");
+        let keystore_path = dir.0.join("a-directory-standing-in-for-the-keystore-file");
+        std::fs::create_dir(&keystore_path).expect("the fixture directory is creatable");
+
+        let record_failure =
+            crate::identity_store::IdentityStoreError::Storage("boom".to_string());
+        // Independent of the code under test: `Display` for `Storage` never
+        // mentions a master key (see `identity_store.rs`), so a reason naming one
+        // could only have come from the removal-failure branch.
+        let bare_record_failure_reason = record_failure.to_string();
+        assert!(
+            !bare_record_failure_reason.contains("master key"),
+            "fixture is broken: the bare record failure must not already talk \
+             about a master key, or this test cannot tell the two branches \
+             apart: {bare_record_failure_reason}"
+        );
+
+        let out = undo_a_keystore_this_keep_wrote(&keystore_path, true, record_failure);
+
+        let reason = match out {
+            Kept::Refused { reason } => reason,
+            Kept::Stored { .. } => {
+                panic!("a keep that could not undo its own write must be refused")
+            }
+        };
+
+        // The spec: "the reason differs from the reason the same failure gives
+        // when the master key is removed" — that bare reason is exactly
+        // `record_failure`'s own message.
+        assert_ne!(
+            reason, bare_record_failure_reason,
+            "a failed keep that could not remove the master key it stored must \
+             not say the same thing as a failed keep that could"
+        );
+        // The spec: "the reason MUST state that a master key was left stored".
+        assert!(
+            reason.contains("master key"),
+            "the reason does not name what was left behind: {reason}"
+        );
+
+        // And the directory fixture must actually have driven the removal
+        // failure this test is about, not something upstream of it.
+        assert!(
+            keystore_path.is_dir(),
+            "the fixture directory is gone — this test no longer exercises a \
+             removal storage refuses"
+        );
     }
 
     #[test]
@@ -5629,8 +5843,8 @@ mod tests {
     #[test]
     fn a_failed_keep_leaves_the_record_no_fuller_than_it_found_it() {
         // The spec's "A failed keep records nothing" has a second clause the
-        // tests above read past: "a subsequent load finds no identity THAT WAS
-        // NOT THERE BEFORE". That is a statement about the record as a whole, not
+        // tests above read past: "a subsequent load finds no recorded choice and
+        // no master key THAT WERE NOT THERE BEFORE". That is a statement about the record as a whole, not
         // about the Stoa being kept — so it is checkable by counting rows across
         // a failure, which nothing else here does.
         //
@@ -6163,20 +6377,24 @@ mod tests {
         // returning a literal. Moving the choice into `posting_identity` is what
         // makes this assertable, and the assertion is between two methods rather
         // than against a constant.
+        //
+        // Since `machine-identity-scope` both name the machine key, so the key is
+        // MINTED here: it is random, and "they agree" cannot be satisfied by both
+        // reporting a constant.
         let dir = OnboardingDir::new("probe-agrees-with-whoami");
-        let paths = dir.paths();
-        let nonce = SlateNonce::generate().unwrap();
-        let kept = keep_through_the_wire(&dir, nonce, Some(nonce), 2, &Unlock::Unencrypted);
-        assert_eq!(kept["kept"], true, "got {kept}");
-
+        let minted = as_json(&create_identity(
+            "{}",
+            &dir.keystore_path(),
+            &Unlock::Unencrypted,
+        ));
+        let open = || Keystore::open(&dir.keystore_path(), &Unlock::Unencrypted);
         let request = format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex());
 
-        let probe_out =
-            get_capabilities_from_stores(&request, || Ok(a_master_key()), || Ok(dir.paths()));
+        let probe_out = get_capabilities_from_stores(&request, open);
         let probe: serde_json::Value = serde_json::from_str(&probe_out)
             .unwrap_or_else(|e| panic!("the probe reply must be JSON ({e}): {probe_out}"));
 
-        let who_out = who_am_i(&request, || Ok(a_master_key()), || Ok(dir.paths()));
+        let who_out = who_am_i(&request, open);
         let who: serde_json::Value = serde_json::from_str(&who_out)
             .unwrap_or_else(|e| panic!("the whoami reply must be JSON ({e}): {who_out}"));
 
@@ -6189,63 +6407,274 @@ mod tests {
              'you are posting as X' from the probe and 'you are X' from whoAmI shows \
              two identities and has no way to decide which one signs."
         );
-
-        // And both agree with what was actually kept, so "they agree" cannot be
-        // satisfied by both being wrong in the same way.
+        // And both are the key the master-key request reported, so "they agree"
+        // cannot be satisfied by both being wrong in the same way.
         assert_eq!(
-            probe["identity"], kept["publicKey"],
-            "the probe's identity is not the one the keep stored"
+            probe["identity"], minted["publicKey"],
+            "the probe's identity is not this peer's master key"
         );
 
-        // The strongest form: an op signed by the key at the recorded path verifies
-        // under the key the probe reported. That is the requirement's own wording —
-        // "derived from the key that would actually sign it" — rather than a
-        // comparison of two derivations that could both be wrong.
-        let recorded = paths
-            .path_for(&a_stoa())
-            .expect("the record reads")
-            .expect("a path is recorded");
-        let signing = a_master_key().stoa_key_at_path(&a_stoa(), recorded);
+        // The strongest form: an op signed by the key a publish signs with verifies
+        // under the key the probe reported — the requirement's own wording,
+        // "derived from the key that would actually sign it".
+        let signing = publishing_key(&open().expect("the minted keystore opens"));
         let sig = crate::identity::sign_op_bytes(&signing, b"a post");
         let reported_key =
             hex::decode(probe["identity"].as_str().unwrap()).expect("the probe reports hex");
         assert!(
-            crate::identity::PublicKey::from_bytes(&reported_key).is_ok(),
-            "the probe must report a parseable public key, got {probe}"
-        );
-        assert!(
             crate::identity::verify_authored_op(&reported_key, b"a post", &sig.to_bytes()),
-            "an op signed by the key at the recorded path does not verify under the \
-             key the probe reported"
+            "an op signed by the publishing key does not verify under the key the \
+             probe reported"
         );
-        // The negative, or the assertion above would hold for any reported value: a
-        // signature from a different path must not verify under it.
-        let elsewhere = a_master_key().stoa_key_at_path(&a_stoa(), recorded.wrapping_add(1));
-        let elsewhere_sig = crate::identity::sign_op_bytes(&elsewhere, b"a post");
-        assert!(
-            !crate::identity::verify_authored_op(
-                &reported_key,
-                b"a post",
-                &elsewhere_sig.to_bytes()
-            ),
-            "another path's signature verified under the probe's reported identity"
+    }
+
+    #[test]
+    fn one_machine_key_posts_replies_and_votes_in_two_stoas() {
+        // ISSUE #149's REGRESSION TEST, and the `identity` scenario "The same key
+        // posts, replies and votes in two Stoas": six ops, two Stoas, one key —
+        // the key a request for this peer's master key reports.
+        //
+        // The issue's own reasoning for the shape: "the current per-Stoa wiring
+        // would pass any test that only ever exercises one Stoa, which is exactly
+        // the kind of thing that looks right by accident." One Stoa cannot tell a
+        // per-Stoa key from a per-machine one; two can.
+        //
+        // Through the wire at every step the adapter takes: the probe and the
+        // report are asked per Stoa, the key comes from `publishing_key` exactly
+        // as the adapter's `publishing` gets it, and the authors are read back out
+        // of the log the three handlers wrote. The keystore is MINTED, so the
+        // expected key is random and no constant can satisfy the comparisons.
+        //
+        // No choice is recorded for either Stoa, and no record is ever opened —
+        // which is also the scenario "No per-Stoa choice is needed to post".
+        let dir = OnboardingDir::new("two-stoas-one-key");
+        let minted = as_json(&create_identity(
+            "{}",
+            &dir.keystore_path(),
+            &Unlock::Unencrypted,
+        ));
+        let machine_key = minted["publicKey"].as_str().unwrap().to_string();
+        let open = || Keystore::open(&dir.keystore_path(), &Unlock::Unencrypted);
+
+        let stoas = [a_stoa(), stoa_address(b"a second, different stoa")];
+        assert_ne!(stoas[0], stoas[1], "the fixture needs two Stoas");
+
+        let mut log = MemoryOpLog::new();
+        let mut authors = Vec::new();
+        for stoa in &stoas {
+            let asked = format!(r#"{{"stoa":"{}"}}"#, stoa.to_hex());
+            let probe = as_json(&get_capabilities_from_stores(&asked, open));
+            assert_eq!(probe["canPost"], true, "in {stoa:?}: {probe}");
+            assert_eq!(
+                probe["identity"],
+                machine_key.as_str(),
+                "in {stoa:?}: {probe}"
+            );
+            let who = as_json(&who_am_i(&asked, open));
+            assert_eq!(who["publicKey"], machine_key.as_str(), "in {stoa:?}: {who}");
+
+            // The adapter opens the keystore per publish; so does this.
+            let key = publishing_key(&open().expect("the minted keystore opens"));
+            let post = as_json(&publish_post(
+                &format!(r#"{{"stoa":"{}","body":"a post"}}"#, stoa.to_hex()),
+                &mut log,
+                &by(&key),
+                &mut ignored_delivery,
+            ));
+            let post_id = post["opId"]
+                .as_str()
+                .expect("the post publishes")
+                .to_string();
+            let reply = as_json(&publish_reply(
+                &format!(
+                    r#"{{"stoa":"{}","parent":"{post_id}","body":"a reply"}}"#,
+                    stoa.to_hex()
+                ),
+                &mut log,
+                &by(&key),
+                &mut ignored_delivery,
+            ));
+            let vote = as_json(&publish_vote(
+                &format!(
+                    r#"{{"stoa":"{}","target":"{post_id}","direction":"up"}}"#,
+                    stoa.to_hex()
+                ),
+                &mut log,
+                &by(&key),
+                &mut ignored_delivery,
+            ));
+            for published in [&post, &reply, &vote] {
+                let id = crate::op::OpId::from_hex(
+                    published["opId"]
+                        .as_str()
+                        .unwrap_or_else(|| panic!("a publish failed in {stoa:?}: {published}")),
+                )
+                .unwrap();
+                let entry = log.get(&id).unwrap().expect("the op is in the log");
+                authors.push(entry.op.op.author.to_hex());
+            }
+        }
+
+        assert_eq!(
+            authors.len(),
+            6,
+            "a post, a reply and a vote in each of two Stoas"
         );
-        // That signature is genuinely valid under its own key, so the refusal is a
-        // mismatch and not a malformed signature. Without this clause the negative
-        // above is satisfied by any 64 junk bytes, and the test would demonstrate
-        // "garbage is refused" rather than "the wrong path's identity is refused"
-        // — which is the property it names. Its two siblings,
-        // `the_reported_identity_is_the_one_an_op_is_actually_signed_under` and
-        // `a_kept_identity_can_sign_as_the_identity_it_reported`, both carry the
-        // same clause; this one was missing it.
+        for author in &authors {
+            assert_eq!(
+                author, &machine_key,
+                "an op was signed by a key that is not this peer's master key — a \
+                 user in two Stoas is two keys, which 0.0.1 says it is not"
+            );
+        }
+
+        // The rival explanation, excluded: a per-Stoa key for either Stoa is NOT
+        // the machine key, so the equalities above cannot hold by coincidence.
+        let keystore = open().unwrap();
+        for stoa in &stoas {
+            assert_ne!(keystore.stoa_public_key(stoa).to_hex(), machine_key);
+            assert_ne!(
+                keystore.stoa_public_key_at_path(stoa, 0).to_hex(),
+                machine_key
+            );
+        }
+    }
+
+    #[test]
+    fn a_recorded_per_stoa_choice_does_not_change_the_key_in_use() {
+        // `identity`: "A recorded per-Stoa choice does not change the key in use".
+        // A candidate is kept for this Stoa, so the record holds a path, and then
+        // the probe, the report and a publish are each asked. All three must name
+        // the machine key and NOT the key the recorded choice derives.
+        //
+        // This is also the state the owner's own profile is in (`design.md`,
+        // "Existing data"): a `chosen_paths` row left by the defect being live.
+        let dir = OnboardingDir::new("recorded-choice-ignored");
+        let nonce = SlateNonce::generate().unwrap();
+        let kept = keep_through_the_wire(&dir, nonce, Some(nonce), 2, &Unlock::Unencrypted);
+        assert_eq!(
+            kept["kept"], true,
+            "the fixture must record a choice: {kept}"
+        );
         assert!(
-            crate::identity::verify_authored_op(
-                &elsewhere.public_key().to_bytes(),
-                b"a post",
-                &elsewhere_sig.to_bytes()
+            dir.paths().path_for(&a_stoa()).unwrap().is_some(),
+            "the fixture must leave a path recorded for this Stoa"
+        );
+
+        // Derived HERE from the fixture's root, not through `Keystore`: the root
+        // used directly is what `identity` names as the machine key.
+        let machine_key = crate::identity::SecretKey::from_bytes(&[7u8; 32])
+            .unwrap()
+            .public_key()
+            .to_hex();
+        assert_ne!(
+            kept["publicKey"].as_str().unwrap(),
+            machine_key,
+            "the kept choice and the machine key must differ, or this proves nothing"
+        );
+
+        let open = || Keystore::open(&dir.keystore_path(), &Unlock::Unencrypted);
+        let request = format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex());
+        let probe = as_json(&get_capabilities_from_stores(&request, open));
+        let who = as_json(&who_am_i(&request, open));
+        assert_eq!(probe["identity"], machine_key.as_str(), "got {probe}");
+        assert_eq!(who["publicKey"], machine_key.as_str(), "got {who}");
+
+        let mut log = MemoryOpLog::new();
+        let out = as_json(&publish_post(
+            &format!(
+                r#"{{"stoa":"{}","body":"after a keep"}}"#,
+                a_stoa().to_hex()
             ),
-            "the control signature is not valid under its own key, so the refusal \
-             above proves nothing"
+            &mut log,
+            &by(&publishing_key(&open().unwrap())),
+            &mut ignored_delivery,
+        ));
+        let id = crate::op::OpId::from_hex(out["opId"].as_str().unwrap()).unwrap();
+        let author = log.get(&id).unwrap().unwrap().op.op.author.to_hex();
+        assert_eq!(author, machine_key, "the post is signed by the machine key");
+        assert_ne!(
+            author,
+            kept["publicKey"].as_str().unwrap(),
+            "the post is signed by the key the recorded choice derives"
+        );
+    }
+
+    #[test]
+    fn an_unreadable_record_of_choices_does_not_prevent_posting() {
+        // `identity`: "An unreadable record of choices does not prevent posting" —
+        // WHEN a peer holds a machine key and the record of per-Stoa choices
+        // cannot be read, THEN the probe reports possible and names the machine
+        // key, AND a post published into a Stoa succeeds and is signed by it.
+        //
+        // `tasks.md` marks this "satisfied by construction, no test": the probe,
+        // the report and `publishing_key` take no record parameter, so no test
+        // can make a record's readability matter to them directly. This test is
+        // not that structural argument — it is the spec's own scenario, made
+        // concrete: a record that genuinely cannot be read sits at the exact path
+        // the adapter would look for it at, right beside a real machine key, and
+        // every wire entry point the scenario names is exercised through the
+        // wire, unmodified. If a later change re-adds a record parameter and
+        // wires it through, this is the test that would turn red.
+        let dir = OnboardingDir::new("record-unreadable");
+        let minted = as_json(&create_identity(
+            "{}",
+            &dir.keystore_path(),
+            &Unlock::Unencrypted,
+        ));
+        let machine_key = minted["publicKey"].as_str().unwrap().to_string();
+
+        // Garbage bytes at the record's own default path — not a missing file,
+        // which `the_identity_in_use_needs_no_choice_recorded_for_the_stoa`
+        // already covers, but one SQLite itself refuses to open.
+        let record_path = IdentityStore::default_path_in(&dir.0);
+        std::fs::write(&record_path, b"not a sqlite file at all")
+            .expect("the fixture can write a file at the record's path");
+        assert!(
+            IdentityStore::open(&record_path).is_err(),
+            "the fixture must leave a record that genuinely cannot be opened, or \
+             this proves nothing"
+        );
+
+        let open = || Keystore::open(&dir.keystore_path(), &Unlock::Unencrypted);
+        let request = format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex());
+
+        let probe = as_json(&get_capabilities_from_stores(&request, open));
+        assert_eq!(probe["canPost"], true, "got {probe}");
+        assert_eq!(probe["identity"], machine_key.as_str(), "got {probe}");
+
+        let who = as_json(&who_am_i(&request, open));
+        assert_eq!(who["hasIdentity"], true, "got {who}");
+        assert_eq!(who["publicKey"], machine_key.as_str(), "got {who}");
+
+        let mut log = MemoryOpLog::new();
+        let out = as_json(&publish_post(
+            &format!(
+                r#"{{"stoa":"{}","body":"posted beside a broken record"}}"#,
+                a_stoa().to_hex()
+            ),
+            &mut log,
+            &by(&publishing_key(&open().unwrap())),
+            &mut ignored_delivery,
+        ));
+        assert!(
+            out.get("error").is_none(),
+            "the publish must succeed: {out}"
+        );
+        let id = crate::op::OpId::from_hex(out["opId"].as_str().unwrap()).unwrap();
+        let author = log.get(&id).unwrap().unwrap().op.op.author.to_hex();
+        assert_eq!(
+            author, machine_key,
+            "the post beside an unreadable record must still be signed by the \
+             machine key"
+        );
+
+        // The record is still unreadable after all three calls — none of them
+        // repaired or replaced it, which would be a different way for this test
+        // to pass for the wrong reason.
+        assert!(
+            IdentityStore::open(&record_path).is_err(),
+            "the record changed shape during the calls above"
         );
     }
 
@@ -6270,20 +6699,16 @@ mod tests {
         // compile, and CI fenced it with a named exemption reading "Delete this
         // exemption when the spec decides". The spec had decided; this test is
         // what the choice moving into `core` makes possible.
-        let dir = OnboardingDir::new("publish-signs-as-the-probe-says");
-        let nonce = SlateNonce::generate().unwrap();
-        let kept = keep_through_the_wire(&dir, nonce, Some(nonce), 2, &Unlock::Unencrypted);
-        assert_eq!(kept["kept"], true, "got {kept}");
-
+        //
+        // Since `machine-identity-scope` both sides are the machine key and no
+        // choice is recorded; the negatives at the end exclude the per-Stoa keys.
         let request = format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex());
-        let probe_out =
-            get_capabilities_from_stores(&request, || Ok(a_master_key()), || Ok(dir.paths()));
+        let probe_out = get_capabilities_from_stores(&request, || Ok(a_master_key()));
         let probe: serde_json::Value = serde_json::from_str(&probe_out)
             .unwrap_or_else(|e| panic!("the probe reply must be JSON ({e}): {probe_out}"));
         assert_eq!(probe["canPost"], true, "got {probe_out}");
 
-        let signing = publishing_key(&a_stoa(), &a_master_key(), &dir.paths())
-            .expect("a kept identity must yield a signing key");
+        let signing = publishing_key(&a_master_key());
 
         // Through the WIRE, not through `publishing_key` twice. Asking the
         // function that was just called what it returns would agree with itself
@@ -6313,83 +6738,61 @@ mod tests {
         // assumed — without this the test passes against an implementation
         // where the two schemes happen to coincide, which is the defect family
         // this project has recorded: two explanations giving one answer.
-        let pathless = a_master_key().stoa_key(&a_stoa());
-        assert_ne!(
-            pathless.public_key().to_hex(),
-            probe["identity"].as_str().unwrap(),
-            "the pathless scheme agrees with the probe, so this test cannot \
-             distinguish the fix from the defect"
-        );
+        for per_stoa in [
+            a_master_key().stoa_key(&a_stoa()),
+            a_master_key().stoa_key_at_path(&a_stoa(), 0),
+        ] {
+            assert_ne!(
+                per_stoa.public_key().to_hex(),
+                probe["identity"].as_str().unwrap(),
+                "a per-Stoa scheme agrees with the probe, so this test cannot \
+                 distinguish the machine key from the defect"
+            );
+        }
     }
 
     #[test]
-    fn a_publish_is_refused_when_no_identity_has_been_chosen_for_the_stoa() {
-        // The other half, and the half that stops the fix being "sign with
-        // something". `posting_identity` reports CannotPost when no path is
-        // recorded; if `publishing_key` fell back to any key, the probe would
-        // say the user cannot post while the publish succeeded under a key the
-        // probe refuses to name — which is a worse disagreement than the one
-        // being fixed, because it is silent on the publishing side.
+    fn the_probe_and_whoami_refuse_alike_when_no_master_key_is_stored() {
+        // Where no machine key is held, "no identity is in use in any Stoa"
+        // (`identity`), and the probe and the report each say so with a reason.
+        // This replaces the test pinning one reason for "no choice recorded for
+        // this Stoa", a state `machine-identity-scope` removed; what is left of
+        // "the two methods describe one state one way" is this state.
         //
-        // One state, one reason: the same constant both other methods give.
-        let dir = OnboardingDir::new("publish-with-no-choice");
-        // `.err()` rather than `.expect_err()`: `SecretKey` has no `Debug`, on
-        // purpose — a secret that can be formatted is a secret that reaches a
-        // log — and `expect_err` requires one on the `Ok` type.
-        let refused = publishing_key(&a_stoa(), &a_master_key(), &dir.paths())
-            .err()
-            .expect("no recorded path must not yield a key");
-        assert_eq!(
-            refused, NO_CHOICE_FOR_THIS_STOA,
-            "a publish with no chosen identity must give the same reason the \
-             probe and whoAmI give, got {refused:?}"
-        );
-    }
-
-    #[test]
-    fn the_probe_and_whoami_give_one_reason_when_no_choice_is_recorded_for_this_stoa() {
-        // The state the two-store split creates: a master key exists, this Stoa has
-        // no choice recorded. Both methods must name it, and name it the SAME way —
-        // two methods describing one situation in two vocabularies is the split
-        // re-appearing at the wire.
-        //
-        // `canPost:false` here is the substantive half: the probe previously
-        // answered `true` with a pathless identity, asserting posting ability for an
-        // identity that has no recorded path and that nothing in the signing path
-        // would ever use.
-        let dir = OnboardingDir::new("probe-no-choice");
+        // The two reasons are the keystore's own `NotFound` message, so they are
+        // compared to it rather than only to each other: two methods agreeing on
+        // an unhelpful string would satisfy the equality alone.
+        let dir = OnboardingDir::new("probe-no-master-key");
+        let open = || Keystore::open(&dir.keystore_path(), &Unlock::Unencrypted);
         let request = format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex());
 
-        let probe_out =
-            get_capabilities_from_stores(&request, || Ok(a_master_key()), || Ok(dir.paths()));
-        let probe: serde_json::Value = serde_json::from_str(&probe_out).unwrap();
-        let who_out = who_am_i(&request, || Ok(a_master_key()), || Ok(dir.paths()));
-        let who: serde_json::Value = serde_json::from_str(&who_out).unwrap();
+        let probe = as_json(&get_capabilities_from_stores(&request, open));
+        let who = as_json(&who_am_i(&request, open));
 
-        assert_eq!(
-            probe["canPost"], false,
-            "a master key with no recorded choice for this Stoa cannot post as \
-             anyone: {probe_out}"
-        );
-        assert!(probe.get("identity").is_none(), "got {probe_out}");
-        assert_eq!(who["hasIdentity"], false, "got {who_out}");
+        assert_eq!(probe["canPost"], false, "got {probe}");
+        assert!(probe.get("identity").is_none(), "got {probe}");
+        assert_eq!(who["hasIdentity"], false, "got {who}");
         assert_eq!(
             probe["reason"], who["reason"],
-            "the two methods describe one state in two ways: probe {probe}, \
-             whoAmI {who}"
+            "probe {probe}, whoAmI {who}"
         );
-        // Pinned to the constant, so a message that stopped naming the fix fails
-        // even while the two still agree with each other.
-        assert_eq!(probe["reason"], NO_CHOICE_FOR_THIS_STOA, "got {probe_out}");
+        assert_eq!(
+            probe["reason"],
+            crate::keystore::KeystoreError::NotFound.to_string(),
+            "got {probe}"
+        );
     }
 
     #[test]
-    fn a_record_restored_beside_a_master_key_names_the_identities_in_use() {
+    fn a_record_restored_beside_a_master_key_reproduces_the_kept_choice() {
         // The spec's "A restore targets the device holding the master key": "the
-        // identities in use are those the record names, AND no other device's
-        // record participates". Nothing in this change covered it — the restore
-        // path is not a code path, it is the property that a record and a master
-        // key which never met each other in one process still agree.
+        // key derived from the restored master key and the path the restored
+        // record names for a Stoa is the identity that was kept for that Stoa,
+        // AND the identity in use in that Stoa is the restored master key's
+        // machine key, not the key the restored record names, AND no other
+        // device's record participates". The restore path is not a code path, it
+        // is the property that a record and a master key which never met each
+        // other in one process still agree.
         //
         // The fixture is a restore in the only sense that is checkable now: a
         // record file written by one store, COPIED to a fresh directory, and read
@@ -6423,51 +6826,44 @@ mod tests {
         )
         .unwrap();
 
-        let v: serde_json::Value = serde_json::from_str(&who_am_i(
-            &slate_request(),
-            || Keystore::open(&restored.keystore_path(), &Unlock::Unencrypted),
-            || Ok(restored.paths()),
-        ))
-        .unwrap();
+        // A restore is two separate facts, because in this release a recorded
+        // choice does not change the key in use (`identity`: "In this release one
+        // machine key is the identity in every Stoa"). The RECORD restored beside
+        // the master key reproduces the choice that was kept, read from the
+        // copies alone ...
+        let restored_master = Keystore::open(&restored.keystore_path(), &Unlock::Unencrypted)
+            .expect("the restored master key opens");
+        let restored_path = restored
+            .paths()
+            .path_for(&a_stoa())
+            .expect("the restored record reads")
+            .expect("the restored record holds the choice");
+        assert_eq!(
+            restored_path, kept_path,
+            "the restored record names a different path"
+        );
+        assert_eq!(
+            restored_master
+                .stoa_public_key_at_path(&a_stoa(), restored_path)
+                .to_hex(),
+            expected,
+            "the restored master key and record do not reproduce the kept choice"
+        );
+
+        // ... and the identity IN USE on the restored device is its machine key,
+        // which the copied record does not change.
+        let v = as_json(&who_am_i(&slate_request(), || {
+            Keystore::open(&restored.keystore_path(), &Unlock::Unencrypted)
+        }));
         assert_eq!(v["hasIdentity"], true, "got {v}");
         assert_eq!(
-            v["path"], kept_path,
-            "the restored record names a different path: {v}"
+            v["publicKey"],
+            restored_master.identity_public_key().to_hex(),
+            "the restored device's identity in use is not its master key: {v}"
         );
-        assert_eq!(
-            v["publicKey"], expected,
-            "the restored identity is not the one the record names: {v}"
-        );
-
-        // "No other device's record participates": a SECOND restore target given
-        // the same master key but a record naming a DIFFERENT path must report
-        // that path's identity, not the first's. Without this, a handler ignoring
-        // the record entirely would satisfy everything above.
-        let other = OnboardingDir::new("restore-other-device");
-        std::fs::copy(origin.keystore_path(), other.keystore_path()).unwrap();
-        let other_path = kept_path.wrapping_add(1);
-        other.paths().record_path(&a_stoa(), other_path).unwrap();
-
-        let w: serde_json::Value = serde_json::from_str(&who_am_i(
-            &slate_request(),
-            || Keystore::open(&other.keystore_path(), &Unlock::Unencrypted),
-            || Ok(other.paths()),
-        ))
-        .unwrap();
-        assert_eq!(w["hasIdentity"], true, "got {w}");
-        assert_eq!(w["path"], other_path, "got {w}");
         assert_ne!(
-            w["publicKey"], v["publicKey"],
-            "two records naming different paths reported one identity, so the \
-             record is not being read: {w}"
-        );
-        // And the expectation for it is also derived here.
-        assert_eq!(
-            w["publicKey"],
-            crate::identity::derive_stoa_key_at_path(&[7u8; 32], &a_stoa(), other_path)
-                .public_key()
-                .to_hex(),
-            "got {w}"
+            v["publicKey"], expected,
+            "the record changed the key in use: {v}"
         );
     }
 
@@ -10502,15 +10898,9 @@ mod tests {
             create_identity(r, &dir.keystore_path(), &Unlock::Unencrypted)
         }
         fn whoami_m(r: &str) -> String {
-            // The `paths` opener is `impl Fn`, called once per handler call but
-            // typed as re-callable, so it opens the record rather than moving one
-            // in. The directory guard outlives the call.
-            let dir = OnboardingDir::new(&sweep_dir_name("whoami"));
-            who_am_i(
-                r,
-                || Ok(Keystore::from_root_for_test([7u8; 32])),
-                || Ok(dir.paths()),
-            )
+            // No directory: `who_am_i` is handed no record since
+            // `machine-identity-scope`, only a keystore opener.
+            who_am_i(r, || Ok(Keystore::from_root_for_test([7u8; 32])))
         }
         // The three `stoa-lifecycle` added, listed for the reason the three above
         // are: when `main`'s envelope merged into this piece, all three still called
@@ -14088,40 +14478,37 @@ mod tests {
         );
         let stoa = crate::identity::Address::from_hex(created["stoa"].as_str().unwrap()).unwrap();
 
-        // `get_capabilities` is given the same `creator_key_in` the creation was.
+        // The probe is reached EXACTLY as the adapter reaches it:
+        // `get_capabilities_from_stores` over the keystore in the same directory.
         //
-        // **It is no longer what the adapter passes**, and saying so is the point.
-        // This comment claimed it was, and `main`'s `identity-onboarding` made that
-        // false: the adapter now calls `get_capabilities_from_stores`, whose lookup
-        // is `posting_identity` — a PATH-DERIVED per-Stoa identity read out of the
-        // identity record. So the live probe and `create_stoa`'s root-derived
-        // creator are two different keys again, which is the very divergence the
-        // one-expression pairing exists to prevent, reintroduced by a merge rather
-        // than by an edit. This test cannot see it, because it injects both halves;
-        // the gap is recorded in `design.md` under Decisions and reported as a spec
-        // question rather than patched here.
-        //
-        // What the test still proves is the pairing itself: given the pairing, the
-        // creator a creation names IS the identity the probe reports.
-        //
-        // **And the pairing is now weaker as a TEST for the same reason it is
-        // stronger as CODE.** Both handlers are handed the identical expression,
-        // so "they agree" is guaranteed by there being one derivation rather than
-        // established by this comparison — which is what the collapse to one value
-        // bought. What the test still does is go through the two wire handlers and
-        // assert the creator reaching the genesis record is the value the probe
-        // reports, which would fail if either handler transformed it. The
-        // assertion against `derive_stoa_key` below is what keeps a wrong-but-
-        // consistent derivation from passing.
-        let probe = get_capabilities(
+        // **Until `machine-identity-scope` this could not be the adapter's call.**
+        // `identity-onboarding` had made the adapter's probe `posting_identity` — a
+        // PATH-DERIVED per-Stoa key read out of the identity record — so the live
+        // probe and `create_stoa`'s root-derived creator were two different keys,
+        // the divergence this pairing exists to prevent, reintroduced by a merge.
+        // This test injected `creator_key_in` into a bare `get_capabilities` and so
+        // could not see it. With the machine key the identity in use, the real
+        // lookup is used and the test sees what ships.
+        let probe = get_capabilities_from_stores(
             &serde_json::json!({ "stoa": stoa.to_hex() }).to_string(),
-            |_stoa| {
-                crate::keystore::creator_key_in(dir.path())
-                    .map(|k| k.to_hex())
-                    .map_err(|e| e.to_string())
-            },
+            || crate::keystore::open_in(dir.path()),
         );
         let probed: serde_json::Value = serde_json::from_str(&probe).unwrap();
+
+        // `identity`: "A Stoa's creator posts as its creator". A post published
+        // into the Stoa with the key the adapter's publish path signs with is
+        // authored by the creator key the genesis record names.
+        let mut log = MemoryOpLog::new();
+        let posted = as_json(&publish_post(
+            &serde_json::json!({ "stoa": stoa.to_hex(), "body": "the creator speaks" }).to_string(),
+            &mut log,
+            &by(&publishing_key(
+                &crate::keystore::open_in(dir.path()).expect("the keystore opens"),
+            )),
+            &mut ignored_delivery,
+        ));
+        let posted_id = crate::op::OpId::from_hex(posted["opId"].as_str().unwrap()).unwrap();
+        let post_author = log.get(&posted_id).unwrap().unwrap().op.op.author;
 
         // The record the creation retained, read back out of the store rather than
         // rebuilt, so the creator asserted on is the one that went into the
@@ -14158,6 +14545,16 @@ mod tests {
             moderators.contains(&genesis.creator),
             "the creator must be the Stoa's moderator"
         );
+
+        // Half three: the creator's own post is authored by the creator, and so by
+        // a moderator — which is what lets moderation this peer publishes bind in
+        // the Stoa it made.
+        assert_eq!(
+            post_author, genesis.creator,
+            "a Stoa's creator posts under a key that is not the creator key its \
+             genesis record names"
+        );
+        assert!(moderators.contains(&post_author));
     }
 
     #[test]

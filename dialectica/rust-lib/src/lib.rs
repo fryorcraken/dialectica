@@ -279,7 +279,13 @@ pub trait DialecticaModule: Send + 'static {
     /// has not made.
     fn generate_identity_slate(&mut self, request: String) -> String;
 
-    /// Keep one candidate from the slate, making it this user's identity.
+    /// Keep one candidate from the slate, recording it as this user's choice for
+    /// the Stoa.
+    ///
+    /// **In this release nothing consults that choice.** The identity in use in
+    /// every Stoa is the machine key (`machine-identity-scope`), so a keep changes
+    /// what the record holds and not who posts. The method stays on the contract,
+    /// working as contracted, for the release that restores per-Stoa identity.
     ///
     /// Takes `{"stoa":"<hex>","slate":"<hex>","index":N}` and returns
     /// `{"kept":true,"publicKey":"…","path":N,"encrypted":bool}` or
@@ -293,16 +299,21 @@ pub trait DialecticaModule: Send + 'static {
     /// unencrypted keystore is a state a view can name rather than a silent
     /// default.
     ///
-    /// Keeping is refused where an identity already exists. Replacing one discards
-    /// every identity derived from it while the ops they signed remain published,
-    /// so it is a separate operation this contract does not provide.
+    /// Keeping is refused where a choice is already recorded for that Stoa.
+    /// Replacing one discards the identity derived from it while the ops it signed
+    /// remain published, so it is a separate operation this contract does not
+    /// provide.
     fn keep_identity(&mut self, request: String) -> String;
 
     /// Who the user is in a Stoa, or why there is nobody.
     ///
     /// Takes `{"stoa":"<hex>"}` and returns
-    /// `{"hasIdentity":true,"publicKey":"…","path":N,"recoveryNeedsTheRecord":bool}`
+    /// `{"hasIdentity":true,"publicKey":"…","recoveryNeedsTheRecord":bool}`
     /// or `{"hasIdentity":false,"reason":"…"}` — the two are exclusive.
+    ///
+    /// **In this release the answer is the machine key in every Stoa**
+    /// (`machine-identity-scope`), and the reply carries no `path`: the machine key
+    /// derives from none.
     ///
     /// **A different question from `getCapabilities`**, and the two can honestly
     /// disagree: a stored identity whose keystore permissions are too open is a
@@ -310,10 +321,10 @@ pub trait DialecticaModule: Send + 'static {
     /// probe would have to render "you are nobody" to a user who has an identity
     /// and a fixable problem.
     ///
-    /// `recoveryNeedsTheRecord` is how a view learns that an exported master key is
-    /// not by itself a complete backup — the chosen derivation paths live only in
-    /// local storage, and the view has no filesystem access to discover that for
-    /// itself.
+    /// `recoveryNeedsTheRecord` is how a view learns whether an exported master key
+    /// is by itself a complete backup — the view has no filesystem access to
+    /// discover that for itself. It is `false` in this release, because the
+    /// identity in use is the master key's own.
     fn who_am_i(&mut self, request: String) -> String;
 
     /// Publish a post into a Stoa.
@@ -602,11 +613,11 @@ impl Dialectica {
 // The one piece of assembly this file does, and the reason it is here rather
 // than in `core`.
 //
-// The three publish handlers need FOUR things `core` structurally cannot reach:
-// the keystore (a path derived from what the host supplied), the per-Stoa
-// signing key, a store, and delivery. Each is the adapter's to supply, exactly
-// as `get_capabilities` supplies a lookup and `list_threads` supplies a store
-// opener.
+// The three publish handlers need things `core` structurally cannot reach: the
+// keystore (a path derived from what the host supplied), a store, and delivery.
+// Each is the adapter's to supply, exactly as `get_capabilities` supplies a
+// keystore opener and `list_threads` supplies a store opener. Which key signs is
+// `core`'s decision, reached through `core::wire::publishing_key`.
 //
 // It is one function rather than three copies because the assembly is identical
 // for all three and only the handler differs. Three copies is three places to
@@ -616,17 +627,19 @@ impl Dialectica {
     /// Assemble the keystore, the key, the store and the delivery sink, then run
     /// one publish handler.
     ///
-    /// # The Stoa is read twice, and that is not a redundancy to remove
+    /// # The Stoa is read before any store opens, and not for the key
     ///
-    /// The signing key is per-Stoa (PLAN.md §5.2), so the Stoa has to be known
-    /// before the key can be derived — and the handler parses the request
-    /// properly, refusing forbidden fields and naming its own failures. So this
-    /// reads the Stoa through [`core::stoa_of`], and the handler re-reads it as
-    /// part of the parse it owns. Both go through `Request::parse` and the
-    /// single `parse_stoa`, so the two reads cannot disagree and both are
-    /// bounded by the request cap; the cost is CPU on a request already proved
-    /// small. Threading a parsed request in from here instead is the reshape
-    /// `design.md` decision 8 defers, and it moves the handlers' signatures.
+    /// Until `machine-identity-scope` the signing key was per-Stoa, so the Stoa
+    /// had to be known before the key could be derived. In this release the key
+    /// is the machine key whichever Stoa is named, and the read stays for the
+    /// other reason it always had: it is the envelope check that makes a
+    /// malformed request the error shape BEFORE the keystore is opened, so a
+    /// request that is not an object is refused as one rather than answered with
+    /// "no identity" (`design.md` D7 of that change). The handler re-reads the
+    /// Stoa as part of the parse it owns; both reads go through `Request::parse`
+    /// and the single `parse_stoa`, so they cannot disagree and both are bounded
+    /// by the request cap. The release that restores per-Stoa identity uses the
+    /// value again.
     ///
     /// # There is no `method` parameter, and that is the fix for a parameter
     /// nobody could keep right
@@ -652,7 +665,7 @@ impl Dialectica {
     ///
     /// The outer guard stays and owns a **generic label**. The only panics it
     /// can catch that the inner one cannot are in `core::stoa_of`,
-    /// `open_from_env`, `Self::paths` and `SqliteOpLog::open` — everything after
+    /// `open_from_env`, `publishing_key` and `SqliteOpLog::open` — everything after
     /// that is inside `core::wire::publishing`, where the handler's own guard
     /// names the method — so the label is accurate for everything it can ever
     /// report.
@@ -687,9 +700,11 @@ impl Dialectica {
         let dir = std::path::PathBuf::from(dir);
 
         core::guarded("opening the publish path's stores", || {
-            // The Stoa, read only far enough to derive a key — THROUGH `core`,
-            // so this is the adapter's first and only touch of the bytes and it
-            // crosses the request envelope.
+            // The Stoa, read THROUGH `core` before anything is opened, so this is
+            // the adapter's first touch of the bytes and it crosses the request
+            // envelope. The value is not used in this release — the key is the
+            // machine key whichever Stoa is named — so the read is the envelope
+            // check alone; see this function's doc for why it stays.
             //
             // It reads the Stoa and NOTHING else: the forbidden-field guard and
             // every required-field read stay the handler's, because an adapter
@@ -703,10 +718,9 @@ impl Dialectica {
             // this way, and what the bare parse it replaced cost, is
             // `design.md` decision 7 — not repeated here, where the question a
             // reader has is what this line does rather than what a commit did.
-            let stoa = match core::stoa_of(request) {
-                Ok(a) => a,
-                Err(e) => return e,
-            };
+            if let Err(e) = core::stoa_of(request) {
+                return e;
+            }
 
             // A publish requires a usable identity and NEVER creates one. This
             // opens an existing keystore; nothing here calls `generate` or
@@ -726,31 +740,19 @@ impl Dialectica {
             };
 
             // WHICH KEY SIGNS IS `core`'s DECISION, not this file's, and that is
-            // the same correction `get_capabilities` above already carries.
-            //
-            // This was `keystore.stoa_key(&stoa)` — the PATHLESS per-Stoa scheme
-            // — while the probe reports `stoa_public_key_at_path`. The two schemes
-            // are asserted to DISAGREE in `identity.rs`, so every published op
-            // was authored by an identity neither `getCapabilities` nor `whoAmI`
-            // would name. `core::wire::publishing_key` is the same derivation
-            // the probe reports, and
+            // the same correction `get_capabilities` below already carries.
+            // `core::wire::publishing_key` is the key the probe reports, and
             // `the_key_a_publish_signs_with_is_the_identity_the_probe_reports`
-            // is the test that the choice living in `core` makes possible — it
-            // could not be written while the choice was on this line.
-            let paths = match Self::paths(&dir) {
-                Ok(p) => p,
-                Err(e) => return core::no_identity(&e.to_string()),
-            };
-            let key = match core::wire::publishing_key(&stoa, &keystore, &paths) {
-                Ok(k) => k,
-                // A Stoa with no chosen identity is the state the probe reports
-                // as `canPost:false`. Refusing here is what keeps the two
-                // methods agreeing: a publish that succeeded under some other
-                // key while the probe said the user cannot post would be a
-                // worse disagreement than the one this fixes, because nothing
-                // on the publishing side would say so.
-                Err(why) => return core::no_identity(&why),
-            };
+            // and `one_machine_key_posts_replies_and_votes_in_two_stoas` are the
+            // tests the choice living in `core` makes possible.
+            //
+            // **The record of per-Stoa choices is not opened here.** It was, and
+            // a Stoa with no recorded choice — or a record that would not open —
+            // refused every publish. In this release the machine key signs in
+            // every Stoa (`machine-identity-scope`), so not opening the record is
+            // what makes "an unreadable record does not prevent posting" hold:
+            // nothing on this path can fail for it.
+            let key = core::wire::publishing_key(&keystore);
 
             let mut log = match core::log::SqliteOpLog::open(&dir.join("ops.sqlite")) {
                 Ok(l) => l,
@@ -865,15 +867,14 @@ impl DialecticaModule for Dialectica {
         // salt, so the two methods reported two different identities for one user
         // in one Stoa. It could not be tested where it was, because this file is
         // not compiled by `cargo test`; see `core::wire::posting_identity`.
+        //
+        // One opener: the record of per-Stoa choices is not the probe's to read
+        // in this release (`machine-identity-scope`).
         let dir = match self.storage_dir() {
             Ok(d) => d,
             Err(e) => return e,
         };
-        core::wire::get_capabilities_from_stores(
-            &request,
-            || Self::open_keystore(&dir),
-            || Self::paths(&dir),
-        )
+        core::wire::get_capabilities_from_stores(&request, || Self::open_keystore(&dir))
     }
 
     fn list_threads(&mut self, request: String) -> String {
@@ -1028,7 +1029,7 @@ impl DialecticaModule for Dialectica {
         // not report one the session happens to be holding for an unfinished
         // onboarding either. Reporting a minted, unwritten key as the user's
         // identity would name an identity that does not exist yet.
-        core::who_am_i(&request, || Self::open_keystore(&dir), || Self::paths(&dir))
+        core::who_am_i(&request, || Self::open_keystore(&dir))
     }
 
     fn publish_post(&mut self, request: String) -> String {

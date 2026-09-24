@@ -135,17 +135,27 @@ which was wrong.
 
 ### Requirement: Keeping a candidate persists it, and keeping is one step
 
-Keeping a candidate SHALL store what is needed to reproduce that identity, such
+Keeping a candidate MUST store what is needed to reproduce that identity, such
 that the identity is unchanged after a restart.
 
-Keeping SHALL either complete or change nothing. There SHALL be no state in which
+Keeping MUST either complete or change nothing. There MUST be no state in which
 part of a choice was recorded.
 
 An identity becomes real when it signs, and nothing signs during onboarding — so
 before a candidate is kept there is nothing to lose, and after it is kept there
 must be nothing missing.
 
-**The identity kept SHALL be the candidate the offering reply displayed at the
+**The one exception is a failure storage will not let the keep undo.** A keep
+that stored a master key where none was stored, and then failed, MUST remove that
+master key and MUST NOT remove one that was stored before it began. Where storage
+refuses that removal, the keep has changed something it cannot take back, and its
+reply MUST say so: it MUST carry a reason and no identity, and the reason MUST
+state that a master key was left stored, so that it differs from the reason the
+same failure gives when the master key was removed. A reply that read as "nothing
+changed" would hide from the user a master key that the identity report then
+names in every Stoa.
+
+**The identity kept MUST be the candidate the offering reply displayed at the
 position selected** — the same public key, not merely a candidate derived at the
 same position. A selection is made on what the user was shown, and an offering and
 a keep are two separate calls, so anything the offering depended on and the keep
@@ -153,11 +163,18 @@ re-established can differ between them while every guard on the selection still
 passes. When it does, the user is given a working identity they never saw, which is
 the outcome the requirement on malformed input calls unrecoverable.
 
-The reply SHALL state whether the candidate was kept, and where it was, SHALL carry
-the identity kept — its public key — and where it was not, SHALL carry a reason and
+The reply MUST state whether the candidate was kept, and where it was, MUST carry
+the identity kept — its public key — and where it was not, MUST carry a reason and
 no identity. This is the posting probe's shape rather than a second convention for
 the same job, and it is what makes a caller able to show the user the identity they
-now have without asking a second question.
+kept without asking a second question.
+
+**In this release what a keep stores is a choice for that Stoa and nothing more.**
+It does not change the identity in use there, which is the machine key in every
+Stoa (`identity`: *In this release one machine key is the identity in every
+Stoa*). So "the identity kept" below means the key the stored choice reproduces,
+read back from the master key and the recorded path — not the identity the
+identity report names.
 
 #### Scenario: The identity kept is the candidate that was displayed
 
@@ -170,12 +187,14 @@ now have without asking a second question.
 #### Scenario: A kept identity survives a restart
 
 - **WHEN** a candidate is kept, and the stored state is then loaded afresh
-- **THEN** the identity reported is the one that was kept
+- **THEN** the key derived from the stored master key and the path recorded for
+  that Stoa is the identity that was kept
 
 #### Scenario: A kept identity survives more than one restart
 
 - **WHEN** a candidate is kept and the stored state is loaded afresh twice
-- **THEN** both loads report the same identity
+- **THEN** both loads reproduce the same identity from the master key and the
+  recorded path
 
 #### Scenario: A kept identity can sign as the identity it reported
 
@@ -192,15 +211,26 @@ now have without asking a second question.
 
 #### Scenario: A failed keep records nothing
 
-- **WHEN** keeping a candidate fails
+- **WHEN** keeping a candidate fails, and storage permits removing any master key
+  the keep stored
 - **THEN** no identity is reported as kept
-- **AND** a subsequent load finds no identity that was not there before
+- **AND** a subsequent load finds no recorded choice and no master key that were
+  not there before
 - **AND** the reply carries a reason and no identity
+
+#### Scenario: A failed keep that cannot remove the master key it stored says so
+
+- **WHEN** keeping a candidate stores a master key where none was stored, then
+  fails, and storage refuses to remove that master key
+- **THEN** no identity is reported as kept
+- **AND** the reply carries a reason and no identity
+- **AND** the reason differs from the reason the same failure gives when the
+  master key is removed
 
 ### Requirement: A chosen derivation path is recorded, because it cannot be recomputed
 
-The derivation path a user chose for a Stoa SHALL be recorded in storage, and that
-record SHALL survive a restart.
+The derivation path a user chose for a Stoa MUST be recorded in storage, and that
+record MUST survive a restart.
 
 This is the cost of letting the user choose, and it is a new obligation rather
 than an inherited one. Where derivation takes only a master key and a Stoa
@@ -209,16 +239,20 @@ beyond the master key and the list of Stoas joined. A user-chosen path is a thir
 input that no value on the network carries, so an unrecorded path is an identity
 that cannot be reproduced from any surviving material.
 
-The record SHALL be readable in full by the module, so that it can later be
+The record MUST be readable in full by the module, so that it can later be
 exported and preserved somewhere other than the machine that made it. **Export
 itself is not in this change** — the owner's sequence is local storage first,
 export and remote backup later — so what is required here is that nothing about
 the record's storage prevents it: no value in it may be derivable only on the
 machine that wrote it, and none may be unreadable once written.
 
-The record SHALL NOT be required to be secret. It says which path was chosen and
+The record MUST NOT be required to be secret. It says which path was chosen and
 reveals nothing that a published identity does not already reveal. This is why it
 does not belong in the keystore file, whose every field is accounted for.
+
+**In this release the record is not consulted by anything that signs or that
+reports the identity in use.** It holds the choices kept, and it is preserved,
+because a per-Stoa key that has signed an op can be reproduced from nothing else.
 
 #### Scenario: A chosen path is readable after a restart
 
@@ -229,7 +263,7 @@ does not belong in the keystore file, whose every field is accounted for.
 
 - **WHEN** the recorded path for a Stoa is read, and derivation is performed from
   the master key and that path
-- **THEN** the result is the identity in use for that Stoa
+- **THEN** the result is the identity that was kept for that Stoa
 
 #### Scenario: Distinct choices for distinct Stoas are recorded separately
 
@@ -307,8 +341,8 @@ what reads back must be what was recorded.
 
 ### Requirement: One device holds the master key, and the record has one writer
 
-The master key SHALL be held on a single device, and the record of chosen
-derivation paths SHALL have exactly one writer.
+The master key MUST be held on a single device, and the record of chosen
+derivation paths MUST have exactly one writer.
 
 This is a deliberate scope limit rather than a property of the design, and taking
 it buys the absence of a whole class of problem: with one writer there is no
@@ -323,6 +357,13 @@ storage backups — would generate its own key locally and have it approved by t
 device holding the master key, so that the master key never leaves the one device.
 Specifying that approval is a separate change with its own capability.
 
+**In this release a restore brings back the choices kept, not the identity in
+use.** The identity in use is the machine key in every Stoa (`identity`: *In this
+release one machine key is the identity in every Stoa*), and a recorded choice
+does not change it. A record restored beside a master key MUST reproduce each
+kept choice from that master key and the recorded path, and MUST NOT change the
+identity in use in any Stoa.
+
 #### Scenario: The record is written by one writer
 
 - **WHEN** chosen paths are recorded
@@ -332,36 +373,55 @@ Specifying that approval is a separate change with its own capability.
 #### Scenario: A restore targets the device holding the master key
 
 - **WHEN** a record is restored alongside a master key
-- **THEN** the identities in use are those the record names
+- **THEN** the key derived from the restored master key and the path the restored
+  record names for a Stoa is the identity that was kept for that Stoa
+- **AND** the identity in use in that Stoa is the restored master key's machine
+  key, not the key the restored record names
 - **AND** no other device's record participates
+
+  The scenario keeps its name because the name is how this delta addresses it.
+  It previously asserted that the identities in use are those the record names;
+  in this release the record names kept choices, and the identity in use is the
+  machine key whatever the record holds.
 
 ### Requirement: The interface can state that identity recovery needs the record
 
-The module SHALL make available, to a caller, that a master key alone is not
-sufficient to recover the user's identities while the recorded paths exist only in
-local storage.
+The module MUST report, to a caller asking for the identity in use, whether
+recovering that identity needs more than the master key.
 
 A user who believes their exported master key is a complete backup has been misled
 by omission, and the caller cannot discover this for itself: it has no filesystem
-access. So the honest statement has to come from the module.
+access. So the statement has to come from the module.
 
-**Remote backup and export are not part of this change** — the owner's sequence is
-local storage first, export and remote backup later. This requirement is therefore
-confined to what is checkable now: that the module reports the unbacked state. A
-requirement covering the backed-up state belongs to the change that implements
-backup, because until then there is no way to reach that state and so no way to
-test a claim about it.
+**In this release the identity in use is the machine key, and the master key
+alone recovers it.** The report MUST therefore state that recovery needs nothing
+beyond the master key, for every Stoa, whatever the record of per-Stoa choices
+holds. A choice recorded by a keep is recoverable only together with the record,
+but it is not the identity in use in this release, so it is not what this report
+describes.
+
+**Remote backup and export are not part of this change.** This requirement is
+confined to what is checkable now. A requirement covering the backed-up state
+belongs to the change that implements backup, because until then there is no way
+to reach that state and so no way to test a claim about it.
 
 #### Scenario: The unbacked state is reportable
 
-- **WHEN** paths have been recorded and no export or remote backup exists
-- **THEN** a caller asking whether recovery needs more than the master key is told
-  that it does
+- **WHEN** the identity in use is reported for a Stoa with a recorded per-Stoa
+  choice, and for a Stoa with none, and no export or remote backup exists
+- **THEN** each reply states that recovering the identity needs nothing beyond
+  the master key
+
+  The scenario keeps its name because the name is how this delta addresses it.
+  What it asserts inverts: the identity in use is the machine key, so the state
+  reported is that the master key alone suffices — including for a Stoa whose
+  recorded choice would itself need the record.
 
 ### Requirement: Keeping an identity does not replace an existing one
 
-Where an identity is already stored, keeping a candidate SHALL be refused rather
-than replacing it, and the refusal SHALL be distinguishable from other failures.
+Where a choice is already recorded for a Stoa, keeping another candidate for that
+Stoa MUST be refused rather than replacing it, and the refusal MUST be
+distinguishable from other failures.
 
 A master key exists in exactly one place. Replacing it silently discards every
 identity derived from it, while the ops those identities signed remain published
@@ -372,20 +432,28 @@ this capability.
 
 #### Scenario: A second keep is refused
 
-- **WHEN** an identity is stored and a candidate is kept again
+- **WHEN** a choice is recorded for a Stoa and a candidate is kept again for that
+  Stoa
 - **THEN** the attempt is refused
-- **AND** the stored identity is unchanged
+- **AND** the recorded choice and the stored master key are unchanged
 
 #### Scenario: The refusal names the situation
 
-- **WHEN** keeping is refused because an identity already exists
+- **WHEN** keeping is refused because a choice is already recorded for that Stoa
 - **THEN** the reason is distinguishable from a malformed request and from a
   storage failure
 
 ### Requirement: The current identity is reportable, separately from whether posting is possible
 
-The module SHALL be able to report the identity in use, or that there is none,
-together with a reason when there is none.
+The module MUST be able to report the identity in use in a Stoa, or that there is
+none, together with a reason when there is none.
+
+**In this release the identity in use is the machine key in every Stoa**
+(`identity`: *In this release one machine key is the identity in every Stoa*).
+Where a machine key is stored and readable, the report MUST name it, for every
+Stoa, whether or not a per-Stoa choice is recorded for that Stoa and whether or
+not the record of choices can be read. Where no machine key is stored, the report
+MUST state that there is none, with a reason.
 
 This is a different question from whether posting is possible, and the two can
 honestly disagree: a stored identity whose keystore permissions are too open is a
@@ -393,25 +461,32 @@ real identity that cannot currently be used. A caller with only the posting prob
 would have to render "you are nobody" to a user who has an identity and a fixable
 problem.
 
-The reply SHALL carry an identity or a reason, never both and never neither —
+The reply MUST carry an identity or a reason, never both and never neither —
 matching the posting probe's shape rather than introducing a second convention for
 the same job.
 
-The reply SHALL name the identity by its public key and SHALL NOT carry an author
+The reply MUST name the identity by its public key and MUST NOT carry an author
 address. The public key is the sole author identifier, and it is what the generated
 display name and the visual mark are both derived from.
 
 #### Scenario: An existing identity is reported
 
-- **WHEN** an identity is stored and readable
+- **WHEN** a machine key is stored and readable
 - **THEN** the reply states that there is an identity
-- **AND** carries its public key
+- **AND** carries the machine key's public key
 - **AND** carries no author address
 - **AND** carries no reason
 
+#### Scenario: No per-Stoa choice is needed for an identity to be reported
+
+- **WHEN** a machine key is stored and readable, and no choice is recorded for the
+  Stoa asked about
+- **THEN** the reply states that there is an identity
+- **AND** carries the machine key's public key
+
 #### Scenario: No identity is reported with a reason
 
-- **WHEN** no identity is stored
+- **WHEN** no machine key is stored
 - **THEN** the reply states that there is none
 - **AND** carries a reason
 - **AND** carries no identity
@@ -468,16 +543,17 @@ when it is not:
 
 ### Requirement: The derivation path is carried in the replies that name an identity
 
-A reply describing a candidate, a reply reporting a kept identity, and a reply
-reporting the identity in use SHALL each carry the derivation path that identity
-derives from.
+A reply describing a candidate and a reply reporting a kept identity MUST each
+carry the derivation path that identity derives from.
 
-The path is the one input to an identity that no published value carries and that
-the module alone holds, so a caller that cannot see it cannot show the user what
-must be preserved — and the requirement that the interface be able to state that
-recovery needs the record is a statement about a value the caller is otherwise
-never shown. The path is not secret: the record of it "reveals nothing that a
-published identity does not already reveal".
+The path is the one input to a per-Stoa identity that no published value carries
+and that the module alone holds, so a caller that cannot see it cannot show the
+user what must be preserved. The path is not secret: the record of it "reveals
+nothing that a published identity does not already reveal".
+
+**The reply reporting the identity in use MUST carry no path in this release.**
+The identity in use is the machine key, which derives from no path, so any path
+in that reply would describe a key that is not the one in use.
 
 #### Scenario: A candidate carries its path
 
@@ -491,9 +567,14 @@ published identity does not already reveal".
 
 #### Scenario: The identity in use is reported with its path
 
-- **WHEN** the identity in use is asked for and there is one
-- **THEN** the reply carries the path it derives from
-- **AND** the path is the one recorded for that Stoa
+- **WHEN** the identity in use is asked for and there is one, for a Stoa with a
+  recorded per-Stoa choice and for a Stoa with none
+- **THEN** neither reply carries a derivation path
+
+  The scenario keeps its name because the name is how this delta addresses it.
+  What it asserts inverts: the identity in use derives from no path in this
+  release, so the reply carries none — and a Stoa with a recorded choice is named
+  because that is where a path would be available to report wrongly.
 
 ### Requirement: A set of candidates and each candidate in it are nameable by the caller
 
@@ -565,7 +646,7 @@ extra field, so they cannot establish closure.
 
 ### Requirement: Every entry point refuses malformed input rather than guessing
 
-Each method of this capability SHALL reject input it cannot interpret, and SHALL
+Each method of this capability MUST reject input it cannot interpret, and MUST
 distinguish an absent field from one of the wrong type.
 
 A caller selecting a candidate supplies a value naming one. Coercing an
@@ -573,17 +654,18 @@ out-of-range or wrongly-typed selection to a default would store an identity the
 user did not choose — which is unrecoverable, because the choice cannot be
 recomputed.
 
-A selection that does not name a candidate in the current set SHALL be refused,
-and SHALL NOT be satisfied by any other candidate.
+A selection that does not name a candidate in the current set MUST be refused,
+and MUST NOT be satisfied by any other candidate.
 
-No input SHALL cause the module to abort. A failure on this path returns an error;
+The module MUST NOT abort on any input. A failure on this path returns an error;
 it does not crash the process serving every other call.
 
 #### Scenario: A selection outside the current set is refused
 
 - **WHEN** a candidate is selected that the current set does not contain
 - **THEN** the attempt is refused
-- **AND** no identity is stored
+- **AND** no choice is recorded and no master key is stored that were not there
+  before
 
 #### Scenario: A selection made against a superseded set is refused
 
@@ -605,7 +687,7 @@ it does not crash the process serving every other call.
 
 ### Requirement: Nothing is stored before a candidate is kept
 
-Generating a slate SHALL NOT write to storage.
+Generating a slate MUST NOT write to storage.
 
 A slate that persisted would record choices the user has not made, and on the
 derivation-path model there is nothing to persist in any case: the paths are
@@ -616,8 +698,10 @@ identity existed to lose.
 #### Scenario: Generating a slate writes nothing
 
 - **WHEN** a slate is generated and no candidate is kept
-- **THEN** no identity is stored
-- **AND** a caller asking who the user is still finds none
+- **THEN** no master key and no recorded choice are stored that were not there
+  before
+- **AND** on a peer that held no master key, a caller asking who the user is
+  still finds none
 
 #### Scenario: A discarded slate leaves no trace
 

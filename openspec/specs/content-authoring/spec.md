@@ -93,24 +93,31 @@ name it in a later call.
 - **WHEN** any publish succeeds
 - **THEN** the reply carries an op id
 
-### Requirement: The author is derived from the Stoa, never supplied
+### Requirement: The author is the module's to decide, never supplied
 
-No publish operation SHALL accept an author, an identity, a key, or an address as
-a parameter. The identity that signs SHALL be derived from the Stoa named in the
-request.
+A publish operation MUST NOT accept an author, an identity, a key, or an address
+as a parameter. The identity that signs MUST be decided by the module from its own
+state. **In this release it is the machine key, whichever Stoa the request names**
+(`identity`: *In this release one machine key is the identity in every Stoa*).
 
 A method taking an author is a method that can be asked to sign as someone it is
 not.
 
-A request carrying a field that names an author SHALL be refused rather than
+A request carrying a field that names an author MUST be refused rather than
 ignored, so that a caller which believes it is choosing an identity is told it is
 not.
 
 #### Scenario: The published op's author is the derived identity
 
 - **WHEN** a post is published into a Stoa
-- **THEN** the op's author is the identity derived for that Stoa
+- **THEN** the op's author is the identity in use for that Stoa, which in this
+  release is the machine key
 - **AND** the op verifies against that identity's key
+
+  The scenario keeps its name because the name is how this delta addresses it.
+  "Derived" now means decided by the module from its own state: the identity is
+  no longer derived from the Stoa, and the check is that the author is the
+  identity in use there.
 
 #### Scenario: A request naming an author is refused
 

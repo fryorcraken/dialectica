@@ -226,15 +226,34 @@ TestCase {
         var all = joined(c);
         verify(all.indexOf("Voting, posting and replying need an identity.") >= 0,
                "the no-identity sentence is missing: " + all);
-        // NOT copy.json common.createIdentity — see DIdentityChip.qml, which
-        // records why this diverges from the bundle. The chip's arm is layer
-        // 2 (a per-Stoa identity), and the bundle's string names layer 1.
-        verify(all.indexOf("Choose an identity for this Stoa") >= 0,
-               "the choose affordance is missing: " + all);
-        // The label must not name layer 1, the master key the user has
-        // already created by the time this arm can render.
-        verify(all.indexOf("Create an identity") < 0,
-               "the chip offers to create a key, not to choose a path: " + all);
+        // NO SPEC: `view-identity-onboarding` requires only that the affordance
+        // names no Stoa (see `test_the_create_affordance_names_no_stoa`); the
+        // exact caption is chosen, not specified. It is copy.json
+        // common.createIdentity, verbatim. It was "Choose an identity for this
+        // Stoa" while this arm meant "no per-Stoa choice";
+        // `machine-identity-scope` made it mean "no machine key" (issue #149).
+        verify(all.indexOf("Create an identity") >= 0,
+               "the create affordance is missing: " + all);
+        c.destroy();
+    }
+
+    // `view-identity-onboarding`, "The affordance to acquire an identity is not a
+    // per-Stoa choice": no text on it names a Stoa as what the identity is for.
+    //
+    // Asserted as the ABSENCE of the word across everything the no-identity
+    // arm renders, rather than as the absence of the old caption: a reworded
+    // per-Stoa caption ("Pick a key for this Stoa") would pass a check pinned to
+    // the old string. The presence assertion above is what stops this passing
+    // on a chip that renders nothing at all.
+    function test_the_create_affordance_names_no_stoa() {
+        var c = chip({ hasIdentity: false });
+        var all = joined(c);
+        verify(all.indexOf("Create an identity") >= 0,
+               "the fixture must render the affordance, or the absence below "
+               + "proves nothing: " + all);
+        verify(all.toLowerCase().indexOf("stoa") < 0,
+               "the identity affordance names a Stoa, presenting the identity "
+               + "as one chosen for a single Stoa: " + all);
         c.destroy();
     }
 
@@ -267,8 +286,8 @@ TestCase {
         var all = joined(c);
         verify(all.indexOf("Voting, posting and replying need an identity.") < 0,
                "the no-identity sentence survives into the held state: " + all);
-        verify(all.indexOf("Choose an identity for this Stoa") < 0,
-               "the choose button survives into the held state: " + all);
+        verify(all.indexOf("Create an identity") < 0,
+               "the create button survives into the held state: " + all);
         c.destroy();
     }
 
@@ -280,7 +299,7 @@ TestCase {
         var all = joined(c);
         verify(all.indexOf("CURRENT IDENTITY") < 0,
                "the identity row survived hasIdentity going false: " + all);
-        verify(all.indexOf("Choose an identity for this Stoa") >= 0,
+        verify(all.indexOf("Create an identity") >= 0,
                "the prompt did not appear: " + all);
         c.destroy();
     }
