@@ -38,7 +38,10 @@ scenario that contradicts it is the one amended.
   requirement it sits in keeps its heading, which the in-flight `ui-thread-view`
   change cites.
 - `thread-read`'s Purpose, which said this capability "places posts in that
-  order", is corrected in place, since a Purpose is not carried by a delta.
+  order", is corrected in place, since a Purpose is not carried by a delta. It
+  now names no direction and points at the requirement on the items' sequence,
+  so it reads true against the live requirement before archive and against the
+  promoted one after it, and archive has nothing to hand-edit.
 - **BREAKING** for any caller relying on the old reply sequence. The in-flight
   `ui-thread-view` change's spec renders "the order the read returned", so a view
   built to it follows without change.
@@ -68,7 +71,7 @@ None.
   for replies carrying no counter, and for an answer carrying a lower counter
   than the reply it answers. *"A reply orders after the reply it answers"*
   gains the conditions it depends on. The Purpose line is corrected in the live
-  spec directly.
+  spec directly, to wording that names no direction.
 
 ## Impact
 

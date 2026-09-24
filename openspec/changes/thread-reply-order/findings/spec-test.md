@@ -2,7 +2,7 @@
 
 ## Findings
 
-- [ ] **`spec-writer`** — `openspec/specs/thread-read/spec.md` (the live spec)
+- [x] **`spec-writer`** — `openspec/specs/thread-read/spec.md` (the live spec)
       is self-contradictory right now, and will stay that way until this change
       is archived.
 
@@ -50,6 +50,22 @@
       even mid-flight), or whether editing the Purpose ahead of the delta is
       accepted practice here — right now it is undocumented practice that
       reproduces a defect already written down as a trap.
+
+      **Outcome: fixed, by neither of the two options offered.** Reverting the
+      edit until archive only moves the contradiction: a delta carries no
+      Purpose, so archive would promote the reversed requirement beneath the
+      old *"places posts in that order"*, and the file would contradict itself
+      from then on unless the `closer` hand-edited the live spec in the archive
+      commit — the `stoa-genesis` shape again, now with a step someone has to
+      remember. The defect is that the Purpose restated the requirement's
+      direction at all, which is a second copy of one rule inside one file.
+      The Purpose line now reads *"places a thread's replies, after its root,
+      in a sequence taken from that order and defines none of its own; which
+      sequence is stated once, in the requirement on the items' sequence, and
+      not here."* It is true of the live requirement today (the rule's own
+      sequence) and of the promoted one after archive (its exact reverse), so
+      the file agrees with itself at every point and archive has nothing to
+      hand-edit. `proposal.md`'s two mentions of the Purpose edit say so.
 
 ## Areas checked and clean
 
