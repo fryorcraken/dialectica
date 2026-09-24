@@ -61,6 +61,17 @@ TestCase {
         return null
     }
 
+    // The method names of every call recorded from `sinceIndex` onward — the
+    // full set, not one method's count. Proving "no OTHER call was made" needs
+    // the set, because a count of named methods staying at zero says nothing
+    // about a method nobody thought to name.
+    function methodsSince(bridge, sinceIndex) {
+        var methods = []
+        for (var i = sinceIndex; i < bridge.calls.length; i++)
+            methods.push(bridge.calls[i].method)
+        return methods
+    }
+
     function namedAnywhere(item, name) {
         var found = []
         function walk(node) {
@@ -265,10 +276,67 @@ TestCase {
         view.destroy()
     }
 
-    // "Following the route asks the module for nothing." The house fake
-    // RECORDS, so a zero count below is "no call was made" and not "a call was
-    // made and ignored" — and the fake answers all three methods, so a call
-    // that WAS made would not have failed quietly on a missing reply.
+    // `view-navigation`, "Following the route makes no call of its own": every
+    // call reaching the bridge in consequence of acting on the affordance is
+    // one the Stoa list makes on being shown, not one the route makes itself.
+    //
+    // The control is `closeFeed()` — the ordinary way back to the list from the
+    // feed's own close button (`Main.qml`'s `onClosed: root.closeFeed()`), which
+    // `acquireIdentity()` shares its whole body with (`enterOnly("", null)`).
+    // Both hide the feed and reveal the already-mounted `DStoaListScreen`, which
+    // is what re-triggers its `onVisibleChanged` showing. If the identity route
+    // reached the bridge for anything of its own, its delta would differ from
+    // this control's; if it reached the bridge for nothing beyond revealing the
+    // list, the two deltas are the same call, in the same order. Comparing the
+    // full method list rather than counting three names chosen in advance is
+    // what lets an unnamed extra call fail this too.
+    function test_following_the_route_makes_no_call_of_its_own() {
+        var replies = {
+            "list_stoas": spec.oneStoa,
+            "list_threads": '{"items":[],"page":0,"hasMore":false}',
+            "who_am_i": '{"hasIdentity":false,"reason":"none"}',
+            "get_capabilities": '{"canPost":false,"reason":"none"}',
+            "get_master_key": '{"hasMasterKey":false}'
+        }
+
+        // The route, driven through the chip's own signal as elsewhere in this
+        // file — the requirement is about the affordance, not the function name.
+        var routeBridge = spec.bridgeFor(replies)
+        Core.bridge = routeBridge
+        var routeView = mainComponent.createObject(null, {})
+        routeView.open(spec.stoaA, "Nym Research", "")
+        verify(routeBridge.calls.length > 0,
+               "the feed did call the core, so the delta below is the route "
+               + "making no call rather than the fake being unreachable")
+        var beforeRoute = routeBridge.calls.length
+        spec.namedAnywhere(routeView, "identityChip")[0].createRequested()
+        compare(routeView.screenShown, "list")
+        var afterRoute = spec.methodsSince(routeBridge, beforeRoute)
+
+        // The control: the same feed, closed by its own close button rather
+        // than the identity chip, reaching the list the same way.
+        var closeBridge = spec.bridgeFor(replies)
+        Core.bridge = closeBridge
+        var closeView = mainComponent.createObject(null, {})
+        closeView.open(spec.stoaA, "Nym Research", "")
+        var beforeClose = closeBridge.calls.length
+        spec.namedAnywhere(closeView, "feed")[0].closed()
+        compare(closeView.screenShown, "list")
+        var afterClose = spec.methodsSince(closeBridge, beforeClose)
+
+        compare(afterRoute, afterClose,
+                "acting on the identity route must reach the bridge for "
+                + "exactly the calls an ordinary return to the list makes, "
+                + "and none besides")
+        routeView.destroy()
+        closeView.destroy()
+    }
+
+    // `view-navigation`, "Following the route creates no key, requests no
+    // slate and keeps nothing". The house fake RECORDS, so a zero count below
+    // is "no call was made" and not "a call was made and ignored" — and the
+    // fake answers all three methods, so a call that WAS made would not have
+    // failed quietly on a missing reply.
     function test_following_the_route_creates_no_key_requests_no_slate_and_keeps_nothing() {
         var bridge = spec.bridgeFor({
             "list_stoas": spec.oneStoa,
@@ -291,22 +359,9 @@ TestCase {
                "the feed did call the core, so the zeros below are this route "
                + "making no call rather than the fake being unreachable")
 
-        var keyQueriesBefore = spec.callsTo(bridge, "get_master_key")
         spec.namedAnywhere(view, "identityChip")[0].createRequested()
 
         compare(view.screenShown, "list")
-
-        // NO SPEC: `view-navigation` says following the route "MUST NOT itself
-        // reach the module", and its scenario enumerates three calls — key
-        // creation, slate, keep. `stoa-navigation-view` requires the list to
-        // ask the read-only master-key query "each time it is shown after being
-        // hidden", and the route is such a showing. So landing makes exactly one
-        // `get_master_key` call. This pins it as the LIST's call rather than the
-        // route's; whether the prose meant to forbid it too is reported to the
-        // spec-writer, not decided here. Measured: an equality with
-        // `keyQueriesBefore` fails, 2 against 1.
-        compare(spec.callsTo(bridge, "get_master_key"), keyQueriesBefore + 1,
-                "the list's showing asks the key state once, and mints nothing")
         compare(spec.callsTo(bridge, "create_identity"), 0,
                 "the route created a key on the user's behalf")
         compare(spec.callsTo(bridge, "generate_identity_slate"), 0,
