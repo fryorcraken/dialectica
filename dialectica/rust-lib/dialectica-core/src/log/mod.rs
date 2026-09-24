@@ -671,10 +671,13 @@ mod tests {
                 arrival: Arrival::unordered()
             })
         );
-        assert_eq!(log.iter().unwrap(), vec![Entry {
-            op: blank.clone(),
-            arrival: Arrival::unordered()
-        }]);
+        assert_eq!(
+            log.iter().unwrap(),
+            vec![Entry {
+                op: blank.clone(),
+                arrival: Arrival::unordered()
+            }]
+        );
         let from_stoa = log.iter_stoa(&stoa).unwrap();
         assert_eq!(from_stoa.len(), 1);
         assert_eq!(from_stoa[0].op, blank, "the title must be unchanged");

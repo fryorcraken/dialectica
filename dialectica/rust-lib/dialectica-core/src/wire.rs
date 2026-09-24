@@ -13241,7 +13241,10 @@ mod tests {
             )
             .unwrap()
         };
-        assert_eq!(before, after, "the stored entry must be unchanged by the call");
+        assert_eq!(
+            before, after,
+            "the stored entry must be unchanged by the call"
+        );
     }
 
     #[test]

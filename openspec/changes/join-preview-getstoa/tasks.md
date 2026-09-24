@@ -36,6 +36,6 @@
 
 ### 4. Gates
 
-- [x] 4.1 `cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p dialectica -p dialectica-core`, `cargo clippy … -D warnings` and the workspace `cargo fmt --check` CI runs pass. A direct `fmt --check` on `dialectica-core` reports only drift that predates this change (`identity.rs`, one site in `wire.rs`).
+- [x] 4.1 `cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p dialectica -p dialectica-core`, `cargo clippy … -D warnings` and the workspace `cargo fmt --check` CI runs pass. A direct `fmt --check` on `dialectica-core` reports only drift that is on `main` already (`identity.rs`, and two `wire.rs` test sites: one from `get-stoa`, one from `machine-identity-scope`).
 - [x] 4.2 `nix build ./dialectica#lgx` succeeds. The flake is under `dialectica/`, and there is none at the repository root.
 - [x] 4.3 Every QML spec passes through `run-qml-tests.sh`, and the `check_qml_members`, `check_qml_names` and `check_qml_reachable` gates and qmllint are clean.
