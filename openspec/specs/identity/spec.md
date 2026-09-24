@@ -2,7 +2,9 @@
 
 ## Purpose
 
-Defines how a user's per-Stoa identity is derived, what an address is derived from, and what a verification of an op does and does not establish — so that a pseudonym is stable within a Stoa, unlinkable across Stoas, and no attacker-supplied key, signature or address can crash a parser or pass as someone else's.
+Defines what the identity in use is, how a user's per-Stoa identity is derived, what a Stoa address is derived from, and what a verification of an op does and does not establish — so that an identity is permanent, no attacker-supplied key, signature or address can crash a parser or pass as someone else's, and a pseudonym stable within a Stoa can be unlinkable across Stoas.
+
+In this release the identity in use is one machine key, the same in every Stoa, so unlinkability across Stoas is suspended rather than provided: the same user in two Stoas is visibly one key. The per-Stoa derivation that unlinkability rests on stays built and is contracted here, and the keys it yields become the identity in use again when per-Stoa identity is restored.
 
 ## Requirements
 

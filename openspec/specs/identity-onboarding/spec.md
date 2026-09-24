@@ -1,11 +1,20 @@
 # identity-onboarding Specification
 
 ## Purpose
-Defines how a user comes to have an identity: what a slate of candidates is, what
-keeping one guarantees, what must be recorded so the choice survives, and what the
-replies may and may not carry — so that a fresh install can reach a state where
-posting is possible, without a secret crossing the module boundary and without a
-choice the user made becoming unrecoverable.
+Defines how a user comes to have an identity: how a peer obtains its master key
+and reports whether it holds one, what a slate of candidates is, what keeping one
+guarantees, what must be recorded so the choice survives, and what the replies may
+and may not carry — so that a fresh install can reach a state where posting is
+possible, without a secret crossing the module boundary and without a choice the
+user made becoming unrecoverable.
+
+**In this release a fresh install reaches that state by creating its master key**,
+which is the machine key and the identity in use in every Stoa (`identity`: *In
+this release one machine key is the identity in every Stoa*). The slate and the
+keep stay built and contracted here, and what a keep records is preserved, but no
+view reaches them and a kept choice does not change the identity in use. They are
+how a user chooses a per-Stoa identity, and they become the route to one again
+when per-Stoa identity is restored.
 
 **Boundary with other capabilities.** `identity` owns what an identity is, how a
 key derives and what an address is; `keystore` owns how a root secret is stored at
