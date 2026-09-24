@@ -118,7 +118,7 @@ Item {
     // must be got right at every call site, which is the shape CLAUDE.md says to
     // replace with one the data enforces. **It was already wrong**: adding this
     // change's `moderation` state required editing five functions, and two of
-    // them (`openThread`, `createIdentityFor`) had been written with only three
+    // them (`openThread`, and the identity route) had been written with only three
     // of the four clears in the first place, so the invariant held by accident
     // of which screens could reach which rather than by anything in the code.
     // A seventh state would have meant getting six more edits right.

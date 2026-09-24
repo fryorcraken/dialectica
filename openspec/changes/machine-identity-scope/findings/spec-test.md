@@ -139,6 +139,15 @@ hash-moved, or position-only-pinned shapes named in the review brief).
       directory, so `wrote_it = true` against a directory path reaches it
       deterministically; the tester decides whether that layer suffices or a
       `keep_selection`-level route exists.
+      **Outcome (`dev-writer` half): fixed** in this commit; the box stays
+      unticked for the `tester`'s half. The `NO SPEC:` comment in
+      `undo_a_keystore_this_keep_wrote` is replaced by a citation of the
+      scenario "A failed keep that cannot remove the master key it stored says
+      so", naming the relation it requires (the reason differs from the bare
+      `record_failure` the same failure reports when the removal works). The
+      function's docstring, which quoted "no master key that were not there
+      before" unqualified, now carries the requirement's exception too. No
+      code changed.
 
 Everything else in scope — the RENAMED/MODIFIED requirement pairs, the
 `identity-onboarding` REMOVED-then-replaced route in `view-navigation` (a

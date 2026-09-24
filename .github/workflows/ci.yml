@@ -547,17 +547,17 @@ jobs:
           # came to disagree with the probe unnoticed. Losing this call from the
           # adapter is the adapter taking the choice back.
           # AND `core::stoa_of` IS REQUIRED FOR AN ORDERING REASON, not a
-          # derivation one. The adapter reads `stoa` before it opens anything --
-          # it once needed the value to derive a per-Stoa key, and since
-          # machine-identity-scope needs only the refusal of a malformed request
-          # ahead of the keystore -- and it was doing that with its own bare
-          # `serde_json::from_str` plus a four-arm ladder -- which shadowed the
-          # whole request envelope on the shipped path: an array was answered
-          # "missing field: stoa" here, and an N-byte request was fully parsed
-          # at ~2N heap before MAX_REQUEST_BYTES was ever evaluated. Going
-          # through `core::stoa_of` crosses the envelope once. Review caught
-          # that; no gate did, because Build LGX proves this file COMPILES and
-          # asserts nothing about the order of operations inside it.
+          # derivation one. The adapter reads `stoa` before it opens anything.
+          # It once needed the value to derive a per-Stoa key; since
+          # machine-identity-scope it needs only the refusal of a malformed
+          # request ahead of the keystore. It used to read `stoa` with its own
+          # bare `serde_json::from_str` plus a four-arm ladder, which shadowed
+          # the whole request envelope on the shipped path: an array was
+          # answered "missing field: stoa" here, and an N-byte request was
+          # fully parsed at ~2N heap before MAX_REQUEST_BYTES was ever
+          # evaluated. Going through `core::stoa_of` crosses the envelope once.
+          # Review caught that; no gate did, because Build LGX proves this file
+          # COMPILES and asserts nothing about the order of operations inside it.
           #
           # EACH `want` CARRIES ITS OWN REASON, and that is a fix rather than
           # tidying. The message used to be one shared string about which key

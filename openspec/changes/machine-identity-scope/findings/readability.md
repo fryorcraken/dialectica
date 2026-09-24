@@ -21,7 +21,7 @@ in the tree.
 
 ## Findings
 
-- [ ] **`dev-writer`** — `dialectica-ui/src/qml/Main.qml:121` — a comment still
+- [x] **`dev-writer`** — `dialectica-ui/src/qml/Main.qml:121` — a comment still
       names the deleted function `createIdentityFor` as if it exists, and its
       own twin comment elsewhere in this piece's diff was updated to drop the
       name while this one was not.
@@ -47,8 +47,14 @@ in the tree.
       `dialectica-ui/src/qml/Main.qml` (two hits: 121, 213) and against
       `dialectica-ui/tests/tst_navigation.qml` (zero hits — its copy was
       already fixed), and against the diff hunk that made that fix.
+      **Fixed** in this commit: line 121 now reads `` (`openThread`, and the
+      identity route) ``, the same wording as its twin in `tst_navigation.qml`,
+      so the two copies of the sentence agree again. Line 213 is left as it
+      was — it is the past-tense reference the finding itself distinguishes.
+      `git grep -n -F -e "createIdentityFor" -- dialectica-ui/src/qml/Main.qml`
+      now returns only 213. Comment-only; `tst_navigation.qml` runs 23/23.
 
-- [ ] **`dev-writer`** — `.github/workflows/ci.yml:550-554` — a comment edited
+- [x] **`dev-writer`** — `.github/workflows/ci.yml:550-554` — a comment edited
       in place to add the new (envelope-check) reason for keeping
       `core::stoa_of` produces a run-on sentence whose pronoun no longer has a
       clear antecedent.
@@ -74,6 +80,12 @@ in the tree.
       **Measured:** read in place at `.github/workflows/ci.yml` lines 543-560;
       confirmed against the diff that the pre-piece sentence had a single clear
       antecedent and the post-piece insertion is what breaks it.
+      **Fixed** in this commit: the run-on is split into sentences, and the
+      pronoun is replaced by what it meant — "It used to read `stoa` with its
+      own bare `serde_json::from_str` plus a four-arm ladder, which shadowed
+      the whole request envelope…". Both reasons (the retired per-Stoa
+      derivation, and the refusal ahead of the keystore that remains) keep
+      their own sentence. Comment-only; no step's commands changed.
 
 ## What was clean
 

@@ -1016,7 +1016,8 @@ pub fn keep_selection(
 ///
 /// `identity-onboarding` requires a keep to "either complete or change nothing",
 /// and a failed one to leave "no recorded choice and no master key that were not
-/// there before". The keystore is written first and the record second, so a
+/// there before" wherever storage permits the removal — the one exception being
+/// a removal storage refuses, which the reply must then report. The keystore is written first and the record second, so a
 /// record failure on a fresh install used to leave a master key on disk with no
 /// path pointing at it. That was harmless only while `whoAmI` read the record —
 /// the orphaned key named no identity. Once the machine key is the identity in
@@ -1043,9 +1044,11 @@ fn undo_a_keystore_this_keep_wrote(
 ) -> Kept {
     if wrote_it {
         if let Err(e) = std::fs::remove_file(keystore_path) {
-            // NO SPEC: the spec does not say what a keep reports when its own
-            // undo fails. This names both failures, so the reason says that a
-            // master key was left behind rather than implying nothing changed.
+            // `identity-onboarding`, "A failed keep that cannot remove the
+            // master key it stored says so": the refusal shape, a reason and
+            // no identity, and a reason that states a master key was left
+            // stored — so it differs from the bare `record_failure` below,
+            // which is what the same failure reports when the removal worked.
             return Kept::Refused {
                 reason: format!(
                     "{record_failure}; the master key this attempt wrote could not \
