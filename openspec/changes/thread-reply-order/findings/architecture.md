@@ -54,7 +54,7 @@ and docs, and it is unusually well-contained for what it touches. Specifically:
 
 I have one non-blocking observation, not a defect in the shipped behaviour.
 
-- [ ] **`dev-writer`/`tester`** — `dialectica/rust-lib/dialectica-core/src/thread.rs:2952` (`a_root_at`, added by this change)
+- [x] **`dev-writer`/`tester`** — `dialectica/rust-lib/dialectica-core/src/thread.rs:2952` (`a_root_at`, added by this change)
       **Finding:** the test module now has three separate hand-rolled
       `Op { .. }.sign(&key)` constructors that each build a `Post` op from
       scratch: `a_post_in` (pre-existing, no clock), `a_reply_at`
@@ -75,6 +75,23 @@ I have one non-blocking observation, not a defect in the shipped behaviour.
       fifth variant doesn't get added without someone noticing there's now a
       reshape opportunity (e.g. a single `a_post_with(parent: Option<&SignedOp>,
       clock: Option<(u64, u64)>, ...)` builder). Not a blocker.
+      **Fixed** in this commit ("Route thread.rs's signed-Post fixtures
+      through one builder"), taken by `dev-writer`. `a_signed_post(stoa,
+      author_seed, clock, thread, parent, body)` is now the only `Op { .. }`
+      for a clean-signed `Post`; `a_post_in`, `a_reply_at` and `a_root_at`
+      are thin wrappers over it. The honest-thread derivation, which
+      `a_reply` and `a_reply_at` each spelled out, is now
+      `the_honest_thread_under(parent)`. Kept `a_post_in`'s signature rather
+      than adding a clock parameter to it, so its ~20 call sites do not
+      change. Two `Post`s still bypass the builder, and its doc comment names
+      them and says why: `a_forged_post` (author and signer differ) and
+      `attachments_are_sanitised_too` (needs an attachment).
+      **No test asserts anything different:** the diff touches only helper
+      bodies, no `#[test]` body. Each wrapper builds the same `Op`
+      field-for-field as before, and ed25519 signing is deterministic, so
+      every fixture op, and every op id a test compares, is byte-identical.
+      `cargo test -p dialectica -p dialectica-core`: 1146 + 30 passed,
+      matching the count this review recorded.
 
 ## Areas I looked at and found clean
 

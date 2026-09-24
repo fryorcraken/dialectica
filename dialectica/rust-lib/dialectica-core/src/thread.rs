@@ -920,28 +920,52 @@ mod tests {
     /// A reply whose `thread` field is the HONEST one: derived from its parent
     /// exactly as `authoring::reply` derives it.
     fn a_reply(author_seed: u8, parent: &SignedOp, body: &str) -> SignedOp {
-        // The honest derivation: the parent's own thread when it has one, the
-        // parent's id when it does not. Spelled here rather than called from
-        // `authoring`, because these fixtures must be able to LIE about it and a
-        // fixture that could only tell the truth cannot build the attack.
-        let thread = match &parent.op.kind {
-            OpKind::Post { thread, .. } => thread.unwrap_or(parent.op.id()),
-            _ => parent.op.id(),
-        };
         a_post_in(
             a_stoa(),
             author_seed,
-            Some(thread),
+            Some(the_honest_thread_under(parent)),
             Some(parent.op.id()),
             body,
         )
     }
 
+    /// The thread an honest author names for a reply to `parent`: the parent's
+    /// own thread when it has one, the parent's id when it does not.
+    ///
+    /// Spelled here rather than called from `authoring`, because these fixtures
+    /// must be able to LIE about it and a fixture that could only tell the truth
+    /// cannot build the attack.
+    fn the_honest_thread_under(parent: &SignedOp) -> OpId {
+        match &parent.op.kind {
+            OpKind::Post { thread, .. } => thread.unwrap_or(parent.op.id()),
+            _ => parent.op.id(),
+        }
+    }
+
     /// A post with every field chosen, so a fixture can name a thread its parent
-    /// does not belong to.
+    /// does not belong to. No clock: the population predating the clock fields.
     fn a_post_in(
         stoa: Address,
         author_seed: u8,
+        thread: Option<OpId>,
+        parent: Option<OpId>,
+        body: &str,
+    ) -> SignedOp {
+        a_signed_post(stoa, author_seed, None, thread, parent, body)
+    }
+
+    /// THE builder for a genuinely-signed, attachment-free `Post` fixture.
+    /// `a_post_in`, `a_reply_at` and `a_root_at` are each this with some fields
+    /// fixed, so a new variant is another thin wrapper rather than another
+    /// `Op { .. }`.
+    ///
+    /// Two `Post`s are built without it, each because it needs what this cannot
+    /// express: `a_forged_post`, whose author and signer differ, and
+    /// `attachments_are_sanitised_too`, whose subject is an attachment.
+    fn a_signed_post(
+        stoa: Address,
+        author_seed: u8,
+        clock: Option<crate::op::OpClock>,
         thread: Option<OpId>,
         parent: Option<OpId>,
         body: &str,
@@ -950,7 +974,7 @@ mod tests {
         Op {
             stoa,
             author: key.public_key(),
-            clock: None,
+            clock,
             kind: OpKind::Post {
                 thread,
                 parent,
@@ -2956,26 +2980,17 @@ mod tests {
         counter: u64,
         asserted_ms: u64,
     ) -> SignedOp {
-        let key = a_key(author_seed);
-        let thread = match &parent.op.kind {
-            OpKind::Post { thread, .. } => thread.unwrap_or(parent.op.id()),
-            _ => parent.op.id(),
-        };
-        Op {
-            stoa: a_stoa(),
-            author: key.public_key(),
-            clock: Some(crate::op::OpClock {
+        a_signed_post(
+            a_stoa(),
+            author_seed,
+            Some(crate::op::OpClock {
                 counter,
                 asserted_ms,
             }),
-            kind: OpKind::Post {
-                thread: Some(thread),
-                parent: Some(parent.op.id()),
-                body: body.to_string(),
-                attachments: vec![],
-            },
-        }
-        .sign(&key)
+            Some(the_honest_thread_under(parent)),
+            Some(parent.op.id()),
+            body,
+        )
     }
 
     #[test]
@@ -3086,22 +3101,17 @@ mod tests {
     /// A root carrying a counter, so a fixture can put the ROOT on the clock too
     /// and show its placement does not depend on where the counter puts it.
     fn a_root_at(author_seed: u8, body: &str, counter: u64) -> SignedOp {
-        let key = a_key(author_seed);
-        Op {
-            stoa: a_stoa(),
-            author: key.public_key(),
-            clock: Some(crate::op::OpClock {
+        a_signed_post(
+            a_stoa(),
+            author_seed,
+            Some(crate::op::OpClock {
                 counter,
                 asserted_ms: A_TIME,
             }),
-            kind: OpKind::Post {
-                thread: None,
-                parent: None,
-                body: body.to_string(),
-                attachments: vec![],
-            },
-        }
-        .sign(&key)
+            None,
+            None,
+            body,
+        )
     }
 
     #[test]
