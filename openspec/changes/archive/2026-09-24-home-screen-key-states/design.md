@@ -481,3 +481,28 @@ could-not-be-read state, the least-claiming of the three.
 
 Rollback is reverting the view commit. The core method can stay: it is
 read-only and has no other caller.
+
+### Meeting `join-preview-getstoa` (#154)
+
+#154 merged to `main` after this change was archived. It made a blank title
+invalid, which the core now refuses, and it modified the create requirement this
+change removes. The merge keeps this change's key gating and #154's blank-title
+rule. The view does not check the title: `create()` passes it through as typed,
+and the core's refusal is rendered in the failure block. That block now sits
+inside the key-held `Loader` (Decision 7), so **a blank-title refusal is
+rendered only in the key-held state**. That is also the only state where the
+create action exists.
+
+For tests, this means a fixture that exercises a create refusal must answer
+`get_master_key` with a held key, even when the test calls `create()` directly.
+**What breaks without it:** removing the key-held answer from
+`test_every_blank_title_reaches_the_core_rather_than_being_refused_here` fails
+it on "the core's reason, unreworded". The create call is still made, but the
+Loader holding the reason is inactive. This was measured.
+
+`test_the_placeholder_is_never_submitted_as_a_title` answered `create_stoa` with
+success for the empty title, a reply `stoa-membership` now forbids. It now
+answers with the error shape and asserts that no Stoa is reported as created.
+**What breaks without that assertion:** a view whose failure branch reports the
+Stoa as created passes the test's two title checks. With the assertion, it fails
+on `screen.created`. This was measured.

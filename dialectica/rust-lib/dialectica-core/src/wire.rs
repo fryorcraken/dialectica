@@ -2496,9 +2496,9 @@ fn policy_name(policy: crate::stoa::Policy) -> &'static str {
 ///
 /// **By this handler's own `genesis.address()` call**, which is
 /// `stoa_address(&self.canonical_bytes()?)` — fallible for a title over the genesis
-/// cap. It returns `{"error":"title: …"}` below, before the store is reached at
-/// all, which is what makes "a failed creation leaves nothing behind" structural
-/// rather than a rule to remember.
+/// cap and for a blank one. It returns `{"error":"title: …"}` below, before the
+/// store is reached at all, which is what makes "a failed creation leaves nothing
+/// behind" structural rather than a rule to remember.
 ///
 /// This used to credit `MembershipStore::join`'s encode-before-write ordering, and
 /// that was false: `join` is never reached for an over-long title, and its refusal
@@ -2509,10 +2509,11 @@ fn policy_name(policy: crate::stoa::Policy) -> &'static str {
 /// guarantee was real and the mechanism named was the wrong one, which sends a
 /// reader editing the store to preserve a property that lives here.
 ///
-/// **No bound the genesis record does not have**, which specifically means an
-/// empty title is accepted: the record has no minimum length, the title is not an
-/// identifier, and refusing one here would make a record other peers decode and
-/// verify without complaint unreachable through this surface.
+/// **No bound the genesis record does not have, and none it does have is
+/// repeated here.** A blank title is refused by the same `genesis.address()`
+/// call, because the genesis encoder has no encoding for one; the reply reads
+/// `{"error":"title: title is blank: …"}`. A title with any character outside
+/// the blank list is created as typed, blank characters and all.
 ///
 /// # Creating the same title twice is one Stoa
 ///
@@ -10740,7 +10741,11 @@ mod tests {
         // object and not a panic", and passed, because the handler *succeeded*.
         // Asserting the absence of a panic cannot see a wrongful success.
         for entry in log.iter().expect("the sweep's log must still be readable") {
-            crate::op::SignedOp::from_bytes(&entry.op.to_bytes())
+            let bytes = entry
+                .op
+                .to_bytes()
+                .expect("an op a publish accepted must have an encoding");
+            crate::op::SignedOp::from_bytes(&bytes)
                 .expect("an op a publish accepted must decode again");
         }
     }
@@ -13433,20 +13438,195 @@ mod tests {
         assert_eq!(reply[FOUNDING_TITLE].as_str().unwrap().len(), 1024);
     }
 
+    // ─── A blank title, at every call it can reach ─────────────────────────
+    //
+    // None of these paths checks a title itself. Each reaches the genesis codec,
+    // which is the one place a title is judged, and these tests are what show
+    // that every path does reach it.
+
+    /// A blank title as a record's bytes and the address those bytes hash to.
+    ///
+    /// Built by hand because the encoder refuses it. This is the pair a peer
+    /// could still hand over: the address is honest and the record is invalid.
+    fn a_blank_titled_reference(title: &str) -> (String, String) {
+        let mut bytes = a_joinable_record("x").canonical_bytes().unwrap();
+        bytes.truncate(1 + 32 + 1);
+        bytes.extend_from_slice(&(title.len() as u32).to_be_bytes());
+        bytes.extend_from_slice(title.as_bytes());
+        (
+            crate::identity::stoa_address(&bytes).to_hex(),
+            hex::encode(bytes),
+        )
+    }
+
     #[test]
-    fn an_empty_title_is_accepted_rather_than_refused() {
-        // The record has no minimum length, the title is not an identifier, and
-        // refusing one here would make a record other peers decode and verify
-        // without complaint unreachable through this surface.
+    fn a_blank_title_creates_nothing_and_says_it_is_blank() {
+        let over_long = create(&mut a_membership_store(), &"x".repeat(1025));
+        let over_long_reason = over_long["error"].as_str().unwrap().to_string();
+
+        for title in ["", "   ", "\u{200B}\u{200B}", "\u{3000}\u{FEFF}\u{0009}"] {
+            let mut store = a_membership_store();
+            let reply = create(&mut store, title);
+            let reason = reply["error"]
+                .as_str()
+                .unwrap_or_else(|| panic!("title {title:?} must be refused, got {reply}"));
+            assert!(
+                reason.contains("blank"),
+                "the reason must name it blank: {reason}"
+            );
+            assert_ne!(reason, over_long_reason);
+            assert!(reply.get("stoa").is_none());
+            assert_eq!(store.len().unwrap(), 0, "the peer is in no new Stoa");
+        }
+    }
+
+    #[test]
+    fn every_blank_title_is_refused_with_the_empty_titles_reason() {
+        let empty = create(&mut a_membership_store(), "")["error"].clone();
+        for title in ["   ", "\u{200B}\u{200B}", "\u{3000}\u{FEFF}\u{0009}"] {
+            assert_eq!(create(&mut a_membership_store(), title)["error"], empty);
+        }
+    }
+
+    #[test]
+    fn a_title_of_one_letter_among_blank_characters_creates_a_stoa_unaltered() {
+        let title = "\u{0020}\u{200B}a\u{3000}\u{FEFF}";
         let mut store = a_membership_store();
-        let reply = create(&mut store, "");
+        let reply = create(&mut store, title);
         assert!(reply.get("error").is_none(), "got {reply}");
+        assert_eq!(reply[FOUNDING_TITLE].as_str().unwrap(), title);
         assert_eq!(
-            reply[FOUNDING_TITLE], "",
-            "the founding title must be reported as the empty string it is"
+            listed(&store, 10)[0][FOUNDING_TITLE].as_str().unwrap(),
+            title
         );
-        let address = crate::identity::Address::from_hex(reply["stoa"].as_str().unwrap()).unwrap();
-        assert!(store.contains(&address).unwrap());
+    }
+
+    #[test]
+    fn a_blank_titled_record_is_refused_by_a_join_and_records_nothing() {
+        for title in ["", "\u{0020}\u{200B}"] {
+            let (stoa, genesis) = a_blank_titled_reference(title);
+            let mut store = a_membership_store();
+            let request = serde_json::json!({ "stoa": stoa, "genesis": genesis }).to_string();
+            let out = join_stoa(&request, &mut store);
+            let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+            let reason = v["error"].as_str().unwrap_or_else(|| panic!("got {out}"));
+            assert!(reason.contains("blank"), "{reason}");
+            assert_eq!(store.len().unwrap(), 0);
+        }
+    }
+
+    #[test]
+    fn a_blank_titled_record_is_refused_by_get_stoa_rather_than_answered() {
+        for title in ["", "\u{0020}\u{200B}"] {
+            let (stoa, genesis) = a_blank_titled_reference(title);
+            let request = serde_json::json!({ "stoa": stoa, "genesis": genesis }).to_string();
+            let v = ask(&request, MemoryOpLog::new());
+            let reason = v["error"].as_str().unwrap_or_else(|| panic!("got {v}"));
+            assert!(reason.contains("blank"), "{reason}");
+            for field in GET_STOA_FIELDS {
+                assert!(v.get(field).is_none(), "{field} beside an error: {v}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_creator_signed_blank_titled_metadata_op_is_answered_as_a_fallback() {
+        // The resolver's fourth condition, through the wire. The op is held in a
+        // `MemoryOpLog`, which keeps ops rather than bytes and so can hold one a
+        // decoder would have refused.
+        for blank in ["", "\u{0020}\u{200B}\u{3000}"] {
+            let log = a_log_holding([a_rename_of(&feed_genesis(), &feed_key(1), 1, blank, "")]);
+            let v = ask(&full_request(), log);
+            assert_eq!(v["title"], "Agora", "title {blank:?}: {v}");
+            assert_eq!(v["isGenesisFallback"], true);
+        }
+    }
+
+    #[test]
+    fn a_blank_titled_op_stored_before_the_refusal_is_an_error_not_a_fallback() {
+        // `stoa-metadata`'s "`getStoa` refuses what it cannot answer, and never
+        // reports a fallback in place of a failure": "This includes a metadata
+        // op whose title is blank that was stored before the `op-format`
+        // capability refused one." Unlike the `MemoryOpLog` test above, this
+        // is the persistent store, holding the op AS BYTES — the row a real
+        // peer's disk could carry from before the format refused this title,
+        // written directly into `ops` because `append` now refuses to write
+        // one.
+        let dir = WireTempDir::new("get-stoa-blank-titled-row");
+        let path = dir.path().join("ops.sqlite");
+
+        let author = feed_key(1); // feed_genesis()'s creator, so the op is by that Stoa's moderator.
+        let stoa = feed_genesis().address().unwrap();
+        let op = Op {
+            stoa,
+            author: author.public_key(),
+            clock: None,
+            kind: OpKind::StoaMetadata {
+                title: String::new(),
+                description: String::new(),
+            },
+        };
+        let signed_op = op.clone().sign(&author);
+        assert!(signed_op.verify(), "the fixture must be authentic");
+        let mut raw_bytes = op.canonical_bytes();
+        raw_bytes.extend_from_slice(&signed_op.signature.to_bytes());
+        let op_id = op.id();
+
+        // Open once to create the schema, then write the row directly.
+        drop(crate::log::SqliteOpLog::open(&path).unwrap());
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute(
+            "INSERT INTO ops
+                 (op_id, op_bytes, stoa, target, author,
+                  arrival_lamport, arrival_msg,
+                  sort_has_counter, sort_counter, score_epoch)
+             VALUES (?1, ?2, ?3, NULL, ?4, NULL, NULL, 1, 0, NULL)",
+            rusqlite::params![
+                op_id.as_bytes().as_slice(),
+                raw_bytes,
+                stoa.as_bytes().as_slice(),
+                author.public_key().to_bytes().as_slice(),
+            ],
+        )
+        .unwrap();
+        drop(conn);
+
+        let before = {
+            let conn = rusqlite::Connection::open(&path).unwrap();
+            conn.query_row(
+                "SELECT op_bytes FROM ops WHERE op_id = ?1",
+                rusqlite::params![op_id.as_bytes().as_slice()],
+                |row| row.get::<_, Vec<u8>>(0),
+            )
+            .unwrap()
+        };
+
+        let out = get_stoa(&full_request(), || crate::log::SqliteOpLog::open(&path));
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let reason = v["error"]
+            .as_str()
+            .unwrap_or_else(|| panic!("expected the error shape, got {out}"));
+        assert!(
+            reason.to_lowercase().contains("blank"),
+            "the reason must name the title as blank: {reason}"
+        );
+        for field in GET_STOA_FIELDS {
+            assert!(v.get(field).is_none(), "{field} beside an error: {v}");
+        }
+
+        let after = {
+            let conn = rusqlite::Connection::open(&path).unwrap();
+            conn.query_row(
+                "SELECT op_bytes FROM ops WHERE op_id = ?1",
+                rusqlite::params![op_id.as_bytes().as_slice()],
+                |row| row.get::<_, Vec<u8>>(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(
+            before, after,
+            "the stored entry must be unchanged by the call"
+        );
     }
 
     #[test]

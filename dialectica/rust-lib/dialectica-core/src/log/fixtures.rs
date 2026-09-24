@@ -111,8 +111,14 @@ pub fn every_op_kind() -> Vec<OpKind> {
             direction: VoteDirection::Down,
         },
         OpKind::StoaMetadata {
-            title: String::new(),
-            description: "\u{0}🏛".to_string(),
+            // A lone NUL: as awkward a title as the format ADMITS. It was the
+            // empty string until a blank title stopped having an encoding, and
+            // a log that stores bytes now refuses that one at the write
+            // (`an_op_with_no_encoding_is_refused_and_nothing_is_written`), so
+            // it no longer belongs in a list of ops every log must store. NUL is
+            // not one of the thirty blank characters.
+            title: "\u{0}".to_string(),
+            description: String::new(),
         },
     ]
 }

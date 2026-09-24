@@ -1614,7 +1614,7 @@ mod tests {
             .iter()
             .unwrap()
             .iter()
-            .map(|e| e.op.to_bytes())
+            .map(|e| e.op.to_bytes().unwrap())
             .collect();
         let count = log.len();
 
@@ -1624,7 +1624,7 @@ mod tests {
             .iter()
             .unwrap()
             .iter()
-            .map(|e| e.op.to_bytes())
+            .map(|e| e.op.to_bytes().unwrap())
             .collect();
         assert_eq!(before, after, "resolving altered the log");
         assert_eq!(log.len(), count);

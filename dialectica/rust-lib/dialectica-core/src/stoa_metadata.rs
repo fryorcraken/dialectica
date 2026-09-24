@@ -19,7 +19,8 @@
 //! reading the ops that name a *Stoa* — [`OpLog::iter_stoa`], because a metadata
 //! op's [`Entry::target`] is `None` by design. Everything else is the same
 //! machinery: the same order, the same three binding checks, run by the same
-//! function, [`Moderators::authorises`].
+//! function, [`Moderators::authorises`]. A fourth check is this capability's
+//! own: the op's title is not blank.
 //!
 //! # Nothing here orders anything
 //!
@@ -34,7 +35,7 @@ use crate::identity::Address;
 use crate::log::{Entry, OpLog, OpLogError};
 use crate::moderation::Moderators;
 use crate::op::{OpId, OpKind};
-use crate::stoa::{Genesis, GenesisError};
+use crate::stoa::{is_blank_title, Genesis, GenesisError};
 
 /// What a genesis record fixes that metadata resolution needs: who may rename
 /// the Stoa, and what to fall back to when nobody has.
@@ -107,8 +108,9 @@ pub enum CurrentMetadata {
     /// came from.
     Fallback { title: String },
     /// The leading binding metadata op decided, and these are its values
-    /// exactly as it carried them — **including an empty title**, which is a
-    /// title and not an absence.
+    /// exactly as it carried them — **including an empty description**, which
+    /// is a description and not an absence. The title is never blank: an op
+    /// carrying a blank one does not bind.
     Declared {
         title: String,
         description: String,
@@ -164,6 +166,16 @@ fn binding_metadata(moderators: &Moderators, entry: &Entry) -> Option<CurrentMet
         | OpKind::Moderate { .. }
         | OpKind::Vote { .. } => return None,
     };
+    // The fourth binding condition: a blank title never binds, so no resolution
+    // can produce a blank current title. `Op::decode` already refuses such an op,
+    // so none arrives over the transport or out of the SQLite log. This holds
+    // resolution to the same rule for one a reader holds anyway (the spec's
+    // words), rather than resting on every path into a log having decoded.
+    // Before `authorises`, for the kind filter's reason: it is free, and
+    // `authorises` verifies a signature.
+    if is_blank_title(title) {
+        return None;
+    }
     if !moderators.authorises(entry) {
         return None;
     }
@@ -370,7 +382,7 @@ mod tests {
         // The fallback must come from the record asked about, not from any
         // fixed value — two titles, two answers. A resolver that returned a
         // constant would pass the test above for one of them.
-        for title in ["Agora", "Lyceum", ""] {
+        for title in ["Agora", "Lyceum", "a"] {
             let genesis = a_genesis(&creator(), title);
             assert_eq!(resolved(&MemoryOpLog::new(), &genesis).title(), title);
         }
@@ -721,19 +733,86 @@ mod tests {
 
     // ─── Values are the op's, exactly ─────────────────────────────────────
 
+    // ─── A blank title never binds ─────────────────────────────────────────
+    //
+    // Every op below is built by struct literal and signed with `sign()`, and is
+    // AUTHENTIC, by the creator, naming this Stoa. It passes all three of the
+    // other checks, so the blank check is the only thing that can refuse it.
+    // That holds because `Op::check_admitted` sits under `encode` and `decode`
+    // and not under `verify` (`op.rs`, design.md decision 2). Deleting the blank
+    // check in `binding_metadata` turns the first two tests here red.
+
+    /// The two blank titles the spec's scenarios name.
+    const BLANK_TITLES: [&str; 2] = ["", "\u{0020}\u{200B}\u{3000}"];
+
     #[test]
-    fn an_empty_title_in_a_binding_op_is_a_title_and_not_a_fallback() {
-        let rename = a_rename(
-            address_of(&agora()),
-            &creator(),
-            Some(1),
-            "",
-            "untitled now",
-        );
+    fn a_metadata_op_carrying_a_blank_title_does_not_bind() {
+        for blank in BLANK_TITLES {
+            let rename = a_rename(address_of(&agora()), &creator(), Some(1), blank, "untitled");
+            assert!(rename.verify(), "the fixture must be authentic");
+            assert!(
+                founding_of(&agora()).moderators.authorises(&Entry {
+                    op: rename.clone(),
+                    arrival: Arrival::unordered(),
+                }),
+                "and authorised, or the authority check is what refuses it"
+            );
+
+            let current = resolved(&a_log_of([rename]), &agora());
+            assert_eq!(current.title(), "Agora", "title {blank:?}");
+            assert!(current.is_genesis_fallback(), "title {blank:?}");
+        }
+    }
+
+    #[test]
+    fn a_later_blank_titled_op_does_not_displace_a_binding_one() {
+        let stoa = address_of(&agora());
+        for blank in BLANK_TITLES {
+            let genuine = a_rename(stoa, &creator(), Some(1), "Genuine", "kept");
+            let later = a_rename(stoa, &creator(), Some(99), blank, "");
+            let genuine_id = genuine.op.id();
+
+            let current = resolved(&a_log_of([genuine, later]), &agora());
+            assert!(
+                matches!(&current, CurrentMetadata::Declared { decided_by, .. } if *decided_by == genuine_id),
+                "the earlier binding op must still decide, title {blank:?}"
+            );
+            assert_eq!(current.title(), "Genuine");
+            assert!(!current.is_genesis_fallback());
+        }
+    }
+
+    #[test]
+    fn a_title_with_one_visible_letter_among_blank_characters_binds_unaltered() {
+        let title = "\u{0020}\u{200B}a\u{3000}\u{FEFF}";
+        let rename = a_rename(address_of(&agora()), &creator(), Some(1), title, "");
         let current = resolved(&a_log_of([rename]), &agora());
-        assert_eq!(current.title(), "");
-        assert_eq!(current.description(), "untitled now");
+        assert_eq!(
+            current.title(),
+            title,
+            "no character removed at either edge"
+        );
         assert!(!current.is_genesis_fallback());
+    }
+
+    #[test]
+    fn an_empty_description_in_a_binding_op_is_a_description_and_not_a_fallback() {
+        let rename = a_rename(address_of(&agora()), &creator(), Some(1), "Renamed", "");
+        let current = resolved(&a_log_of([rename]), &agora());
+        assert_eq!(current.title(), "Renamed");
+        assert_eq!(current.description(), "");
+        assert!(!current.is_genesis_fallback());
+    }
+
+    #[test]
+    fn a_founding_cannot_be_built_from_a_blank_titled_record() {
+        // The other half of "no resolution produces a blank current title": the
+        // fallback is the founding title, and a record whose title is blank has
+        // no address, so there is no `Founding` to fall back to.
+        assert_eq!(
+            Founding::of(&a_genesis(&creator(), "")),
+            Err(GenesisError::BlankTitle)
+        );
     }
 
     #[test]

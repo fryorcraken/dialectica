@@ -129,7 +129,7 @@ impl Membership {
     /// detecting it needs nobody's cooperation.
     ///
     /// Encoding is checked first because it is the more specific failure: a record
-    /// whose title exceeds the genesis cap has no canonical encoding and therefore
+    /// whose title exceeds the genesis cap, or is blank, has no canonical encoding and therefore
     /// no address at all, so it is not "the wrong Stoa" — it is not a Stoa. A
     /// caller telling a user "that record cannot be a Stoa" versus "that record is
     /// not the Stoa you pasted" needs the two apart.
@@ -192,7 +192,7 @@ pub enum MembershipError {
     /// `UndecodableRecord` and rendered "the genesis record could not be read",
     /// which is the opposite operation: the only way to reach it is
     /// [`Genesis::canonical_bytes`] refusing a record — a title over the genesis
-    /// cap — so nothing was ever read.
+    /// cap, or a blank one — so nothing was ever read.
     ///
     /// # Who reaches this, which is not a wire caller
     ///
@@ -1804,19 +1804,73 @@ mod tests {
     // `wire.rs::an_empty_op_log_does_not_empty_the_listing` and
     // `wire.rs::an_op_for_a_stoa_the_peer_is_not_in_creates_no_membership`.
 
+    /// A genesis record's bytes carrying `title`, built by hand because the
+    /// encoder refuses a blank one: a record retained before that refusal.
+    fn raw_record_bytes_titled(title: &str) -> Vec<u8> {
+        let mut bytes = a_record("x").canonical_bytes().unwrap();
+        // version, creator and policy: everything before the title's prefix.
+        bytes.truncate(1 + 32 + 1);
+        bytes.extend_from_slice(&(title.len() as u32).to_be_bytes());
+        bytes.extend_from_slice(title.as_bytes());
+        bytes
+    }
+
     #[test]
-    fn an_empty_title_is_recordable_and_reads_back_empty() {
-        // NO SPEC — well, the spec DOES require an empty title be accepted at
-        // creation; what is unstated is that the store treats it as an ordinary
-        // value rather than as absence. `Genesis` has no minimum length and the
-        // title is not an identifier, so a store that coerced an empty title to
-        // NULL or refused it would make a record other peers decode and verify
-        // without complaint unreachable.
-        let mut store = MembershipStore::in_memory().unwrap();
+    fn a_blank_titled_record_cannot_be_joined() {
+        // Before this change the store recorded one. Now it has no encoding, so
+        // `Membership::verified` refuses it before the store is reached.
         let g = a_record("");
-        let address = g.address().unwrap();
-        join_matching(&mut store, &g).unwrap();
-        assert_eq!(store.get(&address).unwrap().unwrap().genesis.title, "");
+        let bytes = raw_record_bytes_titled("");
+        let address = crate::identity::stoa_address(&bytes);
+        assert_eq!(
+            Membership::verified(&address, &g),
+            Err(MembershipError::UnencodableRecord(GenesisError::BlankTitle))
+        );
+    }
+
+    #[test]
+    fn a_retained_blank_titled_record_is_reported_neither_skipped_nor_migrated() {
+        // The owner's ruling: a record retained before the encoder refused a
+        // blank title fails to decode, the listing says so in the failure
+        // shape, and the row is left exactly as it was. Written behind the
+        // store's back because that is the only way to reach the state now.
+        for title in ["", "\u{0020}\u{200B}"] {
+            let store = MembershipStore::in_memory().unwrap();
+            let bytes = raw_record_bytes_titled(title);
+            // Under the address its OWN bytes hash to, so the refusal is the
+            // decoder's and not the address check's.
+            let address = crate::identity::stoa_address(&bytes);
+            store
+                .conn
+                .execute(
+                    "INSERT INTO stoas (stoa, genesis_bytes) VALUES (?1, ?2)",
+                    rusqlite::params![address.as_bytes().as_slice(), bytes.clone()],
+                )
+                .unwrap();
+
+            match store.list(0, 10) {
+                Err(MembershipError::CorruptEntry(why)) => {
+                    assert!(
+                        why.contains("blank"),
+                        "the reason must name it blank: {why}"
+                    )
+                }
+                other => panic!("title {title:?}: expected the failure shape, got {other:?}"),
+            }
+
+            let kept: Vec<u8> = store
+                .conn
+                .query_row(
+                    "SELECT genesis_bytes FROM stoas WHERE stoa = ?1",
+                    rusqlite::params![address.as_bytes().as_slice()],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(
+                kept, bytes,
+                "title {title:?}: the row must not be rewritten"
+            );
+        }
     }
 
     #[test]

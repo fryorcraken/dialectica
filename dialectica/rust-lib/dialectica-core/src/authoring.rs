@@ -905,7 +905,10 @@ mod tests {
         // Byte-identical: the op is signed, so a second append that rewrote the
         // entry would be a signature that no longer verifies on the peer that
         // received the first.
-        assert_eq!(stored(&log, &first.id).to_bytes(), held.to_bytes());
+        assert_eq!(
+            stored(&log, &first.id).to_bytes().unwrap(),
+            held.to_bytes().unwrap()
+        );
     }
 
     #[test]
@@ -1472,14 +1475,17 @@ mod tests {
         let mut log = a_log();
 
         let published = post(&mut log, &by(&key), stoa, "unaffected".to_string()).unwrap();
-        let before_bytes = stored(&log, &published.id).to_bytes();
+        let before_bytes = stored(&log, &published.id).to_bytes().unwrap();
         let moderators = crate::moderation::Moderators::of(&genesis).unwrap();
         let before_row = crate::feed::list_threads(&log, &moderators, &stoa, 0, 20, false).unwrap();
 
         vote(&mut log, &by(&key), stoa, published.id, VoteDirection::Up).unwrap();
         vote(&mut log, &by(&key), stoa, published.id, VoteDirection::Down).unwrap();
 
-        assert_eq!(stored(&log, &published.id).to_bytes(), before_bytes);
+        assert_eq!(
+            stored(&log, &published.id).to_bytes().unwrap(),
+            before_bytes
+        );
         let after_row = crate::feed::list_threads(&log, &moderators, &stoa, 0, 20, false).unwrap();
         assert_eq!(
             before_row, after_row,
@@ -1660,8 +1666,8 @@ mod tests {
         );
         assert!(ours.verify(), "both must actually verify, not both fail");
         assert_eq!(
-            ours.to_bytes(),
-            theirs.to_bytes(),
+            ours.to_bytes().unwrap(),
+            theirs.to_bytes().unwrap(),
             "the published op and the hand-built one must be the same op, or the \
              comparison above compares two different things"
         );
@@ -2106,7 +2112,7 @@ mod tests {
         for body in bodies {
             let published = post(&mut log, &by(&key), stoa, body.to_string()).unwrap();
             let signed = stored(&log, &published.id);
-            let bytes = signed.to_bytes();
+            let bytes = signed.to_bytes().unwrap();
             let decoded = crate::op::SignedOp::from_bytes(&bytes)
                 .expect("an op this path published must decode again");
             assert_eq!(

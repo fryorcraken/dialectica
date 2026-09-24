@@ -105,16 +105,32 @@ TestCase {
     // call was NOT made. A screen that renders a preview without joining and a
     // screen that joins silently look identical from the outside; the difference
     // is entirely in what reached the bridge.
+    //
+    // A reply may be a FUNCTION of the request, for a test that needs different
+    // answers to different requests. A fake answering every request alike
+    // cannot tell "answered for this reference" from "still showing the last
+    // one", which is exactly the difference the lookup tests exist to see.
     function bridgeFor(replies) {
         return {
             calls: [],
             callModule: function (module, method, args) {
                 this.calls.push({ method: method, args: args })
-                if (replies[method] === undefined)
+                var reply = replies[method]
+                if (reply === undefined)
                     return '{"error":"no fake reply for ' + method + '"}'
-                return replies[method]
+                if (typeof reply === "function")
+                    return reply(JSON.parse(args[0]))
+                return reply
             }
         }
+    }
+
+    // A `get_stoa` success, as the core spells it.
+    function getStoaReply(stoa, isGenesisFallback, title, description) {
+        return JSON.stringify({
+            stoa: stoa, title: title, description: description,
+            policy: "open", isGenesisFallback: isGenesisFallback
+        })
     }
 
     function callsTo(bridge, method) {
@@ -1030,12 +1046,18 @@ TestCase {
         }, { stoaAddress: addr, stoaGenesis: "00ff", foundingTitle: "Nym Research" })
         var bridge = Core.bridge
 
-        // Rendered, and nothing called. This is the assertion the recording
+        // Rendered, and nothing JOINED. This is the assertion the recording
         // bridge exists for: a screen that previews and a screen that joins
         // silently are indistinguishable from the outside.
+        //
+        // It used to assert NO call at all. The preview now asks `getStoa`
+        // what the Stoa is called, which joins nothing, so the assertion is
+        // narrowed to the calls a preview may make rather than dropped.
         compare(screen.joinState, "previewing")
-        compare(bridge.calls.length, 0,
-                "rendering a preview must make NO core call whatever")
+        compare(spec.callsTo(bridge, "join_stoa"), 0,
+                "rendering a preview must make no join call")
+        compare(bridge.calls.length, spec.callsTo(bridge, "get_stoa"),
+                "and the only call it makes is the lookup")
 
         screen.join()
 
@@ -1303,12 +1325,16 @@ TestCase {
     function test_a_resolved_current_title_fills_that_position_when_one_exists() {
         // The panel arrives WITH the value. This is the forward half of the rule
         // above: the prohibition is on claiming, not on the layout.
-        var screen = makeJoin({}, {
-            stoaAddress: "aa".repeat(32),
-            stoaGenesis: "00ff",
-            foundingTitle: "Nym Research",
-            currentTitle: "Nym Research Archive"
-        })
+        //
+        // Driven through the two replies that produce this state, rather than
+        // through `createObject` props: a non-fallback lookup supplies the
+        // current title, and only a join supplies the founding one beside it.
+        var addr = "aa".repeat(32)
+        var screen = makeJoin({
+            "get_stoa": spec.getStoaReply(addr, false, "Nym Research Archive", ""),
+            "join_stoa": '{"stoa":"' + addr + '","foundingTitle":"Nym Research","policy":"open"}'
+        }, { stoaAddress: addr, stoaGenesis: "00ff" })
+        screen.join()
 
         var shown = spec.visibleText(screen)
         verify(shown.indexOf("Nym Research Archive") >= 0, "the resolved title must render")
@@ -1603,14 +1629,14 @@ TestCase {
 
     function test_a_preview_before_a_join_carries_no_founding_title_and_says_so() {
         // The constraint, pinned so nobody later reads the empty panel as a bug
-        // and fills it with something: NO core call answers a founding title for
-        // a reference this peer has not joined. `join_stoa` is the only one that
-        // returns a title for a given pair, and decoding the genesis record in
-        // QML would be a second implementation of core's encoding. See design.md
-        // constraint 4.
+        // and fills it with something. Before a join, `getStoa` answers a
+        // founding title only when it falls back. Here it answers a CURRENT
+        // title, so no founding title is available, and decoding the genesis
+        // record in QML would be a second implementation of core's encoding.
         var attacker = "b02d5e77" + "bb".repeat(28)
         Core.bridge = bridgeFor({
-            "list_stoas": '{"items":[],"page":0,"hasMore":false}'
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_stoa": spec.getStoaReply(attacker, false, "Renamed Since", "")
         })
         var view = mainComponent.createObject(null, {})
         var list = spec.namedAnywhere(view, "stoaList")[0]
@@ -1621,7 +1647,7 @@ TestCase {
         compare(view.screenShown, "join", "the real route reaches the preview")
 
         compare(join.foundingTitle, "",
-                "no call has answered a title for this reference, and none can")
+                "a non-fallback reply answers no founding title for this reference")
 
         // **The user-visible half, which is the finding.** A caption reading
         // FOUNDING TITLE — FIXED FOREVER above an empty value tells a reader the
@@ -1664,12 +1690,15 @@ TestCase {
         verify(/\bjoin(ing|ed)?\b/.test(low),
                "and name joining as what would supply it: " + notes[0].text)
         // The misinformation this must still catch, verified by planting it: a
-        // caption saying the title is blank, or that there is none. An empty
-        // founding title is a LEGAL value the list renders, so a preview saying
-        // "this Stoa has no title" states a fact about the Stoa that nothing
-        // here checked.
+        // caption saying the title is blank, or that there is none. A preview
+        // saying "this Stoa has no title" states a fact about the Stoa that
+        // nothing here checked.
         verify(!/\b(has no|carries no|without a) (founding )?title\b/.test(low),
                "the title is unknown here, not known to be absent: " + notes[0].text)
+        // And with a current title on screen, nothing may say that what the
+        // Stoa is called is unknown: the note's old heading did exactly that.
+        verify(spec.visibleText(join).toLowerCase().indexOf("knows what this stoa is called") < 0,
+               "a current title is known here, so what it is called is not unknown")
 
         // And the address — the half that IS trustworthy — is still on screen,
         // so what the preview shows is the thing worth deciding on.
@@ -1678,24 +1707,26 @@ TestCase {
     }
 
     function test_the_lookalike_warning_cannot_be_claimed_before_a_join_happens() {
-        // **The impersonation defence does not run at preview time, and the
-        // screen must not imply that it did.** A reader handed a second "Nym
-        // Research" sees no lookalike panel before joining — not because there is
-        // no lookalike, but because nothing here knows this reference's title.
+        // **Where no founding title is available, the impersonation defence
+        // does not run, and the screen must not imply that it did.** Before a
+        // join that is every reference `getStoa` does not answer as a fallback.
+        // Here it answers a CURRENT title equal to the held Stoa's founding
+        // title, which is the renamed-to-match case the owner ruled out of
+        // scope on #143: the comparison is over founding titles, so it still
+        // does not run.
         //
-        // Measured through the real paste route before the fix:
+        // Measured through the real paste route before a lookup existed:
         //   foundingTitle=<>  lookalikes=0  panel=0   with heldStoas=1
         //   after join():     foundingTitle=<Nym Research>  lookalikes=1  panel=1
         //
-        // So the warning existed and arrived one action too late. This test does
-        // not assert the panel appears early — it cannot, and design.md
-        // constraint 4 records why. It asserts the screen does not silently
-        // present an unrun check as a clean result.
+        // This test does not assert the panel appears early. It asserts the
+        // screen does not silently present an unrun check as a clean result.
         var held = "7f3a91c4" + "cc".repeat(28)
         var attacker = "b02d5e77" + "bb".repeat(28)
         Core.bridge = bridgeFor({
             "list_stoas": '{"items":[{"stoa":"' + held + '","foundingTitle":"Nym Research"}],'
                         + '"page":0,"hasMore":false}',
+            "get_stoa": spec.getStoaReply(attacker, false, "Nym Research", ""),
             "join_stoa": '{"stoa":"' + attacker + '","foundingTitle":"Nym Research",'
                        + '"policy":"open"}'
         })
@@ -1708,9 +1739,11 @@ TestCase {
 
         compare(join.heldStoas.length, 1,
                 "the listing IS available — the comparison's other half is there")
+        compare(join.currentTitle, "Nym Research",
+                "the lookup's current title IS on screen, and equals the held one")
         compare(join.lookalikes.length, 0,
-                "and the comparison still cannot run, because this reference has "
-                + "no title to compare")
+                "and the comparison still does not run, because a current title "
+                + "is not a founding title")
         compare(spec.visibleNamed(join, "lookalikePanel").length, 0)
 
         // The load-bearing assertion: the preview must state that the comparison
@@ -1768,6 +1801,452 @@ TestCase {
         screen.destroy()
     }
 
+    // ---- what the preview asks the core -----------------------------------
+    //
+    // Written by the implementer as the lookup was built; the tester owns the
+    // final suite. Each fake below answers from the REQUEST where the answer
+    // matters, so a screen showing a stale answer is distinguishable from one
+    // showing the right one.
+
+    // A join screen whose lookup is answered with `reply`, a get_stoa JSON
+    // string, for a fixed reference.
+    function previewAnswered(reply, extraProps) {
+        var props = { stoaAddress: "b02d5e77" + "ab".repeat(28), stoaGenesis: "00ff" }
+        if (extraProps !== undefined)
+            for (var k in extraProps)
+                props[k] = extraProps[k]
+        return makeJoin({ "get_stoa": reply }, props)
+    }
+
+    function test_previewing_a_reference_looks_it_up_with_what_a_join_would_send() {
+        var addr = "b02d5e77" + "12".repeat(28)
+        Core.bridge = bridgeFor({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_stoa": function (r) { return spec.getStoaReply(r.stoa, true, "Agora", "") },
+            "join_stoa": '{"stoa":"' + addr + '","foundingTitle":"Agora","policy":"open"}'
+        })
+        var bridge = Core.bridge
+        var view = mainComponent.createObject(null, {})
+        var list = spec.namedAnywhere(view, "stoaList")[0]
+        var join = spec.namedAnywhere(view, "joinScreen")[0]
+
+        // The display prefix, so "what a join would send" is not trivially the
+        // pasted string.
+        list.pasted = JSON.stringify({ stoa: "stoa:" + addr, genesis: "00ff" })
+        list.preview()
+
+        compare(spec.callsTo(bridge, "get_stoa"), 1, "looked up without the user acting")
+        compare(spec.callsTo(bridge, "join_stoa"), 0, "and joined nothing")
+
+        join.join()
+        var asked = JSON.parse(spec.lastArgsTo(bridge, "get_stoa")[0])
+        var joined = JSON.parse(spec.lastArgsTo(bridge, "join_stoa")[0])
+        compare(asked.stoa, joined.stoa, "the lookup carries the join's address")
+        compare(asked.genesis, joined.genesis, "and the join's record")
+        compare(asked.stoa, addr, "with no display prefix")
+        view.destroy()
+    }
+
+    function test_no_lookup_is_made_without_a_reference_or_for_a_malformed_paste() {
+        Core.bridge = bridgeFor({ "list_stoas": '{"items":[],"page":0,"hasMore":false}' })
+        var bridge = Core.bridge
+        var view = mainComponent.createObject(null, {})
+        compare(spec.callsTo(bridge, "get_stoa"), 0, "nothing is previewed at startup")
+
+        var list = spec.namedAnywhere(view, "stoaList")[0]
+        list.pasted = "stoa:b02d5e77a41c6b9013c6a9408ff4af23"
+        list.preview()
+        compare(spec.callsTo(bridge, "get_stoa"), 0, "a malformed paste looks nothing up")
+        view.destroy()
+    }
+
+    function test_a_fallback_title_fills_the_founding_position_and_says_no_moderator_title_is_held() {
+        var screen = previewAnswered(spec.getStoaReply("x", true, "Agora", ""))
+
+        compare(spec.visibleNamed(screen, "foundingTitlePanel").length, 1)
+        compare(spec.visibleNamed(screen, "foundingTitleText")[0].text, "Agora")
+        compare(spec.visibleNamed(screen, "currentTitlePanel").length, 0,
+                "a fallback title is not a current title")
+        compare(spec.visibleNamed(screen, "titleUnknownNote").length, 0,
+                "a founding title IS available here")
+
+        var notes = spec.visibleNamed(screen, "fallbackNote")
+        compare(notes.length, 1, "the fallback is stated, not only used to pick a panel")
+        var low = notes[0].text.toLowerCase()
+        verify(/\bmoderator\b/.test(low) && /\bno\b/.test(low),
+               "it says no moderator-set title is held here: " + notes[0].text)
+        // The word "not" may be modified by an adverb ("has definitely not
+        // been renamed"), so the earlier form of this check —
+        // `/\b(has not|hasn't|never) been renamed\b/` — is defeated by a
+        // single inserted word while still asserting exactly the false claim
+        // the requirement forbids. `\bnot\b[^.]{0,20}\brenamed\b` catches
+        // "not" and "renamed" within twenty characters of each other in
+        // EITHER order, which a synonym-only rewrite cannot dodge by
+        // rearranging or padding.
+        verify(!/\bnot\b[^.]{0,20}\brenamed\b/.test(low)
+               && !/\brenamed\b[^.]{0,20}\bnot\b/.test(low),
+               "and never that the Stoa has not been renamed, however phrased: "
+               + notes[0].text)
+        screen.destroy()
+    }
+
+    function test_a_non_fallback_title_fills_the_current_position_and_never_the_founding_one() {
+        var screen = previewAnswered(spec.getStoaReply("x", false, "Stoa Poikile", ""))
+
+        compare(spec.visibleNamed(screen, "currentTitleText")[0].text, "Stoa Poikile")
+        verify(spec.visibleText(screen).indexOf("CHOSEN BY A MODERATOR") >= 0,
+               "labelled as the moderator's")
+        compare(spec.visibleNamed(screen, "foundingTitlePanel").length, 0,
+                "a current title is never rendered as the founding one")
+        compare(spec.visibleNamed(screen, "fallbackNote").length, 0)
+        compare(spec.visibleNamed(screen, "titleUnknownNote").length, 1,
+                "no founding title is available, and the screen says so")
+        screen.destroy()
+    }
+
+    function test_a_description_is_rendered_only_from_a_non_fallback_reply_and_only_when_non_empty() {
+        var described = previewAnswered(spec.getStoaReply("x", false, "Stoa Poikile", "the painted porch"))
+        compare(spec.visibleNamed(described, "currentDescriptionText")[0].text, "the painted porch")
+        compare(spec.visibleNamed(described, "currentDescriptionCaption").length, 1)
+        described.destroy()
+
+        var empty = previewAnswered(spec.getStoaReply("x", false, "Stoa Poikile", ""))
+        compare(spec.visibleNamed(empty, "currentDescriptionCaption").length, 0,
+                "no caption over an empty description")
+        empty.destroy()
+
+        // A fallback reply carrying a description is not one the core sends; the
+        // view must still render none from it.
+        var fallback = previewAnswered(spec.getStoaReply("x", true, "Agora", "not a moderator's"))
+        verify(spec.visibleText(fallback).indexOf("not a moderator's") < 0,
+               "no description from a fallback reply")
+        fallback.destroy()
+    }
+
+    function test_a_refused_lookup_renders_the_cores_reason_and_withdraws_no_join() {
+        var addr = "b02d5e77" + "34".repeat(28)
+        var screen = makeJoin({
+            "get_stoa": '{"error":"the op log\'s storage could not be used: disk"}',
+            "join_stoa": '{"stoa":"' + addr + '","foundingTitle":"Agora","policy":"open"}'
+        }, { stoaAddress: addr, stoaGenesis: "00ff" })
+
+        var failures = spec.visibleNamed(screen, "lookupFailureText")
+        compare(failures.length, 1)
+        compare(failures[0].text, "the op log's storage could not be used: disk", "unreworded")
+        compare(spec.visibleNamed(screen, "foundingTitlePanel").length, 0)
+        compare(spec.visibleNamed(screen, "currentTitlePanel").length, 0)
+        compare(spec.visibleNamed(screen, "fallbackNote").length, 0,
+                "a failure is not a fallback")
+        compare(spec.visibleNamed(screen, "joinFailurePanel").length, 0,
+                "and not a refused join")
+        compare(spec.visibleNamed(screen, "joinButton").length, 1, "the join is still offered")
+
+        screen.join()
+        compare(screen.joinState, "joined", "and the join's own reply decides")
+        compare(spec.visibleNamed(screen, "joinedPanel").length, 1)
+        screen.destroy()
+    }
+
+    function test_a_misshapen_lookup_reply_is_a_failure_of_the_views_own() {
+        var shapes = [
+            '{"stoa":"x","title":"Agora","description":"","policy":"open"}',
+            '{"stoa":"x","title":"Agora","description":"","policy":"open","isGenesisFallback":"true"}',
+            '{"stoa":"x","title":7,"description":"","policy":"open","isGenesisFallback":true}',
+            '{"stoa":"x","title":"Agora","description":null,"policy":"open","isGenesisFallback":false}'
+        ]
+        for (var i = 0; i < shapes.length; i++) {
+            var screen = previewAnswered(shapes[i])
+            var failures = spec.visibleNamed(screen, "lookupFailureText")
+            compare(failures.length, 1, "shape " + i + " is a failure")
+            verify(failures[0].text.length > 0, "carrying a reason of the view's own")
+            compare(spec.visibleNamed(screen, "foundingTitlePanel").length, 0, "shape " + i)
+            compare(spec.visibleNamed(screen, "currentTitlePanel").length, 0, "shape " + i)
+            compare(spec.visibleNamed(screen, "joinButton").length, 1, "shape " + i)
+            screen.destroy()
+        }
+    }
+
+    function test_a_blank_looked_up_title_is_a_failure_naming_it_blank() {
+        var blanks = ["", " ​　"]
+        for (var i = 0; i < blanks.length; i++) {
+            for (var f = 0; f < 2; f++) {
+                var screen = previewAnswered(
+                    spec.getStoaReply("x", f === 0, blanks[i], "a description"))
+                var failures = spec.visibleNamed(screen, "lookupFailureText")
+                compare(failures.length, 1, "blank " + i + ", fallback " + (f === 0))
+                verify(/\bblank\b/.test(failures[0].text.toLowerCase()),
+                       "the reason names the title as blank: " + failures[0].text)
+                compare(spec.visibleNamed(screen, "foundingTitlePanel").length, 0)
+                compare(spec.visibleNamed(screen, "currentTitlePanel").length, 0)
+                compare(spec.visibleNamed(screen, "fallbackNote").length, 0)
+                verify(spec.visibleText(screen).indexOf("a description") < 0,
+                       "no description from that reply")
+                compare(spec.visibleNamed(screen, "titleUnknownNote").length, 1,
+                        "no founding title is available")
+                compare(spec.visibleNamed(screen, "joinButton").length, 1)
+                screen.destroy()
+            }
+        }
+    }
+
+    function test_the_views_blank_list_is_the_thirty_the_core_lists() {
+        // Hardcoded, not read back from `Core.blankCodeUnits`: an assertion
+        // against the list itself passes whatever it holds. The core's
+        // `the_blank_characters_are_exactly_the_thirty_the_spec_lists` pins the
+        // same values on the other side.
+        var listed = [
+            0x0009, 0x000A, 0x000B, 0x000C, 0x000D, 0x0020, 0x0085, 0x00A0,
+            0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006,
+            0x2007, 0x2008, 0x2009, 0x200A, 0x2028, 0x2029, 0x202F, 0x205F,
+            0x3000, 0x200B, 0x200C, 0x200D, 0x2060, 0xFEFF
+        ]
+        compare(Core.blankCodeUnits.length, 30)
+        for (var i = 0; i < listed.length; i++)
+            compare(Core.blankCodeUnits[i], listed[i], "code point " + i)
+
+        // Each alone, through the screen a user reads.
+        for (var j = 0; j < listed.length; j++) {
+            var screen = previewAnswered(
+                spec.getStoaReply("x", true, String.fromCharCode(listed[j]), ""))
+            compare(spec.visibleNamed(screen, "lookupFailureText").length, 1,
+                    "U+" + listed[j].toString(16) + " alone is blank")
+            compare(spec.visibleNamed(screen, "foundingTitlePanel").length, 0)
+            screen.destroy()
+        }
+
+        // And no wider: two characters that render as nothing and are NOT in
+        // the list.
+        var outside = ["‎", "᠎"]
+        for (var k = 0; k < outside.length; k++) {
+            var ok = previewAnswered(spec.getStoaReply("x", true, outside[k], ""))
+            compare(spec.visibleNamed(ok, "lookupFailureText").length, 0, "not blank: " + k)
+            compare(spec.visibleNamed(ok, "foundingTitleText")[0].text, outside[k])
+            ok.destroy()
+        }
+    }
+
+    function test_one_visible_letter_among_blank_characters_is_a_title() {
+        var title = " ​a　﻿"
+        var founding = previewAnswered(spec.getStoaReply("x", true, title, ""))
+        compare(spec.visibleNamed(founding, "lookupFailureText").length, 0)
+        compare(spec.visibleNamed(founding, "foundingTitleText")[0].text, title,
+                "rendered in the founding position, untrimmed")
+        founding.destroy()
+
+        var current = previewAnswered(spec.getStoaReply("x", false, title, ""))
+        compare(spec.visibleNamed(current, "lookupFailureText").length, 0)
+        compare(spec.visibleNamed(current, "currentTitleText")[0].text, title,
+                "rendered in the current position, untrimmed")
+        current.destroy()
+    }
+
+    function test_looked_up_text_is_not_interpreted_as_markup() {
+        var markup = "<b>Agora</b> &amp;"
+        var founding = previewAnswered(spec.getStoaReply("x", true, markup, ""))
+        compare(spec.visibleNamed(founding, "foundingTitleText")[0].textFormat, Text.PlainText)
+        founding.destroy()
+
+        var current = previewAnswered(spec.getStoaReply("x", false, markup, markup))
+        compare(spec.visibleNamed(current, "currentTitleText")[0].textFormat, Text.PlainText)
+        compare(spec.visibleNamed(current, "currentDescriptionText")[0].textFormat,
+                Text.PlainText)
+        current.destroy()
+    }
+
+    function test_a_second_reference_renders_nothing_from_the_first_lookup() {
+        var a = "aaaaaaaa" + "56".repeat(28)
+        var b = "bbbbbbbb" + "78".repeat(28)
+        // Answered FROM THE REQUEST: A falls back, B is refused. A fake giving
+        // one answer to both could not tell a stale title from a fresh one.
+        Core.bridge = bridgeFor({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_stoa": function (r) {
+                return r.stoa === a
+                    ? spec.getStoaReply(a, true, "Nym Research", "")
+                    : '{"error":"the genesis record does not hash to this address"}'
+            }
+        })
+        var bridge = Core.bridge
+        var view = mainComponent.createObject(null, {})
+        var join = spec.namedAnywhere(view, "joinScreen")[0]
+
+        view.previewing = { stoa: a, genesis: "00ff" }
+        compare(join.foundingTitle, "Nym Research", "A's lookup answered A")
+
+        view.previewing = { stoa: b, genesis: "00ff" }
+        compare(JSON.parse(spec.lastArgsTo(bridge, "get_stoa")[0]).stoa, b,
+                "B was looked up")
+        var body = spec.bodyText(join)
+        verify(body.indexOf("Nym Research") < 0, "A's title is not rendered for B: " + body)
+        compare(spec.visibleNamed(join, "fallbackNote").length, 0,
+                "nor A's fallback statement")
+        compare(spec.visibleNamed(join, "lookupFailureText").length, 1,
+                "B's own answer is what is shown")
+        view.destroy()
+    }
+
+    // **A state `Main.qml` does not produce, on purpose.** Through the shipped
+    // routes every reference on screen gets a fresh lookup synchronously, so a
+    // stale one is always overwritten before anything renders, and no
+    // Main-driven test can see the reference filter on `currentLookup`. Here the
+    // address moves while the record goes empty, so no lookup is made for the
+    // new pair and the old answer is still stored. Deleting the filter turns
+    // this test red and nothing else. It is kept because a later change that
+    // made lookups asynchronous would make the stale state reachable.
+    function test_a_lookup_answered_for_one_address_is_not_rendered_over_another() {
+        var screen = previewAnswered(spec.getStoaReply("x", true, "Nym Research", ""))
+        compare(screen.foundingTitle, "Nym Research", "the first reference's answer")
+
+        screen.stoaAddress = "cccccccc" + "01".repeat(28)
+        screen.stoaGenesis = ""
+        compare(screen.foundingTitle, "", "not rendered over another address")
+        compare(spec.visibleNamed(screen, "fallbackNote").length, 0)
+        screen.destroy()
+    }
+
+    // `stoa-navigation-view`'s "Joining shows what is being joined" requirement:
+    // "Where both a successful join reply and a fallback reply carry a founding
+    // title for the reference on screen, the join reply's is the one rendered."
+    // Neither existing test drives BOTH a non-blank fallback lookup AND a
+    // subsequent non-blank join reply for the SAME reference —
+    // `test_a_resolved_current_title_fills_that_position_when_one_exists` starts
+    // from a NON-fallback lookup (no founding title available before the join),
+    // and `test_a_blank_founding_title_from_a_join_is_not_a_founding_title` also
+    // starts from a non-fallback lookup. This is the precedence scenario itself.
+    function test_a_join_replys_founding_title_takes_the_place_of_a_fallback_replys() {
+        var addr = "b02d5e77" + "cd".repeat(28)
+        var screen = makeJoin({
+            "get_stoa": spec.getStoaReply(addr, true, "Agora", ""),
+            "join_stoa": JSON.stringify({
+                stoa: addr, foundingTitle: "Agora Renamed At Founding", policy: "open"
+            })
+        }, { stoaAddress: addr, stoaGenesis: "00ff" })
+
+        // Before the join: the fallback's title fills the founding position.
+        compare(screen.foundingTitle, "Agora", "the fallback fills the position first")
+
+        screen.join()
+
+        compare(screen.joinState, "joined")
+        compare(screen.foundingTitle, "Agora Renamed At Founding",
+                "the join reply's founding title takes the place of the fallback's")
+        compare(spec.visibleNamed(screen, "foundingTitleText")[0].text,
+                "Agora Renamed At Founding")
+        verify(spec.visibleText(screen).indexOf("Agora Renamed At Founding") >= 0)
+        // The fallback's own title must not still be on screen anywhere,
+        // which is what "the two MUST NOT both be rendered" requires.
+        verify(spec.bodyText(screen).indexOf("Agora") < 0 ||
+               spec.bodyText(screen).indexOf("Agora Renamed At Founding") >= 0,
+               "the fallback's bare title must not linger beside the join's")
+        screen.destroy()
+    }
+
+    // The other half of the same precedence rule: "A fallback reply's `title`
+    // MUST fill the founding-title position only while no successful join reply
+    // for that reference carries a founding title that is not blank." So when
+    // the join succeeds with a BLANK founding title, the fallback's earlier,
+    // non-blank title must stay rather than being cleared.
+    function test_a_fallback_replys_title_stays_when_the_join_replys_is_blank() {
+        var addr = "b02d5e77" + "ef".repeat(28)
+        var blanks = ["", " ​"]
+        for (var i = 0; i < blanks.length; i++) {
+            var screen = makeJoin({
+                "get_stoa": spec.getStoaReply(addr, true, "Nym Research", ""),
+                "join_stoa": JSON.stringify({ stoa: addr, foundingTitle: blanks[i], policy: "open" })
+            }, { stoaAddress: addr, stoaGenesis: "00ff" })
+
+            compare(screen.foundingTitle, "Nym Research", "the fallback fills it first")
+
+            screen.join()
+
+            compare(screen.joinState, "joined", "blank " + i + ": the join itself succeeded")
+            compare(screen.foundingTitle, "Nym Research",
+                    "blank " + i + ": the fallback's title stays when the join's is blank")
+            compare(spec.visibleNamed(screen, "foundingTitlePanel").length, 1,
+                    "blank " + i + ": the founding panel is still rendered")
+            compare(spec.visibleNamed(screen, "foundingTitleText")[0].text, "Nym Research")
+            compare(spec.visibleNamed(screen, "titleUnknownNote").length, 0,
+                    "blank " + i + ": a founding title IS available, from the fallback")
+            screen.destroy()
+        }
+    }
+
+    function test_a_blank_founding_title_from_a_join_is_not_a_founding_title() {
+        var addr = "b02d5e77" + "9a".repeat(28)
+        var blanks = ["", " ​"]
+        for (var i = 0; i < blanks.length; i++) {
+            var screen = makeJoin({
+                "get_stoa": spec.getStoaReply(addr, false, "Renamed", ""),
+                "join_stoa": JSON.stringify({ stoa: addr, foundingTitle: blanks[i], policy: "open" })
+            }, { stoaAddress: addr, stoaGenesis: "00ff" })
+            screen.join()
+
+            compare(screen.joinState, "joined", "the join itself succeeded")
+            compare(spec.visibleNamed(screen, "foundingTitlePanel").length, 0,
+                    "blank " + i + " is not rendered as a founding title")
+            var notes = spec.visibleNamed(screen, "titleUnknownText")
+            compare(notes.length, 1, "no founding title is available here")
+            verify(!/\bjoining is what would\b/.test(notes[0].text.toLowerCase()),
+                   "and the note no longer says joining would supply one: " + notes[0].text)
+            screen.destroy()
+        }
+    }
+
+    function test_a_blank_title_matches_no_held_stoa() {
+        var held = "7f3a91c4" + "bc".repeat(28)
+        var blanks = ["", " ​"]
+        for (var i = 0; i < blanks.length; i++) {
+            // A fallback lookup carrying the same blank title the held Stoa has.
+            var screen = previewAnswered(
+                spec.getStoaReply("x", true, blanks[i], ""),
+                { heldStoas: [{ stoa: held, foundingTitle: blanks[i] }] })
+
+            // The load-bearing assertion for the EMPTY case: `foundingTitle`
+            // is "" whether the normaliser's blank check ran and refused the
+            // lookup, or was deleted and let an empty-titled fallback through
+            // — an empty fallback title is ALSO "". Only the lookup's own `ok`
+            // flag tells the two apart, and only this assertion depends on it:
+            // deleting `Core.stoaMetadataFrom`'s blank check turns this
+            // green-either-way for blank "" without it.
+            compare(screen.currentLookup.ok, false,
+                    "blank " + i + " must be a FAILED lookup, not a fallback " +
+                    "whose title happens to be empty")
+
+            compare(screen.lookalikes.length, 0, "blank " + i + " matches nothing")
+            compare(spec.visibleNamed(screen, "lookalikePanel").length, 0)
+            compare(spec.visibleNamed(screen, "titleUnknownText").length, 1,
+                    "and the screen says the comparison has not been made")
+            screen.destroy()
+        }
+    }
+
+    function test_titles_among_blank_characters_are_compared_untrimmed() {
+        var held = "7f3a91c4" + "de".repeat(28)
+        var title = " ​a　"
+        var same = previewAnswered(spec.getStoaReply("x", true, title, ""),
+                                   { heldStoas: [{ stoa: held, foundingTitle: title }] })
+        compare(same.lookalikes.length, 1, "the same four characters match")
+        same.destroy()
+
+        var trimmed = previewAnswered(spec.getStoaReply("x", true, title, ""),
+                                      { heldStoas: [{ stoa: held, foundingTitle: "a" }] })
+        compare(trimmed.lookalikes.length, 0, "and `a` alone does not: nothing is trimmed")
+        trimmed.destroy()
+    }
+
+    function test_a_fallback_title_runs_the_lookalike_comparison_before_a_join() {
+        // The comparison is late only where no founding title is available. A
+        // fallback reply makes one available at preview time, so the warning
+        // arrives before the decision it exists to inform.
+        var held = "7f3a91c4" + "ef".repeat(28)
+        var screen = previewAnswered(spec.getStoaReply("x", true, "Nym Research", ""),
+                                     { heldStoas: [{ stoa: held, foundingTitle: "Nym Research" }] })
+        compare(screen.joinState, "previewing", "nothing has been joined")
+        compare(screen.lookalikes.length, 1)
+        compare(spec.visibleNamed(screen, "lookalikePanel").length, 1)
+        screen.destroy()
+    }
+
     // ---- creation ---------------------------------------------------------
 
     // Every creation test below is in the key-held state, because that is the
@@ -1820,23 +2299,40 @@ TestCase {
         screen.destroy()
     }
 
-    function test_an_empty_title_reaches_the_core_rather_than_being_refused_here() {
-        var addr = "ee".repeat(32)
-        var screen = makeList({
-            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
-            "get_master_key": spec.heldKeyReply(aKeyHex(), false),
-            "create_stoa": '{"stoa":"' + addr + '","foundingTitle":"","policy":"open"}'
-        })
-        var bridge = Core.bridge
-        screen.createTitle = ""
-        screen.create()
+    function test_every_blank_title_reaches_the_core_rather_than_being_refused_here() {
+        // The core refuses a blank title and the view does not: the core is the
+        // one place titles are judged, and a second check here would be a second
+        // copy of the blank list that could drift from it. So the call is MADE,
+        // carrying exactly what was typed, and the core's refusal is rendered.
+        //
+        // The fake's refusal names the title it was sent, so an assertion that
+        // the reason is on screen also shows it was this request's reason.
+        var refusal = function (request) {
+            return JSON.stringify({ error: "title: title is blank <" + request.title + ">" })
+        }
+        var typed = ["", "   ", "​　"]
+        for (var i = 0; i < typed.length; i++) {
+            var screen = makeList({
+                "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+                "get_master_key": spec.heldKeyReply(aKeyHex(), false),
+                "create_stoa": refusal
+            })
+            var bridge = Core.bridge
+            screen.createTitle = typed[i]
+            screen.create()
 
-        compare(spec.callsTo(bridge, "create_stoa"), 1,
-                "the create call must be MADE — the reply decides, not a check here")
-        compare(screen.createState, "created")
-        verify(String(spec.lastArgsTo(bridge, "create_stoa")).indexOf('"title":""') >= 0,
-               "and the empty title must be what was sent")
-        screen.destroy()
+            compare(spec.callsTo(bridge, "create_stoa"), 1,
+                    "the create call must be MADE — the reply decides, not a check here")
+            compare(JSON.parse(spec.lastArgsTo(bridge, "create_stoa")[0]).title, typed[i],
+                    "and the title sent is exactly what was typed")
+            compare(screen.createState, "failed")
+            compare(screen.created, null, "nothing may be reported as created")
+            verify(spec.visibleText(screen).indexOf("title is blank <" + typed[i] + ">") >= 0,
+                   "the core's reason, unreworded")
+            compare(spec.visibleNamed(screen, "createdAddress").length, 0,
+                    "and no address is rendered as a Stoa just created")
+            screen.destroy()
+        }
     }
 
     function test_the_created_address_is_rendered() {
@@ -3522,10 +4018,13 @@ TestCase {
     }
 
     function test_the_placeholder_is_never_submitted_as_a_title() {
+        // The empty title is blank, and `stoa-membership` refuses a blank title,
+        // so the core answers with the error shape. A fixture answering success
+        // here would encode a reply the core may not give.
         var screen = makeList({
             "list_stoas": '{"items":[],"page":0,"hasMore":false}',
             "get_master_key": spec.heldKeyReply(aKeyHex(), false),
-            "create_stoa": '{"stoa":"' + "ee".repeat(32) + '","foundingTitle":"","policy":"open"}'
+            "create_stoa": '{"error":"title: title is blank"}'
         })
         var bridge = Core.bridge
         spec.visibleNamed(screen, "createStoaButton")[0].clicked()
@@ -3533,6 +4032,9 @@ TestCase {
         var sent = String(spec.lastArgsTo(bridge, "create_stoa"))
         verify(sent.indexOf('"title":""') >= 0, "the empty string was sent: " + sent)
         verify(sent.indexOf("Title of the new Stoa") < 0, "not the placeholder: " + sent)
+        compare(screen.created, null, "no Stoa may be reported as created")
+        compare(spec.visibleNamed(screen, "createdAddress").length, 0,
+                "and no address is rendered as a Stoa just created")
         screen.destroy()
     }
 
