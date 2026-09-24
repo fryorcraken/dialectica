@@ -113,49 +113,6 @@ merging a pair.
 - **THEN** the route taken is decided from answers received in this run
 - **AND** no value the view retained from a previous run decides it
 
-### Requirement: Onboarding is entered from the navigator and returns to it
-
-The view MUST offer a route from the state that reports a missing or unusable
-identity to the screen where one is acquired, and MUST return the user from that
-screen to the screen they can act on once an identity has been kept.
-
-**The screen itself selects no successor, and MUST NOT be given one to select.**
-Whoever routed to it decides what happens next, because the screen cannot know
-which of several callers sent it there. What the screen emits is that a keep
-occurred; it carries no identity, and the navigator MUST re-ask the module who
-the user is rather than treating that signal as the answer. A signal reporting a
-keep says an operation completed, not what the store now holds.
-
-**The return MUST NOT be conditional on the keep having succeeded.** A user who
-reached the screen and decided against acquiring a key, or whose keep failed,
-is in a state they entered and MUST be able to leave. A route out offered only
-on success is a route absent in exactly the cases where the user is stuck.
-
-#### Scenario: A missing identity offers the route to acquiring one
-
-- **WHEN** the routing state reports that no usable identity exists
-- **THEN** an affordance reaching the screen where one is acquired is offered
-- **AND** acting on it renders that screen
-
-#### Scenario: A kept identity returns the user to where they can act
-
-- **WHEN** the screen reports that an identity was kept
-- **THEN** the user is returned to a screen from which they can act
-- **AND** the identity shown there is taken from a fresh answer to the identity
-  report, not from the keep signal
-
-#### Scenario: The screen can be left without keeping anything
-
-- **WHEN** the screen is rendered and no identity has been kept
-- **THEN** an affordance returning to the previous screen is offered
-- **AND** acting on it makes no keep call
-
-#### Scenario: A failed keep still leaves a way out
-
-- **WHEN** a keep comes back as a refusal, and when it comes back as a failure
-- **THEN** in each case an affordance returning to the previous screen is still
-  offered
-
 ### Requirement: A thread is opened from a feed row and can be left
 
 A row of a Stoa's feed MUST be able to open the thread it heads, and a user who
@@ -370,3 +327,49 @@ says only that the answer has not arrived.
 - **WHEN** a screen is rendered and no value the chrome reports has yet been
   supplied
 - **THEN** the chrome is rendered
+
+### Requirement: Acquiring an identity is reached from the navigator
+
+The view MUST offer a route from the state that reports a missing identity to the
+place where one is acquired.
+
+**In this release that place is the Stoa list, where this machine's key is
+created**, because the identity in use in every Stoa is the machine key
+(`identity`: *In this release one machine key is the identity in every Stoa*).
+Acting on the route MUST render the Stoa list. What the list shows is
+`stoa-navigation-view`'s, and nothing here specifies it.
+
+**Following the route MUST NOT itself reach the module.** Creating the key is an
+action the user takes on the list; the route MUST NOT create a key, request a
+slate, or keep a candidate on the user's behalf.
+
+**The per-Stoa onboarding screen MUST NOT be reachable in this release.** The view
+MUST NOT instantiate it, and its registration MUST carry the record that it is
+deliberately uninstantiated, with a reason, which *Every registered screen type
+is reachable, or is recorded as deliberately unreachable* requires of a type
+nothing instantiates. Per-Stoa identity, which that screen acquires, is out of
+scope for this release.
+
+Once a key exists, the identity a Stoa's feed shows is taken from a fresh answer
+to the identity report, as *Identity routing reads both probes, and neither answer
+is cached* already requires; nothing about the route carries an identity back.
+
+#### Scenario: A missing identity offers the route to acquiring one
+
+- **WHEN** the routing state reports that no identity exists
+- **THEN** an affordance reaching the place where one is acquired is offered
+- **AND** acting on it renders the Stoa list
+
+#### Scenario: Following the route asks the module for nothing
+
+- **WHEN** the affordance leading to acquiring an identity is acted on
+- **THEN** no key-creation call, no slate call and no keep call reaches the bridge
+
+#### Scenario: The per-Stoa onboarding screen is instantiated nowhere
+
+- **WHEN** the view's registrations and the sources its root reaches are read
+  together
+- **THEN** the per-Stoa onboarding screen is instantiated nowhere the view's root
+  reaches
+- **AND** its registration carries the record that it is deliberately
+  uninstantiated, with a reason

@@ -64,11 +64,11 @@ spelled as.
 - **AND** no request carries a further field, so none names a public key, a
   derivation path or any other value as the identity to act as
 
-### Requirement: An identity is what participation needs, and this screen is where one is made
+### Requirement: An identity is what participation needs, and this screen is withheld in this release
 
-An identity SHALL be required before a user posts, replies or votes in a Stoa,
-and SHALL NOT be required to reach the list of Stoas, to look one up by address,
-or to read one. This screen is the view's only route to acquiring one.
+An identity MUST be required before a user posts, replies or votes in a Stoa,
+and MUST NOT be required to reach the list of Stoas, to look one up by address,
+or to read one.
 
 **Identity gates participation inside a Stoa — not launch, and not browsing.** A
 peer holding no identity reaches their Stoas, pastes an address, and reads what
@@ -77,40 +77,46 @@ demand a permanent, unchangeable choice from a user who has not yet seen
 anything to decide it against, and would make a first run impossible to complete
 for a peer whose keystore cannot be read at all.
 
-**Where that gate is enforced, and the affordance leading out of it, are not
-this capability's.** `composer-view` owns both: it requires the compose, reply
-and vote affordances to be rendered only when the posting probe says posting is
-possible, requires a closed gate to show the probe's reason verbatim, and
-requires an affordance leading to guidance on resolving the blockage. Restating
-any of that here would put two live requirements on one behaviour, which is how
-they come to contradict each other — this capability had a requirement describing
-a launch branch for exactly that reason, and the branch it described was removed
-rather than built.
+**In this release the identity is this machine's key, the same in every Stoa, and
+it is acquired on the Stoa list — not on this screen.** This screen acquires a
+per-Stoa identity, which is out of scope for this release, so the view does not
+instantiate it; `view-navigation` owns the route and the record that the screen
+is deliberately uninstantiated. Every other requirement of this capability
+describes the screen itself, and continues to hold of it as a component: it stays
+built for the release that restores per-Stoa identity.
+
+**The affordance leading a user to acquire an identity MUST NOT present that
+identity as one chosen for a single Stoa.** In this release there is no such
+choice, and the key a user creates signs in every Stoa.
+
+**Where the posting gate is enforced, and the guidance offered from a closed
+gate, are not this capability's.** `composer-view` owns both: it requires the
+compose, reply and vote affordances to be rendered only when the posting probe
+says posting is possible, requires a closed gate to show the probe's reason
+verbatim, and requires an affordance leading to guidance on resolving the
+blockage. Restating any of that here would put two live requirements on one
+behaviour.
 
 What this capability owns is the screen itself and the one signal by which a
 keep becomes known outside it. When a keep reports that a candidate was kept,
-the screen SHALL announce that fact, and SHALL announce it on no other outcome.
-That signal is the whole of this screen's outward contract: whoever navigated
-here decides what happens next, and the screen SHALL NOT navigate anywhere
+the screen MUST announce that fact, and MUST announce it on no other outcome.
+That signal is the whole of this screen's outward contract: whoever navigates
+here decides what happens next, and the screen MUST NOT navigate anywhere
 itself. A screen that chose its own successor would have to know which of
 several callers routed to it, which it cannot.
 
-**Neither the route into this screen nor the route back out is built, and this
-capability does not yet contract either.** Nothing instantiates the screen today
-— it is a registered type with no caller — so a requirement that it be reachable,
-or that it offer a way out, would describe behaviour no test on this piece could
-discharge. Both belong to whichever change wires the banner's fix affordance to
-this screen, and that change is where **`stoa-navigation-view`'s "Every state a
-user can enter has a specified way out"** applies: arriving somewhere is half a
-transition, and this screen currently has neither half. It is named here rather
-than left silent so the gap reads as scoped rather than as an oversight.
-
-The screen SHALL take what it reports about stored state from the module's
-replies alone, and SHALL NOT report an identity from any value it stored itself
+The screen MUST take what it reports about stored state from the module's
+replies alone, and MUST NOT report an identity from any value it stored itself
 on a previous run. A remembered "this user has onboarded" outlives the thing it
 remembers: a keystore that was deleted, moved, or is unreadable leaves the flag
 set while the store it stands for is gone. The module is the only party that can
 see the store, so it is the only party that can answer.
+
+#### Scenario: The affordance to acquire an identity is not a per-Stoa choice
+
+- **WHEN** a Stoa's feed reports that no identity exists
+- **THEN** the affordance leading to acquiring one is offered
+- **AND** no text on that affordance names a Stoa as what the identity is for
 
 #### Scenario: A kept candidate is announced
 
