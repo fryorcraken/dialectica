@@ -3140,6 +3140,48 @@ mod tests {
     }
 
     #[test]
+    fn a_reply_carrying_a_lower_counter_than_the_reply_it_answers_comes_before_it() {
+        // `thread-read`: "WHEN a thread holds a reply, and an answer to it
+        // carrying a lower counter than the reply it answers, and is read THEN
+        // the answer comes before the reply it answers AND the replies are the
+        // exact reverse of the rule's sequence, with no reply moved after its
+        // parent."
+        //
+        // No test elsewhere in this module or `design.md`'s task list pins this
+        // scenario — it is the one the amended spec added and the dev-writer's
+        // own list did not cover.
+        //
+        // `design.md`'s Risks names how this arises for real: an answer's
+        // counter can come out LOWER than the reply it answers when the
+        // answered reply's counter was over `op-ordering`'s advance bound and
+        // never raised the answering peer's clock. `thread.rs` takes counters
+        // as given and performs no comparison of its own, so the fixture states
+        // the counters directly rather than reaching for `arrival`'s clock
+        // arithmetic — the read cannot tell the two paths apart, and is not
+        // supposed to.
+        //
+        // This is the mirror image of `a_reply_orders_after_the_reply_it_answers`,
+        // with the counters running the other way: there the answer's counter is
+        // the higher one and it lands after its parent; here it is the lower one
+        // and the spec forbids moving it after its parent anyway.
+        let root = a_root_at(2, "root", 1);
+        let answered = a_reply_at(3, &root, "a reply with a high counter", 50, A_TIME);
+        let answer = a_reply_at(4, &answered, "an answer with a lower counter", 2, A_TIME);
+        let log = a_log(vec![root.clone(), answered.clone(), answer.clone()]);
+
+        assert_eq!(
+            ids_of(&read(&log, &root, false)),
+            vec![
+                root.op.id().to_hex(),
+                answer.op.id().to_hex(),
+                answered.op.id().to_hex(),
+            ],
+            "the answer comes BEFORE the reply it answers: reversing the rule's \
+             sequence does not restore a causal order the counters do not give"
+        );
+    }
+
+    #[test]
     fn the_lowest_counter_leads_the_replies_and_the_highest_ends_them() {
         // Siblings rather than a chain, so the order cannot be explained by
         // parentage: only the counters separate them. Counters are distinct and
