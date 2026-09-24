@@ -52,22 +52,30 @@
 //! # No comparison is written here
 //!
 //! [`OpLog::iter_stoa`] already returns entries in
-//! [`cmp_ops`](crate::arrival::cmp_ops) order, and this module filters and pages
-//! that sequence. There is no `sort`, no `cmp` and no `max_by` — the same
-//! discipline [`crate::revision`], [`crate::moderation`] and [`crate::feed`]
-//! hold, and for the same reason: a second implementation of the ordering rule
-//! could disagree with the first, and two orders that disagree produce no error
-//! anywhere.
+//! [`cmp_ops`](crate::arrival::cmp_ops) order, and this module walks that
+//! sequence **backwards**, filters it and pages it. Backwards because the rule
+//! places the higher counter first and a thread reads oldest first (#147). A
+//! reply therefore comes after the reply it answers **only where its counter is
+//! the greater**; where it is not — a counter-less reply, or an answer to a
+//! reply whose counter was over [`crate::arrival::ADVANCE_BOUND`] and so never
+//! advanced the answerer's clock — the reversed sequence stands and the reply
+//! comes first. `thread-read` forbids moving it after its parent, and doing so
+//! would need exactly the comparison this module does not make. There is no
+//! `sort`, no `cmp` and no `max_by` — the same discipline [`crate::revision`],
+//! [`crate::moderation`] and [`crate::feed`] hold, and for the same reason: a
+//! second implementation of the ordering rule could disagree with the first,
+//! and two orders that disagree produce no error anywhere.
 //!
 //! **What that order guarantees is convergence, not recency** — and a Lamport
 //! counter reaching every op this build publishes does not change that. The
 //! counter is **causal, not temporal**: it says its author had seen something at
 //! N, never *when*, so two counters five apart are not five of anything apart.
 //! Among ops carrying none — the population predating the clock fields —
-//! `cmp_ops` falls back to ascending op id, a hash carrying no temporal meaning
-//! at all. Two peers holding the same ops return the same sequence; neither can
-//! say which reply was written first. Nothing in this module may be reported to a
-//! caller as chronological.
+//! `cmp_ops` falls back to ascending op id, so this read returns them in
+//! DESCENDING op id, a hash carrying no temporal meaning at all. Two peers
+//! holding the same ops return the same sequence; neither can say which reply
+//! was written first. Nothing in this module may be reported to a caller as
+//! chronological.
 //!
 //! The op's wall-clock does not rescue that and must not be reached for: it is
 //! the author's own assertion, display-only, and it reaches a caller only as
@@ -530,7 +538,9 @@ pub struct ReadOptions {
 ///    gates producing three messages**, each gate carrying its own reason at the
 ///    line that makes it. `design.md` §4 tabulates which gate maps to which
 ///    message and why.
-/// 2. Ops in this Stoa, already in [`cmp_ops`](crate::arrival::cmp_ops) order.
+/// 2. Ops in this Stoa, already in [`cmp_ops`](crate::arrival::cmp_ops) order,
+///    walked **in reverse**, so the replies come oldest first — the one the rule
+///    places last leads. Reversed, never re-sorted: see the loop.
 /// 3. Keep the ops that are **authentic** — the log holds junk deliberately
 ///    (§3.3) and the reader never trusts it.
 /// 4. Keep the `Post`s whose **parent chain** reaches this root. Never the ones
@@ -669,7 +679,22 @@ pub fn read_thread<L: OpLog>(
 
     let mut items = Vec::new();
 
-    for entry in log.iter_stoa(stoa)? {
+    // THE REPLY ORDER IS DECIDED HERE, by walking the rule's sequence backwards.
+    //
+    // `cmp_ops` places the higher counter first — newest first — and `thread-read`
+    // wants the replies oldest first, so they are the rule's sequence REVERSED
+    // (#147). A reply lands after the reply it answers only where its counter is
+    // the greater; where it is not, it lands before, and nothing here moves it —
+    // the spec forbids that, and see the module header. Reversed rather than
+    // re-sorted: this read compares no value itself, so it cannot become a
+    // second implementation of the rule that disagrees with the first. A re-sort
+    // by ascending counter would — on equal counters and on counter-less ops,
+    // where the rule's tiebreaks are not symmetric. `design.md`
+    // (thread-reply-order) records which tests say so.
+    //
+    // Nothing below depends on the walk's direction except where each reply
+    // lands: membership, moderation and the root's placement are per-entry.
+    for entry in log.iter_stoa(stoa)?.into_iter().rev() {
         // Authenticity first, before any field of the op is read — including the
         // `parent` the chain walk is about to follow.
         if !entry.op.verify() {
@@ -894,28 +919,52 @@ mod tests {
     /// A reply whose `thread` field is the HONEST one: derived from its parent
     /// exactly as `authoring::reply` derives it.
     fn a_reply(author_seed: u8, parent: &SignedOp, body: &str) -> SignedOp {
-        // The honest derivation: the parent's own thread when it has one, the
-        // parent's id when it does not. Spelled here rather than called from
-        // `authoring`, because these fixtures must be able to LIE about it and a
-        // fixture that could only tell the truth cannot build the attack.
-        let thread = match &parent.op.kind {
-            OpKind::Post { thread, .. } => thread.unwrap_or(parent.op.id()),
-            _ => parent.op.id(),
-        };
         a_post_in(
             a_stoa(),
             author_seed,
-            Some(thread),
+            Some(the_honest_thread_under(parent)),
             Some(parent.op.id()),
             body,
         )
     }
 
+    /// The thread an honest author names for a reply to `parent`: the parent's
+    /// own thread when it has one, the parent's id when it does not.
+    ///
+    /// Spelled here rather than called from `authoring`, because these fixtures
+    /// must be able to LIE about it and a fixture that could only tell the truth
+    /// cannot build the attack.
+    fn the_honest_thread_under(parent: &SignedOp) -> OpId {
+        match &parent.op.kind {
+            OpKind::Post { thread, .. } => thread.unwrap_or(parent.op.id()),
+            _ => parent.op.id(),
+        }
+    }
+
     /// A post with every field chosen, so a fixture can name a thread its parent
-    /// does not belong to.
+    /// does not belong to. No clock: the population predating the clock fields.
     fn a_post_in(
         stoa: Address,
         author_seed: u8,
+        thread: Option<OpId>,
+        parent: Option<OpId>,
+        body: &str,
+    ) -> SignedOp {
+        a_signed_post(stoa, author_seed, None, thread, parent, body)
+    }
+
+    /// THE builder for a genuinely-signed, attachment-free `Post` fixture.
+    /// `a_post_in`, `a_reply_at` and `a_root_at` are each this with some fields
+    /// fixed, so a new variant is another thin wrapper rather than another
+    /// `Op { .. }`.
+    ///
+    /// Two `Post`s are built without it, each because it needs what this cannot
+    /// express: `a_forged_post`, whose author and signer differ, and
+    /// `attachments_are_sanitised_too`, whose subject is an attachment.
+    fn a_signed_post(
+        stoa: Address,
+        author_seed: u8,
+        clock: Option<crate::op::OpClock>,
         thread: Option<OpId>,
         parent: Option<OpId>,
         body: &str,
@@ -924,7 +973,7 @@ mod tests {
         Op {
             stoa,
             author: key.public_key(),
-            clock: None,
+            clock,
             kind: OpKind::Post {
                 thread,
                 parent,
@@ -2882,10 +2931,11 @@ mod tests {
         );
         assert_eq!(page.items.len(), 5);
 
-        // And the replies keep the log's relative order — this module sorts
-        // nothing.
+        // And the replies come in the EXACT REVERSE of the log's relative order
+        // — this module sorts nothing, it walks the rule's sequence backwards.
         let replies_from_log: Vec<String> = log_order
             .iter()
+            .rev()
             .filter(|id| **id != root.op.id().to_hex())
             .cloned()
             .collect();
@@ -2929,69 +2979,83 @@ mod tests {
         counter: u64,
         asserted_ms: u64,
     ) -> SignedOp {
-        let key = a_key(author_seed);
-        let thread = match &parent.op.kind {
-            OpKind::Post { thread, .. } => thread.unwrap_or(parent.op.id()),
-            _ => parent.op.id(),
-        };
-        Op {
-            stoa: a_stoa(),
-            author: key.public_key(),
-            clock: Some(crate::op::OpClock {
+        a_signed_post(
+            a_stoa(),
+            author_seed,
+            Some(crate::op::OpClock {
                 counter,
                 asserted_ms,
             }),
-            kind: OpKind::Post {
-                thread: Some(thread),
-                parent: Some(parent.op.id()),
-                body: body.to_string(),
-                attachments: vec![],
-            },
-        }
-        .sign(&key)
+            Some(the_honest_thread_under(parent)),
+            Some(parent.op.id()),
+            body,
+        )
     }
 
     #[test]
     fn the_sequence_follows_the_counters_and_not_the_asserted_times() {
         // `thread-read`: "WHEN a thread's replies carry asserted times that
         // disagree with the order their counters give THEN the returned sequence
-        // is the one the counters give AND the asserted times did not affect it."
+        // is the one this requirement derives from the counters AND the asserted
+        // times did not affect it."
         //
-        // **The fixture is built so the two rules give OPPOSITE answers**, which
-        // is the whole of it. Counters run 3/2/1 and the order is descending, so
-        // the counter rule yields `late`, `middle`, `early`. The asserted times
-        // run the other way: the counter-3 reply claims the EARLIEST instant and
-        // the counter-1 reply the latest, so a sequence ordered by asserted time
-        // — ascending or descending — is a sequence this assertion rejects.
+        // **The fixture is built so the counter order differs from BOTH time
+        // orders**, which is the whole of it. The times are deliberately NOT
+        // monotone against the counters: a fixture whose times run exactly
+        // opposite to its counters makes the counter answer equal to one of the
+        // two time orders, so the assertion could not tell "by counter" from "by
+        // time" in that direction. This test had that defect before #147 — its
+        // counter answer WAS ascending time — and reversing the reply order would
+        // merely have moved it to descending time.
         //
-        // Ascending by time would be `late`(2024), `middle`(2025), `early`(2026)
-        // reversed — i.e. `early`, `middle`, `late`; descending by time gives
-        // `early`, `middle`, `late` reversed. Either way the counter answer
-        // `late, middle, early` distinguishes it, because the names deliberately
-        // describe the CLAIMED time rather than the position.
+        //   counter 1 claims 2025, counter 2 claims 2026, counter 3 claims 2024
+        //
+        //   by counter (this read, lowest first): middle, latest, earliest
+        //   by ascending time:                    earliest, middle, latest
+        //   by descending time:                   latest, middle, earliest
+        //
+        // Three different sequences, so the assertion below refuses both time
+        // orders. The names describe the CLAIMED time rather than the position.
         //
         // Three distinct instants, each verified against `date -u`:
         //   1_735_689_600_000 ms = 2025-01-01T00:00:00Z
         //   1_704_067_200_000 ms = 2024-01-01T00:00:00Z
         //   1_767_225_600_000 ms = 2026-01-01T00:00:00Z
         let root = a_root(2, "root");
+        let claims_middle = a_reply_at(4, &root, "reply B", 1, 1_735_689_600_000);
+        let claims_latest = a_reply_at(5, &root, "reply C", 2, 1_767_225_600_000);
         // counter 3, but claims 2024 — the earliest time on the highest counter.
         let claims_earliest = a_reply_at(3, &root, "reply A", 3, 1_704_067_200_000);
-        let claims_middle = a_reply_at(4, &root, "reply B", 2, 1_735_689_600_000);
-        // counter 1, but claims 2026 — the latest time on the lowest counter.
-        let claims_latest = a_reply_at(5, &root, "reply C", 1, 1_767_225_600_000);
 
-        // The fixture must really disagree, or this test passes for the reason
-        // every fixture in this file used to: both rules agreeing.
-        assert!(
-            claims_earliest.op.clock.unwrap().counter > claims_latest.op.clock.unwrap().counter,
-            "the highest counter must belong to the earliest claimed time"
+        let counter_order = vec![
+            root.op.id().to_hex(),
+            claims_middle.op.id().to_hex(),
+            claims_latest.op.id().to_hex(),
+            claims_earliest.op.id().to_hex(),
+        ];
+        // The fixture must really disagree with both time orders, or this test
+        // passes for the reason every fixture in this file used to: two rules
+        // agreeing. Stated against the ids so an edit to the counters or times
+        // above that collapses the distinction fails HERE, by name.
+        let ascending_time = vec![
+            root.op.id().to_hex(),
+            claims_earliest.op.id().to_hex(),
+            claims_middle.op.id().to_hex(),
+            claims_latest.op.id().to_hex(),
+        ];
+        let descending_time = vec![
+            root.op.id().to_hex(),
+            claims_latest.op.id().to_hex(),
+            claims_middle.op.id().to_hex(),
+            claims_earliest.op.id().to_hex(),
+        ];
+        assert_ne!(
+            counter_order, ascending_time,
+            "the fixture measures nothing"
         );
-        assert!(
-            claims_earliest.op.clock.unwrap().asserted_ms
-                < claims_latest.op.clock.unwrap().asserted_ms,
-            "and its claimed time must be the earliest, or the two rules agree \
-             and this test measures nothing"
+        assert_ne!(
+            counter_order, descending_time,
+            "the fixture measures nothing"
         );
 
         let log = a_log(vec![
@@ -3004,14 +3068,8 @@ mod tests {
 
         assert_eq!(
             ids_of(&page),
-            vec![
-                root.op.id().to_hex(),
-                claims_earliest.op.id().to_hex(),
-                claims_middle.op.id().to_hex(),
-                claims_latest.op.id().to_hex(),
-            ],
-            "descending counter decides, so the reply claiming the EARLIEST time \
-             leads and the one claiming the latest is last"
+            counter_order,
+            "lowest counter first decides, whatever time each reply claims"
         );
 
         // And the times really did reach the surface, so the assertion above is
@@ -3030,13 +3088,218 @@ mod tests {
         assert_eq!(
             times,
             vec![
-                "2024-01-01T00:00:00Z",
                 "2025-01-01T00:00:00Z",
-                "2026-01-01T00:00:00Z"
+                "2026-01-01T00:00:00Z",
+                "2024-01-01T00:00:00Z"
             ],
-            "the rendered times run FORWARD down the page while the sequence runs \
-             by counter — the visible consequence the spec calls correct"
+            "the rendered times run out of order down the page while the sequence \
+             runs by counter — the visible consequence the spec calls correct"
         );
+    }
+
+    /// A root carrying a counter, so a fixture can put the ROOT on the clock too
+    /// and show its placement does not depend on where the counter puts it.
+    fn a_root_at(author_seed: u8, body: &str, counter: u64) -> SignedOp {
+        a_signed_post(
+            a_stoa(),
+            author_seed,
+            Some(crate::op::OpClock {
+                counter,
+                asserted_ms: A_TIME,
+            }),
+            None,
+            None,
+            body,
+        )
+    }
+
+    #[test]
+    fn a_reply_orders_after_the_reply_it_answers() {
+        // `thread-read`: "WHEN one peer publishes a reply carrying a counter, a
+        // second receives it, the first reply's counter advances the second
+        // peer's clock, and the second publishes a reply to it carrying a
+        // counter THEN the second orders after the first."
+        //
+        // The fixture #147 was measured with: root at counter 1, a reply at 2,
+        // a reply to THAT reply at 3. A received counter within the advance
+        // bound raises the receiver's clock to it, so the answering reply's
+        // counter is the higher one — which is why the counters here run with
+        // the causal chain. Where they do not, the answer comes FIRST; that is
+        // a separate scenario.
+        //
+        // **It fails against newest-first**, the order this read returned before
+        // #147: the ordering rule places counter 3 first, so the rule's own
+        // sequence is `[root, answer, answered]`, and this asserts the reverse.
+        let root = a_root_at(2, "root", 1);
+        let answered = a_reply_at(3, &root, "the first reply", 2, A_TIME);
+        let answer = a_reply_at(4, &answered, "a reply to the first", 3, A_TIME);
+        // Appended answer-first, so the log's insertion sequence agrees with the
+        // defect and not with the fix: a read that followed insertion would fail.
+        let log = a_log(vec![answer.clone(), answered.clone(), root.clone()]);
+
+        assert_eq!(
+            ids_of(&read(&log, &root, false)),
+            vec![
+                root.op.id().to_hex(),
+                answered.op.id().to_hex(),
+                answer.op.id().to_hex(),
+            ],
+            "the reply answering another must come AFTER it"
+        );
+    }
+
+    #[test]
+    fn a_reply_carrying_a_lower_counter_than_the_reply_it_answers_comes_before_it() {
+        // `thread-read`: "WHEN a thread holds a reply, and an answer to it
+        // carrying a lower counter than the reply it answers, and is read THEN
+        // the answer comes before the reply it answers AND the replies are the
+        // exact reverse of the rule's sequence, with no reply moved after its
+        // parent."
+        //
+        // No test elsewhere in this module or `design.md`'s task list pins this
+        // scenario — it is the one the amended spec added and the dev-writer's
+        // own list did not cover.
+        //
+        // `design.md`'s Risks names how this arises for real: an answer's
+        // counter can come out LOWER than the reply it answers when the
+        // answered reply's counter was over `op-ordering`'s advance bound and
+        // never raised the answering peer's clock. `thread.rs` takes counters
+        // as given and performs no comparison of its own, so the fixture states
+        // the counters directly rather than reaching for `arrival`'s clock
+        // arithmetic — the read cannot tell the two paths apart, and is not
+        // supposed to.
+        //
+        // This is the mirror image of `a_reply_orders_after_the_reply_it_answers`,
+        // with the counters running the other way: there the answer's counter is
+        // the higher one and it lands after its parent; here it is the lower one
+        // and the spec forbids moving it after its parent anyway.
+        let root = a_root_at(2, "root", 1);
+        let answered = a_reply_at(3, &root, "a reply with a high counter", 50, A_TIME);
+        let answer = a_reply_at(4, &answered, "an answer with a lower counter", 2, A_TIME);
+        let log = a_log(vec![root.clone(), answered.clone(), answer.clone()]);
+
+        assert_eq!(
+            ids_of(&read(&log, &root, false)),
+            vec![
+                root.op.id().to_hex(),
+                answer.op.id().to_hex(),
+                answered.op.id().to_hex(),
+            ],
+            "the answer comes BEFORE the reply it answers: reversing the rule's \
+             sequence does not restore a causal order the counters do not give"
+        );
+    }
+
+    #[test]
+    fn the_lowest_counter_leads_the_replies_and_the_highest_ends_them() {
+        // Siblings rather than a chain, so the order cannot be explained by
+        // parentage: only the counters separate them. Counters are distinct and
+        // NOT contiguous, and appended in neither ascending nor descending order,
+        // so neither insertion order nor its reverse matches the answer.
+        let root = a_root(2, "root");
+        let low = a_reply_at(3, &root, "low", 4, A_TIME);
+        let mid = a_reply_at(4, &root, "mid", 5, A_TIME);
+        let high = a_reply_at(5, &root, "high", 7, A_TIME);
+        let log = a_log(vec![mid.clone(), root.clone(), high.clone(), low.clone()]);
+
+        let page = read(&log, &root, false);
+        assert_eq!(
+            ids_of(&page),
+            vec![
+                root.op.id().to_hex(),
+                low.op.id().to_hex(),
+                mid.op.id().to_hex(),
+                high.op.id().to_hex(),
+            ],
+            "lowest counter first, highest last"
+        );
+
+        // And that is NOT the rule's own sequence, which leads with the highest.
+        // Read from the log rather than restated, so this holds the fixture to
+        // the claim "the two orders differ here" instead of assuming it.
+        let rule: Vec<String> = log
+            .iter_stoa(&a_stoa())
+            .unwrap()
+            .iter()
+            .map(|e| e.id().to_hex())
+            .filter(|id| *id != root.op.id().to_hex())
+            .collect();
+        assert_eq!(rule[0], high.op.id().to_hex());
+        assert_ne!(ids_of(&page)[1..].to_vec(), rule);
+    }
+
+    #[test]
+    fn replies_with_equal_counters_are_reversed_rather_than_re_sorted() {
+        // The case a re-sort by ASCENDING counter gets wrong: it would keep the
+        // rule's ascending-op-id tiebreak and put the LOWER id first. Reversing
+        // the rule's sequence puts the higher id first, and the spec says so.
+        let root = a_root(2, "root");
+        let one = a_reply_at(3, &root, "one", 5, A_TIME);
+        let two = a_reply_at(4, &root, "two", 5, A_TIME);
+        let (higher, lower) = if one.op.id() > two.op.id() {
+            (one.clone(), two.clone())
+        } else {
+            (two.clone(), one.clone())
+        };
+        assert_ne!(higher.op.id(), lower.op.id(), "two distinct ops");
+        let log = a_log(vec![root.clone(), lower.clone(), higher.clone()]);
+
+        assert_eq!(
+            ids_of(&read(&log, &root, false)),
+            vec![
+                root.op.id().to_hex(),
+                higher.op.id().to_hex(),
+                lower.op.id().to_hex(),
+            ],
+            "equal counters come in DESCENDING op id — the rule's tiebreak reversed"
+        );
+    }
+
+    #[test]
+    fn a_reply_carrying_no_counter_precedes_the_replies_that_carry_one() {
+        // The other case an ascending-counter re-sort gets wrong. The rule places
+        // counter-less ops after every counted one, so its reverse places them
+        // BEFORE — and among themselves in descending op id.
+        //
+        // Run once with a counter-less root and once with a counted one, because
+        // the scenario says "whether or not it carries a counter": a counted root
+        // carrying a counter LOWER than every reply is the arrangement where a
+        // read that stopped pinning the root would put it after the counter-less
+        // replies.
+        for (what, root) in [
+            ("a root carrying no counter", a_root(2, "root")),
+            ("a root carrying a counter", a_root_at(2, "root", 1)),
+        ] {
+            let bare_a = a_reply(3, &root, "bare a");
+            let bare_b = a_reply(4, &root, "bare b");
+            let counted_low = a_reply_at(5, &root, "counted low", 2, A_TIME);
+            let counted_high = a_reply_at(6, &root, "counted high", 3, A_TIME);
+            let (bare_hi, bare_lo) = if bare_a.op.id() > bare_b.op.id() {
+                (bare_a.clone(), bare_b.clone())
+            } else {
+                (bare_b.clone(), bare_a.clone())
+            };
+            let log = a_log(vec![
+                counted_high.clone(),
+                bare_lo.clone(),
+                root.clone(),
+                counted_low.clone(),
+                bare_hi.clone(),
+            ]);
+
+            assert_eq!(
+                ids_of(&read(&log, &root, false)),
+                vec![
+                    root.op.id().to_hex(),
+                    bare_hi.op.id().to_hex(),
+                    bare_lo.op.id().to_hex(),
+                    counted_low.op.id().to_hex(),
+                    counted_high.op.id().to_hex(),
+                ],
+                "{what}: the root first, then the counter-less replies in \
+                 descending op id, then the counted ones lowest counter first"
+            );
+        }
     }
 
     #[test]
@@ -3293,8 +3556,9 @@ mod tests {
         // where the parent is always present — so none of them can tell "reports
         // the parent always" from "reports the parent when it is on the page".
         //
-        // The page boundary is CHOSEN from the order rather than assumed: the
-        // convergent order is ascending op id and carries no temporal meaning, so
+        // The page boundary is CHOSEN from the order rather than assumed: these
+        // replies carry no counter, so their order is descending op id and carries
+        // no temporal meaning, so
         // which reply lands where is not something to guess. This finds an item
         // whose parent precedes it in the whole-thread sequence and then cuts the
         // page between the two, which is the only arrangement that exercises the
