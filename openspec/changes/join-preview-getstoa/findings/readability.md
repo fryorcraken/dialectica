@@ -36,9 +36,26 @@ against the actual tests added in `op.rs`, `stoa_metadata.rs` and
       width, wording unchanged. No test can see a doc comment's wrap; the
       evidence is the diff itself.
 
-- [ ] **`tester`** — `dialectica-ui/tests/tst_stoa_screens.qml` — `test_an_empty_title_reaches_the_core_rather_than_being_refused_here` now iterates three blank titles, not one
+- [x] **`tester`** — `dialectica-ui/tests/tst_stoa_screens.qml` — `test_an_empty_title_reaches_the_core_rather_than_being_refused_here` now iterates three blank titles, not one
       **Scenario:** the test body loops `var typed = ["", "   ", "​　"]` (empty, whitespace-only, zero-width-only), but the name still says "an empty title" singular. The claim the name makes ("reaches the core rather than being refused here") is still true of the body, so this is not a false claim — but a reader scanning test names for "what covers the whitespace-only case" would not find it under this one, since the name reads as the single-empty-string test it used to be before this change widened its scope.
       **Severity:** minor. Renaming to something like `test_every_blank_title_reaches_the_core_rather_than_being_refused_here` would remove the ambiguity; not blocking.
+
+      **Fixed.** Renamed to `test_every_blank_title_reaches_the_core_rather_than_being_refused_here`
+      exactly as suggested — no other file cited the old name (`git grep -n -F`
+      across the tree found it only in this findings file and in an
+      already-archived `openspec/changes/archive/2026-09-13-ui-stoa-list/tasks.md`,
+      which is historical record and left untouched). Confirmed the test still
+      fails for the reason its new name claims: mutated `DStoaListScreen.qml`'s
+      `create()` to send `screen.createTitle.trim()` instead of
+      `screen.createTitle` (implementation code, reverted after). Predicted the
+      loop's second iteration (`"   "`, whitespace-only) would fail the "title
+      sent is exactly what was typed" assertion once trimmed to `""`; observed
+      exactly that — the renamed test failed at `tst_stoa_screens.qml:2286` with
+      `Actual: "", Expected: "   "`, and every other one of the 105 other tests in
+      the file still passed. Reverted the mutation; `git diff --stat` afterward
+      shows only the test file changed (1 insertion, 1 deletion), confirming the
+      implementation is untouched. Full spec file: 106/106 passed after restore.
+      Full QML suite (25 spec files): all passed, 0 failed.
 
 ## Areas checked and found clean
 

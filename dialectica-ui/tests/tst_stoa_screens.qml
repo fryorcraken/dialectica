@@ -2260,7 +2260,7 @@ TestCase {
         screen.destroy()
     }
 
-    function test_an_empty_title_reaches_the_core_rather_than_being_refused_here() {
+    function test_every_blank_title_reaches_the_core_rather_than_being_refused_here() {
         // The core refuses a blank title and the view does not: the core is the
         // one place titles are judged, and a second check here would be a second
         // copy of the blank list that could drift from it. So the call is MADE,
