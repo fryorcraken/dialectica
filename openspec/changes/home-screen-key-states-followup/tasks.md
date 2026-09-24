@@ -8,7 +8,10 @@
       `.openspec.yaml` declares `skip_specs: true` alongside `schema:`, and
       `proposal.md` gives the reason for each finding.
 - [x] design + code — `dev-writer`
-- [ ] tests — `tester`
+- [ ] ~~tests — `tester`~~ — **no separate tester pass.** Both findings are
+      test changes, made by the `dev-writer`, and each changed test was proved
+      to fail under a restored mutation (M1–M4, S1–S3 in `findings/` and
+      `design.md`). No new behaviour was added for a tester to cover.
 - [x] review: correctness — `code-reviewer`
 - [x] review: security — `code-reviewer`
 - [x] review: readability — `code-reviewer`
