@@ -3508,7 +3508,7 @@ TestCase {
         screen.destroy()
     }
 
-    function test_no_key_state_raises_identity() {
+    function test_none_of_the_key_states_claim_identity() {
         // **The key blocks must not say "identity" to do their job.** This
         // screen is banned from that word by
         // `test_neither_the_list_nor_the_creation_outcome_claims_moderation_or_

@@ -43,7 +43,7 @@ and are not covered here.
 
 ## Findings
 
-- [ ] **`dev-writer`** — `dialectica-ui/tests/tst_stoa_screens.qml:3511` —
+- [x] **`dev-writer`** — `dialectica-ui/tests/tst_stoa_screens.qml:3511` —
       `test_no_key_state_raises_identity` is named backwards from what it
       asserts and undersells its own scope
       **Scenario:** the function name has no negation in it, so it reads as
@@ -76,6 +76,13 @@ and are not covered here.
       qmltestrunner::StoaScreens::test_no_key_state_raises_identity()`,
       116/116 passed). This is purely a scan-and-trust-the-name hazard, not a
       functional defect.
+      **Fixed** in the commit that ticks this box: renamed to
+      `test_none_of_the_key_states_claim_identity`, the reviewer's suggestion —
+      an explicit negative, and "the key states" rather than "no key state"
+      since the loop covers all three. Body unchanged; nothing else named the
+      old function (`git grep -F test_no_key_state_raises_identity` finds only
+      this file). A rename changes no assertion, so there is no failing-first
+      test to show; `tst_stoa_screens.qml` runs 116/116 under the new name.
 
 ## Areas checked and clean
 
