@@ -10,14 +10,18 @@ now requires "Create a Stoa" to be absent while this machine holds no key.
 `identity-onboarding`'s "Whether this peer holds a master key is reportable
 without creating one" turns the guess into an answer the core gives. The other
 half is unchanged: a title and nothing else, the core's reason on a refusal, and
-an empty title passed through.
+a blank title passed through to the core as typed, in the form
+`join-preview-getstoa` gave that rule.
 
 **Migration**: Replaced by "Creating a Stoa asks for a title and nothing else,
 and is offered only once the core reports a key", added below. It carries the
-title-only rule, the core's-reason rule and the empty-title rule over unchanged,
-and replaces "always offered" with "offered in the key-held state and not
-instantiated in any other". Tests that assert the create affordance is present
-with no key held assert the removed behaviour and must be inverted.
+title-only rule, the core's-reason rule and the blank-title rule over unchanged,
+blank-title scenarios included, and replaces "always offered" with "offered in
+the key-held state and not instantiated in any other". Tests that assert the
+create affordance is present with no key held assert the removed behaviour and
+must be inverted. Tests that assert a Stoa is reported as created for an empty
+title assert a rule `join-preview-getstoa` had already replaced, and must answer
+the creation with the core's refusal instead.
 
 ## ADDED Requirements
 
@@ -39,8 +43,13 @@ Where creation fails for want of a usable key, the screen MUST render the reason
 the core gave, unreworded. A key can be reported as held and still be unusable
 when creation is attempted, so this path stays reachable in the key-held state.
 
-An **empty title MUST be accepted** by the field and passed through rather than
-refused.
+A **blank title MUST be passed through to the core** by the field, exactly as
+typed, rather than refused or altered by the view, and the core's reply MUST
+decide the outcome. Blank is what `stoa-genesis`'s requirement "A blank title is
+not a valid title" defines: the empty string, or a string made only of the blank
+characters it lists. `stoa-membership` refuses a blank title, so the screen MUST
+NOT report a Stoa as created for one, and MUST render the reason the core gave,
+unreworded.
 
 #### Scenario: The create affordance offers a title and no key
 
@@ -77,6 +86,22 @@ refused.
 - **WHEN** the user creates a Stoa with an empty title
 - **THEN** the create call is made
 - **AND** the reply decides the outcome rather than a check in the view
+
+#### Scenario: A title made only of blank characters reaches the core as typed
+
+- **WHEN** the user creates a Stoa with a title of three U+0020 spaces, and again
+  with the title U+200B U+3000
+- **THEN** in each case the create call is made
+- **AND** the title it carries is exactly what was typed
+- **AND** the reply decides the outcome rather than a check in the view
+
+#### Scenario: A creation refused for a blank title renders the core's reason
+
+- **WHEN** the user creates a Stoa with an empty title, and again with a title of
+  three U+0020 spaces, and the core answers with the error shape
+- **THEN** the screen renders the reason the core gave
+- **AND** it does not report a Stoa as created
+- **AND** no address is rendered as that of a Stoa just created
 
 ### Requirement: The home screen's key state is one value, taken from the core's answer in this run
 
@@ -447,8 +472,11 @@ it is in renders the element they belong to:
 | row open action | `Open` |
 
 The create title field's placeholder MUST be rendered only while the field is
-empty, and MUST NOT be submitted as a title. A Stoa created from an empty field
-is created with the empty title.
+empty, and MUST NOT be submitted as a title. Acting on the create action while
+the field is empty MUST send the empty string as the title. The empty title is
+blank, so the outcome is the core's refusal, rendered as "Creating a Stoa asks
+for a title and nothing else, and is offered only once the core reports a key"
+requires for a blank title.
 
 #### Scenario: The no-key state renders its copy verbatim
 
@@ -479,5 +507,8 @@ is created with the empty title.
 
 #### Scenario: The placeholder is never submitted as a title
 
-- **WHEN** the user acts on the create action with the title field empty
+- **WHEN** the user acts on the create action with the title field empty, and
+  the core answers with the error shape
 - **THEN** the title sent to the core is the empty string
+- **AND** it does not carry the placeholder's text
+- **AND** the screen does not report a Stoa as created

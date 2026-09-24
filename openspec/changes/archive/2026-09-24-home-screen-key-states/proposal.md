@@ -66,7 +66,7 @@ first without a read-only answer from the core. So this change adds one.
   and the placeholder "Title of the new Stoa".
 - **BREAKING (view contract):** `stoa-navigation-view`'s "Creating a Stoa asks
   for a title and nothing else, and is always offered" is removed and replaced.
-  Its title-only, empty-title and core's-reason rules carry over. "Always
+  Its title-only, blank-title and core's-reason rules carry over. "Always
   offered" and its scenario "The affordance is offered when no key exists" are
   reversed.
 
@@ -99,6 +99,19 @@ key already belongs to `identity-onboarding`.
   Requirements are added for the three key states, what each draws and does not
   instantiate, the key line, the re-read on each showing and on the
   could-not-be-read state's read-again action, and the verbatim copy.
+
+  The replacement's blank-title rule is `join-preview-getstoa`'s (#154), not the
+  one this change was written against. #154 merged to `main` after this change
+  was archived and MODIFIED the requirement this change removes: an empty title
+  stopped being a valid title, a blank title is passed through to the core as
+  typed, the core refuses it, and the screen renders the core's reason and
+  reports no Stoa as created. The replacement carries that rule and #154's two
+  blank-title scenarios unchanged. The copy requirement no longer says a Stoa
+  created from an empty field is created with the empty title, which
+  `stoa-membership` now forbids. It says the empty string is sent and the core's
+  refusal is what follows. The key gating is untouched. The delta is recorded
+  here so that the live text is accounted for by a change and is not a hand
+  edit.
 - `view-navigation`: *Acquiring an identity is reached from the navigator* is
   modified, and nothing it forbids is relaxed. It said following the route "MUST
   NOT itself reach the module". Once the route lands on a list that asks the
@@ -128,7 +141,9 @@ key already belongs to `identity-onboarding`.
   which asserts the "already had a key" message this change removes; and
   `test_the_identity_step_is_offered_even_when_the_membership_cannot_be_read`,
   which drives a fixture with no answer to the new query. Every fixture
-  building the screen needs one now. `test_no_identity_probe_is_made_before_the_user_asks`
+  building the screen needs one now. Any test whose `create_stoa` fixture
+  answers success for an empty title encodes a reply `stoa-membership` forbids
+  since #154, and must answer with the core's refusal. `test_no_identity_probe_is_made_before_the_user_asks`
   stays valid: it forbids `who_am_i`, `get_capabilities` and `create_identity`
   on arrival, and the new query is none of them.
 - **Archive order:** `first-run-identity` is complete but not yet archived, and
