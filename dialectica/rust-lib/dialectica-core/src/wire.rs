@@ -2380,9 +2380,9 @@ fn policy_name(policy: crate::stoa::Policy) -> &'static str {
 ///
 /// **By this handler's own `genesis.address()` call**, which is
 /// `stoa_address(&self.canonical_bytes()?)` — fallible for a title over the genesis
-/// cap and for a blank one. It returns `{"error":"title: …"}` below, before the store is reached at
-/// all, which is what makes "a failed creation leaves nothing behind" structural
-/// rather than a rule to remember.
+/// cap and for a blank one. It returns `{"error":"title: …"}` below, before the
+/// store is reached at all, which is what makes "a failed creation leaves nothing
+/// behind" structural rather than a rule to remember.
 ///
 /// This used to credit `MembershipStore::join`'s encode-before-write ordering, and
 /// that was false: `join` is never reached for an over-long title, and its refusal

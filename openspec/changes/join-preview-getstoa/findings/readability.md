@@ -27,9 +27,14 @@ against the actual tests added in `op.rs`, `stoa_metadata.rs` and
 
 ## Findings
 
-- [ ] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/wire.rs:2363` — a doc-comment line runs to 100 characters, wider than the ~85-character wrap the surrounding paragraph and the rest of the file use
+- [x] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/wire.rs:2363` — a doc-comment line runs to 100 characters, wider than the ~85-character wrap the surrounding paragraph and the rest of the file use
       **Scenario:** the line `/// cap and for a blank one. It returns `{"error":"title: …"}` below, before the store is reached at` was widened when "and for a blank one" was inserted into the existing sentence, and the wrap was not redone — every neighbouring line in the same doc comment (2359–2380) sits at 70–90 characters. Cosmetic only: `cargo fmt` does not reflow doc comments, so this survives the fmt gate untouched and needs a human edit.
       **Severity:** trivial (style only, no reader is misled).
+      **Fixed** in the commit that ticks this box: the paragraph in
+      `create_stoa`'s doc comment (at `wire.rs:2381-2385` once the piece is
+      rebased onto #153) is rewrapped so every line sits within the file's
+      width, wording unchanged. No test can see a doc comment's wrap; the
+      evidence is the diff itself.
 
 - [ ] **`tester`** — `dialectica-ui/tests/tst_stoa_screens.qml` — `test_an_empty_title_reaches_the_core_rather_than_being_refused_here` now iterates three blank titles, not one
       **Scenario:** the test body loops `var typed = ["", "   ", "​　"]` (empty, whitespace-only, zero-width-only), but the name still says "an empty title" singular. The claim the name makes ("reaches the core rather than being refused here") is still true of the body, so this is not a false claim — but a reader scanning test names for "what covers the whitespace-only case" would not find it under this one, since the name reads as the single-empty-string test it used to be before this change widened its scope.
