@@ -5669,6 +5669,71 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_keep_that_cannot_remove_the_master_key_it_stored_says_so() {
+        // `identity-onboarding`, "A failed keep that cannot remove the master key
+        // it stored says so". Forcing this through the real `keep_identity` path
+        // needs a filesystem race (something holding the just-written keystore
+        // file open, or a permissions change between the two writes) that no
+        // fixture here can win reliably — so this calls
+        // `undo_a_keystore_this_keep_wrote` directly, the one function that
+        // decides this reply, exactly as the finding that asked for this test
+        // suggested.
+        //
+        // A directory in place of the keystore path makes `std::fs::remove_file`
+        // fail deterministically (a directory is never removable as a file),
+        // with `wrote_it: true` — the state the code is in immediately after
+        // `keep_selection` wrote a fresh master key and the record write then
+        // failed.
+        let dir = OnboardingDir::new("undo-cannot-remove-master-key");
+        let keystore_path = dir.0.join("a-directory-standing-in-for-the-keystore-file");
+        std::fs::create_dir(&keystore_path).expect("the fixture directory is creatable");
+
+        let record_failure =
+            crate::identity_store::IdentityStoreError::Storage("boom".to_string());
+        // Independent of the code under test: `Display` for `Storage` never
+        // mentions a master key (see `identity_store.rs`), so a reason naming one
+        // could only have come from the removal-failure branch.
+        let bare_record_failure_reason = record_failure.to_string();
+        assert!(
+            !bare_record_failure_reason.contains("master key"),
+            "fixture is broken: the bare record failure must not already talk \
+             about a master key, or this test cannot tell the two branches \
+             apart: {bare_record_failure_reason}"
+        );
+
+        let out = undo_a_keystore_this_keep_wrote(&keystore_path, true, record_failure);
+
+        let reason = match out {
+            Kept::Refused { reason } => reason,
+            Kept::Stored { .. } => {
+                panic!("a keep that could not undo its own write must be refused")
+            }
+        };
+
+        // The spec: "the reason differs from the reason the same failure gives
+        // when the master key is removed" — that bare reason is exactly
+        // `record_failure`'s own message.
+        assert_ne!(
+            reason, bare_record_failure_reason,
+            "a failed keep that could not remove the master key it stored must \
+             not say the same thing as a failed keep that could"
+        );
+        // The spec: "the reason MUST state that a master key was left stored".
+        assert!(
+            reason.contains("master key"),
+            "the reason does not name what was left behind: {reason}"
+        );
+
+        // And the directory fixture must actually have driven the removal
+        // failure this test is about, not something upstream of it.
+        assert!(
+            keystore_path.is_dir(),
+            "the fixture directory is gone — this test no longer exercises a \
+             removal storage refuses"
+        );
+    }
+
+    #[test]
     fn each_keep_refusal_reason_is_pinned_to_its_own_situation() {
         // `the_second_keep_refusal_is_distinguishable_from_other_failures`
         // asserts that two reasons DIFFER without pinning either, and its

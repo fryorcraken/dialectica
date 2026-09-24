@@ -96,7 +96,7 @@ hash-moved, or position-only-pinned shapes named in the review brief).
       "Set up an identity" passing the suite is the intended outcome, not a
       gap. No spec change; no work for `tester` or `dev-writer`.
 
-- [ ] **`spec-writer`** / **`tester`** — `dialectica/rust-lib/dialectica-core/src/wire.rs:695` (marked `NO SPEC`, inside `undo_a_keystore_this_keep_wrote`, added by design.md D8)
+- [x] **`spec-writer`** / **`tester`** — `dialectica/rust-lib/dialectica-core/src/wire.rs:695` (marked `NO SPEC`, inside `undo_a_keystore_this_keep_wrote`, added by design.md D8)
       What a keep reports when its own undo — removing the master key that
       same keep just wrote, after the *record* write failed — itself fails to
       remove the file is unspecified, and unlike its sibling branches (pinned
@@ -148,6 +148,48 @@ hash-moved, or position-only-pinned shapes named in the review brief).
       function's docstring, which quoted "no master key that were not there
       before" unqualified, now carries the requirement's exception too. No
       code changed.
+
+      **Outcome (`tester` half): fixed.** New test
+      `wire::tests::a_failed_keep_that_cannot_remove_the_master_key_it_stored_says_so`,
+      calling `undo_a_keystore_this_keep_wrote` directly as this box's own text
+      suggested — a directory in place of the keystore path makes
+      `std::fs::remove_file` fail deterministically, with `wrote_it: true`, no
+      filesystem race needed. It asserts the relation the scenario requires
+      rather than a literal: the returned reason is `assert_ne!` against the
+      bare `record_failure.to_string()` (independently confirmed, before the
+      call under test runs, to not already contain "master key" — the `Storage`
+      arm's `Display` never does — so a pass cannot be explained by the fixture
+      alone), and separately `assert!(reason.contains("master key"))` for the
+      "states a master key was left stored" half. `Kept::Stored` is a
+      `panic!`, not an unreachable branch, so a regression that started
+      reporting success would fail loudly rather than mismatch a field.
+
+      **Mutation, predicted vs. observed:** replaced the `if let Err(e) =
+      std::fs::remove_file(...) { return Kept::Refused { reason: <augmented> }
+      }` block with `let _ = std::fs::remove_file(keystore_path);` (swallowing
+      the removal failure, falling through to the bare
+      `Kept::Refused { reason: record_failure.to_string() }` every sibling
+      branch already returns). Predicted: the new test fails on the
+      `assert_ne!`, because both sides become the identical bare message.
+      Observed: exactly that —
+      `cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p
+      dialectica-core
+      a_failed_keep_that_cannot_remove_the_master_key_it_stored_says_so` failed
+      with `assertion `left != right` failed` and `left`/`right` both equal to
+      `"the identity record could not be read or written: boom; check the path
+      and its containing directory"`. Prediction and observation agree.
+      Reverted immediately after; `git diff --stat` against the commit this
+      run started from shows only `wire.rs`, and the diff is exactly the new
+      test (no implementation line touched) — confirmed with `git diff` and
+      `git status --short` before committing.
+
+      Full suite green after restoring: `cargo test --manifest-path
+      dialectica/rust-lib/Cargo.toml -p dialectica -p dialectica-core` — 1095
+      passed in `dialectica-core`'s lib tests (including the new one), 30 in
+      `end_to_end`, 0 failed anywhere.
+
+      No permission-classifier refusal was hit for this mutation — the Edit
+      tool applied and reverted it without a block.
 
 Everything else in scope — the RENAMED/MODIFIED requirement pairs, the
 `identity-onboarding` REMOVED-then-replaced route in `view-navigation` (a
