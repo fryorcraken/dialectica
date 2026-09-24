@@ -5461,6 +5461,78 @@ mod tests {
     }
 
     #[test]
+    fn creating_a_master_key_while_one_is_held_does_not_replace_the_identity_in_use() {
+        // `identity`: "Creating a master key while one is held does not replace
+        // the identity in use". This is a DIFFERENT check from the test above.
+        // That test pins the mint's own reply and the file's bytes; this one pins
+        // what the requirement actually promises — the identity as the user sees
+        // it (the report) and the identity as peers see it (a signed op) — and it
+        // is not satisfiable by the same mutation. design.md Decision 4: deleting
+        // `mint_master_key`'s `keystore_path.exists()` guard ALONE does not
+        // replace the key, because `Keystore::create`'s `AlreadyExists` refusal
+        // sits underneath it and turns the second mint into the error shape — the
+        // test above already pins that. To prove THIS test red, the mint must be
+        // made to WRITE a fresh root over the held one (design.md: have the
+        // `exists()` branch generate a fresh keystore and call `write_to`, which
+        // replaces a file by design).
+        //
+        // The opener reads the FILE (`Keystore::open`), not a fixture returning a
+        // constant. `|| Ok(a_master_key())` would report the same fixed key
+        // whatever is on disk, and this test would be unable to tell "replaced"
+        // from "not replaced" — the fixture trap design.md warns the tester about.
+        let dir = OnboardingDir::new("mint-while-held-identity-unchanged");
+        let open = || Keystore::open(&dir.keystore_path(), &Unlock::Unencrypted);
+
+        // A peer holding a machine key...
+        let first = as_json(&create_identity(
+            "{}",
+            &dir.keystore_path(),
+            &Unlock::Unencrypted,
+        ));
+        assert_eq!(first["wasNew"], true, "the first call must mint: {first}");
+
+        // ...reports the identity in use for a Stoa...
+        let asked = slate_request();
+        let before = as_json(&who_am_i(&asked, open));
+        let before_key = before["publicKey"]
+            .as_str()
+            .expect("a held key reports a publicKey")
+            .to_string();
+
+        // ...then calls the operation that creates a master key...
+        let _second = create_identity("{}", &dir.keystore_path(), &Unlock::Unencrypted);
+
+        // ...then reports the identity in use for that Stoa again...
+        let after = as_json(&who_am_i(&asked, open));
+        assert_eq!(
+            after["publicKey"], before_key,
+            "the second report must name the public key the first report named: {after}"
+        );
+
+        // ...and publishes a post into it. The post must carry that same key.
+        let key = publishing_key(&open().expect("the keystore opens"));
+        let mut log = MemoryOpLog::new();
+        let post = as_json(&publish_post(
+            &format!(r#"{{"stoa":"{}","body":"a post"}}"#, a_stoa().to_hex()),
+            &mut log,
+            &by(&key),
+            &mut ignored_delivery,
+        ));
+        let post_id = crate::op::OpId::from_hex(
+            post["opId"]
+                .as_str()
+                .unwrap_or_else(|| panic!("the post must publish: {post}")),
+        )
+        .unwrap();
+        let entry = log.get(&post_id).unwrap().expect("the op is in the log");
+        assert_eq!(
+            entry.op.op.author.to_hex(),
+            before_key,
+            "the post must carry the same public key as the identity reports"
+        );
+    }
+
+    #[test]
     fn a_mint_with_no_passphrase_reports_the_key_as_unencrypted() {
         // The honesty requirement, and the one a first-run user needs: with no
         // `DIALECTICA_PASSPHRASE` set, `protection_from_env` yields

@@ -2,7 +2,9 @@
 
 ## Purpose
 
-Defines how a user's per-Stoa identity is derived, what an address is derived from, and what a verification of an op does and does not establish — so that a pseudonym is stable within a Stoa, unlinkable across Stoas, and no attacker-supplied key, signature or address can crash a parser or pass as someone else's.
+Defines what the identity in use is, how a user's per-Stoa identity is derived, what a Stoa address is derived from, and what a verification of an op does and does not establish — so that an identity is permanent, no attacker-supplied key, signature or address can crash a parser or pass as someone else's, and a pseudonym stable within a Stoa can be unlinkable across Stoas.
+
+In this release the identity in use is one machine key, the same in every Stoa, so unlinkability across Stoas is suspended rather than provided: the same user in two Stoas is visibly one key. The per-Stoa derivation that unlinkability rests on stays built and is contracted here, and the keys it yields become the identity in use again when per-Stoa identity is restored.
 
 ## Requirements
 
@@ -417,44 +419,6 @@ leaving it to be inferred.
   the signature
 - **AND** no moderator set, genesis record or posting policy is consulted
 
-### Requirement: Identity does not rotate, and this is a contract not an omission
-
-There SHALL be no way to replace the key behind an identity while keeping the
-identity. A per-Stoa identity is derived once and is permanent.
-
-A key that can be discarded at will is a key nothing can be attached to:
-rotation lets a user shed whatever has accumulated against their identity, and
-does so indistinguishably from a legitimate compromise. Rotation waits until
-standing attaches to a revocable credential rather than to a keypair.
-
-**The affordance that was being held open has been given up, deliberately.** The
-author address hashed a *record* containing the key rather than the key itself,
-so that the record could later grow into a key log and an identity could rotate
-while its identifier survived. With the author address deleted, an identity *is*
-its key and there is no identifier that could outlive one. Rotation, if it ever
-arrives, therefore arrives as a credential layer above the keypair rather than as
-a longer record beneath the same identifier. Nothing shipped depended on the
-affordance, and this requirement already forbids what it was reserved for; it is
-recorded because a reader finding rotation unbuilt should find the reason it is
-now harder, rather than infer that nobody considered it.
-
-#### Scenario: An identity is a pure function of its root and its Stoa
-
-- **WHEN** an identity is derived at any time from a given root and Stoa
-- **THEN** the result is the same key
-- **AND** no operation exists that yields a different key for the same pair
-
-#### Scenario: An identity is named by its key and by nothing beside it
-
-- **WHEN** the values by which an identity is reported are enumerated
-- **THEN** the public key is among them
-- **AND** it is the only identifier among them
-
-  Stated as "the only identifier" rather than as "no identifier that would
-  survive the key changing", because the key cannot change — this requirement
-  forbids it — so a scenario written over that counterfactual could never be
-  run. What is checkable is how many identifiers an identity is reported by.
-
 ### Requirement: A secret key cannot be copied, logged or serialised by accident
 
 A secret key SHALL NOT be duplicable, renderable for display, or serialisable
@@ -551,3 +515,54 @@ identity in use.
   be read
 - **THEN** the probe reports that posting is possible and names the machine key
 - **AND** a post published into a Stoa succeeds and is signed by the machine key
+
+### Requirement: Identity does not rotate: the key behind an identity is never replaced
+
+There SHALL be no way to replace the key behind an identity while keeping the
+identity. A per-Stoa identity is derived once and is permanent.
+
+**In this release the key behind the identity in use is the machine key, in every
+Stoa** — see *In this release one machine key is the identity in every Stoa*.
+Calling the operation that creates a master key while one is held MUST leave the
+identity in use unchanged: the identity report MUST name the same public key
+afterwards as before, and an op published afterwards MUST be signed by that same
+key. The operation meant is the one `identity-onboarding` provides for a peer to
+obtain its master key (*A peer with no master key can obtain one without naming
+a Stoa*), not the one that reports whether a master key is held (*Whether this
+peer holds a master key is reportable without creating one*), which writes
+nothing by its own requirement.
+
+A key that can be discarded at will is a key nothing can be attached to:
+rotation lets a user shed whatever has accumulated against their identity, and
+does so indistinguishably from a legitimate compromise. Rotation waits until
+standing attaches to a revocable credential rather than to a keypair.
+
+**The affordance that was being held open has been given up, deliberately.** The
+author address hashed a *record* containing the key rather than the key itself,
+so that the record could later grow into a key log and an identity could rotate
+while its identifier survived. With the author address deleted, an identity *is*
+its key and there is no identifier that could outlive one. Rotation, if it ever
+arrives, therefore arrives as a credential layer above the keypair rather than as
+a longer record beneath the same identifier. Nothing shipped depended on the
+affordance, and this requirement already forbids what it was reserved for; it is
+recorded because a reader finding rotation unbuilt should find the reason it is
+now harder, rather than infer that nobody considered it.
+
+#### Scenario: Creating a master key while one is held does not replace the identity in use
+
+- **WHEN** a peer holding a machine key reports the identity in use for a Stoa,
+  then calls the operation that creates a master key, then reports the identity
+  in use for that Stoa again and publishes a post into it
+- **THEN** the second report names the public key the first report named
+- **AND** the post carries that same public key
+
+#### Scenario: An identity is named by its key and by nothing beside it
+
+- **WHEN** the values by which an identity is reported are enumerated
+- **THEN** the public key is among them
+- **AND** it is the only identifier among them
+
+  Stated as "the only identifier" rather than as "no identifier that would
+  survive the key changing", because the key cannot change — this requirement
+  forbids it — so a scenario written over that counterfactual could never be
+  run. What is checkable is how many identifiers an identity is reported by.
