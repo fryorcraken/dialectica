@@ -195,9 +195,15 @@ ScreenFrame {
     // only the answer — decide the state.
     //
     // Called on every showing, because the key can change while this screen
-    // is hidden: keeping a per-Stoa identity inside a feed also writes the
-    // master key, and a screen that kept its first answer would offer that
-    // user a key they already hold.
+    // is hidden, and a screen that kept its first answer would offer that user
+    // a key they already hold. Nothing else in this view writes the key in
+    // this release — the per-Stoa keep that used to is not mounted — so the
+    // writers are outside it: another Basecamp instance on the same profile,
+    // or a keystore file repaired or put in place by hand. See design.md,
+    // Decision 8.
+    //
+    // The feed's identity route (`Main.qml`'s `acquireIdentity()`) lands here,
+    // so following it is a showing and asks once. design.md, Decision 15.
     //
     // Also called by "Try reading the key again", the could-not-be-read
     // state's one action. A user who fixes the keystore has no other way back

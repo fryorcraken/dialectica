@@ -235,11 +235,22 @@ elements, and that is the point.
 ### 8. The key state is asked on every showing, through `onVisibleChanged`
 
 `askKeyState()` runs in `Component.onCompleted` (when the screen is visible)
-and in `onVisibleChanged` (when it becomes visible). The reason is the
-proposal's: keeping a per-Stoa identity inside a feed also writes the master
-key, so a screen that remembered its first answer would still be offering that
-user a key they already hold. The calls are synchronous, so an answer from an
-earlier showing cannot land after a later one and overwrite it.
+and in `onVisibleChanged` (when it becomes visible). The key can change while
+the screen is hidden, and a screen that remembered its first answer would go on
+offering a key the user already holds, or go on saying a key could not be read
+after it was repaired. The calls are synchronous, so an answer from an earlier
+showing cannot land after a later one and overwrite it.
+
+**What changes the key while the screen is hidden is no longer anything in this
+view.** The proposal's reason was that keeping a per-Stoa identity inside a feed
+also writes the master key. `machine-identity-scope` (#153) stopped
+instantiating the per-Stoa onboarding screen, so in this release the create-key
+action on this screen is the only writer of the key that the view has. The
+writers left are outside the view: another Basecamp instance on the same
+profile, and a user repairing, restoring or replacing the keystore file while
+the app runs. The requirement does not depend on the removed route.
+`stoa-navigation-view` asks for the query on every showing in its own words, and
+the route returns when per-Stoa identity does (#108).
 
 **What breaks without it:** `test_the_key_state_is_asked_again_on_each_showing`
 and `test_a_mint_failure_does_not_outlive_the_showing_it_happened_in` go red
@@ -268,8 +279,8 @@ three routes.
 
 The second half is why the first is safe. The view reads the key state and then
 acts on it, so there is always a window in which another writer (another
-Basecamp instance on the same profile, a keep in a feed) can create the key
-first. `create_identity`'s `exists()` branch is what makes a press in that
+Basecamp instance on the same profile, or a keystore file put in place by hand)
+can create the key first. `create_identity`'s `exists()` branch is what makes a press in that
 window report the existing key instead of replacing it. Removing that guard
 because "the button is never drawn when a key exists" would turn that window
 into data loss. The guard stays pinned by
@@ -369,6 +380,47 @@ goes red on the no-key fixture, and nothing else does. This was measured by
 changing that Loader to `active: true` with `visible:` bound to the state. The
 test finds the action by its label and its `clicked` signal, walking invisible
 elements too, so a hidden action is still found.
+
+### 15. The feed's identity route lands on these key states, and depends on the third one
+
+`machine-identity-scope` (#153) merged while this change was in review. It
+routes a feed whose identity report says "no identity" to this screen
+(`acquireIdentity()`), where the key is made. The two changes compose rather
+than conflict, and the composition has three consequences.
+
+- **The route needs the could-not-be-read state.** `who_am_i` folds every
+  keystore failure into `{"hasIdentity":false,"reason":…}`, so the route carries
+  a user whose key is present but unreadable as well as one with no key. Under
+  the pre-change list, which drew the create action unconditionally, that user
+  would land on an offer the mint then refuses: Decision 2's trap, reached from
+  the feed. Here `get_master_key` answers with the error shape, the screen is in
+  the could-not-be-read state, and no create-key action exists.
+- **The key line's claim is true because of #153.** The key block says "The
+  same key signs in every Stoa you hold", and the key line shows
+  `get_master_key`'s key, which is `Keystore::identity_public_key()`. After #153
+  that is the public half of `wire::publishing_key`, the key every publish signs
+  with. Before #153 a post in a Stoa signed with the per-Stoa key kept there,
+  and the sentence would have been false.
+- **A navigation test that ends on this screen has to answer the key query.**
+  `tst_navigation.qml`'s
+  `test_a_missing_identity_offers_the_route_to_the_stoa_list` was written
+  against the pre-change list and asserted a `createIdentityButton` drawn
+  whatever the key state. Its fake answered no `get_master_key`, so the fake's
+  error reply put the list in the could-not-be-read state, and the test went red
+  the first time the two changes ran together (CI on #155). The test was wrong,
+  not the screen: `view-navigation` requires only that the route renders the
+  list and leaves what the list shows to `stoa-navigation-view`. The fixture now
+  states `{"hasMasterKey":false}`, in line with its own `who_am_i`, and asserts
+  `createKeyButton`. **What breaks without it:** removing that reply turns the
+  test red, 0 found against 1 expected (measured).
+
+Landing on this screen is a showing, so following the route makes exactly one
+`get_master_key` call (Decision 8). `view-navigation` says following the route
+"MUST NOT itself reach the module", and its scenario lists only key creation,
+slate and keep. The call belongs to the list's showing rather than to the
+route, and it creates nothing. It is pinned under a `NO SPEC:` marker in
+`test_following_the_route_creates_no_key_requests_no_slate_and_keeps_nothing`,
+and reported to the spec-writer to settle whether the prose meant to forbid it.
 
 ## Risks / Trade-offs
 

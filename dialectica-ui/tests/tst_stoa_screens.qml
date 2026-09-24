@@ -3149,9 +3149,11 @@ TestCase {
     }
 
     function test_returning_home_from_a_feed_asks_the_key_state_again() {
-        // The route the re-read exists for, through the real navigator: keeping
-        // a per-Stoa identity inside a feed writes the master key, so the list
-        // the user returns to must not still be offering to make one.
+        // The re-read through the real navigator: the key changes while a feed
+        // is open — in this release from outside the view, since the per-Stoa
+        // keep that used to write it is not mounted (design.md, Decision 8) —
+        // so the list the user returns to must not still be offering to make
+        // one.
         var replies = {
             "list_stoas": '{"items":[],"page":0,"hasMore":false}',
             "get_master_key": spec.noKeyReply()
