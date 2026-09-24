@@ -406,9 +406,28 @@ fn os_str_bytes(v: &std::ffi::OsString) -> &[u8] {
 /// by `Keystore::open(path, &unlock)` — reads twice and leaves a window in
 /// which the file can change between them; see [`unlock_for`].
 pub fn open_from_env(path: &Path) -> Result<Keystore, KeystoreError> {
+    open_from_env_with_protection(path).map(|(keystore, _)| keystore)
+}
+
+/// [`open_from_env`], also reporting whether the file it opened is encrypted.
+///
+/// **The protection comes from the same bytes the key was decoded from.** A
+/// caller wanting both answers could ask [`Keystore::is_encrypted`] after
+/// opening, which is what the mint's existing-key branch does — but that is a
+/// second read of a file an attacker may be editing between the two, and the
+/// protection it reports is then about whatever is at the path *now*, not about
+/// the key just decoded. The same argument [`unlock_for`] records for merging
+/// the unlock decision into one read.
+///
+/// **No caller-supplied unlock is taken**, so the reported protection cannot be
+/// the caller's configuration mistaken for the file's: a keystore stored in the
+/// clear is reported unencrypted whatever [`PASSPHRASE_ENV`] holds, because
+/// `unlock_for(false)` never consults it.
+pub fn open_from_env_with_protection(path: &Path) -> Result<(Keystore, bool), KeystoreError> {
     let bytes = read_checked(path)?;
-    let unlock = unlock_for(protection_of(&bytes)?)?;
-    Keystore::from_file_bytes(&bytes, &unlock)
+    let encrypted = protection_of(&bytes)?;
+    let unlock = unlock_for(encrypted)?;
+    Ok((Keystore::from_file_bytes(&bytes, &unlock)?, encrypted))
 }
 
 /// Where the keystore lives inside a directory the caller chose.
@@ -2962,6 +2981,26 @@ mod tests {
         // The RIGHT passphrase opens it.
         unsafe { std::env::set_var(PASSPHRASE_ENV, "s3cret") };
         assert!(open_from_env(enc.path().as_path()).is_ok());
+
+        // ─── `open_from_env_with_protection`, the master-key query's opener ──
+        //
+        // Here rather than in `wire.rs` because the encrypted arm needs the
+        // variable, and this is the one test that may set it.
+        //
+        // With a passphrase available, BOTH files report the protection the
+        // FILE has. The plain one is the spec's "an existing key's protection is
+        // reported from the key itself": a passphrase is set, and the key is
+        // still reported unprotected, because it is.
+        let (_, enc_reported) = open_from_env_with_protection(enc.path().as_path())
+            .unwrap_or_else(|e| panic!("the right passphrase opens it: {e}"));
+        assert!(enc_reported, "an encrypted file is reported encrypted");
+        let (_, plain_reported) = open_from_env_with_protection(plain.path().as_path())
+            .unwrap_or_else(|e| panic!("a passphrase does not stop a plain file opening: {e}"));
+        assert!(
+            !plain_reported,
+            "a file stored in the clear must be reported unencrypted while a passphrase \
+             is available — the protection is the file's, not the process's"
+        );
 
         // The WRONG one is WrongPassphrase, distinguishable from Locked.
         unsafe { std::env::set_var(PASSPHRASE_ENV, "not-it") };

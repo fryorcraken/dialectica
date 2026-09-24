@@ -1359,6 +1359,122 @@ pub fn mint_master_key(
     })
 }
 
+// ─── Asking about the master key ──────────────────────────────────────────
+
+/// Whether this peer holds a master key, and which.
+///
+/// **Two arms, and each carries exactly the fields its outcome has.** The field
+/// set of each reply is the `identity-onboarding` requirement's whole list, so a
+/// `NotHeld` with a stray `publicKey`, or a `Held` without one, is a shape this
+/// type cannot be put into rather than one a test has to catch.
+///
+/// **There is no third arm for "could not be read"**, and that absence is the
+/// decision rather than an omission: an unreadable keystore is the error shape
+/// ([`get_master_key`] says why), so it never reaches this type.
+#[derive(Debug, PartialEq, Eq)]
+pub enum MasterKey {
+    /// A master key is stored and opened.
+    Held {
+        /// The key this peer signs and creates with, hex — the same value
+        /// [`crate::keystore::creator_key_in`] names as a new Stoa's creator.
+        public_key: String,
+        /// Whether the stored file is protected at rest, read off the file.
+        encrypted: bool,
+    },
+    /// No keystore file is at the path.
+    NotHeld,
+}
+
+impl MasterKey {
+    /// The wire form. Exactly one of the two shapes, by construction.
+    pub fn to_json(&self) -> String {
+        match self {
+            MasterKey::Held {
+                public_key,
+                encrypted,
+            } => serde_json::json!({
+                "hasMasterKey": true,
+                "publicKey": public_key,
+                "encrypted": encrypted,
+            })
+            .to_string(),
+            MasterKey::NotHeld => serde_json::json!({ "hasMasterKey": false }).to_string(),
+        }
+    }
+}
+
+/// `{}` -> whether this peer holds a master key, without creating one.
+///
+/// # Why this exists beside [`create_identity`]
+///
+/// That method answers "is there a key?" only by minting one when there is not,
+/// and [`who_am_i`] and [`get_capabilities`] both take a Stoa, which a fresh
+/// install has none of. So before this, a view could learn whether a key exists
+/// only by creating one — and the home screen's "Create this machine's key" had
+/// to be offered on every run, earning "already had a key" on every run after
+/// the first. This is the read-only answer that lets it be offered only when it
+/// is true.
+///
+/// # An unreadable keystore is the ERROR shape, not `hasMasterKey:false`
+///
+/// **This departs from the probe precedent on purpose.** [`whoami_for`] and
+/// [`capability_for`] answer every storage state — "the probe answers, it does
+/// not fail". Here a present-but-unreadable key (tampered, too-open
+/// permissions, encrypted with no passphrase) is refused. The reason is what
+/// the caller does next: a `false` invites it to offer a new key, the mint then
+/// refuses because it never replaces one, and the user is asked to create a
+/// key they already hold and cannot. `hasMasterKey:false` with a `reason` beside
+/// it would put that invitation one missed field away. See `design.md`.
+///
+/// # What decides "no key"
+///
+/// [`crate::keystore::KeystoreError::NotFound`] and nothing else: the open found
+/// no file. Every other error — an unreadable directory included, where
+/// `Path::exists` would have said `false` — is a failure. That is why this opens
+/// the file rather than asking `exists()` first.
+///
+/// # It writes nothing
+///
+/// The opener is a read, and nothing else is reached: no `create`, no
+/// `write_to`, no identity record. The protection reported is the opened
+/// file's, from the same read — there is no `unlock` parameter through which a
+/// caller's configured passphrase could be mistaken for the file's protection.
+pub fn get_master_key(
+    request: &str,
+    open: impl FnOnce() -> Result<(crate::keystore::Keystore, bool), crate::keystore::KeystoreError>,
+) -> String {
+    guarded("get_master_key", || {
+        // Through the envelope although no field is read, for the reason
+        // `create_identity` gives: the cap and the non-object refusal are the
+        // surface's obligations, not the fields'.
+        if let Err(e) = Request::parse(request) {
+            return e;
+        }
+        match master_key_from(open) {
+            Ok(m) => m.to_json(),
+            Err(e) => error_json(&e.to_string()),
+        }
+    })
+}
+
+/// The query's decision, separated from its JSON and its guard, for the reason
+/// [`mint_master_key`] is.
+///
+/// The keystore's own error is returned unreworded: `KeystoreError`'s messages
+/// name the fix, and the spec requires "the keystore's own vocabulary".
+pub fn master_key_from(
+    open: impl FnOnce() -> Result<(crate::keystore::Keystore, bool), crate::keystore::KeystoreError>,
+) -> Result<MasterKey, crate::keystore::KeystoreError> {
+    match open() {
+        Ok((keystore, encrypted)) => Ok(MasterKey::Held {
+            public_key: keystore.identity_public_key().to_hex(),
+            encrypted,
+        }),
+        Err(crate::keystore::KeystoreError::NotFound) => Ok(MasterKey::NotHeld),
+        Err(e) => Err(e),
+    }
+}
+
 // ─── The feed ─────────────────────────────────────────────────────────────
 
 /// `{"stoa":"…", "page":N, "perPage":N, "includeHidden":bool}` -> one page.
@@ -5503,6 +5619,256 @@ mod tests {
             c.get("error").is_some(),
             "creation must still be refused with no key: {created}"
         );
+    }
+
+    // ─── Asking whether a master key is held ──────────────────────────────
+    //
+    // `identity-onboarding`'s "Whether this peer holds a master key is reportable
+    // without creating one". The opener the adapter passes is
+    // `open_from_env_with_protection` over `default_path_in(dir)`, so these use
+    // the same one over the same path unless a test needs an outcome the
+    // filesystem cannot produce without touching the process environment —
+    // `set_var` is process-global and `keystore.rs` owns the one test allowed
+    // to touch it.
+
+    /// The adapter's opener, over a fixture directory.
+    fn the_adapters_opener(
+        dir: &OnboardingDir,
+    ) -> impl FnOnce() -> Result<(Keystore, bool), crate::keystore::KeystoreError> + '_ {
+        move || crate::keystore::open_from_env_with_protection(&dir.keystore_path())
+    }
+
+    /// A keystore with a fixed root, stored in the clear at the fixture's path.
+    fn store_a_key(dir: &OnboardingDir, root: u8) {
+        Keystore::from_root_for_test([root; 32])
+            .create(&dir.keystore_path(), &Unlock::Unencrypted)
+            .expect("the fixture keystore is writable");
+    }
+
+    fn reply_of(out: &str) -> serde_json::Value {
+        serde_json::from_str(out).unwrap_or_else(|e| panic!("the reply must be JSON ({e}): {out}"))
+    }
+
+    #[test]
+    fn a_peer_with_no_master_key_is_reported_as_holding_none_and_nothing_else() {
+        let dir = OnboardingDir::new("ask-none");
+        let out = get_master_key("{}", the_adapters_opener(&dir));
+
+        // The whole object, compared as a whole: the field set is closed, so a
+        // stray `publicKey:""` or `encrypted:false` beside the `false` is a
+        // defect, and asserting on `hasMasterKey` alone would pass over it.
+        assert_eq!(
+            reply_of(&out),
+            serde_json::json!({ "hasMasterKey": false }),
+            "got {out}"
+        );
+    }
+
+    #[test]
+    fn asking_with_no_key_held_writes_nothing_at_all() {
+        // Neither a keystore nor a chosen path: the directory is read back and
+        // must still be empty, which covers both layers without this test
+        // opening the identity record itself (opening it would create it).
+        let dir = OnboardingDir::new("ask-none-writes-nothing");
+        let _ = get_master_key("{}", the_adapters_opener(&dir));
+
+        assert!(!dir.keystore_path().exists(), "asking must not mint a key");
+        let left: Vec<_> = std::fs::read_dir(&dir.0)
+            .expect("the fixture directory reads")
+            .collect();
+        assert!(
+            left.is_empty(),
+            "asking must write nothing into the storage directory: {left:?}"
+        );
+    }
+
+    #[test]
+    fn a_held_key_is_reported_by_its_public_key_and_its_protection_and_nothing_else() {
+        // Two roots, so the reported key is shown to FOLLOW the file: a handler
+        // returning a constant, or the first key it ever saw, passes one of
+        // these and not both.
+        for root in [3u8, 4u8] {
+            let dir = OnboardingDir::new(&format!("ask-held-{root}"));
+            store_a_key(&dir, root);
+
+            let out = get_master_key("{}", the_adapters_opener(&dir));
+            let expected_key = Keystore::from_root_for_test([root; 32])
+                .identity_public_key()
+                .to_hex();
+            assert_eq!(
+                reply_of(&out),
+                serde_json::json!({
+                    "hasMasterKey": true,
+                    "publicKey": expected_key,
+                    "encrypted": false,
+                }),
+                "got {out}"
+            );
+        }
+    }
+
+    #[test]
+    fn asking_leaves_a_held_key_byte_for_byte_unchanged() {
+        let dir = OnboardingDir::new("ask-held-unchanged");
+        store_a_key(&dir, 5);
+        let before = keystore_bytes(&dir.keystore_path());
+
+        let _ = get_master_key("{}", the_adapters_opener(&dir));
+
+        assert_eq!(
+            keystore_bytes(&dir.keystore_path()),
+            before,
+            "asking must not rewrite the keystore"
+        );
+    }
+
+    #[test]
+    fn the_key_reported_is_the_creator_key_a_stoa_this_peer_creates_records() {
+        // Asserted against the RECORD the creation produced, decoded, rather
+        // than against another call's reply: the claim is about what the new
+        // Stoa records as its creator.
+        let dir = OnboardingDir::new("ask-then-create");
+        store_a_key(&dir, 6);
+        let asked = reply_of(&get_master_key("{}", the_adapters_opener(&dir)));
+
+        let created = reply_of(&create_stoa(
+            r#"{"title":"asked first"}"#,
+            || crate::keystore::creator_key_in(&dir.0),
+            &mut a_membership_store(),
+        ));
+        let genesis_hex = created["genesis"]
+            .as_str()
+            .unwrap_or_else(|| panic!("the creation reply carries its record: {created}"));
+        let genesis = crate::stoa::Genesis::decode(&hex::decode(genesis_hex).expect("hex"))
+            .expect("the created record decodes");
+
+        assert_eq!(
+            asked["publicKey"],
+            serde_json::json!(genesis.creator.to_hex()),
+            "the key reported must be the key the new Stoa names as its creator"
+        );
+    }
+
+    #[test]
+    fn the_protection_reported_is_the_openers_and_not_a_constant() {
+        // The handler passes the file's protection through. Both directions,
+        // so `"encrypted": false` hardcoded in the reply fails here. The opener
+        // is injected because an encrypted key opens only with a passphrase in
+        // the environment, which this module may not set; that the adapter's
+        // opener reads protection off the file is pinned in `keystore.rs`'s
+        // environment test.
+        for encrypted in [true, false] {
+            let out = get_master_key("{}", || {
+                Ok((Keystore::from_root_for_test([8u8; 32]), encrypted))
+            });
+            assert_eq!(
+                reply_of(&out)["encrypted"],
+                serde_json::json!(encrypted),
+                "got {out}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_key_whose_permissions_are_too_open_is_a_failure_not_an_absence() {
+        // The spec's named example. The file is really there, really a key, and
+        // readable by others — so the reply must be the error shape, carrying
+        // the keystore's own reason, and must not say no key is held.
+        use std::os::unix::fs::PermissionsExt;
+        let dir = OnboardingDir::new("ask-too-open");
+        store_a_key(&dir, 9);
+        std::fs::set_permissions(dir.keystore_path(), std::fs::Permissions::from_mode(0o644))
+            .expect("the fixture's mode is settable");
+
+        let out = get_master_key("{}", the_adapters_opener(&dir));
+        let v = reply_of(&out);
+
+        // The reason, derived through the keystore's own open rather than
+        // spelled here, so this asserts "unreworded" rather than one wording.
+        let keystores_reason = crate::keystore::open_from_env(&dir.keystore_path())
+            .err()
+            .expect("the fixture must be refused by the keystore itself")
+            .to_string();
+        assert_eq!(v["error"], serde_json::json!(keystores_reason), "got {out}");
+        assert!(
+            v.get("hasMasterKey").is_none(),
+            "a refused key must not be reported as held or not held: {out}"
+        );
+    }
+
+    #[test]
+    fn a_keystore_that_is_not_a_keystore_is_a_failure_not_an_absence() {
+        // Tampered: a file at the path, owner-only, that is not a keystore.
+        use std::os::unix::fs::PermissionsExt;
+        let dir = OnboardingDir::new("ask-tampered");
+        std::fs::write(dir.keystore_path(), b"not a keystore").expect("writable");
+        std::fs::set_permissions(dir.keystore_path(), std::fs::Permissions::from_mode(0o600))
+            .expect("the fixture's mode is settable");
+
+        let v = reply_of(&get_master_key("{}", the_adapters_opener(&dir)));
+        assert!(v.get("error").is_some(), "got {v}");
+        assert!(v.get("hasMasterKey").is_none(), "got {v}");
+    }
+
+    #[test]
+    fn every_refusal_but_not_found_is_the_error_shape_in_the_keystores_words() {
+        // `NotFound` is the ONE error that means "no key held". Every other is a
+        // key that may well exist and cannot be read — including `Locked`, the
+        // spec's "encrypted with no passphrase available", which only the
+        // environment can produce for a real file.
+        //
+        // PROVED TO FAIL: widening `master_key_from`'s `NotFound` arm to a
+        // catch-all `Err(_) => Ok(MasterKey::NotHeld)` turns this red on the
+        // first variant, as `{"hasMasterKey":false}`.
+        use crate::keystore::KeystoreError;
+        let refusals = [
+            KeystoreError::Locked,
+            KeystoreError::WrongPassphrase,
+            KeystoreError::PermissionsTooOpen { mode: 0o644 },
+            KeystoreError::DirectoryWritableByOthers { mode: 0o777 },
+            KeystoreError::Io("permission denied".to_string()),
+            KeystoreError::NotAKeystore,
+        ];
+        for refusal in refusals {
+            let reason = refusal.to_string();
+            let out = get_master_key("{}", move || Err(refusal));
+            assert_eq!(
+                reply_of(&out),
+                serde_json::json!({ "error": reason }),
+                "a key that cannot be read must fail with the keystore's reason, and \
+                 carry nothing else: {out}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_keystore_in_a_directory_that_cannot_be_searched_is_a_failure_not_an_absence() {
+        // THE GUARD FOR OPENING RATHER THAN ASKING `exists()`. `Path::exists`
+        // answers `false` when the directory cannot be searched — the question
+        // failed, and it says no key. Opening surfaces the EACCES as `Io`.
+        //
+        // PROVED TO FAIL: adding `if !path.exists() { return Err(NotFound) }` at
+        // the top of `keystore::open_from_env_with_protection` turns this red,
+        // as `{"hasMasterKey":false}` over a key that is sitting right there.
+        use std::os::unix::fs::PermissionsExt;
+        let dir = OnboardingDir::new("ask-unsearchable");
+        store_a_key(&dir, 10);
+        std::fs::set_permissions(&dir.0, std::fs::Permissions::from_mode(0o000))
+            .expect("the fixture's mode is settable");
+
+        // Root can search anything, so the premise would not hold; say so
+        // rather than pass vacuously.
+        if dir.keystore_path().exists() {
+            std::fs::set_permissions(&dir.0, std::fs::Permissions::from_mode(0o700)).unwrap();
+            panic!("this test needs a user who cannot search a mode-000 directory");
+        }
+
+        let v = reply_of(&get_master_key("{}", the_adapters_opener(&dir)));
+        std::fs::set_permissions(&dir.0, std::fs::Permissions::from_mode(0o700))
+            .expect("restoring the fixture's mode for cleanup");
+
+        assert!(v.get("error").is_some(), "got {v}");
+        assert!(v.get("hasMasterKey").is_none(), "got {v}");
     }
 
     // ─── Onboarding: the tester's independent coverage ─────────────────────
@@ -10716,6 +11082,9 @@ mod tests {
         // every other identity method takes one, and a fresh install has none —
         // so there is nothing for `{}` to be missing.
         ("create_identity", "the request carries no field to omit"),
+        // No field either: asking about the master key needs no Stoa, for the
+        // reason minting one does not.
+        ("get_master_key", "the request carries no field to omit"),
     ];
 
     fn every_method_with_a_required_field() -> Vec<NamedMethod> {
@@ -10902,6 +11271,15 @@ mod tests {
             let dir = OnboardingDir::new(&sweep_dir_name("mint"));
             create_identity(r, &dir.keystore_path(), &Unlock::Unencrypted)
         }
+        // `home-screen-key-states`' one method. It reads no field, and is listed
+        // for the reason `mint_m` is. A fresh directory per call holds no
+        // keystore, so the served fixture answers `{"hasMasterKey":false}`.
+        fn master_m(r: &str) -> String {
+            let dir = OnboardingDir::new(&sweep_dir_name("master"));
+            get_master_key(r, || {
+                crate::keystore::open_from_env_with_protection(&dir.keystore_path())
+            })
+        }
         fn whoami_m(r: &str) -> String {
             // No directory: `who_am_i` is handed no record since
             // `machine-identity-scope`, only a keystore opener.
@@ -10994,6 +11372,7 @@ mod tests {
             ("generate_identity_slate", slate_m),
             ("keep_identity", keep_m),
             ("create_identity", mint_m),
+            ("get_master_key", master_m),
             ("who_am_i", whoami_m),
             ("create_stoa", create_m),
             ("join_stoa", join_m),
@@ -11588,6 +11967,9 @@ mod tests {
             // keystore, so the mint takes the writing branch and answers
             // `{"publicKey":…,"wasNew":true}`.
             "create_identity" => "{}".to_string(),
+            // Likewise no field. Served: a fresh sweep directory holds no
+            // keystore, so the answer is `{"hasMasterKey":false}`.
+            "get_master_key" => "{}".to_string(),
             // The three publish handlers. `publish_post` needs only a body; the
             // other two also name an op that must EXIST in the log their
             // wrapper seeds, which `a_seeded_root_id` supplies.

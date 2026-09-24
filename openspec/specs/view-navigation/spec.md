@@ -339,9 +339,18 @@ created**, because the identity in use in every Stoa is the machine key
 Acting on the route MUST render the Stoa list. What the list shows is
 `stoa-navigation-view`'s, and nothing here specifies it.
 
-**Following the route MUST NOT itself reach the module.** Creating the key is an
-action the user takes on the list; the route MUST NOT create a key, request a
-slate, or keep a candidate on the user's behalf.
+**Following the route MUST NOT itself make any call to the module.** Creating the
+key is an action the user takes on the list. A call made in consequence of
+following the route, whether by the navigator or by the list on being shown,
+MUST NOT create a key, request a slate, or keep a candidate on the user's behalf.
+
+**Rendering the list is a showing of it, and the calls the list makes when shown
+are the list's, not the route's.** What the list asks the module on being shown
+is `stoa-navigation-view`'s to require, and beyond the prohibition above this
+requirement neither forbids nor requires any of it. In this release that is the
+read-only master-key query, which `stoa-navigation-view` requires on every
+showing, so following the route leads to exactly the calls a showing of the list
+makes and to none besides.
 
 **The per-Stoa onboarding screen MUST NOT be reachable in this release.** The view
 MUST NOT instantiate it, and its registration MUST carry the record that it is
@@ -360,7 +369,13 @@ is cached* already requires; nothing about the route carries an identity back.
 - **THEN** an affordance reaching the place where one is acquired is offered
 - **AND** acting on it renders the Stoa list
 
-#### Scenario: Following the route asks the module for nothing
+#### Scenario: Following the route makes no call of its own
+
+- **WHEN** the affordance leading to acquiring an identity is acted on
+- **THEN** every call that reaches the bridge in consequence is one the Stoa list
+  makes on being shown
+
+#### Scenario: Following the route creates no key, requests no slate and keeps nothing
 
 - **WHEN** the affordance leading to acquiring an identity is acted on
 - **THEN** no key-creation call, no slate call and no keep call reaches the bridge

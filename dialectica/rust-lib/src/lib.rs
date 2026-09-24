@@ -259,6 +259,28 @@ pub trait DialecticaModule: Send + 'static {
     /// view can name rather than a silent default.
     fn create_identity(&mut self, request: String) -> String;
 
+    /// Whether this peer holds a master key, without creating one.
+    ///
+    /// Takes `{}` and returns
+    /// `{"hasMasterKey":true,"publicKey":"<hex>","encrypted":bool}` or
+    /// `{"hasMasterKey":false}`, with no other fields in either.
+    ///
+    /// **It takes no Stoa and writes nothing.** `createIdentity` answers this
+    /// question only by minting, and `whoAmI` and `getCapabilities` take a
+    /// Stoa a fresh install does not have — so without this, a view could learn
+    /// whether a key exists only by creating one.
+    ///
+    /// `publicKey` is the key this peer signs and creates Stoas with.
+    /// `encrypted` is read off the stored file, never off the passphrase the
+    /// process currently has.
+    ///
+    /// **A key that is present but cannot be read is the error shape, never
+    /// `hasMasterKey:false`** — a tampered file, too-open permissions, or an
+    /// encrypted key with no passphrase available. Reporting such a store as
+    /// empty would invite the view to offer a new key, which `createIdentity`
+    /// then refuses because it never replaces one.
+    fn get_master_key(&mut self, request: String) -> String;
+
     /// A slate of candidate identities for a Stoa.
     ///
     /// Takes `{"stoa":"<hex>"}` and returns
@@ -977,6 +999,21 @@ impl DialecticaModule for Dialectica {
         // one here would be the second copy CLAUDE.md's guard rule is about.
         let unlock = core::keystore::protection_from_env();
         core::create_identity(&request, &core::keystore::default_path_in(&dir), &unlock)
+    }
+
+    fn get_master_key(&mut self, request: String) -> String {
+        let dir = match self.storage_dir() {
+            Ok(d) => d,
+            Err(e) => return e,
+        };
+        // The same path `create_identity` above and `creator_key_in` resolve,
+        // through the same `default_path_in`, so the key this reports is the key
+        // a later `create_stoa` names as creator. The opener reports the file's
+        // own protection; no unlock is supplied from here, because the
+        // protection a caller has configured is not the protection the file has.
+        core::get_master_key(&request, || {
+            core::keystore::open_from_env_with_protection(&core::keystore::default_path_in(&dir))
+        })
     }
 
     fn generate_identity_slate(&mut self, request: String) -> String {

@@ -347,6 +347,26 @@ TestCase {
         return listComponent.createObject(null, props === undefined ? {} : props)
     }
 
+    // The list screen inside a parentless host Item, for the tests that hide
+    // and re-show it.
+    //
+    // **Neither obvious parent works, both observed on Qt 6.10.3.** Created
+    // with no parent (`makeList`), the screen reads `visible` true at
+    // completion, but after `visible = false` a `visible = true` leaves it
+    // invisible and emits no `visibleChanged` — a parentless item's effective
+    // visibility needs a parent to become true again. Created under the
+    // TestCase, it reads `visible` false from the start, because the runner
+    // never shows the TestCase. A parentless host is the shape that behaves
+    // like `Main.qml`, which mounts the screen in an always-shown layout: the
+    // host is never toggled, so its own visibility stays true.
+    Component { id: hostComponent; Item {} }
+
+    function makeShownList(replies) {
+        Core.bridge = bridgeFor(replies)
+        var host = hostComponent.createObject(null, {})
+        return listComponent.createObject(host, {})
+    }
+
     function makeJoin(replies, props) {
         Core.bridge = bridgeFor(replies)
         return joinComponent.createObject(null, props)
@@ -2229,13 +2249,15 @@ TestCase {
 
     // ---- creation ---------------------------------------------------------
 
-    function test_the_create_affordance_is_present_when_no_key_exists() {
-        // Offered whatever the keystore holds. The posting probe takes a Stoa
-        // address and there is no Stoa yet, so there is nothing to ask it — a
-        // hidden button would be hidden on a guess rather than an answer.
+    // Every creation test below is in the key-held state, because that is the
+    // only state the create affordance exists in. `get_master_key` is in each
+    // fixture for that reason; without it the fake answers the error shape and
+    // the screen is, correctly, in its could-not-be-read state.
+
+    function test_the_create_affordance_is_present_and_usable_when_a_key_is_held() {
         var screen = makeList({
             "list_stoas": '{"items":[],"page":0,"hasMore":false}',
-            "get_capabilities": '{"canPost":false,"reason":"No keystore found."}'
+            "get_master_key": spec.heldKeyReply(aKeyHex(), false)
         })
 
         var buttons = spec.visibleNamed(screen, "createStoaButton")
@@ -2244,9 +2266,26 @@ TestCase {
         screen.destroy()
     }
 
+    function test_the_create_affordance_is_not_instantiated_when_no_key_is_held() {
+        // Inverted from the removed "always offered" requirement. NOT HIDDEN:
+        // `namedAnywhere` walks visible and invisible elements alike, so a
+        // `visible: false` button would still be found and fail this.
+        var screen = makeList({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_master_key": spec.noKeyReply()
+        })
+
+        compare(spec.namedAnywhere(screen, "createStoaButton").length, 0,
+                "no create action may exist in the element tree with no key held")
+        compare(spec.namedAnywhere(screen, "createTitleField").length, 0,
+                "nor a title field for a new Stoa")
+        screen.destroy()
+    }
+
     function test_a_creation_refused_for_want_of_a_key_renders_the_cores_reason() {
         var screen = makeList({
             "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_master_key": spec.heldKeyReply(aKeyHex(), false),
             "create_stoa": '{"error":"No keystore found. Create one before posting; '
                          + 'the reply box comes back when a reply would actually send."}'
         })
@@ -2275,6 +2314,7 @@ TestCase {
         for (var i = 0; i < typed.length; i++) {
             var screen = makeList({
                 "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+                "get_master_key": spec.heldKeyReply(aKeyHex(), false),
                 "create_stoa": refusal
             })
             var bridge = Core.bridge
@@ -2299,6 +2339,7 @@ TestCase {
         var addr = "b02d5e77a41c6b9013c6a9408ff4af235d7e1b06c92a84f13be057dc6104a8bf"
         var screen = makeList({
             "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_master_key": spec.heldKeyReply(aKeyHex(), false),
             "create_stoa": '{"stoa":"' + addr + '","foundingTitle":"Transport Notes","policy":"open"}'
         })
         screen.createTitle = "Transport Notes"
@@ -2315,6 +2356,7 @@ TestCase {
         var reply = '{"stoa":"' + addr + '","foundingTitle":"Transport Notes","policy":"open"}'
         var screen = makeList({
             "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_master_key": spec.heldKeyReply(aKeyHex(), false),
             "create_stoa": reply
         })
         var bridge = Core.bridge
@@ -3060,6 +3102,7 @@ TestCase {
         var screen = makeList({
             "list_stoas": '{"items":[{"stoa":"' + addr + '","foundingTitle":"Transport Notes"}],'
                         + '"page":0,"hasMore":false}',
+            "get_master_key": spec.heldKeyReply(aKeyHex(), false),
             "create_stoa": '{"stoa":"' + addr + '","foundingTitle":"Transport Notes","policy":"open"}'
         })
         screen.createTitle = "Transport Notes"
@@ -3113,7 +3156,10 @@ TestCase {
     // address preimage forever, so a field for one mints a Stoa nobody can
     // moderate at an address that cannot be un-minted.
     function test_the_create_affordance_offers_exactly_one_field_and_it_is_not_a_key() {
-        var screen = makeList({ "list_stoas": '{"items":[],"page":0,"hasMore":false}' })
+        var screen = makeList({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_master_key": spec.heldKeyReply(aKeyHex(), false)
+        })
 
         // **Counted, not searched by name.** A test looking for an element named
         // `creatorKeyField` pins one spelling of the defect and nothing else;
@@ -3252,14 +3298,21 @@ TestCase {
         var minted = Core.createIdentity()
         compare(spec.callsTo(bridge, "create_identity"), 1)
         compare(minted.ok, true)
+
+        Core.bridge = bridgeFor({ "get_master_key": '{"hasMasterKey":false}' })
+        bridge = Core.bridge
+        var asked = Core.getMasterKey()
+        compare(spec.callsTo(bridge, "get_master_key"), 1)
+        compare(asked.ok, true)
     }
 
-    // ---- first run: the identity step -------------------------------------
+    // ---- this machine's key: the three key states ---------------------------
     //
-    // The deadlock this closes: creating a Stoa needs a creator key and mints
-    // none, and the only thing that writes one is per-Stoa onboarding, which
-    // refuses a request naming no Stoa. A fresh profile could reach neither, so
-    // "Create it" answered `no keystore found` with nothing able to create one.
+    // `stoa-navigation-view`'s key-state requirements, from `home-screen-key-
+    // states`. The key state is decided by `get_master_key`'s reply, so every
+    // fixture below names one — and the fakes answer DIFFERENTLY per test
+    // (a key, no key, a failure, a malformed reply), because a fake answering
+    // the same for every input cannot tell "asked" from "never asked".
 
     /// A key hex of the right length, so `AddressLabel` renders it as it would a
     /// real one rather than falling into a short-string path.
@@ -3267,188 +3320,764 @@ TestCase {
         return "7f3c19d84ba2e05c6178fd4390ab2ec5518d7a6f30b94c2e81df05a7c63e14b2"
     }
 
-    function test_the_identity_step_is_offered_before_any_stoa_exists() {
-        // The affordance the deadlock needed and did not have. Offered on the
-        // EMPTY membership, which is the state a fresh profile is in.
-        var screen = makeList({ "list_stoas": '{"items":[],"page":0,"hasMore":false}' })
+    /// A second key whose every 8-character window differs from the first's,
+    /// so a screen rendering the wrong one is caught by its head group alone.
+    function anotherKeyHex() {
+        return "c4a1e07b93d25f6810bb7c3e5d49f2a6071e8c35b9d4a26f0e17c83b5a92d6e4"
+    }
 
-        var buttons = spec.visibleNamed(screen, "createIdentityButton")
-        compare(buttons.length, 1,
-                "a fresh profile must be able to make a key without a Stoa in hand")
-        compare(buttons[0].enabled, true)
+    function heldKeyReply(key, encrypted) {
+        return JSON.stringify({ hasMasterKey: true, publicKey: key, encrypted: encrypted })
+    }
+
+    function noKeyReply() {
+        return '{"hasMasterKey":false}'
+    }
+
+    // The key block's explanation, verbatim from copy.json.
+    readonly property string keyExplanationCopy:
+        "A Stoa records its creator's key, so this machine needs one before it "
+        + "can create or post. Making it writes a key here and tells nobody. The "
+        + "same key signs in every Stoa you hold."
+
+    readonly property string unencryptedCopy:
+        "Stored unencrypted on this machine. Anyone who can read the file can post as you."
+
+    function test_a_reply_stating_no_key_puts_the_screen_in_the_no_key_state() {
+        var screen = makeList({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_master_key": spec.noKeyReply()
+        })
+
+        compare(screen.machineKey.state, "none")
+        compare(spec.visibleNamed(screen, "createKeyButton").length, 1,
+                "the key block's action is the task on this screen")
+        compare(spec.visibleNamed(screen, "keyExplanation").length, 1)
         screen.destroy()
     }
 
-    function test_the_identity_step_is_offered_even_when_the_membership_cannot_be_read() {
-        // Not conditional on the listing. A peer whose membership failed to read
-        // may still have no key, and hiding the one affordance that unblocks
-        // them behind a successful read brings the deadlock back for exactly the
-        // users least able to diagnose it.
-        //
-        // WATCHED TO FAIL: binding the block's `visible` to
-        // `screen.readState === "ok"` turns this red while leaving the test
-        // above green — which is why both directions are here.
-        var screen = makeList({ "list_stoas": '{"error":"the membership store is locked"}' })
+    function test_a_reply_naming_a_held_key_puts_the_screen_in_the_key_held_state() {
+        var screen = makeList({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_master_key": spec.heldKeyReply(aKeyHex(), false)
+        })
 
-        compare(screen.readState, "failed", "the fixture must be in the failed state")
-        compare(spec.visibleNamed(screen, "createIdentityButton").length, 1,
-                "a failed listing says nothing about whether a key exists")
+        compare(screen.machineKey.state, "held")
+        compare(screen.machineKey.publicKey, aKeyHex())
+        compare(spec.visibleNamed(screen, "keyLine").length, 1)
         screen.destroy()
     }
 
-    function test_no_identity_probe_is_made_before_the_user_asks() {
-        // The screen asserts nothing about whether a key exists, and CANNOT:
-        // `who_am_i` and `get_capabilities` both take a Stoa and there is no
-        // Stoa yet. So it must not call them — a screen that probed would be
-        // sending a request core refuses and rendering the refusal as an answer.
-        var screen = makeList({ "list_stoas": '{"items":[],"page":0,"hasMore":false}' })
+    function test_a_failed_query_is_the_could_not_be_read_state_carrying_the_cores_words() {
+        var screen = makeList({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_master_key": '{"error":"keystore permissions are too open (mode 0644)"}'
+        })
+
+        compare(screen.machineKey.state, "unreadable")
+        var reasons = spec.visibleNamed(screen, "keyUnreadableReason")
+        compare(reasons.length, 1)
+        compare(reasons[0].text, "keystore permissions are too open (mode 0644)",
+                "the core's message, unreworded")
+        compare(spec.namedAnywhere(screen, "createKeyButton").length, 0,
+                "a key that may exist is not offered to be made")
+        compare(spec.namedAnywhere(screen, "createStoaButton").length, 0,
+                "nor is creation, which needs a key that could not be read")
+        compare(spec.namedAnywhere(screen, "createTitleField").length, 0)
+        compare(spec.namedAnywhere(screen, "keyLine").length, 0, "and no key line")
+        var shown = spec.visibleText(screen)
+        verify(shown.indexOf(spec.keyExplanationCopy) < 0,
+               "the no-key explanation must not be rendered: " + shown)
+        verify(!/\bno key\b|\bholds? none\b|\bhas no key\b/i.test(shown),
+               "nothing may state that no key is held: " + shown)
+        screen.destroy()
+    }
+
+    // "Pasting stays available when the key state could not be read"
+    // (stoa-navigation-view, spec.md lines 416-419). Asserts presence AND that
+    // the action still reaches the preview signal — the shape this file's own
+    // defect-family note asks for, not just an element existing in the tree.
+    function test_pasting_stays_available_when_the_key_state_could_not_be_read() {
+        var screen = makeList({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_master_key": '{"error":"keystore permissions are too open (mode 0644)"}'
+        })
+        compare(screen.machineKey.state, "unreadable", "the fixture is the could-not-be-read state")
+
+        compare(spec.visibleNamed(screen, "pasteSection").length, 1)
+        compare(spec.visibleNamed(screen, "pasteField").length, 1)
+        compare(spec.visibleNamed(screen, "pasteButton").length, 1)
+
+        var asked = []
+        screen.previewRequested.connect(function (stoa, genesis) { asked.push(stoa) })
+        var stoa = "ab".repeat(32)
+        screen.pasted = DStoaReference.shareText(stoa, "00ff")
+        spec.visibleNamed(screen, "pasteButton")[0].clicked()
+
+        compare(asked.length, 1, "the action still reaches the preview signal")
+        compare(asked[0], stoa)
+        screen.destroy()
+    }
+
+    function test_a_reply_claiming_a_key_without_naming_one_is_not_the_key_held_state() {
+        var replies = ['{"hasMasterKey":true}', '{"hasMasterKey":true,"publicKey":""}',
+                       '{"hasMasterKey":true,"publicKey":7}']
+        for (var i = 0; i < replies.length; i++) {
+            var screen = makeList({
+                "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+                "get_master_key": replies[i]
+            })
+            compare(screen.machineKey.state, "unreadable", "for " + replies[i])
+            compare(spec.namedAnywhere(screen, "keyLine").length, 0, "for " + replies[i])
+            compare(spec.namedAnywhere(screen, "createStoaButton").length, 0, "for " + replies[i])
+            verify(spec.visibleNamed(screen, "keyUnreadableReason")[0].text !== "",
+                   "the failure must name what was wrong with the reply")
+            screen.destroy()
+        }
+    }
+
+    function test_a_reply_stating_neither_outcome_is_not_the_no_key_state() {
+        // `=== false` and nothing looser. Each of these is falsy or absent, and
+        // each would put a `!hasMasterKey` screen in the no-key state, drawing
+        // "Create this machine's key" for a peer the core said nothing about.
+        var replies = ['{}', '{"hasMasterKey":null}', '{"hasMasterKey":0}',
+                       '{"hasMasterKey":"false"}', '{"hasMasterKey":"true","publicKey":"aa"}']
+        for (var i = 0; i < replies.length; i++) {
+            var screen = makeList({
+                "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+                "get_master_key": replies[i]
+            })
+            compare(screen.machineKey.state, "unreadable", "for " + replies[i])
+            compare(spec.namedAnywhere(screen, "createKeyButton").length, 0, "for " + replies[i])
+            screen.destroy()
+        }
+    }
+
+    // ---- could not be read: what failed, and reading the key again ----------
+    //
+    // "A key state that could not be read is told apart from both others".
+    // Every fixture here changes the query's answer between the arrival and the
+    // press, because a fake answering the same both times cannot tell "asked
+    // again" from "kept the first answer".
+
+    readonly property string unreadableStatement:
+        "Whether this machine holds a key could not be read."
+    readonly property string readAgainLabel: "Try reading the key again"
+
+    /// Every element carrying `label` that can be acted on, visible or not.
+    ///
+    /// Keyed on the label AND on having a `clicked` signal, so the thing found
+    /// is the action the user reads rather than an element named for it: a
+    /// button whose objectName survived a relabelling would not be found, and
+    /// a caption carrying the words without an action behind it is not one.
+    /// Walks invisible elements too, because the spec's "not rendered" is met
+    /// here by the action not existing, and a hidden one would still be found.
+    function actionsLabelled(item, label) {
+        var found = []
+        function walk(node) {
+            if (!node)
+                return
+            if (node.text === label && typeof node.clicked === "function")
+                found.push(node)
+            var kids = node.children
+            if (kids !== undefined)
+                for (var i = 0; i < kids.length; i++)
+                    walk(kids[i])
+        }
+        walk(item)
+        return found
+    }
+
+    function test_the_could_not_be_read_state_states_what_failed_above_the_reason() {
+        // Both routes into the state: the failure shape, and a success stating
+        // neither boolean. The statement is the same for both.
+        var replies = ['{"error":"keystore permissions are too open (mode 0644)"}',
+                       '{"hasMasterKey":"maybe"}']
+        for (var i = 0; i < replies.length; i++) {
+            var screen = makeList({
+                "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+                "get_master_key": replies[i]
+            })
+            var statements = spec.visibleNamed(screen, "keyUnreadableStatement")
+            compare(statements.length, 1, "for " + replies[i])
+            compare(statements[0].text, spec.unreadableStatement, "verbatim, for " + replies[i])
+            var reason = spec.visibleNamed(screen, "keyUnreadableReason")[0]
+            verify(reason.text !== "" && reason.text !== spec.unreadableStatement,
+                   "the reason is a second element, not the statement: " + reason.text)
+            verify(statements[0].mapToItem(screen, 0, 0).y < reason.mapToItem(screen, 0, 0).y,
+                   "the statement sits above the reason, for " + replies[i])
+            screen.destroy()
+        }
+    }
+
+    function test_reading_the_key_again_asks_the_query_and_mints_nothing() {
+        var replies = {
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_master_key": '{"error":"keystore could not be read"}',
+            "create_identity": '{"publicKey":"' + aKeyHex() + '","encrypted":false,"wasNew":true}'
+        }
+        var screen = makeList(replies)
+        var bridge = Core.bridge
+        var before = spec.callsTo(bridge, "get_master_key")
+
+        var actions = spec.actionsLabelled(screen, spec.readAgainLabel)
+        compare(actions.length, 1, "the could-not-be-read state offers the action")
+        actions[0].clicked()
+
+        compare(spec.callsTo(bridge, "get_master_key"), before + 1, "asked exactly once more")
+        compare(spec.callsTo(bridge, "create_identity"), 0,
+                "and nothing minted, although the fake would have answered a mint")
+        screen.destroy()
+    }
+
+    function test_reading_the_key_again_reaches_the_key_held_state_once_the_key_can_be_read() {
+        var earlier = "keystore permissions are too open (mode 0644)"
+        var replies = {
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_master_key": '{"error":"' + earlier + '"}'
+        }
+        var screen = makeList(replies)
+        compare(screen.machineKey.state, "unreadable", "the fixture starts unreadable")
+
+        replies["get_master_key"] = spec.heldKeyReply(anotherKeyHex(), true)
+        spec.actionsLabelled(screen, spec.readAgainLabel)[0].clicked()
+
+        compare(screen.machineKey.state, "held")
+        compare(spec.visibleNamed(screen, "keyLineAddress")[0].address, anotherKeyHex(),
+                "naming the key the second answer named")
+        var shown = spec.visibleText(screen)
+        verify(shown.indexOf(spec.unreadableStatement) < 0, shown)
+        verify(shown.indexOf(earlier) < 0, "nor the earlier reason: " + shown)
+        screen.destroy()
+    }
+
+    function test_reading_the_key_again_reaches_the_no_key_state_when_none_is_held() {
+        // The requirement names this outcome alongside the other two ("a reply
+        // stating no key is held puts it in its no-key state"); it has no
+        // scenario of its own.
+        var replies = {
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_master_key": '{"error":"keystore could not be read"}'
+        }
+        var screen = makeList(replies)
+
+        replies["get_master_key"] = spec.noKeyReply()
+        spec.actionsLabelled(screen, spec.readAgainLabel)[0].clicked()
+
+        compare(screen.machineKey.state, "none")
+        compare(spec.visibleNamed(screen, "createKeyButton").length, 1)
+        verify(spec.visibleText(screen).indexOf(spec.unreadableStatement) < 0)
+        screen.destroy()
+    }
+
+    function test_reading_the_key_again_that_fails_again_renders_the_new_reason() {
+        var replies = {
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_master_key": '{"error":"keystore permissions are too open (mode 0644)"}'
+        }
+        var screen = makeList(replies)
+
+        replies["get_master_key"] = '{"error":"the keystore is encrypted and no passphrase is set"}'
+        spec.actionsLabelled(screen, spec.readAgainLabel)[0].clicked()
+
+        compare(screen.machineKey.state, "unreadable")
+        var reasons = spec.visibleNamed(screen, "keyUnreadableReason")
+        compare(reasons.length, 1)
+        compare(reasons[0].text, "the keystore is encrypted and no passphrase is set",
+                "the new message, unreworded")
+        verify(spec.visibleText(screen).indexOf("permissions are too open") < 0,
+               "and the earlier one is gone")
+        compare(spec.actionsLabelled(screen, spec.readAgainLabel).length, 1,
+                "the action is still offered, so a second fix can be read too")
+        screen.destroy()
+    }
+
+    function test_the_read_again_action_belongs_to_the_could_not_be_read_state_alone() {
+        var replies = [spec.noKeyReply(), spec.heldKeyReply(aKeyHex(), false)]
+        for (var i = 0; i < replies.length; i++) {
+            var screen = makeList({
+                "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+                "get_master_key": replies[i]
+            })
+            verify(screen.machineKey.state !== "unreadable", "the fixture is a readable state")
+            compare(spec.actionsLabelled(screen, spec.readAgainLabel).length, 0,
+                    "for " + replies[i])
+            verify(spec.visibleText(screen).indexOf(spec.readAgainLabel) < 0,
+                   "nor the words, for " + replies[i])
+            screen.destroy()
+        }
+    }
+
+    function test_arriving_asks_the_query_once_and_mints_nothing() {
+        var screen = makeList({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_master_key": spec.noKeyReply()
+        })
+        var bridge = Core.bridge
+
+        compare(spec.callsTo(bridge, "get_master_key"), 1)
+        compare(spec.callsTo(bridge, "create_identity"), 0,
+                "nothing may be minted before the user presses the button")
+        verify(String(spec.lastArgsTo(bridge, "get_master_key")).indexOf("stoa") < 0,
+               "the query names no Stoa — a fresh install has none")
+        screen.destroy()
+    }
+
+    function test_the_key_state_is_asked_again_on_each_showing() {
+        // The fake's answer CHANGES between showings, which is what makes this
+        // able to fail: a screen that kept its first answer stays in "none".
+        var replies = {
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_master_key": spec.noKeyReply()
+        }
+        var screen = makeShownList(replies)
+        var bridge = Core.bridge
+        compare(screen.machineKey.state, "none")
+
+        screen.visible = false
+        replies["get_master_key"] = spec.heldKeyReply(aKeyHex(), false)
+        screen.visible = true
+
+        compare(spec.callsTo(bridge, "get_master_key"), 2, "once for each showing")
+        compare(screen.machineKey.state, "held", "the earlier answer notwithstanding")
+        compare(spec.namedAnywhere(screen, "createKeyButton").length, 0)
+        screen.destroy()
+    }
+
+    function test_returning_home_from_a_feed_asks_the_key_state_again() {
+        // The re-read through the real navigator: the key changes while a feed
+        // is open — in this release from outside the view, since the per-Stoa
+        // keep that used to write it is not mounted (design.md, Decision 8) —
+        // so the list the user returns to must not still be offering to make
+        // one.
+        var replies = {
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_master_key": spec.noKeyReply()
+        }
+        Core.bridge = bridgeFor(replies)
+        var bridge = Core.bridge
+        var view = mainComponent.createObject(null, {})
+        var list = spec.namedAnywhere(view, "stoaList")[0]
+        compare(list.machineKey.state, "none")
+
+        view.open("ab".repeat(32), "Agora", "00ff")
+        replies["get_master_key"] = spec.heldKeyReply(aKeyHex(), false)
+        view.closeFeed()
+
+        compare(spec.callsTo(bridge, "get_master_key"), 2, "asked on arrival and on return")
+        compare(list.machineKey.state, "held")
+        view.destroy()
+    }
+
+    function test_hiding_the_screen_asks_nothing() {
+        var screen = makeShownList({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_master_key": spec.noKeyReply()
+        })
+        var bridge = Core.bridge
+        screen.visible = false
+        compare(spec.callsTo(bridge, "get_master_key"), 1,
+                "a hide is not a showing")
+        screen.destroy()
+    }
+
+    function test_the_key_state_does_not_follow_the_listing() {
+        // Each key state against a FAILED listing. The listing and the key are
+        // answered by different calls, and the one that failed says nothing
+        // about the other.
+        var cases = [
+            { reply: spec.noKeyReply(), state: "none", present: "createKeyButton" },
+            { reply: spec.heldKeyReply(aKeyHex(), false), state: "held", present: "createStoaButton" }
+        ]
+        for (var i = 0; i < cases.length; i++) {
+            var screen = makeList({
+                "list_stoas": '{"error":"the membership store is locked"}',
+                "get_master_key": cases[i].reply
+            })
+            compare(screen.readState, "failed", "the fixture must be in the failed state")
+            compare(screen.machineKey.state, cases[i].state)
+            compare(spec.visibleNamed(screen, cases[i].present).length, 1,
+                    cases[i].state + ": a failed listing changes nothing about the key")
+            screen.destroy()
+        }
+    }
+
+    function test_no_other_identity_probe_is_made_on_arrival() {
+        // `who_am_i` and `get_capabilities` both take a Stoa, and there is no
+        // Stoa on this screen. The key question is `get_master_key`'s.
+        var screen = makeList({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_master_key": spec.noKeyReply()
+        })
         var bridge = Core.bridge
 
         compare(spec.callsTo(bridge, "who_am_i"), 0)
         compare(spec.callsTo(bridge, "get_capabilities"), 0)
-        compare(spec.callsTo(bridge, "create_identity"), 0,
-                "and nothing may be minted before the user presses the button")
         screen.destroy()
     }
 
-    function test_a_minted_identity_is_reported_as_new_and_names_its_key() {
+    // ---- no key held (0A) --------------------------------------------------
+
+    function test_the_no_key_state_renders_the_key_block_above_the_paste_section() {
         var screen = makeList({
             "list_stoas": '{"items":[],"page":0,"hasMore":false}',
-            "create_identity": '{"publicKey":"' + aKeyHex()
-                             + '","encrypted":false,"wasNew":true}'
+            "get_master_key": spec.noKeyReply()
+        })
+
+        var block = spec.visibleNamed(screen, "keyBlock")
+        var paste = spec.visibleNamed(screen, "pasteSection")
+        compare(block.length, 1)
+        compare(paste.length, 1)
+        compare(spec.visibleNamed(screen, "pasteField").length, 1)
+        compare(spec.visibleNamed(screen, "pasteButton").length, 1)
+        verify(block[0].mapToItem(screen, 0, 0).y < paste[0].mapToItem(screen, 0, 0).y,
+               "the key block sits above the paste section")
+        screen.destroy()
+    }
+
+    function test_a_reference_can_be_previewed_with_no_key_held() {
+        var screen = makeList({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_master_key": spec.noKeyReply()
         })
         var bridge = Core.bridge
-        screen.createIdentity()
+        var asked = []
+        screen.previewRequested.connect(function (stoa, genesis) { asked.push(stoa) })
+
+        var stoa = "ab".repeat(32)
+        screen.pasted = DStoaReference.shareText(stoa, "00ff")
+        spec.visibleNamed(screen, "pasteButton")[0].clicked()
+
+        compare(asked.length, 1, "a preview is requested")
+        compare(asked[0], stoa)
+        compare(spec.callsTo(bridge, "join_stoa"), 0, "and nothing is joined")
+        screen.destroy()
+    }
+
+    function test_creating_the_key_calls_the_mint_once_and_names_no_stoa() {
+        var screen = makeList({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_master_key": spec.noKeyReply(),
+            "create_identity": '{"publicKey":"' + aKeyHex() + '","encrypted":false,"wasNew":true}'
+        })
+        var bridge = Core.bridge
+
+        spec.visibleNamed(screen, "createKeyButton")[0].clicked()
 
         compare(spec.callsTo(bridge, "create_identity"), 1)
-        compare(screen.keyState, "ready")
-
-        var labels = spec.visibleNamed(screen, "identityKeyLabel")
-        compare(labels.length, 1, "the key this machine now holds must be nameable")
-        compare(labels[0].address, aKeyHex(), "the key the core returned")
-
-        verify(spec.visibleText(screen).indexOf("was created") >= 0,
-               "a first run must read as a creation")
-
-        // **And it must not have said "identity" to do it.** This screen is
-        // banned from that word by
-        // `test_neither_the_list_nor_the_creation_outcome_claims_moderation_or_
-        // identity`: one key signs in every Stoa in this release, so raising
-        // identity here offers an unlinkability property the software lacks.
-        // Asserted HERE too, because that sibling drives creation rather than
-        // the mint, so the copy this test renders is a corpus it never scans.
-        verify(!/\bidentity\b/i.test(spec.visibleText(screen)),
-               "the mint's own copy must not raise identity either")
-        screen.destroy()
-    }
-
-    function test_a_second_press_reports_the_existing_key_rather_than_a_failure() {
-        // `wasNew:false` is a SUCCESS: the peer has a key, which is what was
-        // asked for. A screen that rendered it as a failure would tell a user
-        // their identity is broken at the moment it is working, and — worse —
-        // invite them to look for a way to replace it.
-        //
-        // WATCHED TO FAIL: rendering the outcome text unconditionally as "An
-        // identity was created" turns this red on the second assertion.
-        var screen = makeList({
-            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
-            "create_identity": '{"publicKey":"' + aKeyHex()
-                             + '","encrypted":false,"wasNew":false}'
-        })
-        screen.createIdentity()
-
-        compare(screen.keyState, "ready", "an existing key is not a failure")
-        var text = spec.visibleText(screen)
-        verify(text.indexOf("already had a key") >= 0,
-               "the screen must say the key was already there")
-        verify(text.indexOf("Nothing was replaced") >= 0,
-               "and that nothing was destroyed — the reassurance is the point")
-        screen.destroy()
-    }
-
-    function test_an_unencrypted_key_is_said_to_be_unencrypted() {
-        // The honesty requirement, and the first run's normal case: with no
-        // passphrase set core stores the key in the clear and reports it. A user
-        // should learn that from the interface, not from the file.
-        //
-        // WATCHED TO FAIL: deleting the warning Text turns this red.
-        var screen = makeList({
-            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
-            "create_identity": '{"publicKey":"' + aKeyHex()
-                             + '","encrypted":false,"wasNew":true}'
-        })
-        screen.createIdentity()
-
-        compare(spec.visibleNamed(screen, "identityUnencryptedWarning").length, 1,
-                "a key stored in the clear must say so")
-        verify(spec.visibleText(screen).indexOf("stored unencrypted") >= 0)
-        screen.destroy()
-    }
-
-    function test_an_encrypted_key_carries_no_unencrypted_warning() {
-        // The other direction, and the reason the test above proves anything: a
-        // warning shown unconditionally would satisfy it while telling every user
-        // with a protected key something false.
-        var screen = makeList({
-            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
-            "create_identity": '{"publicKey":"' + aKeyHex()
-                             + '","encrypted":true,"wasNew":true}'
-        })
-        screen.createIdentity()
-
-        compare(spec.visibleNamed(screen, "identityUnencryptedWarning").length, 0,
-                "a protected key must not be reported as stored in the clear")
-        screen.destroy()
-    }
-
-    function test_a_refused_mint_renders_the_cores_reason_and_claims_no_key() {
-        var screen = makeList({
-            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
-            "create_identity": '{"error":"the keystore directory is not writable"}'
-        })
-        screen.createIdentity()
-
-        compare(screen.keyState, "failed")
-        compare(screen.keyHeld, null, "nothing may be reported as held")
-        compare(spec.visibleNamed(screen, "identityKeyLabel").length, 0,
-                "and no key may be on screen")
-        verify(spec.visibleText(screen).indexOf("not writable") >= 0,
-               "the core's own reason, unreworded")
-        screen.destroy()
-    }
-
-    function test_a_success_without_a_key_is_treated_as_a_failure() {
-        // `ok:true` means the module ANSWERED, not that a key exists — the
-        // warning `Core.qml` carries at its `ok: true` return. A screen stopping
-        // at `ok` would report an identity that was never made, and the user
-        // would then meet the deadlock's error again with nothing explaining it.
-        var screen = makeList({
-            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
-            "create_identity": '{"encrypted":false,"wasNew":true}'
-        })
-        screen.createIdentity()
-
-        compare(screen.keyState, "failed",
-                "a reply naming no key is not an identity, whatever `ok` says")
-        compare(screen.keyHeld, null)
-        screen.destroy()
-    }
-
-    function test_the_mint_request_names_no_stoa() {
-        // The whole of why this method exists. A request carrying a Stoa would
-        // be a request only a peer that already has one can make, which is the
-        // deadlock restated.
-        var screen = makeList({
-            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
-            "create_identity": '{"publicKey":"' + aKeyHex()
-                             + '","encrypted":false,"wasNew":true}'
-        })
-        var bridge = Core.bridge
-        screen.createIdentity()
-
         var sent = String(spec.lastArgsTo(bridge, "create_identity"))
         verify(sent.indexOf("stoa") < 0,
                "the mint must name no Stoa — a fresh install has none: " + sent)
         screen.destroy()
+    }
+
+    function test_a_successful_mint_moves_the_screen_to_the_key_held_state() {
+        var screen = makeList({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_master_key": spec.noKeyReply(),
+            "create_identity": '{"publicKey":"' + anotherKeyHex() + '","encrypted":false,"wasNew":true}'
+        })
+        spec.visibleNamed(screen, "createKeyButton")[0].clicked()
+
+        compare(screen.machineKey.state, "held")
+        compare(spec.namedAnywhere(screen, "keyBlock").length, 0,
+                "the key block is no longer in the element tree")
+        compare(spec.visibleNamed(screen, "createStoaButton").length, 1,
+                "and the create affordance is present")
+        compare(spec.visibleNamed(screen, "keyLineAddress")[0].address, anotherKeyHex(),
+                "naming the key the MINT returned")
+        screen.destroy()
+    }
+
+    function test_a_refused_mint_renders_the_cores_reason_and_stays_in_the_no_key_state() {
+        var screen = makeList({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_master_key": spec.noKeyReply(),
+            "create_identity": '{"error":"the keystore directory is not writable"}'
+        })
+        spec.visibleNamed(screen, "createKeyButton")[0].clicked()
+
+        compare(screen.machineKey.state, "none")
+        var shown = spec.visibleText(screen)
+        verify(shown.indexOf("No key was created.") >= 0, "says no key was created: " + shown)
+        compare(spec.visibleNamed(screen, "mintFailureText")[0].text,
+                "the keystore directory is not writable", "the core's reason, unreworded")
+        compare(spec.namedAnywhere(screen, "keyLine").length, 0, "no key is rendered as held")
+        screen.destroy()
+    }
+
+    function test_a_mint_success_naming_no_key_is_not_a_key() {
+        var replies = ['{"encrypted":false,"wasNew":true}',
+                       '{"publicKey":"","encrypted":false,"wasNew":true}']
+        for (var i = 0; i < replies.length; i++) {
+            var screen = makeList({
+                "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+                "get_master_key": spec.noKeyReply(),
+                "create_identity": replies[i]
+            })
+            spec.visibleNamed(screen, "createKeyButton")[0].clicked()
+
+            verify(screen.machineKey.state !== "held", "for " + replies[i])
+            compare(spec.namedAnywhere(screen, "keyLine").length, 0, "for " + replies[i])
+            verify(spec.visibleNamed(screen, "mintFailureText")[0].text !== "",
+                   "a failure naming what was wrong with the reply")
+            screen.destroy()
+        }
+    }
+
+    // "A failure rendered after a press belongs to the showing in which the
+    // press was made", and its scenario "A refused mint is not rendered on a
+    // later showing". The query answers no key both times, so the refusal is
+    // gone because the showing changed, not because the key state did.
+    function test_a_mint_failure_does_not_outlive_the_showing_it_happened_in() {
+        var screen = makeShownList({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_master_key": spec.noKeyReply(),
+            "create_identity": '{"error":"the keystore directory is not writable"}'
+        })
+        spec.visibleNamed(screen, "createKeyButton")[0].clicked()
+        compare(spec.visibleNamed(screen, "mintFailureText")[0].text,
+                "the keystore directory is not writable",
+                "the fixture must render the refusal before the re-showing")
+
+        screen.visible = false
+        screen.visible = true
+
+        compare(screen.machineKey.state, "none")
+        var shown = spec.visibleText(screen)
+        verify(shown.indexOf("No key was created.") < 0, shown)
+        verify(shown.indexOf("the keystore directory is not writable") < 0, shown)
+        screen.destroy()
+    }
+
+    // ---- key held (0B) -----------------------------------------------------
+
+    function test_the_key_block_is_not_instantiated_when_a_key_is_held() {
+        var screen = makeList({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_master_key": spec.heldKeyReply(aKeyHex(), false)
+        })
+
+        compare(spec.namedAnywhere(screen, "createKeyButton").length, 0,
+                "no create-key action, visible or invisible")
+        compare(spec.namedAnywhere(screen, "keyExplanation").length, 0,
+                "no element carrying the explanation")
+        screen.destroy()
+    }
+
+    function test_creating_a_stoa_sits_above_pasting_and_the_key_line_below_both() {
+        var screen = makeList({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_master_key": spec.heldKeyReply(aKeyHex(), false)
+        })
+
+        function y(name) { return spec.visibleNamed(screen, name)[0].mapToItem(screen, 0, 0).y }
+        verify(y("createBlock") < y("pasteSection"), "create above paste")
+        verify(y("pasteSection") < y("keyLine"), "the key line below the paste section")
+        verify(y("createBlock") < y("keyLine"), "and below the create affordance")
+        screen.destroy()
+    }
+
+    function test_the_key_line_abbreviates_the_reported_key_through_the_one_component() {
+        var screen = makeList({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_master_key": spec.heldKeyReply(anotherKeyHex(), false)
+        })
+
+        var labels = spec.addressElementsFor(screen, anotherKeyHex())
+        compare(labels.length, 1, "exactly one element renders the key")
+        verify(labels[0].full !== undefined, "rendered by AddressLabel")
+        compare(labels[0].full, false, "abbreviated, never in full")
+        compare(labels[0].address, anotherKeyHex(), "carrying the reported key")
+        compare(labels[0].text.split("…").length, 3, "head, middle and tail: " + labels[0].text)
+        screen.destroy()
+    }
+
+    function test_an_unprotected_key_carries_the_warning_in_the_accent_colour() {
+        var screen = makeList({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_master_key": spec.heldKeyReply(aKeyHex(), false)
+        })
+
+        var warnings = spec.visibleNamed(screen, "unencryptedWarning")
+        compare(warnings.length, 1)
+        compare(warnings[0].text, spec.unencryptedCopy)
+        verify(Qt.colorEqual(warnings[0].color, DTheme.accent), "in the accent colour")
+        screen.destroy()
+    }
+
+    function test_a_protected_key_carries_no_unencrypted_warning() {
+        var screen = makeList({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_master_key": spec.heldKeyReply(aKeyHex(), true)
+        })
+
+        compare(spec.visibleNamed(screen, "unencryptedWarning").length, 0)
+        screen.destroy()
+    }
+
+    function test_an_omitted_protection_field_makes_no_claim_either_way() {
+        var screen = makeList({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_master_key": '{"hasMasterKey":true,"publicKey":"' + aKeyHex() + '"}'
+        })
+
+        compare(screen.machineKey.state, "held")
+        compare(spec.visibleNamed(screen, "unencryptedWarning").length, 0)
+        var shown = spec.visibleText(screen).toLowerCase()
+        verify(!/\b(encrypted|protected)\b/.test(shown),
+               "nothing may claim the key is protected either: " + shown)
+        screen.destroy()
+    }
+
+    function test_the_key_held_state_renders_the_same_however_it_was_reached() {
+        function heldText(replies, press) {
+            var screen = makeList(replies)
+            if (press)
+                spec.visibleNamed(screen, "createKeyButton")[0].clicked()
+            compare(screen.machineKey.state, "held")
+            var text = spec.visibleText(screen)
+            screen.destroy()
+            return text
+        }
+        var list = '{"items":[],"page":0,"hasMore":false}'
+        var fromQuery = heldText({ "list_stoas": list,
+                                   "get_master_key": spec.heldKeyReply(aKeyHex(), false) }, false)
+        var fromNewMint = heldText({ "list_stoas": list, "get_master_key": spec.noKeyReply(),
+                                     "create_identity": '{"publicKey":"' + aKeyHex()
+                                                      + '","encrypted":false,"wasNew":true}' }, true)
+        var fromOldMint = heldText({ "list_stoas": list, "get_master_key": spec.noKeyReply(),
+                                     "create_identity": '{"publicKey":"' + aKeyHex()
+                                                      + '","encrypted":false,"wasNew":false}' }, true)
+
+        compare(fromNewMint, fromQuery)
+        compare(fromOldMint, fromQuery)
+        verify(!/already had a key|nothing was replaced/i.test(fromOldMint),
+               "a mint that found a key says nothing about it: " + fromOldMint)
+    }
+
+    // ---- the copy ----------------------------------------------------------
+
+    function test_the_no_key_state_renders_its_copy_verbatim() {
+        var screen = makeList({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_master_key": spec.noKeyReply()
+        })
+        var shown = spec.visibleText(screen).split("\n")
+        var expected = ["Stoas you joined", "NO DIRECTORY EXISTS · JOIN BY ADDRESS",
+                        "THIS MACHINE'S KEY", spec.keyExplanationCopy,
+                        "Create this machine's key",
+                        "PASTE A STOA REFERENCE — THE ADDRESS AND ITS FOUNDING RECORD",
+                        "Look at it first"]
+        for (var i = 0; i < expected.length; i++)
+            verify(shown.indexOf(expected[i]) >= 0, "missing verbatim: " + expected[i])
+        screen.destroy()
+    }
+
+    function test_the_key_held_state_renders_its_copy_verbatim() {
+        var screen = makeList({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_master_key": spec.heldKeyReply(aKeyHex(), false)
+        })
+        var shown = spec.visibleText(screen).split("\n")
+        var expected = ["Stoas you joined", "NO DIRECTORY EXISTS · JOIN BY ADDRESS",
+                        "CREATE A STOA", "Create it",
+                        "PASTE A STOA REFERENCE — THE ADDRESS AND ITS FOUNDING RECORD",
+                        "Look at it first", "THIS MACHINE'S KEY", spec.unencryptedCopy]
+        for (var i = 0; i < expected.length; i++)
+            verify(shown.indexOf(expected[i]) >= 0, "missing verbatim: " + expected[i])
+        screen.destroy()
+    }
+
+    function test_a_listed_row_renders_its_actions_verbatim() {
+        var addr = "b02d5e77" + "c3".repeat(28)
+        var screen = makeList({
+            "list_stoas": '{"items":[{"stoa":"' + addr + '","foundingTitle":"Transport Notes",'
+                        + '"genesis":"00ff"}],"page":0,"hasMore":false}',
+            "get_master_key": spec.noKeyReply()
+        })
+        var shown = spec.visibleText(screen).split("\n")
+        verify(shown.indexOf("Copy a shareable reference") >= 0)
+        verify(shown.indexOf("Open") >= 0)
+        screen.destroy()
+    }
+
+    function test_the_title_placeholder_shows_only_while_the_field_is_empty() {
+        var screen = makeList({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_master_key": spec.heldKeyReply(aKeyHex(), false)
+        })
+
+        compare(spec.visibleNamed(screen, "createTitlePlaceholder").length, 1)
+        compare(spec.visibleNamed(screen, "createTitlePlaceholder")[0].text, "Title of the new Stoa")
+
+        spec.namedAnywhere(screen, "createTitleField")[0].text = "Agora"
+        compare(spec.visibleNamed(screen, "createTitlePlaceholder").length, 0,
+                "the placeholder goes once text is entered")
+        screen.destroy()
+    }
+
+    function test_the_placeholder_is_never_submitted_as_a_title() {
+        // The empty title is blank, and `stoa-membership` refuses a blank title,
+        // so the core answers with the error shape. A fixture answering success
+        // here would encode a reply the core may not give.
+        var screen = makeList({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_master_key": spec.heldKeyReply(aKeyHex(), false),
+            "create_stoa": '{"error":"title: title is blank"}'
+        })
+        var bridge = Core.bridge
+        spec.visibleNamed(screen, "createStoaButton")[0].clicked()
+
+        var sent = String(spec.lastArgsTo(bridge, "create_stoa"))
+        verify(sent.indexOf('"title":""') >= 0, "the empty string was sent: " + sent)
+        verify(sent.indexOf("Title of the new Stoa") < 0, "not the placeholder: " + sent)
+        compare(screen.created, null, "no Stoa may be reported as created")
+        compare(spec.visibleNamed(screen, "createdAddress").length, 0,
+                "and no address is rendered as a Stoa just created")
+        screen.destroy()
+    }
+
+    function test_none_of_the_key_states_claim_identity() {
+        // **The key blocks must not say "identity" to do their job.** This
+        // screen is banned from that word by
+        // `test_neither_the_list_nor_the_creation_outcome_claims_moderation_or_
+        // identity`: one key signs in every Stoa in this release, so raising
+        // identity here offers an unlinkability property the software lacks.
+        // Asserted over all three key states, because that sibling drives only
+        // creation, so the copy these states render is a corpus it never scans.
+        var replies = [spec.noKeyReply(), spec.heldKeyReply(aKeyHex(), false),
+                       '{"error":"keystore could not be read"}']
+        for (var i = 0; i < replies.length; i++) {
+            var screen = makeList({
+                "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+                "get_master_key": replies[i]
+            })
+            var shown = spec.visibleText(screen)
+            verify(shown.indexOf("Look at it first") >= 0, "the corpus is the rendered screen")
+            verify(!/\bidentity\b/i.test(shown),
+                   "no key state may raise identity: " + shown)
+            screen.destroy()
+        }
+    }
+
+    function test_the_mint_reports_protection_from_its_own_reply() {
+        // The mint's `encrypted` decides the warning when the key-held state was
+        // reached through it — both directions, so a warning drawn
+        // unconditionally fails the second.
+        var cases = [{ encrypted: false, warnings: 1 }, { encrypted: true, warnings: 0 }]
+        for (var i = 0; i < cases.length; i++) {
+            var screen = makeList({
+                "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+                "get_master_key": spec.noKeyReply(),
+                "create_identity": JSON.stringify({ publicKey: aKeyHex(),
+                                                    encrypted: cases[i].encrypted,
+                                                    wasNew: true })
+            })
+            spec.visibleNamed(screen, "createKeyButton")[0].clicked()
+            compare(spec.visibleNamed(screen, "unencryptedWarning").length, cases[i].warnings,
+                    "encrypted: " + cases[i].encrypted)
+            screen.destroy()
+        }
     }
 }

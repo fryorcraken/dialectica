@@ -61,6 +61,17 @@ TestCase {
         return null
     }
 
+    // The method names of every call recorded from `sinceIndex` onward — the
+    // full set, not one method's count. Proving "no OTHER call was made" needs
+    // the set, because a count of named methods staying at zero says nothing
+    // about a method nobody thought to name.
+    function methodsSince(bridge, sinceIndex) {
+        var methods = []
+        for (var i = sinceIndex; i < bridge.calls.length; i++)
+            methods.push(bridge.calls[i].method)
+        return methods
+    }
+
     function namedAnywhere(item, name) {
         var found = []
         function walk(node) {
@@ -220,12 +231,29 @@ TestCase {
     // Driven through the CHIP's own signal, not `acquireIdentity()`, because the
     // requirement is about the affordance a user acts on: a navigator function
     // nothing wires to the chip would pass a test that called it directly.
+    //
+    // **The last assertion is a composition of two specs, and the fixture has
+    // to answer both.** `view-navigation` requires only that the route renders
+    // the list; what the list then draws is `stoa-navigation-view`'s, and there
+    // the create-key action exists only in the no-key state, entered on
+    // `get_master_key` answering `hasMasterKey:false` and on nothing else. So
+    // this fixture states the master-key answer that agrees with its own
+    // `who_am_i` — no keystore on this machine — and the claim is: a feed that
+    // reports no identity, on a machine holding no key, lands the user where
+    // the key is made.
+    //
+    // Without the `get_master_key` reply the fake answers that method with the
+    // error shape, the list is in its could-not-be-read state, and no create-key
+    // action exists — correctly, since a key may be held and unreadable. That is
+    // how this test went red when it first met the key-state list: it was
+    // written against a list that drew `createIdentityButton` unconditionally.
     function test_a_missing_identity_offers_the_route_to_the_stoa_list() {
         Core.bridge = spec.bridgeFor({
             "list_stoas": spec.oneStoa,
             "list_threads": '{"items":[],"page":0,"hasMore":false}',
             "who_am_i": '{"hasIdentity":false,"reason":"no keystore on this machine"}',
-            "get_capabilities": '{"canPost":false,"reason":"no keystore on this machine"}'
+            "get_capabilities": '{"canPost":false,"reason":"no keystore on this machine"}',
+            "get_master_key": '{"hasMasterKey":false}'
         })
         var view = mainComponent.createObject(null, {})
         view.open(spec.stoaA, "Nym Research", "")
@@ -242,15 +270,73 @@ TestCase {
                 + "machine's key is created")
         compare(spec.visibleNamed(view, "stoaList").length, 1,
                 "and the list is what is on screen")
-        compare(spec.visibleNamed(view, "createIdentityButton").length, 1,
-                "with the control that creates the key reachable on it")
+        compare(spec.visibleNamed(view, "createKeyButton").length, 1,
+                "with the control that creates the key reachable on it, the "
+                + "master-key query having reported no key held")
         view.destroy()
     }
 
-    // "Following the route asks the module for nothing." The house fake
-    // RECORDS, so a zero count below is "no call was made" and not "a call was
-    // made and ignored" — and the fake answers all three methods, so a call
-    // that WAS made would not have failed quietly on a missing reply.
+    // `view-navigation`, "Following the route makes no call of its own": every
+    // call reaching the bridge in consequence of acting on the affordance is
+    // one the Stoa list makes on being shown, not one the route makes itself.
+    //
+    // The control is `closeFeed()` — the ordinary way back to the list from the
+    // feed's own close button (`Main.qml`'s `onClosed: root.closeFeed()`), which
+    // `acquireIdentity()` shares its whole body with (`enterOnly("", null)`).
+    // Both hide the feed and reveal the already-mounted `DStoaListScreen`, which
+    // is what re-triggers its `onVisibleChanged` showing. If the identity route
+    // reached the bridge for anything of its own, its delta would differ from
+    // this control's; if it reached the bridge for nothing beyond revealing the
+    // list, the two deltas are the same call, in the same order. Comparing the
+    // full method list rather than counting three names chosen in advance is
+    // what lets an unnamed extra call fail this too.
+    function test_following_the_route_makes_no_call_of_its_own() {
+        var replies = {
+            "list_stoas": spec.oneStoa,
+            "list_threads": '{"items":[],"page":0,"hasMore":false}',
+            "who_am_i": '{"hasIdentity":false,"reason":"none"}',
+            "get_capabilities": '{"canPost":false,"reason":"none"}',
+            "get_master_key": '{"hasMasterKey":false}'
+        }
+
+        // The route, driven through the chip's own signal as elsewhere in this
+        // file — the requirement is about the affordance, not the function name.
+        var routeBridge = spec.bridgeFor(replies)
+        Core.bridge = routeBridge
+        var routeView = mainComponent.createObject(null, {})
+        routeView.open(spec.stoaA, "Nym Research", "")
+        verify(routeBridge.calls.length > 0,
+               "the feed did call the core, so the delta below is the route "
+               + "making no call rather than the fake being unreachable")
+        var beforeRoute = routeBridge.calls.length
+        spec.namedAnywhere(routeView, "identityChip")[0].createRequested()
+        compare(routeView.screenShown, "list")
+        var afterRoute = spec.methodsSince(routeBridge, beforeRoute)
+
+        // The control: the same feed, closed by its own close button rather
+        // than the identity chip, reaching the list the same way.
+        var closeBridge = spec.bridgeFor(replies)
+        Core.bridge = closeBridge
+        var closeView = mainComponent.createObject(null, {})
+        closeView.open(spec.stoaA, "Nym Research", "")
+        var beforeClose = closeBridge.calls.length
+        spec.namedAnywhere(closeView, "feed")[0].closed()
+        compare(closeView.screenShown, "list")
+        var afterClose = spec.methodsSince(closeBridge, beforeClose)
+
+        compare(afterRoute, afterClose,
+                "acting on the identity route must reach the bridge for "
+                + "exactly the calls an ordinary return to the list makes, "
+                + "and none besides")
+        routeView.destroy()
+        closeView.destroy()
+    }
+
+    // `view-navigation`, "Following the route creates no key, requests no
+    // slate and keeps nothing". The house fake RECORDS, so a zero count below
+    // is "no call was made" and not "a call was made and ignored" — and the
+    // fake answers all three methods, so a call that WAS made would not have
+    // failed quietly on a missing reply.
     function test_following_the_route_creates_no_key_requests_no_slate_and_keeps_nothing() {
         var bridge = spec.bridgeFor({
             "list_stoas": spec.oneStoa,
@@ -263,7 +349,8 @@ TestCase {
                 '{"slate":"ab","count":1,"candidates":[{"index":0,"publicKey":"'
                 + spec.keyA + '"}]}',
             "keep_identity": '{"kept":true,"publicKey":"' + spec.keyA
-                             + '","path":0,"encrypted":false}'
+                             + '","path":0,"encrypted":false}',
+            "get_master_key": '{"hasMasterKey":false}'
         })
         Core.bridge = bridge
         var view = mainComponent.createObject(null, {})
