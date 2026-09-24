@@ -2,7 +2,7 @@
 
 - [x] spec — `spec-writer`
 - [x] design + code — `dev-writer`
-- [ ] tests — `tester`
+- [x] tests — `tester`
 - [ ] review: correctness — `code-reviewer`
 - [ ] review: security — `code-reviewer`
 - [ ] review: readability — `code-reviewer`
@@ -54,7 +54,7 @@ the tester does not have to work it out again.
       keystore from disk on every call, not from the mint's reply. Verify: by
       reading `whoami_for` → `posting_identity` and the adapter's `publishing` →
       `publishing_key`.
-- [ ] 2.4 **Owned by the `tester` row, not this one.** A test cites *Creating a
+- [x] 2.4 **Owned by the `tester` row, not this one.** A test cites *Creating a
       master key while one is held does not replace the identity in use*, and
       calls `createIdentity`, not the read-only `getMasterKey` (design.md
       Risks). It must be proved red against a build whose mint writes a fresh root over a
@@ -62,3 +62,19 @@ the tester does not have to work it out again.
       mint into the error shape and the identity stays unchanged (design.md
       Decision 4). The test's keystore opener must read the file, not return
       `a_master_key()`.
+
+      Done:
+      `dialectica-core/src/wire.rs`'s
+      `wire::tests::creating_a_master_key_while_one_is_held_does_not_replace_the_identity_in_use`.
+      Holds a machine key (`createIdentity`), reports the identity
+      (`who_am_i`), calls `createIdentity` again, reports again, and publishes
+      a post — asserting the second report names the first report's key and
+      the post's author is that same key. The opener is `|| Keystore::open(&dir.keystore_path(), &Unlock::Unencrypted)`,
+      which reads the file. Proved red by mutating `mint_master_key`'s
+      `exists()` branch to `Keystore::generate()` + `write_to` (replacing the
+      file, bypassing `Keystore::create`'s `AlreadyExists` guard) instead of
+      reading the existing key back: the second `who_am_i` report assertion
+      failed with the fixture's key on the left and the freshly-generated
+      key on the right. Restored; `cargo test --manifest-path
+      dialectica/rust-lib/Cargo.toml -p dialectica -p dialectica-core` is
+      green (1142 + 30 passed) with the implementation unchanged from HEAD.
