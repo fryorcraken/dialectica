@@ -54,8 +54,14 @@
 //! [`OpLog::iter_stoa`] already returns entries in
 //! [`cmp_ops`](crate::arrival::cmp_ops) order, and this module walks that
 //! sequence **backwards**, filters it and pages it. Backwards because the rule
-//! places the higher counter first and a thread reads oldest first — a reply
-//! after the reply it answers (#147). There is no `sort`, no `cmp` and no
+//! places the higher counter first and a thread reads oldest first (#147). A
+//! reply therefore comes after the reply it answers **only where its counter is
+//! the greater**; where it is not — a counter-less reply, or an answer to a
+//! reply whose counter was over [`crate::arrival::ADVANCE_BOUND`] and so never
+//! advanced the answerer's clock — the reversed sequence stands and the reply
+//! comes first. `thread-read` forbids moving it after its parent, and doing so
+//! would need exactly the comparison this module does not make. There is no
+//! `sort`, no `cmp` and no
 //! `max_by` — the same
 //! discipline [`crate::revision`], [`crate::moderation`] and [`crate::feed`]
 //! hold, and for the same reason: a second implementation of the ordering rule
@@ -677,8 +683,11 @@ pub fn read_thread<L: OpLog>(
     // THE REPLY ORDER IS DECIDED HERE, by walking the rule's sequence backwards.
     //
     // `cmp_ops` places the higher counter first — newest first — and `thread-read`
-    // wants a reply after the reply it answers, so the replies are the rule's
-    // sequence REVERSED (#147). Reversed rather than re-sorted: this read compares
+    // wants the replies oldest first, so they are the rule's sequence REVERSED
+    // (#147). A reply lands after the reply it answers only where its counter is
+    // the greater; where it is not, it lands before, and nothing here moves it —
+    // the spec forbids that, and see the module header. Reversed rather than
+    // re-sorted: this read compares
     // no value itself, so it cannot become a second implementation of the rule
     // that disagrees with the first. A re-sort by ascending counter would — on
     // equal counters and on counter-less ops, where the rule's tiebreaks are not
@@ -3097,13 +3106,17 @@ mod tests {
 
     #[test]
     fn a_reply_orders_after_the_reply_it_answers() {
-        // `thread-read`: "WHEN one peer publishes a reply, a second receives it
-        // and publishes a reply to it THEN the second orders after the first."
+        // `thread-read`: "WHEN one peer publishes a reply carrying a counter, a
+        // second receives it, the first reply's counter advances the second
+        // peer's clock, and the second publishes a reply to it carrying a
+        // counter THEN the second orders after the first."
         //
         // The fixture #147 was measured with: root at counter 1, a reply at 2,
-        // a reply to THAT reply at 3. Receiving a reply raises the receiver's
-        // clock past it, so the answering reply's counter is the higher one —
-        // which is why the counters here run with the causal chain.
+        // a reply to THAT reply at 3. A received counter within the advance
+        // bound raises the receiver's clock to it, so the answering reply's
+        // counter is the higher one — which is why the counters here run with
+        // the causal chain. Where they do not, the answer comes FIRST; that is
+        // a separate scenario.
         //
         // **It fails against newest-first**, the order this read returned before
         // #147: the ordering rule places counter 3 first, so the rule's own

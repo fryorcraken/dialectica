@@ -52,4 +52,14 @@
       is green.
 - [x] 4.2 A mutant that re-sorts by ascending counter turns the three tests
       named in `design.md` Decision 1 red.
-- [x] 4.3 `nix build .#lgx` succeeds.
+- [x] 4.3 `nix build ./dialectica#lgx` succeeds.
+
+## 5. The spec's amendment on counters
+
+- [x] 5.1 Bring `design.md`'s Risks entry in line with the amended *"A reply
+      orders after the reply it answers"*: the gap it flagged is now specified,
+      and the over-bound case is recorded beside the counter-less one.
+- [x] 5.2 Correct `thread.rs`'s comments that said a reply lands after the
+      reply it answers without condition. No code change: the read already
+      moves no reply after its parent. Verify: the 4.1 suite is unchanged and
+      green.

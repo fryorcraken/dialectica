@@ -122,18 +122,29 @@ membership and not position, so it is unaffected. It passes unchanged.
 
 ## Risks / Trade-offs
 
-- **[Counter-less replies do not come after the reply they answer]** Replies
-  without a counter are placed by descending op id, which is a hash. The
-  on-disk test `a_thread_read_over_a_store_on_disk_returns_the_root_and_its_replies`
-  shows it: its counter-less reply-to-a-reply comes before its parent because of
-  how the hashes fell. A reply from an older build (no counter) that answers a
-  counted post is placed ahead of every counted reply, so it comes before its
-  parent too. The spec requires this (*"a reply carrying no counter … MUST come
-  before every reply that carries one"*). The scenario *"A reply orders after
-  the reply it answers"* holds only when both replies carry counters, which
-  every op this build publishes does. → Accepted, because the spec requires it.
-  It is flagged for the spec-writer in the hand-over, since the scenario's
-  wording does not state that it depends on counters.
+- **[A reply can come before the reply it answers]** Reversing the rule puts an
+  answer after its parent only where the answer's counter is the greater, and
+  two cases break that:
+  - *No counter.* A reply from an older build is placed by descending op id,
+    which is a hash, ahead of every counted reply, so it comes before a counted
+    parent. Between two counter-less replies the hashes decide: the on-disk test
+    `a_thread_read_over_a_store_on_disk_returns_the_root_and_its_replies` derives
+    its expectation from the ids for that reason.
+  - *An over-bound parent.* This build's publish path can produce it too.
+    `clock_from_counters` (`arrival.rs`) holds an op whose counter is more than
+    `ADVANCE_BOUND` above the clock but does not advance the clock to it, and
+    `cmp_ops` still orders the op by that counter. An honest peer answering it
+    signs one above its own clock, which is lower. Any author can reach this by
+    choosing a counter over the bound, and their reply then sits last in the
+    thread, after every answer to it. The bound, and ordering by an over-bound counter, are
+    `op-ordering`'s; this change only reverses what they produce.
+
+  → Accepted, and specified: `thread-read` states the conditions *"A reply
+  orders after the reply it answers"* depends on, requires the reversed
+  sequence regardless, and forbids moving a reply after its parent (scenario
+  *"A reply carrying a lower counter than the reply it answers comes before
+  it"*). A parent-aware fix-up would also have been a comparison inside
+  `thread.rs`, the second ordering rule Decision 1 exists to prevent.
 - **[A long thread's newest replies are on its last page]** Oldest first means
   page 0 holds the root and the earliest replies. The read reports `hasMore` but
   no total, so a reader who wants the newest replies has to page to the end. →
