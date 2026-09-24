@@ -414,13 +414,38 @@ than conflict, and the composition has three consequences.
   `createKeyButton`. **What breaks without it:** removing that reply turns the
   test red, 0 found against 1 expected (measured).
 
-Landing on this screen is a showing, so following the route makes exactly one
-`get_master_key` call (Decision 8). `view-navigation` says following the route
-"MUST NOT itself reach the module", and its scenario lists only key creation,
-slate and keep. The call belongs to the list's showing rather than to the
-route, and it creates nothing. It is pinned under a `NO SPEC:` marker in
-`test_following_the_route_creates_no_key_requests_no_slate_and_keeps_nothing`,
-and reported to the spec-writer to settle whether the prose meant to forbid it.
+Landing on this screen is a showing, so following the route leads to exactly
+one `get_master_key` call (Decision 8). As first written, `view-navigation` said
+following the route "MUST NOT itself reach the module", which read against
+`stoa-navigation-view`'s every-showing query as a contradiction over that one
+call. The spec-writer settled it in `fca9199` by amending *Acquiring an identity
+is reached from the navigator* (recorded as a `MODIFIED` delta under this
+change's `specs/view-navigation/`). The route makes no call of its own. The
+calls the list makes on being shown are the list's. No call the route leads to,
+the list's included, creates a key, requests a slate or keeps a candidate. The
+old scenario is now two, and `tst_navigation.qml` has a test for each:
+`test_following_the_route_makes_no_call_of_its_own` and
+`test_following_the_route_creates_no_key_requests_no_slate_and_keeps_nothing`.
+
+**The first test's control depends on `acquireIdentity()` and `closeFeed()`
+having the same body.** "Every call is one the list makes on being shown" cannot
+be checked against a fixed list of method names, because an extra call nobody
+thought to name would pass. So the test compares the full sequence of bridge
+methods after the identity chip against the sequence after the feed's own close
+button (`closeFeed()`). Both are `enterOnly("", null)`, so the close button is a
+plain showing of the list and nothing else. **What the comparison catches:** a
+mutation that had `acquireIdentity()` call `Core.whoAmI()` before entering the
+list failed that test (`[who_am_i, get_master_key]` against `[get_master_key]`)
+and left the create/slate/keep test green (measured when the test was written,
+in `18ec847`).
+
+**If the two functions diverge, the control stops being equivalent to a plain
+showing.** Should `closeFeed()` gain a call of its own, the test goes red while
+the route is still correct. Worse, should `acquireIdentity()` then be rewritten
+to delegate to `closeFeed()`, the test goes green while the route makes that
+call. Whoever makes the two diverge must give the test a control that is still
+only a showing of the list. `Main.qml`'s comment on `acquireIdentity()` says so
+where that change would be made.
 
 ## Risks / Trade-offs
 

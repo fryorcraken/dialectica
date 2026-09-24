@@ -214,12 +214,20 @@ Item {
     // onboarding screen with that Stoa — issue #149: the per-Stoa slate that
     // #108 schedules for 0.0.3, reachable in 0.0.1.
     //
-    // **It reaches the module for nothing.** Rendering the list is the whole
-    // route; creating the key is an action the user takes there, and the route
-    // creates no key, requests no slate and keeps no candidate on their behalf.
+    // **It makes no call of its own.** Rendering the list is the whole route.
+    // The list, once shown, asks the read-only master-key query, as
+    // `stoa-navigation-view` requires of every showing. That call is the list's
+    // and not the route's (`view-navigation`, *Acquiring an identity is reached
+    // from the navigator*). Creating the key is an action the user takes there,
+    // and nothing the route leads to creates a key, requests a slate or keeps a
+    // candidate on their behalf.
+    //
     // `enterOnly("", null)` is the list by the navigator's own definition, so
     // this is the same transition `closeFeed()` makes — named for what the user
     // asked for rather than for what it happens to share with leaving a feed.
+    // `tst_navigation.qml`'s no-call-of-its-own test uses `closeFeed()` as its
+    // control on the strength of that shared body, so a change here that
+    // diverges from it has to revisit that control.
     function acquireIdentity() {
         root.enterOnly("", null)
     }
