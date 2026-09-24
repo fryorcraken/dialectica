@@ -70,7 +70,7 @@ and the test together, with no mutation needed to convict it.
 
 ## Findings
 
-- [ ] **`dev-writer`** — `dialectica-ui/tests/tst_stoa_screens.qml:778` and
+- [x] **`dev-writer`** — `dialectica-ui/tests/tst_stoa_screens.qml:778` and
       `:2627` — `test_a_created_stoa_is_openable_from_the_creation_reply_alone`
       and `test_a_creation_success_carrying_no_address_is_a_failure` drive
       `screen.create()` directly on a fixture whose `get_master_key` has no
@@ -104,6 +104,28 @@ and the test together, with no mutation needed to convict it.
       Rewriting both fixtures to use `spec.heldKeyReply(...)` and driving
       `create()` (or the real create button) from that state would close the
       gap with no change to what each test asserts.
+      **Fixed** in the commit that ticks this box. Both fixtures now carry
+      `get_master_key: spec.heldKeyReply(aKeyHex(), false)`, and each test
+      drives creation through `createStoaButton` found with `visibleNamed`,
+      with its count compared to 1, not through a bare `create()`. The
+      assertions after that are unchanged. The reasoning is in `design.md`
+      Decision 2: the fixture change alone would be decoration, because
+      `create()` never reads the key state. The baseline showed both tests
+      passing in the could-not-be-read state. The `NO SPEC:` marker on the
+      second test is left in place (it predates #155). Mutations, each
+      restored, predicted and observed:
+      - Drop the `get_master_key` reply from both fixtures. Predicted: both
+        red at the button lookup. Observed: both red, `Actual 0` against
+        `Expected 1`, 134 passed, 2 failed.
+      - `onClicked: {}` on `createStoaButton`. Predicted: both red at
+        `createState`. Observed: both red (`""` against `"created"` and
+        `"failed"`). `test_the_placeholder_is_never_submitted_as_a_title`,
+        which already drove the button, went red too: 133 passed, 3 failed.
+      - Remove `rememberGenesis(...)` from `create()` and disable its
+        no-address guard. Predicted: each test red at the assertion its name
+        is about. Observed: the first red at `genesisFor` (`""` against the
+        genesis), the second red at `createState` (`"created"` against
+        `"failed"`), 134 passed, 2 failed.
 
 ## Areas checked and found clean
 
