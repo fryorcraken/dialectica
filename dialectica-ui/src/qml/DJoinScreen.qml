@@ -60,44 +60,138 @@ ScreenFrame {
          && screen.outcome.genesis === screen.stoaGenesis)
             ? screen.outcome : null
 
-    // The founding title, where one is known.
+    // ---- the lookup, and the reference it describes -----------------------
     //
-    // **On this build that means "after a join, and not before" — the preview
-    // has no title at all, and the screen says so rather than captioning a
-    // blank.** This is a constraint of the core API, not an oversight here:
-    // `join_stoa` is the ONLY call that answers a founding title for a given
-    // reference. `list_stoas` answers for Stoas already held and `create_stoa`
-    // for one just made; neither can be asked about a pasted pair. The title IS
-    // inside the genesis record the user pasted, and decoding it here would be a
-    // second implementation of core's encoding — the thing the core/UI split
-    // exists to prevent, and the same argument that keeps address verification
-    // out of `DStoaReference.parse`. See design.md constraint 4.
+    // `getStoa` answers what this Stoa is called for a reference this peer has
+    // not joined. It is asked as soon as a reference is on screen, without the
+    // user acting, because asking joins nothing.
     //
-    // Derived, not assigned: it can only ever be the title the core returned for
+    // **Stored with the reference it was made for, exactly as the join outcome
+    // is**, and for the same reason: a title answered for one reference and
+    // rendered over the next lends a name the user may trust to an address they
+    // should not. `null` means nothing has been asked. Otherwise:
+    //   { stoa, genesis, ok, isGenesisFallback, title, description, error }
+    // with the fields `Core.stoaMetadataFrom` fills for `ok` or for a failure.
+    property var lookup: null
+
+    readonly property var currentLookup:
+        (screen.lookup !== null
+         && screen.lookup.stoa === screen.stoaAddress
+         && screen.lookup.genesis === screen.stoaGenesis)
+            ? screen.lookup : null
+
+    // Whether the reply says this peer holds no moderator-set title, so its
+    // `title` is the founding one.
+    readonly property bool lookupFellBack:
+        screen.currentLookup !== null && screen.currentLookup.ok
+        && screen.currentLookup.isGenesisFallback
+
+    // The failure a lookup ended in, as a reason to render, or "".
+    readonly property string lookupFailure:
+        screen.currentLookup !== null && !screen.currentLookup.ok
+            ? screen.currentLookup.error : ""
+
+    // Ask about the reference on screen. Never with half of one: an empty
+    // address or record is how "no reference" reaches this screen, and a paste
+    // that is not a reference never gets here at all, because
+    // `DStoaReference.parse` refuses it on the list.
+    //
+    // **Synchronous, and called on every change of either half.** `Main.qml`
+    // binds the two strings separately, so switching straight from one
+    // reference to another asks once for the new address with the old record.
+    // The core refuses that pair, and the answer is stored against a pair that
+    // is never on screen, so nothing renders it. The shipped navigator passes
+    // through no preview between two pastes, so it never does this.
+    // design.md decision 7.
+    function lookUp() {
+        var stoa = screen.stoaAddress
+        var genesis = screen.stoaGenesis
+        if (stoa === "" || genesis === "")
+            return
+        var answer = Core.stoaMetadataFrom(Core.getStoa(stoa, genesis))
+        answer.stoa = stoa
+        answer.genesis = genesis
+        screen.lookup = answer
+    }
+
+    // Whether construction has finished. The two change handlers wait for it,
+    // so a screen built with both halves already set asks once, from
+    // `Component.onCompleted`, rather than once per property it was given.
+    property bool constructed: false
+    Component.onCompleted: {
+        screen.constructed = true
+        screen.lookUp()
+    }
+    onStoaAddressChanged: if (screen.constructed) screen.lookUp()
+    onStoaGenesisChanged: if (screen.constructed) screen.lookUp()
+
+    // The founding title, where one is available for this reference.
+    //
+    // **Two calls can answer one, and no other can.** A successful join
+    // reply's `foundingTitle`, and a `getStoa` reply whose `isGenesisFallback`
+    // is `true`: that resolution fell back to the founding values, so its
+    // `title` IS the founding title. A reply whose flag is `false` carries a
+    // current title and no founding title beside it, so for that Stoa none is
+    // available before a join. The title is inside the genesis record the user
+    // pasted, and decoding it here would be a second implementation of the
+    // core's encoding, the thing the core/UI split exists to prevent.
+    //
+    // The join's is preferred where it has one. The two can only disagree if
+    // the core answers the same record two ways.
+    //
+    // **A blank title is not an available founding title**, whichever reply
+    // carried it. `Core.stoaMetadataFrom` already refuses a lookup that carries
+    // one; the join reply's is tested here. A caption over a blank value would
+    // tell the reader this Stoa's founding title is blank, which no valid
+    // Stoa's is.
+    //
+    // Derived, not assigned: it can only ever be a title the core returned for
     // THIS reference. A title carried over from another Stoa would caption an
     // untrusted address with a name the user already trusts — the exact
     // impersonation the lookalike requirement exists to expose, delivered by the
     // view itself, and invisible to that requirement because the two titles
     // being compared would be the same string from the same source.
-    readonly property string foundingTitle:
-        screen.currentOutcome !== null ? screen.currentOutcome.foundingTitle : ""
+    readonly property string foundingTitle: {
+        var joined = screen.currentOutcome !== null
+            ? screen.currentOutcome.foundingTitle : ""
+        if (typeof joined === "string" && !Core.isBlankTitle(joined))
+            return joined
+        return screen.lookupFellBack ? screen.currentLookup.title : ""
+    }
 
-    // Whether this build knows anything about what this Stoa is called.
+    // Whether a founding title is available for this reference.
     //
-    // The panel and the not-yet note are two renderings of this one fact, so
+    // The panel and the no-title note are two renderings of this one fact, so
     // they cannot disagree about which is showing — an `implicitHeight`
     // computed over a hidden panel and a note bound to a different expression
     // is how a screen ends up with both or neither.
     readonly property bool titleKnown: screen.foundingTitle !== ""
 
-    // A resolved CURRENT title, from a moderator-signed metadata op. Nothing
-    // supplies one and nothing on this build can: `stoa-metadata` says plainly
-    // that resolution is not implemented and that metadata ops accumulate
-    // unread. The property exists so the panel arrives WITH the value rather
-    // than before it — filling this position with the founding value would
-    // assert that no moderator has renamed this Stoa, which is a fact no peer
-    // here has checked and which is false for every Stoa that has been renamed.
-    property string currentTitle: ""
+    // A resolved CURRENT title: the `title` of a `getStoa` reply whose
+    // `isGenesisFallback` is `false`, which only a moderator-signed metadata op
+    // the core found binding can produce. "" otherwise.
+    //
+    // **Derived from the lookup, never assigned**, and never filled with the
+    // founding value. A current-title panel holding the founding title would
+    // assert that no moderator has renamed this Stoa. A fallback reply does not
+    // establish that: it says only that this machine holds no rename.
+    readonly property string currentTitle:
+        screen.currentLookup !== null && screen.currentLookup.ok
+        && !screen.currentLookup.isGenesisFallback
+            ? screen.currentLookup.title : ""
+
+    // The description a moderator set with that current title, or "".
+    //
+    // Read only from a non-fallback reply. A fallback reply's is always ""
+    // (the genesis record has none), and reading it there would render a
+    // value no moderator set.
+    //
+    // From the lookup itself and not through `currentTitle`, so the two cannot
+    // be read from different sources.
+    readonly property string currentDescription:
+        screen.currentLookup !== null && screen.currentLookup.ok
+        && !screen.currentLookup.isGenesisFallback
+            ? screen.currentLookup.description : ""
 
     // The Stoas this peer already holds, for the lookalike comparison below.
     // `[]` when the listing failed, which makes a missed lookalike the failure
@@ -155,21 +249,22 @@ ScreenFrame {
     // screen. A carried-over title could otherwise suppress the comparison
     // entirely by making both sides equal.
     //
-    // **The cost of that correctness is that the comparison cannot run before a
-    // join**, because `foundingTitle` is "" until one succeeds. A design review
-    // measured it through the real paste route: a held *Nym Research* and a
-    // pasted second *Nym Research* gave `lookalikes=0` and no panel at preview
-    // time, then `lookalikes=1` after `join()`. The warning is real and arrives
-    // one action after the decision it exists to inform.
+    // **Over FOUNDING titles only, and never over `currentTitle`.** That is the
+    // owner's scope ruling on #143, not an omission. A Stoa founded under any
+    // title and renamed to match one the user holds gets a non-fallback reply,
+    // so no founding title is available and the comparison does not run. For
+    // now the creator's key, the identicon and whether the user already joined
+    // it are the signal; on-chain Stoas, after 0.1.0, are what will fix a
+    // Stoa's identity. `titleUnknownNote` says the comparison has not been
+    // made, so its silence is not read as a clean result.
     //
-    // That is NOT closed by relaxing this guard — comparing against "" would
-    // match every untitled Stoa and comparing against a carried-over title is
-    // the impersonation this derivation prevents. It is closed by a core call
-    // that answers a founding title for an un-joined reference, which does not
-    // exist and which this piece does not add. Until it does, the screen's
-    // obligation is to say the check has not been made rather than to render
-    // the silence of an unrun check as a clean result — which is what
-    // `titleUnknownNote` below does.
+    // So it runs at preview time for a Stoa the core answers as a fallback, and
+    // otherwise only after a join. That is late rather than absent.
+    //
+    // **A blank title matches nothing, and that needs no check here.**
+    // `foundingTitle` is never blank, and two equal strings are blank or not
+    // together, so a held Stoa whose title is blank can never equal it. A guard
+    // for it would have no test that could fail. design.md decision 11.
     readonly property var lookalikes: {
         var out = []
         if (screen.foundingTitle === "")
@@ -313,13 +408,12 @@ ScreenFrame {
         // would discard at the last step the distinction the core puts on the
         // wire by naming the field `foundingTitle` rather than `title`.
         //
-        // **Conditional on there being one**, which on a preview there is not.
-        // An unconditional caption reading FOUNDING TITLE — FIXED FOREVER over
-        // an empty value tells a reader this Stoa's founding title is blank. An
-        // empty founding title is legal — the genesis record has no minimum
-        // length, and the list renders such a row — so the reader has no way to
-        // tell "" from "not known here", and the two mean opposite things on the
-        // screen where they decide whether to trust an address.
+        // **Conditional on one being available**: after a join, or from a
+        // lookup that fell back. An unconditional caption reading FOUNDING
+        // TITLE — FIXED FOREVER over an empty value tells a reader this Stoa's
+        // founding title is blank. No valid Stoa's is, so the caption would be
+        // asserting something false on the screen where the reader decides
+        // whether to trust an address.
         Rectangle {
             objectName: "foundingTitlePanel"
             visible: screen.titleKnown
@@ -359,16 +453,20 @@ ScreenFrame {
             }
         }
 
-        // The current title's position, **reserved and empty**.
+        // The current title's position, filled only from a lookup that did NOT
+        // fall back: the core found a moderator-signed rename that binds.
         //
-        // The mockup fills this panel and it is exactly the right idea — the
-        // distinction is why it is worth designing around. But nothing resolves
-        // the moderator-signed metadata op that carries a current title, so this
-        // renders only when a resolved one is actually supplied. A panel
-        // captioned "current title" holding the founding value would assert that
-        // nobody has renamed this Stoa, which is the one thing no peer on this
-        // build has checked.
+        // Never from a fallback reply, whose `title` is the founding one. A
+        // panel captioned "current title" holding the founding value would
+        // assert that nobody has renamed this Stoa, and a fallback establishes
+        // only that this machine holds no rename.
+        //
+        // The description goes here too, where the reply carried one. A
+        // moderator sets it in the same op as the current title, and the
+        // bundle's preview has no description position of its own. Its caption
+        // attributes it to that same op.
         Rectangle {
+            objectName: "currentTitlePanel"
             visible: screen.currentTitle !== ""
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -396,6 +494,31 @@ ScreenFrame {
                     text: screen.currentTitle
                     font: DTheme.body
                     color: DTheme.ink
+                    // Chosen by whoever holds the creator's key, and carrying
+                    // whatever characters they typed. Never markup.
+                    textFormat: Text.PlainText
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+
+                // No caption over an empty description: an empty one is a
+                // value the moderator set, and a caption over nothing would
+                // read as a description that failed to load.
+                Text {
+                    objectName: "currentDescriptionCaption"
+                    visible: screen.currentDescription !== ""
+                    text: "DESCRIPTION — SET WITH THE CURRENT TITLE"
+                    font: DTheme.label
+                    color: DTheme.inkMuted
+                    textFormat: Text.PlainText
+                }
+
+                Text {
+                    objectName: "currentDescriptionText"
+                    visible: screen.currentDescription !== ""
+                    text: screen.currentDescription
+                    font: DTheme.bodySmall
+                    color: DTheme.inkSoft
                     textFormat: Text.PlainText
                     wrapMode: Text.WordWrap
                     Layout.fillWidth: true
@@ -404,26 +527,82 @@ ScreenFrame {
         }
     }
 
-    // ---- what this build does not know about this Stoa yet -----------------
+    // ---- what a fallback does and does not establish ----------------------
+    //
+    // A fallback reply's `title` fills the founding panel above. **This says
+    // what that means**, because the founding title shown alone would read as
+    // "this Stoa has not been renamed". A fallback establishes only that this
+    // machine holds no binding rename: one it has not received looks exactly
+    // the same. That is the issue's "this may be stale", surfaced rather than
+    // only used to pick a panel.
+    Text {
+        objectName: "fallbackNote"
+        visible: screen.lookupFellBack
+        text: "This machine holds no title set by a moderator for this Stoa. A rename "
+            + "it has not received would look exactly like this, so the founding "
+            + "title may since have been changed."
+        font: DTheme.note
+        color: DTheme.inkSoft
+        wrapMode: Text.WordWrap
+        lineHeight: 1.5
+        textFormat: Text.PlainText
+        Layout.fillWidth: true
+    }
+
+    // ---- a lookup that failed ---------------------------------------------
+    //
+    // The core's refusal, or the view's own reason for a reply it could not
+    // place, rendered as it came. **It is not a refused join, and nothing here
+    // says it is.** The join is a separate call the core answers for itself,
+    // and the view cannot tell the causes apart without parsing the core's
+    // text: a record that does not match its address would fail the join too,
+    // and an op store that cannot be read would not. So the join affordance
+    // stays, and the join's own reply decides. design.md decision 10.
+    ColumnLayout {
+        objectName: "lookupFailurePanel"
+        visible: screen.lookupFailure !== ""
+        Layout.fillWidth: true
+        spacing: 6
+
+        Text {
+            text: "What this Stoa is called could not be looked up."
+            font: DTheme.label
+            color: DTheme.inkMuted
+            textFormat: Text.PlainText
+        }
+
+        Text {
+            objectName: "lookupFailureText"
+            text: screen.lookupFailure
+            font: DTheme.address
+            color: DTheme.ink
+            wrapMode: Text.WrapAnywhere
+            textFormat: Text.PlainText
+            Layout.fillWidth: true
+        }
+    }
+
+    // ---- when no founding title is available here ------------------------
     //
     // **The screen states the absence of a check rather than leaving the check's
-    // silence to be read as its result.** Two things are unknown on a preview
-    // and both matter to the decision the user is about to make:
+    // silence to be read as its result.** Where no founding title is available,
+    // two things follow and both matter to the decision the user is about to
+    // make:
     //
-    //   - what this Stoa is called. `join_stoa` is the only call that answers a
-    //     founding title, so the title inside the pasted record is not readable
-    //     here. An empty panel captioned FOUNDING TITLE would read as a blank
-    //     title, which is a legal value and a different fact.
-    //   - whether a Stoa already held presents the same title. That comparison
-    //     is over titles, so with no title it cannot run. A reader who sees no
-    //     lookalike warning and infers there is no lookalike has been misled by
-    //     an unrun check — the impersonation this whole screen is written
-    //     against, arriving through the defence rather than around it.
+    //   - no founding title is shown. An empty panel captioned FOUNDING TITLE
+    //     would read as a blank title, which no valid Stoa has.
+    //   - the same-title comparison has not run, because it is over founding
+    //     titles. A reader who sees no lookalike warning and infers there is no
+    //     lookalike has been misled by an unrun check — the impersonation this
+    //     whole screen is written against, arriving through the defence rather
+    //     than around it.
     //
-    // This is the honest rendering of a constraint, not a placeholder for a
-    // feature. It goes away when a core call can answer a founding title for a
-    // reference this peer has not joined; until then, saying nothing here is the
-    // one option that misinforms.
+    // This happens before a join whenever the lookup did not fall back: it
+    // failed, it has not answered, or it answered a CURRENT title. The copy
+    // must therefore not say that nothing here knows what the Stoa is called,
+    // because a current title may be on screen above. After a join succeeds,
+    // the only way here is a join reply whose founding title was blank, and
+    // "joining would supply one" would then be false. Hence two texts.
     ColumnLayout {
         objectName: "titleUnknownNote"
         visible: !screen.titleKnown
@@ -431,7 +610,7 @@ ScreenFrame {
         spacing: 6
 
         Text {
-            text: "NOTHING HERE KNOWS WHAT THIS STOA IS CALLED"
+            text: "NO FOUNDING TITLE IS AVAILABLE HERE"
             font: DTheme.label
             color: DTheme.inkMuted
             textFormat: Text.PlainText
@@ -439,12 +618,17 @@ ScreenFrame {
 
         Text {
             objectName: "titleUnknownText"
-            text: "The founding title is inside the record you pasted, and this "
-                + "screen cannot read it — only joining asks for it. So no title "
-                + "is shown, and the same-title comparison against the Stoas you "
-                + "already hold has not been made. If you are expecting this to "
-                + "be a Stoa you have seen before, the address above is the only "
-                + "thing that can tell you."
+            text: screen.joinState === "joined"
+                ? "The join succeeded, but its reply carried no usable founding "
+                  + "title, so none is shown and the same-title comparison against "
+                  + "the Stoas you already hold has not been made. The address "
+                  + "above is the only thing that can tell you which Stoa this is."
+                : "The founding title is inside the record you pasted, and this "
+                  + "screen does not decode it; joining is what would supply it. "
+                  + "So no founding title is shown, and the same-title comparison "
+                  + "against the Stoas you already hold has not been made. If you "
+                  + "are expecting this to be a Stoa you have seen before, the "
+                  + "address above is the only thing that can tell you."
             font: DTheme.note
             color: DTheme.inkSoft
             wrapMode: Text.WordWrap

@@ -632,6 +632,13 @@ pub enum OpError {
     InvalidText,
     /// The author key is not a valid public key.
     InvalidAuthor(KeyError),
+    /// A metadata op's title is blank, as [`crate::stoa::is_blank_title`]
+    /// defines it: empty, or made only of the thirty blank characters.
+    ///
+    /// One variant for every blank title, the empty one included, for the
+    /// reason [`crate::stoa::GenesisError::BlankTitle`] gives. The description
+    /// is not held to this: an empty or blank description is valid.
+    BlankTitle,
 }
 
 impl From<OutOfBounds> for OpError {
@@ -661,6 +668,11 @@ impl std::fmt::Display for OpError {
             }
             OpError::InvalidText => write!(f, "a text field is not valid UTF-8"),
             OpError::InvalidAuthor(e) => write!(f, "the author key is invalid: {e}"),
+            OpError::BlankTitle => write!(
+                f,
+                "a metadata op's title is blank: it has no character other than \
+                 whitespace or zero-width characters"
+            ),
         }
     }
 }
@@ -720,6 +732,14 @@ impl Op {
     /// to exactly the id it always had. The migration needs no rewrite, no
     /// re-signing and no recomputation, and it holds by construction rather than
     /// by a test comparing against a recorded constant.
+    ///
+    /// # This is the layout, and [`Op::encode`] is the encoding
+    ///
+    /// Total over every `Op` value: it lays out whatever the struct holds, and it
+    /// is what an op id and a signature are computed over. Whether an op *has an
+    /// encoding* — whether the format admits it at all — is [`Op::encode`]'s
+    /// question, and [`SignedOp::to_bytes`] goes through that one. For an op the
+    /// format admits, the two return the same bytes.
     pub fn canonical_bytes(&self) -> Vec<u8> {
         let mut out = Vec::new();
         // The version says whether the clock fields are present, so the two are
@@ -789,6 +809,46 @@ impl Op {
             }
         }
         out
+    }
+
+    /// The op's encoding: its canonical bytes, for an op the format admits.
+    ///
+    /// Fallible so that the encoder refuses exactly what [`Op::decode`] refuses
+    /// — the symmetry `stoa.rs` keeps for the genesis record, where a record the
+    /// decoder would reject must not be one the encoder will produce. Everything
+    /// that writes an op's bytes out of this process goes through here, by way
+    /// of [`SignedOp::to_bytes`].
+    pub fn encode(&self) -> Result<Vec<u8>, OpError> {
+        self.check_admitted()?;
+        Ok(self.canonical_bytes())
+    }
+
+    /// Whether the format admits this op at all, beyond its structure.
+    ///
+    /// **The one guard, with two callers**: [`Op::encode`] and [`Op::decode`].
+    /// One function is what makes "the encoder refuses exactly what the decoder
+    /// refuses" hold by construction rather than by two checks kept in step.
+    ///
+    /// One rule today: a [`OpKind::StoaMetadata`] title must not be blank. The
+    /// description is exempt, because an empty description is a value and not an
+    /// absence.
+    ///
+    /// **Not called by [`Op::canonical_bytes`], [`Op::id`], [`Op::sign`] or
+    /// [`SignedOp::verify`], deliberately.** An op the format does not admit can
+    /// still be built as a struct, signed and held in memory, and
+    /// `stoa-metadata`'s resolver is required to refuse one "a reader
+    /// nonetheless holds". If this guard sat under `verify`, such an op would
+    /// fail the authenticity check first, and the resolver's own blank check
+    /// would never be what refused it. Deleting that check would then leave
+    /// every test green. The change's `design.md` decision 2 has the
+    /// alternatives.
+    fn check_admitted(&self) -> Result<(), OpError> {
+        match &self.kind {
+            OpKind::StoaMetadata { title, .. } if crate::stoa::is_blank_title(title) => {
+                Err(OpError::BlankTitle)
+            }
+            _ => Ok(()),
+        }
     }
 
     /// Decode a canonical encoding, refusing anything else.
@@ -875,12 +935,17 @@ impl Op {
 
         cursor.finish()?;
 
-        Ok(Op {
+        let op = Op {
             stoa,
             author,
             clock,
             kind,
-        })
+        };
+        // AFTER the structure, as `Genesis::decode` does: an input wrong in two
+        // ways reports the structural fault. And through the guard `encode`
+        // uses, so the two sides cannot disagree about what is admitted.
+        op.check_admitted()?;
+        Ok(op)
     }
 
     /// This op's id: the hash of its canonical bytes, domain-separated.
@@ -948,10 +1013,14 @@ impl SignedOp {
     /// The signature trails rather than leads so that the signed preimage is a
     /// prefix of the message — a decoder never has to skip over the signature
     /// to find the bytes it covers.
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut out = self.op.canonical_bytes();
+    ///
+    /// Fallible because [`Op::encode`] is: an op the format has no encoding for
+    /// has no wire form either, so it can be neither published nor stored as
+    /// bytes a later read would refuse.
+    pub fn to_bytes(&self) -> Result<Vec<u8>, OpError> {
+        let mut out = self.op.encode()?;
         out.extend_from_slice(&self.signature.to_bytes());
-        out
+        Ok(out)
     }
 
     /// Decode the wire form.
@@ -1811,7 +1880,7 @@ mod tests {
         let key = a_key(2);
         for op in one_of_each_kind() {
             let signed = op.sign(&key);
-            let restored = SignedOp::from_bytes(&signed.to_bytes()).unwrap();
+            let restored = SignedOp::from_bytes(&signed.to_bytes().unwrap()).unwrap();
             assert_eq!(restored, signed);
             assert!(
                 restored.verify(),
@@ -1824,7 +1893,7 @@ mod tests {
     fn the_signed_preimage_is_a_prefix_of_the_wire_form() {
         // So a decoder never skips over the signature to find what it covers.
         let signed = a_post().sign(&a_key(2));
-        let wire = signed.to_bytes();
+        let wire = signed.to_bytes().unwrap();
         assert!(wire.starts_with(&signed.op.canonical_bytes()));
         assert_eq!(wire.len(), signed.op.canonical_bytes().len() + 64);
     }
@@ -1843,7 +1912,7 @@ mod tests {
         // what is read as the signature and leaves a byte over in the op —
         // which `Op::decode`'s own check catches.
         let signed = a_post().sign(&a_key(2));
-        let mut wire = signed.to_bytes();
+        let mut wire = signed.to_bytes().unwrap();
         wire.push(0);
         assert_eq!(SignedOp::from_bytes(&wire), Err(OpError::TrailingBytes));
     }
@@ -2641,13 +2710,15 @@ mod tests {
 
     #[test]
     fn a_metadata_op_round_trips_through_multibyte_and_empty_text() {
-        // Empty is legitimate and must not be confused with absent — a zero
-        // length prefix is a real encoding.
+        // An empty DESCRIPTION is legitimate and must not be confused with
+        // absent — a zero length prefix is a real encoding. An empty TITLE is
+        // not admitted at all; `a_metadata_op_with_a_blank_title_is_refused_on_encode`
+        // has it.
         for (title, description) in [
-            ("", ""),
+            ("a", ""),
             ("Ἀγορά", "ἡ ἀγορά — the marketplace"),
             ("🏛", ""),
-            ("", "a\0b"),
+            ("a", "a\0b"),
         ] {
             let op = Op {
                 kind: OpKind::StoaMetadata {
@@ -2658,6 +2729,148 @@ mod tests {
             };
             assert_eq!(Op::decode(&op.canonical_bytes()).unwrap(), op);
         }
+    }
+
+    // ─── A blank metadata title ──────────────────────────────────────────
+
+    /// Every blank title the spec's scenarios name: the empty one, each of the
+    /// thirty blank characters alone, and the mixed one.
+    fn every_blank_title() -> Vec<String> {
+        let mut titles = vec![String::new()];
+        titles.extend(crate::stoa::BLANK_CHARACTERS.iter().map(|c| c.to_string()));
+        titles.push("\u{0020}\u{200B}\u{3000}\u{FEFF}\u{0009}".to_string());
+        titles
+    }
+
+    fn a_metadata_op_titled(title: &str, description: &str) -> Op {
+        Op {
+            kind: OpKind::StoaMetadata {
+                title: title.to_string(),
+                description: description.to_string(),
+            },
+            ..a_metadata_op()
+        }
+    }
+
+    #[test]
+    fn a_metadata_op_with_a_blank_title_is_refused_on_encode() {
+        for title in every_blank_title() {
+            let op = a_metadata_op_titled(&title, "a description");
+            assert_eq!(op.encode(), Err(OpError::BlankTitle), "title {title:?}");
+            // And so it has no wire form: the one every write out of this
+            // process goes through.
+            assert_eq!(
+                op.sign(&a_key(2)).to_bytes(),
+                Err(OpError::BlankTitle),
+                "title {title:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_metadata_op_with_a_blank_title_is_refused_on_decode() {
+        // The bytes come from `canonical_bytes`, which is the total layout and
+        // so lays out a blank title exactly as a hostile peer would send it.
+        for title in every_blank_title() {
+            let bytes = a_metadata_op_titled(&title, "a description").canonical_bytes();
+            assert_eq!(
+                Op::decode(&bytes),
+                Err(OpError::BlankTitle),
+                "title {title:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_blank_metadata_title_is_its_own_refusal() {
+        // The spec requires it be distinguishable from truncation, a lying length
+        // prefix and an over-long field: all three are also shapes a zero-length
+        // title prefix could be mistaken for. Compared as rendered text, since
+        // that is what reaches a caller.
+        let rendered = OpError::BlankTitle.to_string();
+        for other in [
+            OpError::Truncated,
+            OpError::LengthMismatch,
+            OpError::FieldTooLong(MAX_FIELD_LEN + 1),
+            OpError::TrailingBytes,
+            OpError::InvalidText,
+        ] {
+            assert_ne!(rendered, other.to_string());
+        }
+        assert!(
+            rendered.contains("blank"),
+            "the reason must name the title as blank"
+        );
+    }
+
+    #[test]
+    fn one_visible_letter_among_blank_characters_is_a_title_kept_as_given() {
+        let title = "\u{0020}\u{200B}a\u{3000}\u{FEFF}";
+        let op = a_metadata_op_titled(title, "");
+        let bytes = op.encode().expect("one letter makes the title not blank");
+        match Op::decode(&bytes).unwrap().kind {
+            OpKind::StoaMetadata { title: decoded, .. } => assert_eq!(decoded, title),
+            other => panic!("expected metadata, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_empty_or_blank_description_is_valid() {
+        // The rule is the title's alone. A description is not identity and not
+        // a title, and an empty one is the ordinary case.
+        for description in ["", "\u{0020}\u{200B}"] {
+            let op = a_metadata_op_titled("Renamed", description);
+            let bytes = op
+                .encode()
+                .expect("the description is not held to the rule");
+            assert_eq!(Op::decode(&bytes).unwrap(), op);
+        }
+    }
+
+    #[test]
+    fn a_blank_title_does_not_make_other_kinds_unencodable() {
+        // The guard is scoped to the metadata kind. A post with an empty body is
+        // a valid post, and `an_empty_body_and_an_empty_attachment_list_round_trip`
+        // pins it separately. This pins that the new guard did not reach it.
+        let post = Op {
+            kind: OpKind::Post {
+                thread: None,
+                parent: None,
+                body: String::new(),
+                attachments: vec![],
+            },
+            ..a_post()
+        };
+        assert_eq!(post.encode(), Ok(post.canonical_bytes()));
+    }
+
+    // Specified: "A metadata op with a blank title followed by trailing bytes
+    // is refused as trailing bytes" names both the empty title and the mixed
+    // blank title U+0020 U+200B. The structural fault is reported first, as
+    // the genesis decoder does.
+    #[test]
+    fn a_blank_title_followed_by_trailing_bytes_reports_the_trailing_bytes() {
+        for title in ["", "\u{0020}\u{200B}"] {
+            let mut bytes = a_metadata_op_titled(title, "").canonical_bytes();
+            bytes.push(0);
+            assert_eq!(
+                Op::decode(&bytes),
+                Err(OpError::TrailingBytes),
+                "title {title:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_blank_titled_op_can_still_be_built_signed_and_verified_in_memory() {
+        // The property `stoa-metadata`'s resolver tests depend on, pinned here
+        // where it lives. The format does not admit this op, and it is still an
+        // authentic op by its author. If `verify` refused it, a resolver's own
+        // blank check would never be what refused it, and deleting that check
+        // would leave every resolver test green (design.md decision 2).
+        let signed = a_metadata_op_titled("", "").sign(&a_key(2));
+        assert!(signed.verify(), "authenticity is not admission");
+        assert_eq!(signed.to_bytes(), Err(OpError::BlankTitle));
     }
 
     #[test]

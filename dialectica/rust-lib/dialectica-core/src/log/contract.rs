@@ -171,7 +171,7 @@ fn a_stored_op_reads_back_byte_identical<L: OpLog>(log: &mut L) {
 
     let entry = log.get(&id).unwrap().unwrap();
     assert_eq!(entry.op, op);
-    assert_eq!(entry.op.to_bytes(), op.to_bytes());
+    assert_eq!(entry.op.to_bytes().unwrap(), op.to_bytes().unwrap());
     assert_eq!(entry.id(), id);
     assert!(entry.op.verify(), "storage must not disturb the signature");
 }

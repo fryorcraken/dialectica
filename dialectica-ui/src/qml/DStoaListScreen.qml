@@ -235,12 +235,14 @@ ScreenFrame {
     // ---- creating -------------------------------------------------------
 
     function create() {
-        // The title is passed THROUGH, empty included. The core accepts an empty
-        // title — the genesis record has no minimum length — so a view refusing
-        // one would make a Stoa other peers decode and verify without complaint
-        // unreachable through this interface. Nothing is appended either: adding
-        // a suffix to obtain a different Stoa mints one with a title the user did
-        // not choose, permanently, at an address that cannot be withdrawn.
+        // The title is passed THROUGH exactly as typed, blank included. The core
+        // refuses a blank title and this view does not, because the core is the
+        // one place titles are judged: a check here would be a second copy of
+        // the blank list that could drift from it. So a blank title reaches the
+        // core and its refusal is rendered below, unreworded. Nothing is
+        // appended either: adding a suffix to obtain a different Stoa mints one
+        // with a title the user did not choose, permanently, at an address that
+        // cannot be withdrawn.
         screen.createState = "creating"
         screen.createFailure = ""
 
@@ -472,11 +474,14 @@ ScreenFrame {
                 ColumnLayout {
                     spacing: 2
 
-                    // An EMPTY founding title renders as nothing, and the row is
-                    // still a row. An empty title is legal — the genesis record
-                    // has no minimum length — so a row that collapsed would be a
-                    // Stoa the user cannot reach, and a substitute like
-                    // "Untitled" would be a title no peer agrees on.
+                    // A BLANK founding title renders as nothing, and the row is
+                    // still a row. A blank title is not a valid one: the core
+                    // refuses to create or join such a Stoa, and a listing that
+                    // reaches a retained one reports a failure rather than an
+                    // item. But a listing that carries one anyway still names a
+                    // Stoa the core says this peer is in. A row that collapsed
+                    // would be a Stoa the user cannot reach, and a substitute
+                    // like "Untitled" would be a title no peer agrees on.
                     Text {
                         text: row.rowTitle
                         font: DTheme.rowTitle

@@ -728,6 +728,14 @@ impl OpLog for SqliteOpLog {
         // produced `sort_has_counter`.
         let score_epoch = entry.op.op.clock.map(|c| c.counter as i64);
 
+        // BEFORE the write, and the reason is the read path: `decode_entry`
+        // refuses what the encoder refuses, so an op with no encoding written
+        // anyway is a row every later read of its Stoa fails on.
+        let op_bytes = entry
+            .op
+            .to_bytes()
+            .map_err(|e| OpLogError::Unencodable(e.to_string()))?;
+
         let changed = self
             .conn
             .execute(
@@ -739,7 +747,7 @@ impl OpLog for SqliteOpLog {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 rusqlite::params![
                     id.as_bytes().as_slice(),
-                    entry.op.to_bytes(),
+                    op_bytes,
                     entry.op.op.stoa.as_bytes().as_slice(),
                     entry.target().map(|t| t.as_bytes().to_vec()),
                     entry.op.op.author.to_bytes().as_slice(),
@@ -1275,7 +1283,7 @@ mod tests {
 
         let reopened = SqliteOpLog::open(&path).unwrap();
         let entry = reopened.get(&id).unwrap().unwrap();
-        assert_eq!(entry.op.to_bytes(), op.to_bytes());
+        assert_eq!(entry.op.to_bytes().unwrap(), op.to_bytes().unwrap());
         assert_eq!(entry.op, op);
         assert!(entry.op.verify(), "storage must not disturb the signature");
         assert_eq!(entry.arrival, arrival, "the recorded arrival must survive");
@@ -2005,6 +2013,233 @@ mod tests {
     }
 
     #[test]
+    fn a_read_fails_rather_than_returning_the_surviving_op_beside_a_corrupt_one() {
+        // `op-log`'s ADDED "A stored entry that does not decode fails every
+        // read that would return it": "MUST NOT skip the entry, MUST NOT
+        // return the other entries as though that one were absent." The test
+        // above corrupts the ONLY op in the store, so an implementation that
+        // filtered undecodable rows would return an EMPTY list there — which
+        // reads exactly like "no ops", not like "the survivor, minus one".
+        // Two ops in one Stoa is what tells the two apart: filtering would
+        // return the survivor alone, and this is what must not happen.
+        let dir = TempDir::new("corrupt-with-survivor");
+        let path = dir.file("log.sqlite");
+
+        let stoa = a_stoa("Agora");
+        let survivor = Op {
+            stoa,
+            ..a_post("the survivor")
+        }
+        .sign(&a_key(2));
+        let survivor_id = survivor.op.id();
+        let doomed = Op {
+            stoa,
+            ..a_post("about to be corrupted")
+        }
+        .sign(&a_key(2));
+        let doomed_id = doomed.op.id();
+        assert_ne!(survivor_id, doomed_id, "the fixture needs two distinct ops");
+
+        let mut log = SqliteOpLog::open(&path).unwrap();
+        log.append(survivor, Arrival::unordered()).unwrap();
+        log.append(doomed, Arrival::unordered()).unwrap();
+        drop(log);
+
+        let conn = Connection::open(&path).unwrap();
+        conn.execute(
+            "UPDATE ops SET op_bytes = ?1 WHERE op_id = ?2",
+            rusqlite::params![vec![0xFFu8; 8], doomed_id.as_bytes().as_slice()],
+        )
+        .unwrap();
+        drop(conn);
+
+        let reopened = SqliteOpLog::open(&path).unwrap();
+
+        // A read by the DOOMED op's own id fails, as `a_corrupt_stored_op_is_
+        // reported_rather_than_decoded` already pins with one op. Repeated
+        // here so the fixture guard below (both ids distinct) also covers it,
+        // and to keep this test's three assertions about ONE corruption
+        // together rather than split across two fixtures.
+        match reopened.get(&doomed_id) {
+            Err(OpLogError::CorruptEntry(_)) => {}
+            other => panic!("a read of the corrupt entry's own id must fail, got {other:?}"),
+        }
+        // The SURVIVOR's own id is unaffected: this is a different entry, and
+        // the spec's refusal is about a read that WOULD RETURN the corrupt
+        // entry, not about poisoning the whole store.
+        assert_eq!(
+            reopened.get(&survivor_id).unwrap().map(|e| e.op.op.id()),
+            Some(survivor_id),
+            "a read of the SURVIVOR's own distinct id must still succeed"
+        );
+
+        // The Stoa-restricted read: the one this scenario is written for.
+        match reopened.iter_stoa(&stoa) {
+            Err(OpLogError::CorruptEntry(_)) => {}
+            Ok(entries) => panic!(
+                "a Stoa-restricted read must fail rather than return the survivor \
+                 alone, got {} entries",
+                entries.len()
+            ),
+            Err(other) => panic!("expected CorruptEntry, got {other:?}"),
+        }
+
+        // The unrestricted read, for the same reason.
+        match reopened.iter() {
+            Err(OpLogError::CorruptEntry(_)) => {}
+            Ok(entries) => panic!(
+                "an unrestricted read must fail rather than return the survivor \
+                 alone, got {} entries",
+                entries.len()
+            ),
+            Err(other) => panic!("expected CorruptEntry, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_op_with_no_encoding_is_refused_and_nothing_is_written() {
+        // The guard in `append`. Without it the row is written, and every later
+        // read of the Stoa fails as `CorruptEntry` because `decode_entry` refuses
+        // what the encoder refuses: a store poisoning itself on one op.
+        //
+        // The op is authentic and built the only way one can be: by struct
+        // literal and `sign()`. No production path hands a log one, because the
+        // transport decodes (which refuses it) and nothing authors a metadata op.
+        let author = a_key(2);
+        let stoa = a_stoa("Agora");
+        let blank = Op {
+            stoa,
+            author: author.public_key(),
+            clock: None,
+            kind: crate::op::OpKind::StoaMetadata {
+                title: String::new(),
+                description: String::new(),
+            },
+        }
+        .sign(&author);
+        assert!(blank.verify(), "the fixture must be authentic");
+
+        let mut log = SqliteOpLog::in_memory().unwrap();
+        log.append(signed(a_post("already here")), Arrival::unordered())
+            .unwrap();
+
+        match log.append(blank, Arrival::unordered()) {
+            Err(OpLogError::Unencodable(why)) => assert!(why.contains("blank"), "{why}"),
+            other => panic!("expected Unencodable, got {other:?}"),
+        }
+        assert_eq!(log.len().unwrap(), 1, "nothing was written");
+        assert_eq!(
+            log.iter_stoa(&stoa).unwrap().len(),
+            1,
+            "and the Stoa is still readable, which is the property the guard protects"
+        );
+    }
+
+    #[test]
+    fn a_creator_signed_blank_titled_op_stored_before_the_refusal_fails_every_read() {
+        // `op-log`'s ADDED "A stored entry that does not decode fails every
+        // read that would return it": "This includes a metadata op whose
+        // title is blank that was stored before the `op-format` capability
+        // refused one." The `append` guard above stops a NEW blank-title op
+        // from reaching the table; this row is what the table could already
+        // hold from before that guard existed, written straight into `ops`
+        // rather than through `append` — which is now the only way to
+        // construct this fixture at all.
+        let dir = TempDir::new("blank-titled-before-refusal");
+        let path = dir.file("log.sqlite");
+
+        let author = a_key(3);
+        let stoa = a_stoa("Agora");
+        for blank in ["", "\u{0020}\u{200B}"] {
+            let op = Op {
+                stoa,
+                author: author.public_key(),
+                clock: None,
+                kind: crate::op::OpKind::StoaMetadata {
+                    title: blank.to_string(),
+                    description: String::new(),
+                },
+            };
+            let signed_op = op.clone().sign(&author);
+            assert!(signed_op.verify(), "the fixture must be authentic");
+
+            // The bytes as they would have been written before the format
+            // refused this title: the op's layout (NOT its `encode`, which
+            // now refuses) followed by the 64-byte signature — exactly what
+            // `SignedOp::to_bytes` produces for an op the format admits.
+            let mut raw_bytes = op.canonical_bytes();
+            raw_bytes.extend_from_slice(&signed_op.signature.to_bytes());
+            let op_id = op.id();
+
+            let mut log = SqliteOpLog::open(&path).unwrap();
+            // A second, decodable op in the same Stoa, so a failure below
+            // cannot be explained by "the Stoa has nothing else to read" —
+            // and so the same fixture also demonstrates the survivor is not
+            // returned in its place.
+            let sibling = Op {
+                stoa,
+                ..a_post("a sibling in the same stoa")
+            }
+            .sign(&a_key(4));
+            log.append(sibling, Arrival::unordered()).unwrap();
+            drop(log);
+
+            let conn = Connection::open(&path).unwrap();
+            conn.execute(
+                "INSERT INTO ops
+                     (op_id, op_bytes, stoa, target, author,
+                      arrival_lamport, arrival_msg,
+                      sort_has_counter, sort_counter, score_epoch)
+                 VALUES (?1, ?2, ?3, NULL, ?4, NULL, NULL, 1, 0, NULL)",
+                rusqlite::params![
+                    op_id.as_bytes().as_slice(),
+                    raw_bytes,
+                    stoa.as_bytes().as_slice(),
+                    author.public_key().to_bytes().as_slice(),
+                ],
+            )
+            .unwrap();
+            drop(conn);
+
+            let reopened = SqliteOpLog::open(&path).unwrap();
+            let before = {
+                let conn = Connection::open(&path).unwrap();
+                conn.query_row(
+                    "SELECT op_bytes FROM ops WHERE op_id = ?1",
+                    rusqlite::params![op_id.as_bytes().as_slice()],
+                    |row| row.get::<_, Vec<u8>>(0),
+                )
+                .unwrap()
+            };
+
+            match reopened.iter_stoa(&stoa) {
+                Err(OpLogError::CorruptEntry(why)) => assert!(
+                    why.to_lowercase().contains("blank"),
+                    "title {blank:?}: the reason must name the title as blank, got {why:?}"
+                ),
+                other => panic!(
+                    "title {blank:?}: a Stoa-restricted read reaching a blank-titled \
+                     row must fail, naming it blank, got {other:?}"
+                ),
+            }
+
+            let after = {
+                let conn = Connection::open(&path).unwrap();
+                conn.query_row(
+                    "SELECT op_bytes FROM ops WHERE op_id = ?1",
+                    rusqlite::params![op_id.as_bytes().as_slice()],
+                    |row| row.get::<_, Vec<u8>>(0),
+                )
+                .unwrap()
+            };
+            assert_eq!(
+                before, after,
+                "title {blank:?}: a read must not repair, rewrite or remove the entry"
+            );
+        }
+    }
+
+    #[test]
     fn every_error_variant_renders_differently() {
         // Two errors that read the same are one error with two names, and a
         // reader cannot act on the difference. `keystore.rs` pins the same
@@ -2027,6 +2262,10 @@ mod tests {
             }
             .to_string(),
             OpLogError::CorruptEntry("bytes".to_string()).to_string(),
+            // Beside `CorruptEntry` on purpose: both are about an op's bytes, and
+            // one says the store is damaged while the other says nothing was
+            // written. A reader told the first would go looking at the file.
+            OpLogError::Unencodable("bytes".to_string()).to_string(),
         ];
         for (i, a) in rendered.iter().enumerate() {
             for b in rendered.iter().skip(i + 1) {
