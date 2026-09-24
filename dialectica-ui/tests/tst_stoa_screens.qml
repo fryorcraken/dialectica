@@ -775,15 +775,26 @@ TestCase {
         screen.destroy()
     }
 
+    // In the key-held state and driven through the create BUTTON, because that
+    // is the only place a user can create from: in the could-not-be-read state
+    // the fake's unanswered `get_master_key` would otherwise put this in, the
+    // affordance is not in the element tree. The button lookup is what makes
+    // the fixture's key state load-bearing — drop the `get_master_key` reply
+    // and this fails at the lookup rather than passing on a bare `create()`.
     function test_a_created_stoa_is_openable_from_the_creation_reply_alone() {
         var addr = "dd".repeat(32)
         var genesis = "01" + "ee".repeat(32) + "00" + "00000004" + "74657374"
         var screen = makeList({
             "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_master_key": spec.heldKeyReply(aKeyHex(), false),
             "create_stoa": '{"stoa":"' + addr + '","foundingTitle":"New",'
                          + '"policy":"open","genesis":"' + genesis + '"}'
         })
-        screen.create()
+        var create = spec.visibleNamed(screen, "createStoaButton")
+        compare(create.length, 1,
+                "creation is reachable only with a key held, so that is where "
+                + "this is driven from")
+        create[0].clicked()
 
         compare(screen.createState, "created")
         compare(screen.genesisFor(addr), genesis,
@@ -2624,13 +2635,21 @@ TestCase {
     // say what happens when a success arrives WITHOUT one. It is treated as a
     // failure here rather than rendering a created Stoa with no address, which
     // would be a Stoa the user cannot name, share or read.
+    //
+    // Driven from the key-held state through the create button, for the reason
+    // `test_a_created_stoa_is_openable_from_the_creation_reply_alone` gives.
     function test_a_creation_success_carrying_no_address_is_a_failure() {
         var screen = makeList({
             "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_master_key": spec.heldKeyReply(aKeyHex(), false),
             "create_stoa": '{"foundingTitle":"Transport Notes","policy":"open"}'
         })
+        var create = spec.visibleNamed(screen, "createStoaButton")
+        compare(create.length, 1,
+                "creation is reachable only with a key held, so that is where "
+                + "this is driven from")
         screen.createTitle = "Transport Notes"
-        screen.create()
+        create[0].clicked()
         compare(screen.createState, "failed")
         compare(screen.created, null)
         screen.destroy()

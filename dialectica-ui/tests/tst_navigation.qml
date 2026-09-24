@@ -280,16 +280,26 @@ TestCase {
     // call reaching the bridge in consequence of acting on the affordance is
     // one the Stoa list makes on being shown, not one the route makes itself.
     //
-    // The control is `closeFeed()` — the ordinary way back to the list from the
-    // feed's own close button (`Main.qml`'s `onClosed: root.closeFeed()`), which
-    // `acquireIdentity()` shares its whole body with (`enterOnly("", null)`).
-    // Both hide the feed and reveal the already-mounted `DStoaListScreen`, which
-    // is what re-triggers its `onVisibleChanged` showing. If the identity route
-    // reached the bridge for anything of its own, its delta would differ from
-    // this control's; if it reached the bridge for nothing beyond revealing the
-    // list, the two deltas are the same call, in the same order. Comparing the
-    // full method list rather than counting three names chosen in advance is
-    // what lets an unnamed extra call fail this too.
+    // **The control calls no navigator function.** It empties the feed's state
+    // by writing `chosen` directly, which is the list by the navigator's own
+    // definition (`screenShown` is "list" when every state is null). That hides
+    // the feed and reveals the already-mounted `DStoaListScreen`, re-triggering
+    // its `onVisibleChanged` showing — and nothing else, because no function of
+    // `Main.qml` ran. So the control is a plain showing of the list by
+    // construction, not by two functions happening to share a body.
+    //
+    // It used to be `closeFeed()`, whose body was the same as
+    // `acquireIdentity()`'s. That tied the test to a sibling it is not about: a
+    // call added to `closeFeed()` alone failed this test with a message blaming
+    // the route, and `acquireIdentity()` rewritten to delegate to a
+    // `closeFeed()` that made a call passed it while the route made that call.
+    // Both measured; this change's `design.md` Decision 1 has the detail.
+    //
+    // If the identity route reached the bridge for anything of its own — in its
+    // own body or in the `enterOnly` primitive it goes through — its delta
+    // differs from this control's. Comparing the full method list rather than
+    // counting three names chosen in advance is what lets an unnamed extra call
+    // fail this too.
     function test_following_the_route_makes_no_call_of_its_own() {
         var replies = {
             "list_stoas": spec.oneStoa,
@@ -313,23 +323,25 @@ TestCase {
         compare(routeView.screenShown, "list")
         var afterRoute = spec.methodsSince(routeBridge, beforeRoute)
 
-        // The control: the same feed, closed by its own close button rather
-        // than the identity chip, reaching the list the same way.
-        var closeBridge = spec.bridgeFor(replies)
-        Core.bridge = closeBridge
-        var closeView = mainComponent.createObject(null, {})
-        closeView.open(spec.stoaA, "Nym Research", "")
-        var beforeClose = closeBridge.calls.length
-        spec.namedAnywhere(closeView, "feed")[0].closed()
-        compare(closeView.screenShown, "list")
-        var afterClose = spec.methodsSince(closeBridge, beforeClose)
+        // The control: the same feed, its state emptied directly, so the list
+        // is shown with no navigator function having run.
+        var showBridge = spec.bridgeFor(replies)
+        Core.bridge = showBridge
+        var showView = mainComponent.createObject(null, {})
+        showView.open(spec.stoaA, "Nym Research", "")
+        var beforeShow = showBridge.calls.length
+        showView.chosen = null
+        compare(showView.screenShown, "list",
+                "emptying the only state set is the list, so the control is a "
+                + "showing of it")
+        var afterShow = spec.methodsSince(showBridge, beforeShow)
 
-        compare(afterRoute, afterClose,
+        compare(afterRoute, afterShow,
                 "acting on the identity route must reach the bridge for "
-                + "exactly the calls an ordinary return to the list makes, "
-                + "and none besides")
+                + "exactly the calls the list makes on being shown, and none "
+                + "besides")
         routeView.destroy()
-        closeView.destroy()
+        showView.destroy()
     }
 
     // `view-navigation`, "Following the route creates no key, requests no
