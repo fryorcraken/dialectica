@@ -497,7 +497,7 @@ Declining to transform valid text is a canonicality requirement, not an oversigh
 
 #### Scenario: Valid text is returned exactly as it arrived
 
-- **WHEN** a text field carries valid UTF-8, including multi-byte sequences, bidirectional controls and zero-width characters
+- **WHEN** a text field carries valid UTF-8, including multi-byte sequences, bidirectional controls and zero-width characters, and — where the field is a metadata op's title — at least one character that is not blank, as "A Stoa metadata op carries display fields and no policy" uses the term
 - **THEN** decoding returns those characters unchanged
 - **AND** re-encoding reproduces the original bytes
 
@@ -515,6 +515,12 @@ The Stoa it applies to and the key that signed it are the Stoa and author every 
 
 Why no policy is a decision of the `stoa-metadata` capability, which owns the concept; this capability records only that the wire format has no such field and that the encoding's length accounts for exactly the fields named above, so one cannot be added without the encoding visibly changing.
 
+**A metadata op whose title is blank is not a valid op.** Blank has the meaning, and the exact list of blank characters, that the `stoa-genesis` capability's requirement "A blank title is not a valid title" gives it; the empty title is blank. Encoding MUST refuse such an op, and decoding MUST refuse an input carrying one, as one of the refusals "A malformed op is rejected at the decoding boundary" requires: before the input reaches any state machine, with no partially-populated op produced, and reported distinguishably from every other refusal that requirement lists. Every blank title, the empty one included, MUST be refused with one and the same failure.
+
+A title carrying at least one character that is not a blank character MUST NOT be refused on account of the blank characters it also carries, and MUST NOT be trimmed or otherwise altered. The description is not held to this rule: an empty description, and a description made only of blank characters, are valid and MUST NOT be refused.
+
+**A blank title is the last refusal decoding reports.** An input to which any other refusal this capability requires of decoding also applies MUST be reported as that other refusal, and MUST NOT be reported as a blank title. Only an input that is otherwise exactly one well-formed metadata op is refused for its title being blank.
+
 #### Scenario: A metadata op's encoding accounts for exactly its declared fields
 
 - **WHEN** a metadata op is encoded
@@ -526,6 +532,44 @@ Why no policy is a decision of the `stoa-metadata` capability, which owns the co
 - **WHEN** one metadata op's title and description are the same concatenated text as another's, split at a different point
 - **THEN** their encodings differ
 - **AND** their ids differ
+
+#### Scenario: A metadata op with an empty title is refused on both sides
+
+- **WHEN** a metadata op is given a title that is the empty string
+- **THEN** encoding it fails
+- **AND** decoding an input that is otherwise a well-formed metadata op, with a title length of zero, fails
+- **AND** the decoding failure is distinguishable from truncation, from a length prefix disagreeing with the input, and from an over-long field
+
+#### Scenario: A metadata op whose title is made only of blank characters is refused on both sides
+
+- **WHEN** a metadata op is given, in turn, a title consisting of exactly one of the thirty blank characters, for every one of them, and then the title U+0020 U+200B U+3000 U+FEFF U+0009
+- **THEN** encoding each fails
+- **AND** decoding an input that is otherwise a well-formed metadata op carrying that title fails
+- **AND** each failure is the same failure an empty title produces
+
+#### Scenario: A metadata op with a blank title followed by trailing bytes is refused as trailing bytes
+
+- **WHEN** an input that is otherwise a well-formed metadata op whose title is the empty string is followed by one extra byte, and again one whose title is U+0020 U+200B followed by one extra byte
+- **THEN** decoding each fails as trailing bytes
+- **AND** neither failure is the one a blank title produces
+
+#### Scenario: A metadata op whose title has one visible letter among blank characters is accepted
+
+- **WHEN** a metadata op whose title is U+0020 U+200B, the letter `a`, U+3000 U+FEFF is encoded and decoded
+- **THEN** both succeed
+- **AND** the decoded title is those five characters in that order, with none removed at either edge
+
+#### Scenario: A metadata op with an empty description is accepted
+
+- **WHEN** a metadata op carrying a title that is not blank and an empty description is encoded and decoded
+- **THEN** both succeed
+- **AND** the decoded description is empty
+
+#### Scenario: A metadata op with a blank description is accepted
+
+- **WHEN** a metadata op carrying a title that is not blank and the description U+0020 U+200B is encoded and decoded
+- **THEN** both succeed
+- **AND** the decoded description is those two characters unchanged
 
 #### Scenario: A signature over a metadata op does not verify as another kind
 

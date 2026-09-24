@@ -37,122 +37,6 @@ The encoding of the op that carries this is the `op-format` capability's.
 - **THEN** the genesis record still decodes to its founding title
 - **AND** the two titles are separately available
 
-### Requirement: Current metadata resolves by last-write-wins, falling back to genesis
-
-A reader MUST take a Stoa's current metadata from the **leading binding**
-metadata op it holds for that Stoa, and MUST fall back to the genesis record's
-founding values when it holds none.
-
-**A metadata op binds only when all three of these hold**, and whether they
-hold MUST be decided each time a Stoa's metadata is resolved:
-
-- it is authentic — its signature verifies under the author key it names;
-- that author is in the moderator set derived from the Stoa's genesis record,
-  which the `moderation-resolution` capability's requirement "A Stoa's moderator
-  set is derived from its genesis record" defines as the record's creator alone;
-- the Stoa the op itself names is the Stoa being resolved.
-
-A reader MUST NOT treat a metadata op as binding because it was stored, because
-it was accepted on an earlier resolution, or because the peer that relayed it
-vouched for it. An authentic signature establishes who signed, and nothing about
-whether the signer may rename the Stoa.
-
-**"Leading" is the position the `op-ordering` capability's rule gives**: the
-higher Lamport counter carried in the op's own signed bytes first, equal
-counters broken by ascending op id, and an op carrying no counter after every op
-that carries one. This capability MUST NOT define an ordering or a tiebreak of
-its own, and resolution MUST NOT consult any transport-supplied ordering
-metadata, any recorded arrival, or the op's author-asserted wall-clock.
-
-Ops that do not bind MUST NOT take part in the ordering. A later op that fails
-any of the three checks MUST NOT displace an earlier binding one, and MUST NOT
-be reported as the current metadata.
-
-Only ops of the metadata kind decide current metadata. A post, revision, vote or
-moderation op in the Stoa — by a moderator or anyone else — MUST NOT change it.
-
-**The fallback values are the founding title and an empty description**, since
-the genesis record carries no description. A resolution that falls back MUST
-report that it did. A Stoa whose only metadata ops fail to bind MUST resolve
-exactly as a Stoa with none.
-
-A binding op's title and description MUST be taken as the op carries them,
-including when either is empty. An empty title in a binding op is the current
-title. It is not an absence, and it MUST NOT trigger the fallback.
-
-Resolution MUST depend on nothing but the metadata ops held and the genesis
-record. Two readers holding the same ops and the same record MUST reach the same
-current metadata, whatever sequence those ops were received in.
-
-#### Scenario: A Stoa with no metadata op shows its founding values
-
-- **WHEN** a reader holds a Stoa's genesis record and no metadata op for it
-- **THEN** the Stoa's displayed title is the founding title
-- **AND** its description is empty
-- **AND** the resolution reports that it fell back to the genesis values
-
-#### Scenario: The creator's metadata op supplies the current values
-
-- **WHEN** a reader holds a metadata op for a Stoa, authentically signed by that Stoa's creator and naming that Stoa
-- **THEN** the current title and description are the op's
-- **AND** the resolution reports that it did not fall back
-
-#### Scenario: A later rename supersedes an earlier one
-
-- **WHEN** a reader holds two binding metadata ops for one Stoa, one carrying a higher counter than the other
-- **THEN** the current values are those of the op carrying the higher counter
-
-#### Scenario: A later rename wins whatever the two op ids are
-
-- **WHEN** a reader holds two binding metadata ops for one Stoa where the op carrying the higher counter has the higher op id, and again where it has the lower op id
-- **THEN** in both cases the current values are those of the op carrying the higher counter
-
-#### Scenario: A metadata op by anyone but the creator does not bind
-
-- **WHEN** a reader holds a metadata op for a Stoa that verifies and is signed by a key other than the Stoa's creator, and no other metadata op
-- **THEN** the Stoa's current title is the founding title
-- **AND** the resolution reports that it fell back to the genesis values
-
-#### Scenario: A metadata op forging the creator's authorship does not bind
-
-- **WHEN** a reader holds a metadata op for a Stoa that names the Stoa's creator as its author but whose signature was made by another key, and no other metadata op
-- **THEN** the Stoa's current title is the founding title
-- **AND** the resolution reports that it fell back to the genesis values
-
-#### Scenario: A non-binding later op does not displace a binding earlier one
-
-- **WHEN** a reader holds a binding metadata op for a Stoa and a metadata op for the same Stoa carrying a higher counter that fails to bind
-- **THEN** the current values are those of the binding op
-
-#### Scenario: A creator's metadata op naming another Stoa does not rename this one
-
-- **WHEN** one key has created two Stoas and has signed a metadata op naming only the second
-- **THEN** the first Stoa resolves to its founding values and reports that it fell back
-- **AND** the second Stoa resolves to the op's values
-
-#### Scenario: An op carrying a counter leads one carrying none
-
-- **WHEN** a reader holds two binding metadata ops for one Stoa, one carrying a counter and one carrying none
-- **THEN** the current values are those of the op carrying a counter
-- **AND** this holds whichever of the two has the lower op id
-
-#### Scenario: Ops of other kinds do not change current metadata
-
-- **WHEN** a reader holds no metadata op for a Stoa, and holds posts, votes and moderation ops in that Stoa signed by its creator
-- **THEN** the Stoa resolves to its founding values and reports that it fell back
-
-#### Scenario: An empty title in a binding op is a title, not a fallback
-
-- **WHEN** a reader holds a binding metadata op for a Stoa whose title is empty
-- **THEN** the current title is empty
-- **AND** the resolution reports that it did not fall back
-
-#### Scenario: Resolution does not depend on the sequence ops arrived in
-
-- **WHEN** two readers hold the same metadata ops for a Stoa, binding and non-binding, appended in different sequences
-- **THEN** both resolve the same current values
-- **AND** both report the same answer as to whether they fell back
-
 ### Requirement: Current metadata does not include the posting policy
 
 The posting policy SHALL NOT be part of a Stoa's mutable current metadata. It is
@@ -218,7 +102,7 @@ address is the identity.
 
 #### Scenario: Display text is preserved rather than sanitised in the data layer
 
-- **WHEN** a metadata op carries a title containing control or zero-width characters
+- **WHEN** a metadata op carries a title containing control or zero-width characters alongside at least one character that is not blank, as the `stoa-genesis` capability's requirement "A blank title is not a valid title" defines blank
 - **THEN** decoding preserves them unchanged
 - **AND** the obligation to render them safely rests with the renderer
 
@@ -232,8 +116,8 @@ listing item or a creation reply is usable here as it is.
 
 The call MUST verify the record against the address before resolving anything,
 and MUST resolve current metadata from that record's moderator set and the ops
-the peer holds, as the requirement "Current metadata resolves by last-write-wins,
-falling back to genesis" defines.
+the peer holds, as the requirement "Current metadata resolves by last-write-wins
+among binding ops, falling back to genesis" defines.
 
 **The call MUST answer for a Stoa the peer is not in.** Whether the peer has
 joined the Stoa MUST NOT change the answer. Metadata ops the peer holds for an
@@ -296,6 +180,11 @@ A successful `getStoa` reply MUST carry every one of the following fields:
 - `isGenesisFallback`: a boolean. It is `true` exactly when no binding metadata
   op was held for the Stoa, and `false` whenever one was.
 
+**`title` MUST NOT be blank in any successful reply**, whether or not the
+resolution fell back — blank as the `stoa-genesis` capability's requirement "A
+blank title is not a valid title" defines it, so neither the empty string nor a
+string made only of the blank characters it lists.
+
 **The reply MUST NOT carry the founding title in a field of its own.** The
 founding title is in the genesis record the caller supplied, and the
 `stoa-membership` capability's calls are what report it under a name of its own;
@@ -332,6 +221,12 @@ carries them, with no character removed, replaced or added.
 - **THEN** `title` is the genesis record's title
 - **AND** `description` is the empty string
 - **AND** `isGenesisFallback` is `false`
+
+#### Scenario: No successful reply carries a blank title
+
+- **WHEN** `getStoa` succeeds for a Stoa that falls back, for a Stoa whose leading binding metadata op carries a title that is not blank, for a Stoa whose only creator-signed metadata op carries an empty title, and for a Stoa whose only creator-signed metadata op carries the title U+0020 U+200B U+3000
+- **THEN** in each reply `title` is a string containing at least one character that is not a blank character
+- **AND** the third and fourth replies' `title` is the founding title and their `isGenesisFallback` is `true`
 
 #### Scenario: The policy is reported by name from the genesis record
 
@@ -372,17 +267,29 @@ The call MUST fail when:
 - `stoa` or `genesis` is absent, or is not a string;
 - `stoa` is not a well-formed Stoa address;
 - `genesis` is not a record the genesis encoding decodes, including when it is
-  longer than the largest record that encoding can hold;
+  longer than the largest record that encoding can hold, and including when its
+  title is blank — the empty string, or a string made only of the blank
+  characters the `stoa-genesis` capability lists;
 - the record does not verify against the address;
 - the peer's op store cannot be consulted. A peer that has no op store yet is
   not this case; the requirement "A Stoa's metadata is answerable from its
-  address and genesis record, joined or not" says how it is answered.
+  address and genesis record, joined or not" says how it is answered;
+- a read of the Stoa's ops reaches a stored entry the op store cannot decode,
+  as the `op-log` capability's requirement "A stored entry that does not decode
+  fails every read that would return it" defines. This includes a metadata op
+  whose title is blank that was stored before the `op-format` capability
+  refused one.
 
 **A store that cannot be consulted MUST produce the error shape and MUST NOT
 produce a fallback reply.** A fallback reply states that the peer holds no
 binding metadata op, which it cannot know when the store is unreadable. Reporting
 the founding values as `isGenesisFallback: true` would make a broken store
 indistinguishable from a Stoa nobody has renamed.
+
+**A stored entry that does not decode MUST likewise produce the error shape,
+carrying the reason the decoding gave, and MUST NOT produce a fallback reply.**
+The call MUST NOT answer as though the entry were absent, or as though it were a
+metadata op that fails to bind, and MUST NOT migrate, rewrite or remove it.
 
 A request field the call does not read MUST be ignored rather than refused, and
 a request carrying one MUST be answered as though it were absent.
@@ -398,11 +305,33 @@ a request carrying one MUST be answered as though it were absent.
 - **WHEN** `getStoa` is called with a request that is not a JSON object, with `stoa` or `genesis` missing, with either holding a number, with an address of the wrong length or alphabet, and with a `genesis` that is not a decodable record
 - **THEN** each reply is the error shape carrying a reason
 
+#### Scenario: A record whose title is blank is refused, not answered as a fallback
+
+- **WHEN** `getStoa` is called with a record that is otherwise a well-formed genesis record but whose title is the empty string, together with the address computed by hashing that record's bytes — and again with such a record whose title is U+0020 U+200B, with the address computed the same way
+- **THEN** each reply is the error shape
+- **AND** each reason names the title as blank
+- **AND** neither carries a title, description, policy or `isGenesisFallback`
+
+#### Scenario: A record whose title has one visible letter among blank characters is answered
+
+- **WHEN** `getStoa` is called for a Stoa the peer holds no binding metadata op for, whose genesis record's title is U+0020 U+200B, the letter `a`, U+3000 U+FEFF
+- **THEN** the call succeeds
+- **AND** `title` is those five characters in that order, with none removed at either edge
+- **AND** `isGenesisFallback` is `true`
+
 #### Scenario: An unreadable store is an error, not a fallback
 
 - **WHEN** `getStoa` is called with a valid address and record and the peer's op store cannot be consulted
 - **THEN** the reply is the error shape
 - **AND** it does not carry `isGenesisFallback`
+
+#### Scenario: A blank-titled metadata op stored before the refusal is an error, not a fallback
+
+- **WHEN** `getStoa` is called with a valid address and record, on a peer whose persistent op store holds, for that Stoa, an entry stored as it would have been before the `op-format` capability refused a blank title — a metadata op signed by the Stoa's creator whose title is the empty string — and no other op
+- **THEN** the reply is the error shape
+- **AND** its reason names the title as blank
+- **AND** it carries no title, description, policy or `isGenesisFallback`
+- **AND** the stored entry afterwards is the entry stored before the call
 
 #### Scenario: An unrecognised request field is ignored
 
@@ -425,3 +354,156 @@ receiving peer every call, not only this one.
 - **WHEN** `getStoa` is called for a Stoa whose ops include forged, mis-signed, non-moderator, cross-Stoa and wrong-kind metadata ops, ops carrying the maximum representable counter, ops carrying no counter, and titles and descriptions at the maximum field length
 - **THEN** the call returns a reply rather than aborting
 - **AND** the module answers subsequent calls
+
+### Requirement: Current metadata resolves by last-write-wins among binding ops, falling back to genesis
+
+A reader MUST take a Stoa's current metadata from the **leading binding**
+metadata op it holds for that Stoa, and MUST fall back to the genesis record's
+founding values when it holds none.
+
+**A metadata op binds only when all four of these hold**, and whether they
+hold MUST be decided each time a Stoa's metadata is resolved:
+
+- it is authentic — its signature verifies under the author key it names;
+- that author is in the moderator set derived from the Stoa's genesis record,
+  which the `moderation-resolution` capability's requirement "A Stoa's moderator
+  set is derived from its genesis record" defines as the record's creator alone;
+- the Stoa the op itself names is the Stoa being resolved;
+- its title is not blank — blank having the meaning, and the exact list of
+  blank characters, that the `stoa-genesis` capability's requirement "A blank
+  title is not a valid title" gives it, under which the empty title is blank.
+  The `op-format` capability refuses to encode or decode a metadata op with a
+  blank title; this condition holds resolution to the same rule for any such op
+  a reader nonetheless holds, meaning one its op log returns from a read. A
+  blank-titled metadata op stored as bytes before that refusal is not held in
+  that sense and is not an op that fails to bind: the `op-log` capability's
+  requirement "A stored entry that does not decode fails every read that would
+  return it" makes the read fail, and "`getStoa` refuses what it cannot answer,
+  and never reports a fallback in place of a failure" says what `getStoa`
+  answers then.
+
+A reader MUST NOT treat a metadata op as binding because it was stored, because
+it was accepted on an earlier resolution, or because the peer that relayed it
+vouched for it. An authentic signature establishes who signed, and nothing about
+whether the signer may rename the Stoa.
+
+**"Leading" is the position the `op-ordering` capability's rule gives**: the
+higher Lamport counter carried in the op's own signed bytes first, equal
+counters broken by ascending op id, and an op carrying no counter after every op
+that carries one. This capability MUST NOT define an ordering or a tiebreak of
+its own, and resolution MUST NOT consult any transport-supplied ordering
+metadata, any recorded arrival, or the op's author-asserted wall-clock.
+
+Ops that do not bind MUST NOT take part in the ordering. A later op that fails
+any of the four checks MUST NOT displace an earlier binding one, and MUST NOT
+be reported as the current metadata.
+
+Only ops of the metadata kind decide current metadata. A post, revision, vote or
+moderation op in the Stoa — by a moderator or anyone else — MUST NOT change it.
+
+**The fallback values are the founding title and an empty description**, since
+the genesis record carries no description. A resolution that falls back MUST
+report that it did. A Stoa whose only metadata ops fail to bind MUST resolve
+exactly as a Stoa with none.
+
+A binding op's title and description MUST be taken as the op carries them, with
+no character removed, including the blank characters a title that is not blank
+also carries. An empty description in a binding op is the current description.
+It is not an absence, and it MUST NOT trigger the fallback.
+
+**A resolution MUST NOT produce a blank current title**, the empty title
+included. A binding op's title is not blank by the fourth condition above, and a
+founding title is not blank because the `stoa-genesis` capability refuses a
+record whose title is blank.
+
+Resolution MUST depend on nothing but the metadata ops held and the genesis
+record. Two readers holding the same ops and the same record MUST reach the same
+current metadata, whatever sequence those ops were received in.
+
+#### Scenario: A Stoa with no metadata op shows its founding values
+
+- **WHEN** a reader holds a Stoa's genesis record and no metadata op for it
+- **THEN** the Stoa's displayed title is the founding title
+- **AND** its description is empty
+- **AND** the resolution reports that it fell back to the genesis values
+
+#### Scenario: The creator's metadata op supplies the current values
+
+- **WHEN** a reader holds a metadata op for a Stoa, authentically signed by that Stoa's creator, naming that Stoa, and carrying a title that is not blank
+- **THEN** the current title and description are the op's
+- **AND** the resolution reports that it did not fall back
+
+#### Scenario: A later rename supersedes an earlier one
+
+- **WHEN** a reader holds two binding metadata ops for one Stoa, one carrying a higher counter than the other
+- **THEN** the current values are those of the op carrying the higher counter
+
+#### Scenario: A later rename wins whatever the two op ids are
+
+- **WHEN** a reader holds two binding metadata ops for one Stoa where the op carrying the higher counter has the higher op id, and again where it has the lower op id
+- **THEN** in both cases the current values are those of the op carrying the higher counter
+
+#### Scenario: A metadata op by anyone but the creator does not bind
+
+- **WHEN** a reader holds a metadata op for a Stoa that verifies and is signed by a key other than the Stoa's creator, and no other metadata op
+- **THEN** the Stoa's current title is the founding title
+- **AND** the resolution reports that it fell back to the genesis values
+
+#### Scenario: A metadata op forging the creator's authorship does not bind
+
+- **WHEN** a reader holds a metadata op for a Stoa that names the Stoa's creator as its author but whose signature was made by another key, and no other metadata op
+- **THEN** the Stoa's current title is the founding title
+- **AND** the resolution reports that it fell back to the genesis values
+
+#### Scenario: A non-binding later op does not displace a binding earlier one
+
+- **WHEN** a reader holds a binding metadata op for a Stoa and a metadata op for the same Stoa carrying a higher counter that fails to bind
+- **THEN** the current values are those of the binding op
+
+#### Scenario: A creator's metadata op naming another Stoa does not rename this one
+
+- **WHEN** one key has created two Stoas and has signed a metadata op naming only the second
+- **THEN** the first Stoa resolves to its founding values and reports that it fell back
+- **AND** the second Stoa resolves to the op's values
+
+#### Scenario: An op carrying a counter leads one carrying none
+
+- **WHEN** a reader holds two binding metadata ops for one Stoa, one carrying a counter and one carrying none
+- **THEN** the current values are those of the op carrying a counter
+- **AND** this holds whichever of the two has the lower op id
+
+#### Scenario: Ops of other kinds do not change current metadata
+
+- **WHEN** a reader holds no metadata op for a Stoa, and holds posts, votes and moderation ops in that Stoa signed by its creator
+- **THEN** the Stoa resolves to its founding values and reports that it fell back
+
+#### Scenario: A metadata op carrying a blank title does not bind
+
+- **WHEN** a reader holds, for a Stoa, a metadata op authentically signed by that Stoa's creator and naming that Stoa whose title is the empty string, and no other metadata op — and again when that op's title is U+0020 U+200B U+3000 instead
+- **THEN** in each case the Stoa's current title is the founding title
+- **AND** the resolution reports that it fell back to the genesis values
+
+#### Scenario: A later metadata op carrying a blank title does not displace a binding one
+
+- **WHEN** a reader holds a binding metadata op for a Stoa, and a metadata op for the same Stoa signed by its creator, carrying a higher counter and an empty title — and again when that later op's title is U+0020 U+200B U+3000 instead
+- **THEN** in each case the current values are those of the binding op
+- **AND** the resolution reports that it did not fall back
+
+#### Scenario: A title with one visible letter among blank characters binds unaltered
+
+- **WHEN** a reader holds, for a Stoa, a metadata op authentically signed by that Stoa's creator and naming that Stoa whose title is U+0020 U+200B, the letter `a`, U+3000 U+FEFF, and no other metadata op
+- **THEN** the current title is those five characters in that order, with none removed at either edge
+- **AND** the resolution reports that it did not fall back
+
+#### Scenario: An empty description in a binding op is a description, not a fallback
+
+- **WHEN** a reader holds a binding metadata op for a Stoa whose description is empty
+- **THEN** the current description is empty
+- **AND** the current title is the op's
+- **AND** the resolution reports that it did not fall back
+
+#### Scenario: Resolution does not depend on the sequence ops arrived in
+
+- **WHEN** two readers hold the same metadata ops for a Stoa, binding and non-binding, appended in different sequences
+- **THEN** both resolve the same current values
+- **AND** both report the same answer as to whether they fell back
