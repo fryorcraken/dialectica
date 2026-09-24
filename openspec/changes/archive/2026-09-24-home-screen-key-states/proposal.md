@@ -99,6 +99,17 @@ key already belongs to `identity-onboarding`.
   Requirements are added for the three key states, what each draws and does not
   instantiate, the key line, the re-read on each showing and on the
   could-not-be-read state's read-again action, and the verbatim copy.
+- `view-navigation`: *Acquiring an identity is reached from the navigator* is
+  modified, and nothing it forbids is relaxed. It said following the route "MUST
+  NOT itself reach the module". Once the route lands on a list that asks the
+  read-only master-key query on every showing, that sentence contradicts
+  `stoa-navigation-view`, so it now states where the boundary is. The route makes
+  no call of its own. The calls the list makes on being shown belong to the list.
+  No call the route leads to, the list's included, creates a key, requests a
+  slate or keeps a candidate. This was found after archive, when the two capabilities were first
+  read together (`machine-identity-scope` merged while this change was in
+  review). The delta is recorded here so that the live text is accounted for by
+  a change and is not a hand edit.
 
 ## Impact
 
