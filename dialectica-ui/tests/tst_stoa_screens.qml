@@ -2897,6 +2897,32 @@ TestCase {
         screen.destroy()
     }
 
+    // "Pasting stays available when the key state could not be read"
+    // (stoa-navigation-view, spec.md lines 416-419). Asserts presence AND that
+    // the action still reaches the preview signal — the shape this file's own
+    // defect-family note asks for, not just an element existing in the tree.
+    function test_pasting_stays_available_when_the_key_state_could_not_be_read() {
+        var screen = makeList({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_master_key": '{"error":"keystore permissions are too open (mode 0644)"}'
+        })
+        compare(screen.machineKey.state, "unreadable", "the fixture is the could-not-be-read state")
+
+        compare(spec.visibleNamed(screen, "pasteSection").length, 1)
+        compare(spec.visibleNamed(screen, "pasteField").length, 1)
+        compare(spec.visibleNamed(screen, "pasteButton").length, 1)
+
+        var asked = []
+        screen.previewRequested.connect(function (stoa, genesis) { asked.push(stoa) })
+        var stoa = "ab".repeat(32)
+        screen.pasted = DStoaReference.shareText(stoa, "00ff")
+        spec.visibleNamed(screen, "pasteButton")[0].clicked()
+
+        compare(asked.length, 1, "the action still reaches the preview signal")
+        compare(asked[0], stoa)
+        screen.destroy()
+    }
+
     function test_a_reply_claiming_a_key_without_naming_one_is_not_the_key_held_state() {
         var replies = ['{"hasMasterKey":true}', '{"hasMasterKey":true,"publicKey":""}',
                        '{"hasMasterKey":true,"publicKey":7}']

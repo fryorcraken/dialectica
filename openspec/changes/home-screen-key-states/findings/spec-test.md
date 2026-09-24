@@ -18,7 +18,7 @@ state, copy table) have a directly corresponding test that asserts the actual
 claim (element-tree absence via `namedAnywhere`/invisible-walking, not opacity;
 verbatim text; call counts via the recording fake bridge). One gap found:
 
-- [ ] **`tester`** — "Pasting stays available when the key state could not be
+- [x] **`tester`** — "Pasting stays available when the key state could not be
       read" (`stoa-navigation-view`, "A key state that could not be read is
       told apart from both others", scenario at spec.md lines 416–419) has no
       test.
@@ -38,6 +38,39 @@ verbatim text; call counts via the recording fake bridge). One gap found:
       delta's could-not-be-read requirement with no test naming it, and the
       "not instantiated" tests for that state check five different absences
       without checking this one presence.
+
+      **Fixed.** Added
+      `test_pasting_stays_available_when_the_key_state_could_not_be_read` in
+      `dialectica-ui/tests/tst_stoa_screens.qml`, in the could-not-be-read
+      block right after the fixture the gap description names. It builds the
+      could-not-be-read fixture (the same `get_master_key` failure reply as
+      the neighbouring test), asserts `pasteSection`/`pasteField`/`pasteButton`
+      are each present via `spec.visibleNamed`, then goes further than
+      presence alone — connects `previewRequested`, sets `screen.pasted` to a
+      `DStoaReference.shareText` value, clicks `pasteButton`, and asserts the
+      preview signal actually fires with the pasted Stoa. That second half
+      follows this file's own stated defect family ("assert the property the
+      user is affected by, not the value feeding it") and is modelled directly
+      on the existing `test_a_reference_can_be_previewed_with_no_key_held`.
+
+      **Mutation, to prove it can fail for the reason it names:** added
+      `visible: screen.machineKey.state !== "unreadable"` to the `pasteSection`
+      `ColumnLayout` in `dialectica-ui/src/qml/DStoaListScreen.qml` (the exact
+      shape the gap description warns about — paste made key-state-dependent
+      instead of sitting outside every `Loader`). Predicted: the new test
+      fails on the `pasteSection` presence assertion. Observed: it did —
+      `test_pasting_stays_available_when_the_key_state_could_not_be_read`
+      failed with `Actual (): 0, Expected (): 1` at the `pasteSection` count
+      line. Three pre-existing tests also failed on the same mutation
+      (`test_the_no_key_state_renders_the_key_block_above_the_paste_section`
+      and two others asserting relative position via `pasteSection`), which
+      independently confirms the mutation was a real behavioural change and
+      not a fluke — prediction and observation matched exactly. Reverted
+      immediately after reading the failing run; full suite (both this file
+      and the whole `run-qml-tests.sh` sweep, 25 spec files) reruns green
+      afterward. `git diff --stat 4b338f6` shows only
+      `dialectica-ui/tests/tst_stoa_screens.qml` and this findings file
+      changed — the implementation edit was not left in the tree.
 
 ## 2. Mutation testing
 
