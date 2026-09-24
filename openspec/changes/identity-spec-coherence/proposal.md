@@ -24,17 +24,21 @@ on, and the contradiction sits in the requirement that forbids rotation.
   requirement's own.** The requirement's real claim still holds and stays: *there
   SHALL be no way to replace the key behind an identity while keeping the
   identity.* The scenario now checks that claim at the one point in this release
-  where it can fail: asking for a master key while one is held leaves the
-  identity in use unchanged, both as reported and as signed.
+  where it can fail: calling the operation that creates a master key while one
+  is held leaves the identity in use unchanged, both as reported and as signed.
+  The scenario names that operation by the phrase `identity-onboarding` uses for
+  it. It does not mean the read-only query that reports whether a key is held.
+  That query writes nothing by its own requirement, so a scenario about it could
+  not fail.
 - **Why this option and not the other.** The issue offers two rewrites. Here is
   what each gives when the test is "can a test fail against it?":
   - *The requirement's own claim, stated as the issue words it* ("no operation
     replaces the key behind an identity while keeping the identity"). As worded,
     this keeps the defect. It is still a claim about every operation in the API,
     and no test can enumerate those. So it is taken, but stated over a named
-    operation and an observed outcome. A test fails if asking for a master key
-    again changes the key the identity report names or the key a post is signed
-    with.
+    operation and an observed outcome. A test fails if calling the operation
+    that creates a master key, on a peer that already holds one, changes the key
+    the identity report names or the key a post is signed with.
   - *Scoping the old scenario to one derivation scheme and one path.* Every
     clause that survives this is already a scenario in the first requirement. The
     THEN clause is "The same root, Stoa and path always yield the same identity",
@@ -49,8 +53,9 @@ on, and the contradiction sits in the requirement that forbids rotation.
   in use before and after an operation. That is a different observation from
   repeated derivation, so it does not bring the duplicate back.
 - **The requirement's prose gains one paragraph** saying that in this release the
-  key behind the identity in use is the machine key, and that asking for a master
-  key while one is held MUST leave it unchanged. Without it, the new scenario
+  key behind the identity in use is the machine key, and that calling the
+  operation that creates a master key while one is held MUST leave it unchanged.
+  Without it, the new scenario
   would test something the requirement text does not state. The rest of the
   requirement and its second scenario are carried unchanged.
 - **The requirement is renamed, because the tool leaves no other way to drop the
@@ -77,6 +82,14 @@ on, and the contradiction sits in the requirement that forbids rotation.
   - `identity-onboarding`: a fresh install reaches posting by creating its machine
     key. The slate and the keep stay contracted and stay built, but no view reaches
     them, and a kept choice does not change the identity in use.
+
+**Left alone:** *In this release one machine key is the identity in every Stoa*
+says "the key a request for this peer's master key reports" three times. That
+phrase could mean either operation too, but there it does no harm. Every use
+concerns a peer that already holds a key, and `identity-onboarding` requires both
+operations to name that same stored key. So either reading gives the same
+answer, and a test fails under either one if the wrong key is reported. It is
+not part of #157's contradiction, and this change does not touch it.
 
 No identity behaviour and no key derivation changes. The operation the new
 scenario names already reports an existing master key rather than replacing it.
@@ -145,5 +158,6 @@ None.
   issue, no test cited the old one. The behaviour it pins already exists: the
   wire method that creates a master key reports an existing key and writes
   nothing. So the test needs no core change to pass. It must still be shown to
-  fail against a build whose master-key request replaces a held key.
+  fail against a build whose operation that creates a master key replaces a
+  held key.
 - No code, wire shape or UI change.

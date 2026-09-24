@@ -17,11 +17,11 @@ was not an option.
 **Migration**: Replaced by "Identity does not rotate: the key behind an identity
 is never replaced", added in this same change. Its text is this requirement's
 with these edits: one new paragraph stating that in this release the key behind
-the identity in use is the machine key in every Stoa, and that asking for a
-master key while one is held MUST leave the identity in use unchanged, as
-reported and as signed; and the scenario "An identity is a pure function of its
-root and its Stoa" replaced by "Asking for a master key while one is held does
-not replace the identity in use", which checks that paragraph. Its old **THEN**
+the identity in use is the machine key in every Stoa, and that calling the
+operation that creates a master key while one is held MUST leave the identity in
+use unchanged, as reported and as signed; and the scenario "An identity is a pure
+function of its root and its Stoa" replaced by "Creating a master key while one
+is held does not replace the identity in use", which checks that paragraph. Its old **THEN**
 clause is dropped, not carried over, because it is covered by "The same root and
 Stoa always yield the same identity". Every other paragraph, and the scenario "An
 identity is named by its key and by nothing beside it" with its note, is
@@ -37,9 +37,12 @@ identity. A per-Stoa identity is derived once and is permanent.
 
 **In this release the key behind the identity in use is the machine key, in every
 Stoa** — see *In this release one machine key is the identity in every Stoa*.
-Asking for a master key while one is held MUST leave the identity in use
-unchanged: the identity report MUST name the same public key afterwards as before,
-and an op published afterwards MUST be signed by that same key.
+Calling the operation that creates a master key while one is held MUST leave the
+identity in use unchanged: the identity report MUST name the same public key
+afterwards as before, and an op published afterwards MUST be signed by that same
+key. The operation meant is the one `identity-onboarding` provides for a peer to
+obtain its master key, not the one that reports whether a master key is held,
+which writes nothing by its own requirement.
 
 A key that can be discarded at will is a key nothing can be attached to:
 rotation lets a user shed whatever has accumulated against their identity, and
@@ -57,11 +60,11 @@ affordance, and this requirement already forbids what it was reserved for; it is
 recorded because a reader finding rotation unbuilt should find the reason it is
 now harder, rather than infer that nobody considered it.
 
-#### Scenario: Asking for a master key while one is held does not replace the identity in use
+#### Scenario: Creating a master key while one is held does not replace the identity in use
 
 - **WHEN** a peer holding a machine key reports the identity in use for a Stoa,
-  then asks for a master key, then reports the identity in use for that Stoa
-  again and publishes a post into it
+  then calls the operation that creates a master key, then reports the identity
+  in use for that Stoa again and publishes a post into it
 - **THEN** the second report names the public key the first report named
 - **AND** the post carries that same public key
 
