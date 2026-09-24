@@ -25,6 +25,13 @@ scenario that contradicts it is the one amended.
   ascending counter would get them wrong: replies with equal counters come in
   **descending** op id, and a reply carrying no counter comes **before** every
   reply that carries one.
+- *"A reply orders after the reply it answers"* states what it depends on: both
+  replies carry counters, and the answered reply's counter advanced the
+  answering peer's clock. Where either carries no counter, or the answered
+  reply's counter exceeded `op-ordering`'s advance bound, the answer can carry
+  the lower counter and come first; the read returns the reversed rule's
+  sequence regardless and does not move a reply after its parent. A scenario
+  pins that case.
 - The scenario *"The sequence is the ordering rule's and is not re-sorted here"*
   keeps its name and now asserts the exact reverse of the rule's sequence;
   `openspec validate` refuses a MODIFIED block that drops a scenario by name. The
@@ -58,7 +65,9 @@ None.
   order, with the root first"* changes the reply order from the ordering rule's
   sequence to its exact reverse, amends the contradicting scenario, and adds
   scenarios pinning the order against newest-first, against a re-sort on ties,
-  and for replies carrying no counter. The Purpose line is corrected in the live
+  for replies carrying no counter, and for an answer carrying a lower counter
+  than the reply it answers. *"A reply orders after the reply it answers"*
+  gains the conditions it depends on. The Purpose line is corrected in the live
   spec directly.
 
 ## Impact

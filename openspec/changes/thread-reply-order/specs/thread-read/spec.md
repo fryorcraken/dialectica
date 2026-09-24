@@ -6,9 +6,11 @@ The items SHALL be a flat sequence. Each SHALL name its parent, which is what le
 
 The root post MUST be the first item of the first page. The replies MUST follow in the **exact reverse** of the sequence the system's ordering rule places them in: the reply the rule places last MUST be the first reply, and the reply the rule places first MUST be the last. This capability MUST NOT define an order of its own, MUST NOT sort by arrival, and MUST NOT compare any value itself. A second implementation of the ordering rule could disagree with the first, and two orders that disagree produce no error anywhere — each peer stays internally consistent while rendering one thread differently from its neighbour.
 
-**What that order guarantees is convergence and causal position, and still not wall-clock recency.** The rule leads with the Lamport counter an op carries in its own signed bytes and places the higher counter first, so its reverse places a reply written after its author saw another reply after that reply, and every peer holding both agrees. Two consequences of reversing the rule's sequence, rather than re-sorting the replies, are part of this contract: replies carrying equal counters MUST come in descending op id, the reverse of the rule's tiebreak; and a reply carrying no counter — one encoded before the clock fields existed — MUST come before every reply that carries one, those among themselves in descending op id. An op id is a hash and carries no temporal meaning whatever.
+**What that order guarantees is convergence and causal position, and still not wall-clock recency.** The rule leads with the Lamport counter an op carries in its own signed bytes and places the higher counter first, so its reverse places a reply carrying the higher of two counters after the other, and every peer holding both agrees. Two consequences of reversing the rule's sequence, rather than re-sorting the replies, are part of this contract: replies carrying equal counters MUST come in descending op id, the reverse of the rule's tiebreak; and a reply carrying no counter — one encoded before the clock fields existed — MUST come before every reply that carries one, those among themselves in descending op id. An op id is a hash and carries no temporal meaning whatever.
 
-**A caller SHALL NOT be told the sequence is chronological.** A Lamport order says a reply was written knowing of what precedes it; it does not say when either was written, and two replies whose authors had not seen one another's are separated by op id. The distinction is not pedantic here: the asserted time an item carries is the author's claim and disagrees with the sequence whenever an author's clock is wrong or an author is lying, so a caller presenting the sequence as chronological would be making a claim the items themselves can visibly contradict.
+**Where both carry counters, a reply comes after the reply it answers when its counter is the greater of the two, and the read MUST NOT restore that relation where the counters do not give it.** `op-ordering`'s publish rule gives the answering reply the greater counter when both replies carry counters and the answered reply's counter advanced the answering peer's clock. It does not where either reply carries no counter, nor where the answered reply's counter exceeded `op-ordering`'s advance bound at the answering peer, so that the answer carries the lower counter. In those cases the replies MUST still come in the reverse of the rule's sequence, even where that places a reply before the reply it answers; the read MUST NOT move a reply after its parent.
+
+**A caller SHALL NOT be told the sequence is chronological.** A counter says its author had seen something at the counter below it; it does not say which op that was, nor when either reply was written, and two replies whose authors had not seen one another's are ordered by counters neither chose with the other in view. The distinction is not pedantic here: the asserted time an item carries is the author's claim and disagrees with the sequence whenever an author's clock is wrong or an author is lying, so a caller presenting the sequence as chronological would be making a claim the items themselves can visibly contradict.
 
 A field MAY be named or described in terms of the order — *latest*, *first*, *position* — where what it names is the ordering rule's position. A field SHALL NOT be named or described in terms of wall-clock time unless it is the author-asserted time, which SHALL be marked as such.
 
@@ -44,8 +46,14 @@ A flat sequence is specified rather than a tree because whether a thread view sh
 
 #### Scenario: A reply orders after the reply it answers
 
-- **WHEN** one peer publishes a reply, a second receives it and publishes a reply to it
+- **WHEN** one peer publishes a reply carrying a counter, a second receives it, the first reply's counter advances the second peer's clock, and the second publishes a reply to it carrying a counter
 - **THEN** the second orders after the first in the returned sequence
+
+#### Scenario: A reply carrying a lower counter than the reply it answers comes before it
+
+- **WHEN** a thread holds a reply, and an answer to it carrying a lower counter than the reply it answers, and is read
+- **THEN** the answer comes before the reply it answers
+- **AND** the replies are the exact reverse of the rule's sequence, with no reply moved after its parent
 
 #### Scenario: The lowest counter leads the replies and the highest ends them
 
@@ -65,6 +73,7 @@ A flat sequence is specified rather than a tree because whether a thread view sh
 - **WHEN** a thread holds replies carrying no counter alongside replies carrying one, and is read
 - **THEN** every reply carrying no counter comes before every reply carrying one
 - **AND** the replies carrying no counter come in descending op id among themselves
+- **AND** a reply carrying no counter that answers a reply carrying one comes before the reply it answers
 - **AND** the root is still the first item, whether or not it carries a counter
 
 #### Scenario: The sequence does not follow the asserted times
