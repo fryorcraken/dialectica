@@ -220,12 +220,29 @@ TestCase {
     // Driven through the CHIP's own signal, not `acquireIdentity()`, because the
     // requirement is about the affordance a user acts on: a navigator function
     // nothing wires to the chip would pass a test that called it directly.
+    //
+    // **The last assertion is a composition of two specs, and the fixture has
+    // to answer both.** `view-navigation` requires only that the route renders
+    // the list; what the list then draws is `stoa-navigation-view`'s, and there
+    // the create-key action exists only in the no-key state, entered on
+    // `get_master_key` answering `hasMasterKey:false` and on nothing else. So
+    // this fixture states the master-key answer that agrees with its own
+    // `who_am_i` — no keystore on this machine — and the claim is: a feed that
+    // reports no identity, on a machine holding no key, lands the user where
+    // the key is made.
+    //
+    // Without the `get_master_key` reply the fake answers that method with the
+    // error shape, the list is in its could-not-be-read state, and no create-key
+    // action exists — correctly, since a key may be held and unreadable. That is
+    // how this test went red when it first met the key-state list: it was
+    // written against a list that drew `createIdentityButton` unconditionally.
     function test_a_missing_identity_offers_the_route_to_the_stoa_list() {
         Core.bridge = spec.bridgeFor({
             "list_stoas": spec.oneStoa,
             "list_threads": '{"items":[],"page":0,"hasMore":false}',
             "who_am_i": '{"hasIdentity":false,"reason":"no keystore on this machine"}',
-            "get_capabilities": '{"canPost":false,"reason":"no keystore on this machine"}'
+            "get_capabilities": '{"canPost":false,"reason":"no keystore on this machine"}',
+            "get_master_key": '{"hasMasterKey":false}'
         })
         var view = mainComponent.createObject(null, {})
         view.open(spec.stoaA, "Nym Research", "")
@@ -242,8 +259,9 @@ TestCase {
                 + "machine's key is created")
         compare(spec.visibleNamed(view, "stoaList").length, 1,
                 "and the list is what is on screen")
-        compare(spec.visibleNamed(view, "createIdentityButton").length, 1,
-                "with the control that creates the key reachable on it")
+        compare(spec.visibleNamed(view, "createKeyButton").length, 1,
+                "with the control that creates the key reachable on it, the "
+                + "master-key query having reported no key held")
         view.destroy()
     }
 
@@ -263,7 +281,8 @@ TestCase {
                 '{"slate":"ab","count":1,"candidates":[{"index":0,"publicKey":"'
                 + spec.keyA + '"}]}',
             "keep_identity": '{"kept":true,"publicKey":"' + spec.keyA
-                             + '","path":0,"encrypted":false}'
+                             + '","path":0,"encrypted":false}',
+            "get_master_key": '{"hasMasterKey":false}'
         })
         Core.bridge = bridge
         var view = mainComponent.createObject(null, {})
@@ -272,9 +291,22 @@ TestCase {
                "the feed did call the core, so the zeros below are this route "
                + "making no call rather than the fake being unreachable")
 
+        var keyQueriesBefore = spec.callsTo(bridge, "get_master_key")
         spec.namedAnywhere(view, "identityChip")[0].createRequested()
 
         compare(view.screenShown, "list")
+
+        // NO SPEC: `view-navigation` says following the route "MUST NOT itself
+        // reach the module", and its scenario enumerates three calls — key
+        // creation, slate, keep. `stoa-navigation-view` requires the list to
+        // ask the read-only master-key query "each time it is shown after being
+        // hidden", and the route is such a showing. So landing makes exactly one
+        // `get_master_key` call. This pins it as the LIST's call rather than the
+        // route's; whether the prose meant to forbid it too is reported to the
+        // spec-writer, not decided here. Measured: an equality with
+        // `keyQueriesBefore` fails, 2 against 1.
+        compare(spec.callsTo(bridge, "get_master_key"), keyQueriesBefore + 1,
+                "the list's showing asks the key state once, and mints nothing")
         compare(spec.callsTo(bridge, "create_identity"), 0,
                 "the route created a key on the user's behalf")
         compare(spec.callsTo(bridge, "generate_identity_slate"), 0,
