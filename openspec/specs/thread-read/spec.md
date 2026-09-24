@@ -5,7 +5,7 @@ Defines reading one thread: what identifies it, which of the ops a peer holds be
 
 Three boundaries are named rather than restated, because each is another capability's and two specs asserting one rule is how two copies drift.
 
-- **`op-ordering` owns what orders two ops**, including the degraded order in force while the transport supplies no ordering metadata. This capability places posts in that order and defines none of its own.
+- **`op-ordering` owns what orders two ops**, including the degraded order in force while the transport supplies no ordering metadata. This capability places a thread's replies, after its root, in the exact reverse of that order and defines none of its own.
 - **`post-revision` owns which version of a post is current**, who may publish one, and what a reader renders of it. This capability reports that answer per post and does not restate how it is reached.
 - **`moderation-resolution` owns whether a target is hidden** and which op decided it. This capability decides what a thread read *does* with that answer, which is a different question.
 
