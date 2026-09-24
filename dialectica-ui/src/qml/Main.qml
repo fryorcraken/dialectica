@@ -225,9 +225,10 @@ Item {
     // `enterOnly("", null)` is the list by the navigator's own definition, so
     // this is the same transition `closeFeed()` makes — named for what the user
     // asked for rather than for what it happens to share with leaving a feed.
-    // `tst_navigation.qml`'s no-call-of-its-own test uses `closeFeed()` as its
-    // control on the strength of that shared body, so a change here that
-    // diverges from it has to revisit that control.
+    // Nothing ties the two together: `tst_navigation.qml`'s no-call-of-its-own
+    // test compares this route against the list shown with no navigator
+    // function run at all, so `closeFeed()` can change without that test
+    // blaming this route.
     function acquireIdentity() {
         root.enterOnly("", null)
     }

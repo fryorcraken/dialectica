@@ -85,7 +85,7 @@ commit claims — not a defect newly introduced by this piece.
 
 ## Finding
 
-- [ ] **`dev-writer`** — `dialectica-ui/src/qml/Main.qml:231` and
+- [x] **`dev-writer`** — `dialectica-ui/src/qml/Main.qml:231` and
       `dialectica-ui/tests/tst_navigation.qml:283` —
       `test_following_the_route_makes_no_call_of_its_own`'s control
       (`closeFeed()`) has no structural guarantee of staying in lock-step
@@ -126,6 +126,32 @@ commit claims — not a defect newly introduced by this piece.
       severity: the risk is well-documented, the failure mode is "wrong
       blame in a red CI run" rather than "defect ships silently", and no
       such divergence exists on `main` today.
+      **Fixed** in the commit that ticks this box, and by neither of the two
+      suggested options. The control no longer runs `closeFeed()`. It writes
+      `chosen = null` on a feed-showing `Main`, which shows the list without
+      running any navigator function, so nothing links the test to
+      `closeFeed()` at all. `design.md` Decision 1 gives the reasoning and
+      cites Decision 15 of the archived `home-screen-key-states` design. In
+      short: delegating `acquireIdentity()` to `closeFeed()` is the trap
+      Decision 15 names, and a same-transition test cannot see calls, so it
+      stays green in this finding's own scenario. `Main.qml`'s comment on
+      `acquireIdentity()` is rewritten, and no code there changes.
+      Mutations to `Main.qml`, each restored, predicted and observed, new
+      control and then old control:
+      - M1: `Core.whoAmI("")` in `acquireIdentity()`. Predicted: new red.
+        Observed: new red, `[who_am_i,get_master_key]` against
+        `[get_master_key]`. Old: red, same message.
+      - M2: `Core.whoAmI("")` in `closeFeed()` only (this finding's
+        scenario). Predicted: new green. Observed: new green, 24 passed. Old:
+        red, `[get_master_key]` against `[who_am_i,get_master_key]`, which
+        reproduces this finding.
+      - M3: M2, plus `acquireIdentity() { root.closeFeed() }`. Predicted: new
+        red. Observed: new red, same message as M1. Old: **green**, 24
+        passed, while the route calls `who_am_i`. This is the delegation
+        option's failure, measured.
+      - M4: `Core.whoAmI("")` in `enterOnly()`. Predicted: new red. Observed:
+        new red, same message as M1. Old: green, because both sides made the
+        call.
 
 ## Areas not covered
 
