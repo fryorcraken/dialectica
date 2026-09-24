@@ -2202,12 +2202,17 @@ fn a_thread_read_over_a_store_on_disk_returns_the_root_and_its_replies() {
         "the root reports no parent: {reply_json}"
     );
 
-    // The replies are in the order the ordering rule places them, which for
-    // unordered arrivals is ascending op id — derived HERE from the op ids rather
-    // than read back from the reply, so this is an independent expectation rather
-    // than the implementation agreeing with itself.
+    // The replies are in the exact reverse of the order the ordering rule places
+    // them in (#147). These ops carry no counter, so the rule places them in
+    // ascending op id and the read returns DESCENDING op id — derived HERE from
+    // the op ids rather than read back from the reply, so this is an independent
+    // expectation rather than the implementation agreeing with itself.
+    //
+    // Which of `reply` and `deep` comes first is therefore decided by their
+    // hashes, not by `deep` answering `reply`: an op carrying no counter says
+    // nothing about what its author had seen.
     let mut expected_replies = [reply.op.id(), deep.op.id()];
-    expected_replies.sort();
+    expected_replies.sort_by(|a, b| b.cmp(a));
     let got_replies: Vec<&str> = items[1..]
         .iter()
         .map(|i| i["id"].as_str().unwrap())
@@ -2218,7 +2223,7 @@ fn a_thread_read_over_a_store_on_disk_returns_the_root_and_its_replies() {
             .iter()
             .map(|id| id.to_hex())
             .collect::<Vec<_>>(),
-        "the replies come back in the ordering rule's order: {reply_json}"
+        "the replies come back in the reverse of the ordering rule's order: {reply_json}"
     );
 
     // And the chain was WALKED across the file: the deep reply is two links from
