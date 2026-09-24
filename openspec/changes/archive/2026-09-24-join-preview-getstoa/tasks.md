@@ -11,7 +11,7 @@
 - [x] review: design — `design-reviewer`
 - [x] findings all ticked, `findings/` deleted — `closer`
 - [x] `openspec validate --strict`, then `archive` — `closer`
-- [ ] CI green, title/body checked, PR merged — `closer`
+- [x] CI green, title/body checked, PR merged — `closer`
 
 ## Implementation
 
