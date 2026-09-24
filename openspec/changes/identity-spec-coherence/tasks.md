@@ -20,7 +20,7 @@ This change edits the contract's text. It changes no code (design.md Decision
 the tester's stage row owns it. Section 2 records what that test depends on, so
 the tester does not have to work it out again.
 
-## 1. Spec text (done by the spec-writer in `43622b9`; checked here)
+## 1. Spec text (done by the spec-writer in `43622b9` and `c8d3105`; checked here)
 
 - [x] 1.1 The delta `REMOVED`s *Identity does not rotate, and this is a contract
       not an omission* and `ADDED`s *Identity does not rotate: the key behind an
@@ -39,8 +39,8 @@ the tester does not have to work it out again.
 
 ## 2. The behaviour the scenario names already holds (design.md Decision 4)
 
-- [x] 2.1 Confirm that asking for a master key while one is held replaces
-      nothing. `mint_master_key` returns early on `keystore_path.exists()`, and
+- [x] 2.1 Confirm that calling the operation that creates a master key
+      (`createIdentity`) while one is held replaces nothing. `mint_master_key` returns early on `keystore_path.exists()`, and
       `Keystore::create` refuses an existing file underneath it. Verify: by
       reading `wire.rs` `mint_master_key` and `keystore.rs` `Keystore::create`.
       `a_mint_over_an_existing_keystore_replaces_nothing_and_reports_it_as_not_new`
@@ -54,9 +54,10 @@ the tester does not have to work it out again.
       keystore from disk on every call, not from the mint's reply. Verify: by
       reading `whoami_for` → `posting_identity` and the adapter's `publishing` →
       `publishing_key`.
-- [ ] 2.4 **Owned by the `tester` row, not this one.** A test cites *Asking for
-      a master key while one is held does not replace the identity in use*. It
-      must be proved red against a build whose mint writes a fresh root over a
+- [ ] 2.4 **Owned by the `tester` row, not this one.** A test cites *Creating a
+      master key while one is held does not replace the identity in use*, and
+      calls `createIdentity`, not the read-only `getMasterKey` (design.md
+      Risks). It must be proved red against a build whose mint writes a fresh root over a
       held one. Deleting guard 1 alone is **not** that build: guard 2 turns the
       mint into the error shape and the identity stays unchanged (design.md
       Decision 4). The test's keystore opener must read the file, not return

@@ -159,8 +159,9 @@ and that no view reaches the slate.
 ### 4. No code changes. Two existing guards hold the behaviour, and a test must be proved against a build that actually replaces the key
 
 Before writing this I checked the claim that nothing needs to change, rather than
-taking it from the proposal. The requirement's new paragraph ("asking for a master
-key while one is held MUST leave the identity in use unchanged") already holds.
+taking it from the proposal. The requirement's new paragraph ("calling the
+operation that creates a master key while one is held MUST leave the identity in
+use unchanged") already holds.
 Two guards hold it, one layered on the other:
 
 1. **`mint_master_key`'s `keystore_path.exists()` branch** (`wire.rs`). It returns
@@ -200,18 +201,21 @@ test here claims to cover it.
 
 ## Risks / Trade-offs
 
-- **[Risk] "Asks for a master key" also reads as the read-only query.** The
-  delta's scenario and prose say "asks for a master key". `identity-onboarding`
-  has two operations that could match: the one that *creates* a master key
-  (`createIdentity`) and the one that *reports whether one is held*
-  (`getMasterKey`, which "MUST NOT create, write, replace or modify any stored
-  key"). Under the second reading the scenario cannot fail by construction, and a
-  test written that way would stay green against a mint that replaces the key.
-  `proposal.md` (What Changes, and Impact) means the creating operation, and
-  Decision 1 builds on that reading. → Reported to the spec-writer, who decides
-  whether the delta should name the operation as `identity-onboarding` does ("the
-  operation that creates a master key"). Until then, the tester should read it as
-  the creating operation.
+- **[Risk] A test of the scenario that calls the read-only query cannot fail.**
+  `identity-onboarding` has two operations a loose reading of "a master key
+  request" could match: the one that *creates* a master key (`createIdentity`)
+  and the one that *reports whether one is held* (`getMasterKey`, which "MUST NOT
+  create, write, replace or modify any stored key"). A test built on the second
+  stays green against a mint that replaces the key, because the query writes
+  nothing by its own requirement. → The delta's prose and scenario name the
+  operation by the phrase `identity-onboarding` uses for it, "the operation that
+  creates a master key", and the prose says it is not the query. Decision 1's
+  choice of `createIdentity` is that reading. The live spec's phrase "the key a
+  request for this peer's master key reports", in *In this release one machine
+  key is the identity in every Stoa*, is left as it is (`proposal.md`, "Left
+  alone"). Every use of it concerns a peer that already holds a key, and both
+  operations are required to name that same key, so either reading gives the
+  same answer.
 
 - **[Risk] Archive places the ADDED requirement at the end of `identity`'s
   spec, not where the removed one stood.** → This is not drift. `proposal.md`
