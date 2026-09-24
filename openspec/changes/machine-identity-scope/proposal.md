@@ -142,7 +142,11 @@ None.
   Three scenarios here (and one in `content-authoring`) keep their names while
   their content changes, the convention this capability already uses, because
   `validate` refuses a MODIFIED block that drops a scenario.
-  `generateIdentitySlate` and `keepIdentity` themselves are unchanged.
+  `generateIdentitySlate` and `keepIdentity` themselves are unchanged, with one
+  addition to what a failed keep does: because a stored master key is now an
+  identity in every Stoa, a keep that fails after storing one removes it, and
+  where storage refuses the removal the keep's reason says a master key was left
+  rather than reading as "nothing changed".
 - `content-authoring`: the author requirement no longer says the identity is
   derived from the Stoa — it says the module decides it and the caller never
   supplies it — and is renamed to match.

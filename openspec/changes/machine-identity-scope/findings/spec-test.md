@@ -75,7 +75,7 @@ hash-moved, or position-only-pinned shapes named in the review brief).
 
 ## Findings
 
-- [ ] **`spec-writer`** — `dialectica-ui/tests/tst_identity_chip.qml:229` (marked `NO SPEC`)
+- [x] **`spec-writer`** — `dialectica-ui/tests/tst_identity_chip.qml:229` (marked `NO SPEC`)
       The `view-identity-onboarding` requirement constrains the create-identity
       affordance to name no Stoa, but the exact caption ("Create an identity")
       is the dev's choice; nothing in the spec text picks it.
@@ -85,6 +85,16 @@ hash-moved, or position-only-pinned shapes named in the review brief).
       "stoa" rather than the presence of one literal string.
       **Measured:** read only — the test's own comment names the gap and cites
       the covering test; no code was run for this one.
+      **Outcome (`spec-writer`): rejected — the marker stays, as a decision.**
+      The caption is copy, not behaviour: it is `copy.json`
+      `common.createIdentity`, owned by the design bundle, and a spec that
+      pinned the literal would fail on a reword rather than on a caption that
+      misinforms. What the contract has to hold is the relation, and it does:
+      the scenario requires the affordance to be offered (the presence half,
+      which the test's `indexOf("Create an identity")` precondition discharges
+      as a fixture guard) and to name no Stoa (the absence half). A rewrite to
+      "Set up an identity" passing the suite is the intended outcome, not a
+      gap. No spec change; no work for `tester` or `dev-writer`.
 
 - [ ] **`spec-writer`** / **`tester`** — `dialectica/rust-lib/dialectica-core/src/wire.rs:695` (marked `NO SPEC`, inside `undo_a_keystore_this_keep_wrote`, added by design.md D8)
       What a keep reports when its own undo — removing the master key that
@@ -103,6 +113,32 @@ hash-moved, or position-only-pinned shapes named in the review brief).
       flags as un-mutation-tested for a different reason (the permission
       checker refused the flag-removing mutation for its *sibling* test), and
       this second branch is not mentioned there at all.
+      **Outcome (`spec-writer` half): fixed.** The box is left unticked for the
+      `tester`'s half. `specs/identity-onboarding/spec.md`, requirement
+      "Keeping a candidate persists it, and keeping is one step", now names the
+      one exception to "complete or change nothing": a keep that stored a master
+      key where none was, then failed, MUST remove it and MUST NOT remove one
+      that predates it; where storage refuses the removal, the reply MUST carry
+      a reason and no identity, and the reason MUST state that a master key was
+      left stored, so it differs from the reason the same failure gives when the
+      removal succeeds. "A failed keep records nothing" is narrowed to "storage
+      permits removing any master key the keep stored" (it contradicted the new
+      case as written), and a new scenario, "A failed keep that cannot remove
+      the master key it stored says so", carries the rest. The proposal's
+      `identity-onboarding` bullet says so. `openspec validate
+      machine-identity-scope --strict` passes. The current code already meets
+      this; the only `dev-writer` work is that the `NO SPEC:` comment in
+      `undo_a_keystore_this_keep_wrote` is now stale and should be replaced by
+      a citation of the new scenario. **`tester` now has to pin:** with the
+      master key removal refused, the reply is the refusal shape with a reason
+      and no identity, and that reason is **not equal** to the reason the same
+      record failure gives when the removal succeeds — assert the relation, not
+      the literal. Reaching the branch needs no filesystem race:
+      `undo_a_keystore_this_keep_wrote` is callable from `wire.rs`'s own
+      `mod tests`, and `std::fs::remove_file` refuses a path that is a
+      directory, so `wrote_it = true` against a directory path reaches it
+      deterministically; the tester decides whether that layer suffices or a
+      `keep_selection`-level route exists.
 
 Everything else in scope — the RENAMED/MODIFIED requirement pairs, the
 `identity-onboarding` REMOVED-then-replaced route in `view-navigation` (a

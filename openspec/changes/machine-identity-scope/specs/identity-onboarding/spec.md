@@ -12,6 +12,16 @@ An identity becomes real when it signs, and nothing signs during onboarding — 
 before a candidate is kept there is nothing to lose, and after it is kept there
 must be nothing missing.
 
+**The one exception is a failure storage will not let the keep undo.** A keep
+that stored a master key where none was stored, and then failed, MUST remove that
+master key and MUST NOT remove one that was stored before it began. Where storage
+refuses that removal, the keep has changed something it cannot take back, and its
+reply MUST say so: it MUST carry a reason and no identity, and the reason MUST
+state that a master key was left stored, so that it differs from the reason the
+same failure gives when the master key was removed. A reply that read as "nothing
+changed" would hide from the user a master key that the identity report then
+names in every Stoa.
+
 **The identity kept MUST be the candidate the offering reply displayed at the
 position selected** — the same public key, not merely a candidate derived at the
 same position. A selection is made on what the user was shown, and an offering and
@@ -68,11 +78,21 @@ identity report names.
 
 #### Scenario: A failed keep records nothing
 
-- **WHEN** keeping a candidate fails
+- **WHEN** keeping a candidate fails, and storage permits removing any master key
+  the keep stored
 - **THEN** no identity is reported as kept
 - **AND** a subsequent load finds no recorded choice and no master key that were
   not there before
 - **AND** the reply carries a reason and no identity
+
+#### Scenario: A failed keep that cannot remove the master key it stored says so
+
+- **WHEN** keeping a candidate stores a master key where none was stored, then
+  fails, and storage refuses to remove that master key
+- **THEN** no identity is reported as kept
+- **AND** the reply carries a reason and no identity
+- **AND** the reason differs from the reason the same failure gives when the
+  master key is removed
 
 ### Requirement: A chosen derivation path is recorded, because it cannot be recomputed
 
