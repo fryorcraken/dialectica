@@ -459,6 +459,7 @@ pub fn receive<L: OpLog>(
     message: InboundMessage<'_>,
     channels: &OpenChannels,
     log: &mut L,
+    _now_ms: u64,
 ) -> Result<Admitted, InboundRefusal> {
     let channel_stoa = *channels
         .stoa_of(message.channel_id)
@@ -668,6 +669,15 @@ mod tests {
     fn a_key(seed: u8) -> SecretKey {
         SecretKey::from_bytes(&[seed; 32]).unwrap()
     }
+
+    /// The receiving peer's own current time, for the tests that are not about
+    /// it. 2026-09-18T11:01:44Z, the instant `authoring.rs` spells `A_TIME`.
+    ///
+    /// **Deliberately far from `inbound`'s `timestamp`**, which is nanoseconds:
+    /// 1.7 × 10^18 against 1.79 × 10^12, about six orders of magnitude apart. A
+    /// boundary that read one where it should read the other would not agree
+    /// with itself by accident.
+    const NOW_MS: u64 = 1_789_729_304_000;
 
     /// A Stoa address from a genesis record, so the fixture's addresses are the
     /// ones a real peer would hold rather than synthetic bytes.
@@ -1086,6 +1096,7 @@ mod tests {
             },
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap();
 
@@ -1154,6 +1165,7 @@ mod tests {
             },
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap_err();
 
@@ -1176,6 +1188,7 @@ mod tests {
             },
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap();
         let second = receive(
@@ -1187,6 +1200,7 @@ mod tests {
             },
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap();
 
@@ -1216,6 +1230,7 @@ mod tests {
             },
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap();
 
@@ -1247,6 +1262,7 @@ mod tests {
             },
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap();
 
@@ -1287,6 +1303,7 @@ mod tests {
                 },
                 &channels,
                 &mut log,
+                NOW_MS,
             )
             .unwrap();
             assert_eq!(
@@ -1325,6 +1342,7 @@ mod tests {
                     },
                     &channels,
                     &mut log,
+                    NOW_MS,
                 )
                 .unwrap();
                 out.push((admitted.id, log.get(&admitted.id).unwrap().unwrap().arrival));
@@ -1387,6 +1405,7 @@ mod tests {
                 inbound(identity.channel_id(), &payload),
                 &channels,
                 &mut log,
+                NOW_MS,
             )
             .unwrap();
             assert!(log
@@ -1415,6 +1434,7 @@ mod tests {
             inbound("/dialectica/1/c/not-a-channel", &payload),
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap_err();
         assert_eq!(refusal, InboundRefusal::UnknownChannel);
@@ -1429,8 +1449,13 @@ mod tests {
         // A valid op with its last byte flipped: it decodes structurally in some
         // cases and not others, so the fixture is a payload that genuinely cannot
         // decode — truncated below the signature width.
-        let refusal =
-            receive(inbound(identity.channel_id(), b"junk"), &channels, &mut log).unwrap_err();
+        let refusal = receive(
+            inbound(identity.channel_id(), b"junk"),
+            &channels,
+            &mut log,
+            NOW_MS,
+        )
+        .unwrap_err();
         assert!(
             matches!(refusal, InboundRefusal::Undecodable(_)),
             "got {refusal:?}"
@@ -1463,6 +1488,7 @@ mod tests {
             inbound(identity.channel_id(), &payload),
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap_err();
         assert_eq!(refusal, InboundRefusal::FailsVerification);
@@ -1527,6 +1553,7 @@ mod tests {
             inbound(identity.channel_id(), &payload),
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap_err();
         assert_eq!(refusal, InboundRefusal::FailsVerification);
@@ -1553,6 +1580,7 @@ mod tests {
             inbound(identity.channel_id(), &payload),
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap_err();
         assert!(
@@ -1599,6 +1627,7 @@ mod tests {
             inbound(identity.channel_id(), &payload),
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap_err();
         assert_eq!(refusal, InboundRefusal::Undecodable(OpError::BlankTitle));
@@ -1625,6 +1654,7 @@ mod tests {
             inbound(identity.channel_id(), &payload),
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap();
         assert_eq!(admitted.id, op.op.id());
@@ -1652,7 +1682,13 @@ mod tests {
         ];
         for payload in &refusals {
             assert!(
-                receive(inbound(identity.channel_id(), payload), &channels, &mut log).is_err(),
+                receive(
+                    inbound(identity.channel_id(), payload),
+                    &channels,
+                    &mut log,
+                    NOW_MS
+                )
+                .is_err(),
                 "the fixture must be refused"
             );
         }
@@ -1668,6 +1704,7 @@ mod tests {
             inbound(identity.channel_id(), &payload),
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap();
         assert_eq!(admitted.id, good.op.id());
@@ -1767,8 +1804,13 @@ mod tests {
         let op = signed_post_in(stoa, "arrives while the disk is unwritable");
         assert!(op.verify(), "the fixture op must pass every earlier guard");
         let bytes = op.to_bytes().unwrap();
-        let refusal =
-            receive(inbound(identity.channel_id(), &bytes), &channels, &mut log).unwrap_err();
+        let refusal = receive(
+            inbound(identity.channel_id(), &bytes),
+            &channels,
+            &mut log,
+            NOW_MS,
+        )
+        .unwrap_err();
 
         assert!(
             matches!(refusal, InboundRefusal::Storage(OpLogError::Storage(_))),
@@ -1806,6 +1848,7 @@ mod tests {
             inbound(identity.channel_id(), &payload),
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap_err();
         assert_eq!(
@@ -1855,6 +1898,7 @@ mod tests {
             inbound(identity.channel_id(), &payload),
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap_err();
         assert_eq!(
@@ -1874,7 +1918,8 @@ mod tests {
         assert!(receive(
             inbound(identity.channel_id(), &mine_payload),
             &channels,
-            &mut log
+            &mut log,
+            NOW_MS
         )
         .is_ok());
     }
@@ -1895,7 +1940,7 @@ mod tests {
         let shorter = &identity.channel_id()[..identity.channel_id().len() - 1];
         for wrong in [longer.as_str(), shorter] {
             assert_eq!(
-                receive(inbound(wrong, &payload), &channels, &mut log).unwrap_err(),
+                receive(inbound(wrong, &payload), &channels, &mut log, NOW_MS).unwrap_err(),
                 InboundRefusal::UnknownChannel,
                 "a prefix match admitted a payload on {wrong}"
             );
@@ -1919,7 +1964,8 @@ mod tests {
         assert!(receive(
             inbound(identity.channel_id(), &payload),
             &channels,
-            &mut log
+            &mut log,
+            NOW_MS
         )
         .is_err());
 
@@ -1947,6 +1993,7 @@ mod tests {
             inbound(identity.channel_id(), &payload),
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap_err();
         assert_eq!(
@@ -1988,6 +2035,7 @@ mod tests {
             inbound(identity.channel_id(), &payload),
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap_err();
         assert!(
@@ -2014,6 +2062,7 @@ mod tests {
             inbound(identity.channel_id(), &payload),
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap_err();
         assert!(
@@ -2054,6 +2103,7 @@ mod tests {
             inbound(identity.channel_id(), &payload),
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap();
         assert_eq!(admitted.id, op.op.id());
@@ -2103,6 +2153,7 @@ mod tests {
             inbound(identity.channel_id(), &payload),
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap_err();
         assert_eq!(
@@ -2162,6 +2213,7 @@ mod tests {
                 inbound(identity.channel_id(), &payload),
                 &channels,
                 &mut log,
+                NOW_MS,
             );
         }
     }
@@ -2205,6 +2257,7 @@ mod tests {
                     },
                     &channels,
                     &mut log,
+                    NOW_MS,
                 );
             }
         }
@@ -2215,13 +2268,20 @@ mod tests {
         let stoa = a_stoa("Agora");
         let (channels, mut log, identity) = peer_in(stoa);
 
-        assert!(receive(inbound(identity.channel_id(), b""), &channels, &mut log).is_err());
+        assert!(receive(
+            inbound(identity.channel_id(), b""),
+            &channels,
+            &mut log,
+            NOW_MS
+        )
+        .is_err());
         let good = signed_post_in(stoa, "after");
         let payload = good.to_bytes().unwrap();
         let admitted = receive(
             inbound(identity.channel_id(), &payload),
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap();
         assert_eq!(admitted.id, good.op.id());
@@ -2286,6 +2346,7 @@ mod tests {
             inbound(identity.channel_id(), &payload),
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap();
 
@@ -2527,6 +2588,7 @@ mod tests {
             inbound(identity.channel_id(), &payload),
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap();
         assert_eq!(admitted.id, id);
@@ -2583,6 +2645,7 @@ mod tests {
             inbound(identity.channel_id(), &payload),
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap();
         assert_eq!(admitted.appended, Appended::Stored);
@@ -2619,7 +2682,8 @@ mod tests {
             receive(
                 inbound(identity.channel_id(), &payload),
                 &channels,
-                &mut log
+                &mut log,
+                NOW_MS
             )
             .unwrap_err(),
             InboundRefusal::FailsVerification
@@ -2766,6 +2830,7 @@ mod tests {
             inbound(identity.channel_id(), &payload),
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap();
 
