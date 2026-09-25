@@ -103,15 +103,32 @@ reached (`isHidden`, `isRevised`, `currentVersion` equal to the revision,
 that failed to reach a state would test an ordinary row and pass for the wrong
 reason.
 
-**This is a guard, and what breaks without it is measured.** Each of these was
-applied to the code, run, and reverted:
+**This is a guard, and what breaks without it is measured.** Each mutation below
+was applied on its own, run against all of `dialectica-core`'s unit tests, and
+reverted. The right-hand column is the complete red set.
 
 | Mutation | Turns red |
 |---|---|
-| `feed_page_json` adds `"authorKey": row.author` to every row | *filled in from the run* |
-| `feed_page_json`'s envelope adds `"total"` | *filled in from the run* |
-| `sanitised_json` adds a fourth key | *filled in from the run* |
-| `thread_page_json` adds `"authorKey": item.author` | *filled in from the run* |
+| `feed_page_json` adds `"authorKey"` to every row | `the_feed_reply_is_the_ecosystems_pagination_shape`, `a_feed_row_with_a_reply_carries_latest_reply_and_nothing_else_new`, `a_feed_row_revised_hidden_with_an_attachment_and_a_voted_reply_carries_no_further_key` |
+| `feed_page_json` adds a key only to a **hidden** row | `a_feed_row_revised_hidden_…` only |
+| the envelope adds `"total"` | `the_feed_envelope_carries_exactly_items_page_and_has_more_on_every_page`, `a_feed_row_revised_hidden_…` |
+| `sanitised_json` adds a fourth key | `a_feed_row_revised_hidden_…` only |
+| an attachment entry alone adds a fourth key | `a_feed_row_revised_hidden_…` only |
+| `thread_page_json` adds a top-level `"signer"` | `a_thread_reply_carries_exactly_its_contracted_keys_and_no_others`, `no_thread_item_holds_its_signers_key_under_any_key_but_author` |
+| `thread_page_json` sets `position` to the author's hex | `no_thread_item_holds_its_signers_key_under_any_key_but_author` only |
+| the row filter also demands `thread: None` | `a_parentless_post_carrying_a_thread_field_is_a_row_of_its_own` only |
+| `parse_index`'s wrong-type message drops the field name | `malformed_pagination_fields_are_refused_by_name` only |
+
+Before this change, nothing turned red for four of these: a key on a hidden
+row only, a `total`, a fourth key on the sanitised object, and a row filter
+that also required `thread: None`. So the new tests are the only guard on those
+four properties. The thread-item test is mostly covered by the existing exact
+key-set test. What it adds is a check on *values*: the signer's key copied into
+a key the contract already allows is caught only by walking every value.
+
+That last row also shows something outside this change. No wire test pins the
+value of a thread item's `position`, so replacing it with any string leaves
+every other test green.
 
 `feed.rs`'s `a_row_carries_the_public_key_and_no_derived_display_name` keeps its
 destructuring of `FeedRow`. It is the struct-level half: a new field fails to
@@ -141,10 +158,16 @@ the row and the item share one documented spelling.
 `DEFAULT_PER_PAGE` and `MAX_PER_PAGE` in `feed.rs` are the values the spec calls
 "a default" and "the cap". The spec contracts only their relation: the default
 is no larger than the cap, zero is served as the default, and a larger request
-is clamped. That matches `thread-read`. The tests reach the numbers through the
-constants rather than through literals, so the spec's silence on the values is
-not quietly turned into a pin. Whether a caller must be able to rely on a number
-is an owner question (proposal.md, *Open questions*).
+is clamped. That matches `thread-read`. `feed.rs`'s `clamp_per_page` tests
+reach the numbers through the constants rather than literals, and no test added
+here names either value, so the spec's silence on them is not quietly turned
+into a pin. Whether a caller must be able to rely on a number is an owner
+question (proposal.md, *Open questions*).
+
+The largest accepted page index is written as `usize::MAX`, not as a 64-bit
+literal, for the same reason. It is this build's limit, not a constant of the
+format. The index one past it is written as a `u128`, so the test can express
+it on any target.
 
 ## Risks / Trade-offs
 
