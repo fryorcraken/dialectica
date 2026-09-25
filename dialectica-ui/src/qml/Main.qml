@@ -107,6 +107,31 @@ Item {
       : root.previewing !== null ? "join"
       : "list"
 
+    // ---- what the end-to-end suite reads ---------------------------------
+    //
+    // A sitometres `state:` expression is evaluated against this root, so what
+    // `dialectica-ui/tests/ui/*.yaml` asserts has to be reachable from here.
+    // The ids below (`list`, `join`) are private to this file by QML's own
+    // rules; these are the public handles.
+    //
+    // **Read-only, and each one a projection of state a screen already owns.**
+    // None is a second copy: a writable mirror of the listing is the drift
+    // `DStoaListScreen.visibleRows` was reshaped to prevent, and a spec
+    // asserting against a copy would pass while the screen rendered something
+    // else.
+    //
+    // **They are the suite's interface, and nothing else reads them.** Renaming
+    // one breaks a spec, which is the intended coupling. They are not a place
+    // for the navigator to hold state: in particular there is no key or
+    // identity handle here, because `screenShown` must never come to depend on
+    // one (see above), and the suite asserts the key state from the element
+    // tree instead. (`e2e-ui-suite` design.md, "Root handles for the suite".)
+    readonly property string listReadState: list.readState
+    readonly property int stoaCount: list.visibleRows.length
+    readonly property string pasteFailure: list.pasteFailure
+    readonly property string joinState: join.joinState
+    readonly property string joinFailure: join.failure
+
     // ---- the one transition primitive -----------------------------------
     //
     // **Every transition below goes through `enterOnly`, and none of them clears
