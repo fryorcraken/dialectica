@@ -61,6 +61,21 @@ script's docstring says it. The count moved from three to five when the tester
 added the "more steps" case, which #120 and this piece's first pass had not
 tested.)
 
+**A missing report is a failure that says nothing was proved.** None of the
+three conditions covers this case, so it is a chosen behaviour, marked
+`NO SPEC:` in `tst_adjudicate_ui_run.py`. sitometres writes the report from a
+`finally`, so the report is missing only when the process never reached its
+exit: a job timeout or an OOM kill. The adjudicator exits 1 and says that,
+instead of crashing on a missing-file traceback. Both outcomes fail the step.
+The difference is the diagnosis: "nothing was proved (job timeout?)" names the
+likely cause, and a missing-file traceback reads as a bug in the adjudicator.
+**Rejected:** exit 0 with a warning, because an absent report is the absence
+of evidence, which is the one thing this script exists not to pass. **What
+breaks without the guard, measured:** replacing the `os.path.exists` check with
+`False and …` turns exactly two checks red, "names the real cause" and "is
+not a traceback". "exit 1" stays green, because the traceback exits 1 too, so
+the message is all the guard adds.
+
 `set -o pipefail` precedes the `| tee`, or the step's status is `tee`'s, which
 is always 0.
 

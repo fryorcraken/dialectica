@@ -102,6 +102,10 @@ def main():
     check("reports the count", "did not execute the whole spec" in out, out)
     check("reports the step", "steps that did not pass" in out, out)
 
+    # NO SPEC: none of the three adjudication conditions covers a report that
+    # does not exist. This pins the chosen behaviour, exit 1 with a message
+    # saying nothing was proved rather than a traceback about a missing file.
+    # The reason is in design.md D1.
     print("a missing report says nothing was proved, not that a file is absent")
     code, out = run({}, 2, write_report=False)
     check("exit 1", code == 1, f"(got {code})")

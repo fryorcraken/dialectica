@@ -112,7 +112,7 @@ returns nothing — no marked gaps in any of the five files.
 
 One unmarked candidate, worth a decision rather than a fix:
 
-- [ ] **`dev-writer`** — `tst_adjudicate_ui_run.py`, "a missing report says
+- [x] **`dev-writer`** — `tst_adjudicate_ui_run.py`, "a missing report says
       nothing was proved, not that a file is absent" — this pins a specific
       behaviour (message contains "nothing was proved", not a traceback, not
       a bare file-not-found) for a case that is not one of the three
@@ -127,6 +127,20 @@ One unmarked candidate, worth a decision rather than a fix:
       not a behavioural defect; confirm it's in design.md's Decisions (it
       plausibly already is, under D1's "docstring's attribution corrected to
       the measured one", which I have not read) or mark it.
+
+      **Fixed** in the commit that ticks this box, both ways. It was not in
+      design.md: D1's "attribution corrected" sentence is about the
+      step-count checks, not this case. The test now carries a `NO SPEC:`
+      marker, and D1 has a paragraph covering what was chosen (exit 1 with
+      "nothing was proved"), why (sitometres writes the report from a
+      `finally`, so a missing report means the process was killed), and the
+      rejected alternative (exit 0 with a warning). Mutation run here to
+      check the test is not decoration: with the `os.path.exists` guard
+      replaced by `False and …`, "names the real cause" and "is not a
+      traceback" go red, and "exit 1" stays green, since the traceback also
+      exits 1. D1 records that too. Reverted; the suite is green. Handed to
+      the runner as a `NO SPEC:` for the spec-writer to judge. This piece is
+      `skip_specs: true`, so no capability spec exists to capture it in yet.
 
 ## Was tasks.md section 5 complete?
 
