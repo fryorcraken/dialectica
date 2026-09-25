@@ -6,7 +6,7 @@ rows.
 
 ## Findings
 
-- [ ] **`dev-writer`** — `openspec/changes/e2e-ui-suite/tasks.md:31` — task 1.1's
+- [x] **`dev-writer`** — `openspec/changes/e2e-ui-suite/tasks.md:31` — task 1.1's
       "measured" count is stale by a factor that changed under it
       **Scenario:** tasks.md 1.1 reads "disabling the step-count branch turns
       exactly three of its checks red." That was true only before the tester's
@@ -35,6 +35,17 @@ rows.
       does not affect what merges. It is worth an unticked box because it is
       exactly the "measured claim in a comment" pattern this review is asked to
       run down, and it is checkable and wrong today.
+
+      **Fixed** in the commit that ticks this box, together with the matching
+      `spec-test.md` finding. Your count is right, and it is now measured
+      rather than traced: with the condition changed to
+      `if False and len(steps) != expected:`, `tst_adjudicate_ui_run.py`
+      printed `5 check(s) failed`. The five were both checks of "stopped
+      early", both of "MORE steps than the spec", and "reports the count".
+      Mutation reverted; the suite is green on the real code. tasks.md 1.1 no
+      longer carries a number: it points at design.md D1, which holds the
+      count, so the checklist cannot drift from it again. D1 now says when
+      the count was last re-run.
 
 ## What I checked and found clean
 

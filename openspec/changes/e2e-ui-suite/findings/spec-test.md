@@ -72,7 +72,7 @@ me — it stands as the dev-writer's/tester's self-report only.
 
 #2 led to a finding by reading rather than executing, below.
 
-- [ ] **`dev-writer`** — `tasks.md` 1.1 vs `adjudicate-ui-run.py`'s own
+- [x] **`dev-writer`** — `tasks.md` 1.1 vs `adjudicate-ui-run.py`'s own
       docstring (the line right above `if len(steps) != expected:`) —
       disagree about how many `tst_adjudicate_ui_run.py` checks go red when
       the step-count branch is disabled. tasks.md says "exactly three of its
@@ -96,6 +96,14 @@ me — it stands as the dev-writer's/tester's self-report only.
       tried); severity low (doesn't affect merge-readiness of the tests
       themselves, both numbers describe a check that does discriminate), but
       the discrepancy itself should not ship uncorrected.
+
+      **Fixed** in the commit that ticks this box, together with the matching
+      `readability.md` finding. The mutation ran this time, in this worktree:
+      `if False and len(steps) != expected:` gave `5 check(s) failed`, the
+      same five you traced by hand. So the docstring and design.md D1 were
+      right, and tasks.md 1.1's "three" was stale from before the tester's
+      "more steps" case. tasks.md 1.1 now points at D1 for the count instead
+      of carrying a copy. Mutation reverted; the suite is green.
 
 ## Spec gaps, marked and unmarked (part 3)
 

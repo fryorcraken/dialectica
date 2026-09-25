@@ -47,8 +47,9 @@ radicle's inline heredoc, which is the same logic but cannot be run without
 pushing a branch — both of this repo's QML gate defects shipped through review
 for exactly that reason.
 
-**What breaks without the count branch, measured:** disabling
-`len(steps) != expected` turns exactly five checks in
+**What breaks without the count branch, measured** (last re-run with the
+condition replaced by `False and …`, after the "more steps" case landed):
+disabling `len(steps) != expected` turns exactly five checks in
 `tst_adjudicate_ui_run.py` red — both of the stopped-early case's, both of the
 "more steps than the spec" case's added by `tester` (the other direction of the
 same inequality: a phantom or double-logged step, not merely a dropped one),

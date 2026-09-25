@@ -28,8 +28,9 @@ D3). Every box below that depends on the run says which CI run ticked it.
 
 - [x] 1.1 `adjudicate-ui-run.py` and `tst_adjudicate_ui_run.py` brought over;
       `python3 dialectica-ui/tests/tst_adjudicate_ui_run.py` passes, and
-      disabling the step-count branch turns exactly three of its checks red
-      (design.md D1 — the docstring's attribution corrected to the measured one)
+      disabling the step-count branch turns red exactly the checks design.md
+      D1 lists, and no others (re-measured after the tester's "more steps"
+      case was added; D1 holds the count so this line cannot go stale beside it)
 - [x] 1.2 `validate-ui-specs.mjs` brought over;
       `node dialectica-ui/tests/validate-ui-specs.mjs` reports `join.yaml: ok
       (14 steps)` against sitometres 0.1.2
