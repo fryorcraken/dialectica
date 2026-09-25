@@ -43,7 +43,20 @@ another file.
   `dev-writer` or `tester` then brings the markers and tests into line with the
   new spec text. The runner does not put markers to the owner. It escalates
   only what the `spec-writer` returns as a product decision, and says what the
-  choice is.
+  choice is. Specifically:
+  - **The callback is a fresh `spec-writer` dispatch**, not a continuation of
+    the one that wrote the spec. #169's optional suggestion, keeping that
+    agent's tree until the `dev-writer`'s first pass so it could be continued,
+    is **declined**; `design.md` gives why.
+  - **The brief points at markers by command**, `git grep -n "NO SPEC:"`,
+    rather than listing them. **A behaviour decision reported without a marker
+    is quoted word for word** from the hand-back, since no file holds it.
+  - **After the `spec-writer`, the `dev-writer` goes next if the behaviour
+    changed; otherwise the `tester` does.** Either brief names the
+    `spec-writer`'s commit, and says the markers it decided are closed: each
+    is reworded or removed to match the new spec text, not kept as an open
+    question for the review round.
+  - With no marker and no reported decision, the `tester` is next, as before.
 - **#171: every change made after the review round is reviewed before the
   `closer` runs.** `RUNNER.md` requires review of every commit added to the
   piece after the review round, before the `closer` is dispatched. That covers:
@@ -53,20 +66,61 @@ another file.
   - a fix for a red CI run.
 
   "The `closer`, and what comes back" no longer tells the runner to re-dispatch
-  the `closer` straight after a fixer. The runner decides how big the
-  re-review is: which lanes, how many reviewers, and which model each runs on,
-  using the Agent tool's `model` override. It records that call, and any
-  decision to skip a re-review, in its report and in the piece's `tasks.md`.
-  When unsure, it re-reviews.
+  the `closer` straight after a fixer: a red-CI fix goes through re-review
+  first. The runner decides how big the re-review is: which lanes, how many
+  reviewers, and which model each runs on, using the Agent tool's `model`
+  override. It records that call, and any decision to skip a re-review, in its
+  report and in the piece's `tasks.md`. When unsure, it re-reviews.
+  Specifically:
+  - **What needs review is every commit that changes something which merges.**
+    A commit that only records tracking needs none: a box flipped, a finding's
+    outcome written into `findings/`, a stage-row tick, or the runner's own
+    record line under the re-review row. A commit that moves reasoning into
+    `design.md` does need review.
+  - **`RUNNER.md` names no model**, only the Agent tool's `model` override.
+  - **A re-review brief carries three things:** the commit range to read (for
+    `spec-test-reviewer`, only the spec and test files in it); that the
+    reviewer's stage row is already ticked and stays ticked; and that new
+    findings are appended as boxes to that reviewer's existing findings file.
+    If the `closer` has already deleted `findings/`, which it does before
+    archiving, the file is written afresh at the same name in the change's
+    folder as it now stands, the archived one.
 - **#171: the stage-block template gets a place to record a re-review round.**
   The template lives in `spec-writer.md`, which `README.md` names as its only
-  copy. Where and how that place is written is the `dev-writer`'s call. Two
-  existing rules constrain it. Nobody adds a row, which keeps concurrent
-  cherry-picks from colliding on one line. And the runner does not write the
-  work.
+  copy. It gains one row, placed after the review rows and before the
+  `closer`'s three:
+
+  ```markdown
+  - [ ] re-review: every commit after the review round — runner
+  ```
+
+  - **The row is the runner's.** It records the runner's sizing decision, not
+    an agent's work. `RUNNER.md` lists it among the runner's own tasks.
+  - **The runner writes one indented line under it per round:** the commit
+    range, what landed, the lanes and the model each ran on, and why that size.
+    A round the runner skips also gets a line, with the reason. These lines are
+    not rows: they carry no box.
+  - **The row is never struck.** A round with nothing to review gets its line
+    and then a tick.
+  - **The runner ticks it when no commit that merges is unreviewed**, and
+    **unticks it when such a commit lands after the tick**, such as a red-CI
+    fix. This is the only row in the stage block that ever goes from `[x]` back
+    to `[ ]`.
+  - **The runner commits the record lines, the tick and any untick itself**, in
+    its own tree on `piece/<name>`, before the next dispatch forks from it.
+  - **The `closer` is dispatched only when every row above its own three is
+    ticked or struck**, this row included, so an unticked re-review row stops
+    the `closer` at its existing Step 1 gate.
+  - **After the `closer` has archived the change, the stage block is in
+    `openspec/changes/archive/<date>-<name>/tasks.md`.** The runner's untick
+    for a red-CI fix goes there, and a re-dispatched `closer`'s Step 1 reads
+    the block there.
 - **#170: forbid `--admin` in `closer.md`.** The file names `gh pr merge
   --admin`, and any change to branch protection, as things the `closer` never
-  does, including when the owner has granted merge-on-green. If the PR stays
+  does, including when the owner has granted merge-on-green. Branch protection
+  here covers rulesets too: no write to `branches/main/protection` and none to
+  `rulesets`. Step 6 carries the rule, and "What you never do" points to it
+  rather than restating it. If the PR stays
   `BLOCKED` with every required check green, the `closer` stops and reports the
   output of
   `gh pr view <n> --json mergeStateStatus,mergeable,statusCheckRollup,reviewDecision`.
@@ -88,9 +142,15 @@ another file.
 
 - **Why #165 was `BLOCKED`** (#170's closing paragraph). This piece only stops
   a closer from going around a block. It does not diagnose one.
-- **Keeping the `spec-writer`'s tree until the `dev-writer`'s first pass.** #169
-  marks this optional, and the owner's scope for this piece does not include
-  it.
+- **Re-review of commits the `closer` makes itself**: its rebase, including any
+  conflict it resolves, and its archive commit. The re-review rule covers
+  commits made before the `closer` is dispatched, and a red-CI fix made after
+  it. `design.md`'s Risks names the rebase gap as a follow-up candidate.
+- **Editing `tester.md`**, whose "Keep the markers and report each one" is out
+  of date once the `spec-writer` has decided a marker before the `tester` runs.
+  None of the four issues asks for a `tester.md` change, so it goes to the
+  owner as a proposal. Until then, the `tester`'s brief carries the
+  difference, as the #169 item above says.
 - **Changing the size of the first review round.** Every reviewer row stays. A
   change with no source diff still gets all six reviewers. Only the re-review
   after that round is left to the runner's judgement.
@@ -137,20 +197,16 @@ None. This change edits agent instructions and no system behaviour, so
 
 ## Impact
 
-- `.claude/agents/RUNNER.md`: the hand-back sequence (#169, #171) and "The
-  `closer`, and what comes back" (#171).
+- `.claude/agents/RUNNER.md`: the hand-back sequence (#169, #171), "The
+  `closer`, and what comes back" (#171), and the re-review row in "What a
+  runner does" (#171).
 - `.claude/agents/spec-writer.md`: the stage-block template (#171).
-- `.claude/agents/closer.md`: Step 6 and/or "What you never do" (#170).
-- `.claude/agents/README.md`: one paragraph (#133).
-
-Two nearby sentences describe the runner's own sequence and may now be
-inaccurate. Neither should become a second copy of the rule:
-
-- `closer.md`'s closing paragraph: "The runner dispatches a fresh `closer` when
-  the fix has landed."
-- `README.md`'s "one row per stage, then three rows the `closer` owns".
-
-If the new template makes either one wrong, the fix is to point to `RUNNER.md`
-or `spec-writer.md`, not to restate the rule.
+- `.claude/agents/closer.md`: Step 6 and "What you never do" (#170); Step 1,
+  for where a re-dispatched `closer` reads the stage block after the archive
+  (#171); and the closing paragraph, which points to `RUNNER.md`'s re-review
+  step rather than restating it (#171).
+- `.claude/agents/README.md`: one paragraph (#133). Its "one row per stage,
+  then three rows the `closer` owns" stays as it is: the re-review row is one
+  more row before the `closer`'s three, so the sentence still holds.
 
 No code, tests, CI workflow or spec changes.
