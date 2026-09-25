@@ -60,6 +60,7 @@ cherry-picks clean — git conflicts on the same line, not on neighbouring ones.
 - [ ] review: architecture — `code-reviewer`
 - [ ] review: spec-test — `spec-test-reviewer`
 - [ ] review: design — `design-reviewer`
+- [ ] re-review: every commit after the review round — runner
 - [ ] findings all ticked, `findings/` deleted — `closer`
 - [ ] `openspec validate --strict`, then `archive` — `closer`
 - [ ] CI green, title/body checked, PR merged — `closer`
@@ -68,6 +69,11 @@ cherry-picks clean — git conflicts on the same line, not on neighbouring ones.
 The archive row sits **above** the merge row on purpose: the archive is a commit on
 the piece branch that rides the same PR, so it happens before CI and the merge, not
 after. [`closer.md`](closer.md) says why.
+
+The re-review row is the runner's: it records a decision rather than an agent's
+work, and collects one indented line per re-review round beneath it. Write it bare,
+like the rest; [`RUNNER.md`](RUNNER.md), "From the `dev-writer`'s hand-back to the
+merge", says what goes under it and when it is ticked.
 
 Tick your own row when the spec is done. **Strike a row through with its reason
 rather than deleting it** if it genuinely does not apply — a missing row reads as an

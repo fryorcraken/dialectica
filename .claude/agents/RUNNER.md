@@ -15,7 +15,10 @@ first dispatch; [`README.md`](README.md) is the flow itself.
 
 Yours besides dispatching: `git worktree add --no-track` (the flag is
 load-bearing — see "Create worktrees with `--no-track`"), removing each agent's
-worktree once its work is cherry-picked, and the reading below.
+worktree once its work is cherry-picked, the reading below, and the stage
+block's re-review row — the one row that records a decision of yours rather
+than an agent's work (step 3 of "From the `dev-writer`'s hand-back to the
+merge").
 
 ## One runner per piece, sitting in that piece's worktree
 
@@ -335,11 +338,104 @@ Agent trees accumulate faster than piece trees, one per dispatch rather than one
 per piece, so `git worktree list` is worth running at the end of each review
 round rather than at merge time.
 
-## The `closer`, and what comes back
+## From the `dev-writer`'s hand-back to the merge
 
-Dispatch it when every review row is ticked; it rebases if behind, archives,
-watches CI and merges. Watching a run is the cheapest work in the flow and
-yours is the most expensive context to spend on it.
+One sequence, in order. Every step is a dispatch, so the rules above hold at
+each one: one writer at a time, and cherry-pick before the next dispatch.
+
+**1. Route what the spec left unsaid, before the `tester`.** If the
+`dev-writer`'s hand-back names any `NO SPEC:` marker, or any behaviour decision
+it made where the spec was silent, **dispatch the `spec-writer` next.** Point
+its brief at the markers with `git grep -n "NO SPEC:"` rather than listing
+them. A decision reported without a marker is in no file, so quote the
+hand-back's sentence verbatim — that is the one thing here you hold the only
+copy of.
+
+Dispatch a **fresh** `spec-writer`, not the one that wrote the spec: that one's
+tree was forked before the `dev-writer`'s commits existed, so it cannot see the
+markers it is being asked to judge.
+
+Then the markers and tests are brought into line with the new spec text: by the
+`dev-writer` if the `spec-writer` changed the behaviour, and then the `tester`;
+otherwise by the `tester` directly. Either brief names the `spec-writer`'s
+commit.
+
+**Do not put markers to the owner.** Deciding them is the `spec-writer`'s job.
+Escalate only what it returns as a product decision, and state the choice: the
+options, and what each would make the system do.
+
+No marker and no reported decision: the `tester` is next.
+
+**2. The `tester`, then the review round** — six reviewers in parallel, as "How
+many at once" sets out.
+
+**3. Every commit made after the review round is reviewed before the `closer`
+runs.** That includes:
+
+- a writer's pass answering findings;
+- a rewrite or new file made on an owner instruction;
+- a `spec-writer` callback;
+- a fix for a red CI run (step 4 sends it back here).
+
+What counts is **every commit that changes something which merges**. A commit
+that only flips boxes — a finding's outcome in `findings/`, which is deleted
+before merge, or a stage-row tick — needs no review. A commit moving reasoning
+into `design.md` does.
+
+**A green CI run and the author's own mutation runs are not review, and a
+warning the owner did not answer is not consent.** Two pieces merged unreviewed
+code on the same day with every gate green, one of them after a re-pass was
+offered as optional and nobody answered.
+
+**Size the re-review yourself** — it is a judgement, not a fixed rule, because
+what lands after review ranges from one line to a rewrite:
+
+- **Lanes and count.** Re-dispatch the lanes whose ground the new commits touch
+  — spec-test when tests or scenarios changed, design when `design.md` did,
+  correctness or security when code did. A finding answered exactly as its
+  reviewer asked may need only that reviewer to confirm it. A rewrite needs all
+  six again.
+- **Model.** The Agent tool's `model` override sets it per dispatch. A narrow
+  confirmation can run on a smaller model; a rewrite or a security-relevant
+  change gets the strongest one.
+- **The brief** names the commit range to read — for `spec-test-reviewer`, only
+  the spec and test files in it, since it stays blind to the implementation —
+  and says the reviewer's stage row is already ticked and stays so, and that
+  new findings are appended as boxes to its existing findings file.
+
+A re-review can raise findings of its own, whose fixes are commits, which need
+the next round. Each round covers only what landed since the last, so rounds
+shrink.
+
+**Record the call**, in your report and in the stage block's re-review row. One
+indented line per round under that row: the commit range, what landed, the
+lanes and model each ran on, and why that size. A round you decide to skip gets
+a line too, with its reason — a skip is a decision, and an unrecorded one looks
+exactly like a forgotten one:
+
+```markdown
+- [ ] re-review: every commit after the review round — runner
+      round 1 `a1b2c3d..e4f5a6b` findings pass — correctness, spec-test (role default models): two handlers and their tests changed
+      round 2 `e4f5a6b..0c9d8e7` red-CI fix — skipped: `cargo fmt` whitespace only, no token changed
+```
+
+**Tick the row when no commit that merges is unreviewed.** The record and the
+tick are commits you make in your own tree, on `piece/<name>`, before the next
+dispatch forks from it. **If a commit lands after it is ticked — a red-CI fix
+— untick it** and add the next round's line: the `closer`'s Step 1 refuses to
+run while a row other than its own is unticked, and that is the only thing that
+lets it see the fix was never read.
+
+**When unsure, re-review.** The `closer` waits.
+
+**4. The `closer`** — below.
+
+### The `closer`, and what comes back
+
+Dispatch it when every row above its own three is ticked or struck, the
+re-review row included; it rebases if behind, archives, watches CI and merges.
+Watching a run is the cheapest work in the flow and yours is the most expensive
+context to spend on it.
 
 It decides nothing and dispatches nobody. Two things come back:
 
@@ -359,8 +455,10 @@ section above measures. Who to send:
 | the contract, not the code | `spec-writer`, then the fixer — never both at once |
 
 One writer at a time still holds: the piece is idle, not free. Give the writer
-the run URL, not your reading of it. Then **re-dispatch the `closer`** — a piece
-merges because the `closer` saw it green, not because the fix looked right.
+the run URL, not your reading of it. Then **the fix goes back through step 3**
+— untick the re-review row and size a round for it — **and only then
+re-dispatch the `closer`**. A piece merges because the fix went through step 3
+and the `closer` saw it green, not because the fix looked right.
 
 **An unticked box**, meaning a finding was never answered: it routes to whoever
 the finding names.
