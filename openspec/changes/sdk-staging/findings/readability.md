@@ -11,7 +11,7 @@ logos-rust-sdk source" step and its comment block, plus the re-grounded
 
 ## Finding
 
-- [ ] **`dev-writer`** — `openspec/changes/sdk-staging/proposal.md:73` and
+- [x] **`dev-writer`** — `openspec/changes/sdk-staging/proposal.md:73` and
       `openspec/changes/sdk-staging/design.md:84` — dangling reference to an
       undefined "shallow-`//` trap"
       **Scenario:** a reader of `design.md`'s D1 Alternatives, or of
@@ -46,6 +46,21 @@ logos-rust-sdk source" step and its comment block, plus the re-grounded
       nothing downstream depends on the trap being understood, since the
       alternative it describes was already ruled out on other, stated
       grounds.
+      **Fixed** in the commit that ticks this box: I took the second fix
+      shape and dropped both references. The re-export alternative in
+      `design.md` D1 now rests on the owner's ruling and on the reason
+      already given ("the build's own flake is not changed to serve
+      developer tooling"). `proposal.md`'s out-of-scope bullet points to
+      D1. I did not take the first shape because nothing can source the
+      explanation. `git log --all -G shallow` finds no commit that defines
+      the term, and the draft that explained it was never committed. The
+      owner's comment names the trap without explaining it. Any clause
+      written now would be a reconstruction presented as the lost text.
+      Checked with `git grep -n -F "shallow"` over `openspec/`,
+      `CLAUDE.md`, `docs/`, `README.md`, `.gitignore` and `.github/`:
+      after the change it matches only this findings file. Prose only, so
+      no test can go red on it. `cargo test` (1180 + 30 passed) and
+      `nix build ./dialectica#lgx` both passed on the edited tree.
 
 ## What was clean
 

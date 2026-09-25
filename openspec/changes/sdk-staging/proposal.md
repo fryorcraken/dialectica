@@ -69,8 +69,8 @@ witness.
 **Out of scope:**
 
 - No `flake.nix` change and no re-export of the builder's output. The owner's
-  comment says that if `--inputs-from` works, the re-export and the
-  shallow-`//` trap discussed earlier are unnecessary.
+  comment says that if `--inputs-from` works, the re-export is unnecessary.
+  `design.md` D1 records it among the alternatives.
 - The other `python3` heredocs in `ci.yml`. Only the staging step's snippet is
   replaced.
 - The `.#lgx` string at `ci.yml` line 1768 and in archived changes. The issue

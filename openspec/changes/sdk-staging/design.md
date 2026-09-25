@@ -81,9 +81,8 @@ Alternatives, and what ruled each out:
   don't add this SDK to a `Cargo.toml` by hand", and it is not on crates.io.
 - **Re-export the builder's `rust-sdk-src` from `dialectica/flake.nix`.** An
   earlier draft of the proposal took this route. The owner's comment on #168
-  ruled it, and the shallow-`//` trap discussed with it, unnecessary if
-  `--inputs-from` works. It does, so the build's own flake is not changed to
-  serve developer tooling.
+  ruled it unnecessary if `--inputs-from` works. It does, so the build's own
+  flake is not changed to serve developer tooling.
 - **The runner links a store path into each agent tree.** What #91 did. It was
   the correct SDK (the owner's comment on #168 withdrew the concern that it was
   not: the runner linked `lsdgw…`, the same path this command gives). But ten
