@@ -1818,6 +1818,71 @@ mod tests {
         );
     }
 
+    // `op-ordering`, "A counter taken from the clock leaves the wall-clock at
+    // the current time": when this peer's clock for a Stoa is ABOVE its
+    // current time, the counter takes the clock term (one above the held
+    // maximum), and the wall-clock field still takes the current time — the
+    // two fields diverge. `one_reading_of_the_time_signs_both_clock_fields`
+    // covers the other branch, where the clock is BEHIND the time and the two
+    // fields end up equal by construction; that fixture cannot tell "the
+    // wall-clock is the current time" apart from "the wall-clock is whatever
+    // the counter came out to", because in that scenario they are the same
+    // number. This fixture separates them: a mutation that wrote the counter
+    // into the wall-clock field (matching the letter of "one reading signs
+    // both fields" while dropping which VALUE each field gets) would still
+    // pass every other test in this file, and only fails here.
+    #[test]
+    fn a_counter_taken_from_the_clock_leaves_the_wall_clock_at_the_current_time() {
+        let stoa = a_stoa("Agora");
+        let key = a_key(A_ROOT, &stoa);
+        let peer = a_key(ANOTHER_ROOT, &stoa);
+        let mut log = a_log();
+
+        // An op from somebody else, carrying a counter far ahead of this
+        // peer's current time — so this peer's clock for the Stoa ends up
+        // above A_TIME, and the clock term (not the time) decides the
+        // counter of the next publish.
+        let received = Op {
+            stoa,
+            author: peer.public_key(),
+            clock: Some(OpClock {
+                counter: A_TIME + 3_000_000,
+                asserted_ms: A_TIME + 3_000_000,
+            }),
+            kind: OpKind::Post {
+                thread: None,
+                parent: None,
+                body: "from a fast clock".to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&peer);
+        log.append(received, Arrival::unordered()).unwrap();
+
+        let published = post(&mut log, &by(&key), stoa, "mine".to_string()).unwrap();
+        let clock = stored(&log, &published.id).op.clock.unwrap();
+
+        // Both expectations are computed independently of the code under
+        // test, from the fixture's own numbers, rather than read back from
+        // what `publish` produced.
+        assert_eq!(
+            clock.counter,
+            A_TIME + 3_000_001,
+            "the counter is one above the clock this peer holds"
+        );
+        assert_eq!(
+            clock.asserted_ms, A_TIME,
+            "the wall-clock stays at this peer's current time, not at the \
+             value the clock term produced for the counter"
+        );
+        assert_ne!(
+            clock.asserted_ms, clock.counter,
+            "the fixture must actually separate the two fields, or the \
+             assertions above could agree by the two fields happening to \
+             carry the same number"
+        );
+    }
+
     #[test]
     fn a_reply_to_an_op_ahead_of_the_time_still_carries_the_greater_counter() {
         // The case the advance bound got wrong: a parent signed ahead of the
