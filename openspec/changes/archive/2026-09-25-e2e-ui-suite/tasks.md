@@ -40,11 +40,20 @@ D3). Every box below that depends on the run says which CI run ticked it.
       `dialectica-ui/tests/tst_ui_tool_pins.sh` passes, and it goes red when
       either real workflow's copy is changed alone (design.md D8). `yaml` is
       pinned, and no YAML library is fetched from a package index
-- [ ] 1.5 The edited `ui-specs` job (new env, pinned `yaml`, `yq` installed
+- [x] 1.5 The edited `ui-specs` job (new env, pinned `yaml`, `yq` installed
       ahead of the three shell scripts) and ui-tests.yml (`yq` without
       `python3-yaml` in the apt line, the shell adjudicator) are green in CI.
-      Not yet run: nothing was pushed after these edits. The closer's push is
-      the first run, and it also settles 6.4
+      Confirmed on the closer's push, commit `44045cb`: CI run
+      https://github.com/fryorcraken/dialectica/actions/runs/36113588714 and
+      UI tests run
+      https://github.com/fryorcraken/dialectica/actions/runs/36113588834, both
+      `success`. `command -v yq` / `yq --version` in "Install graphics runtime
+      libraries and yq" resolved to the apt `yq` package (3.1.0-3, pulling
+      `python3-toml`/`python3-xmltodict` — the jq-wrapper, not the Go binary).
+      All three shell scripts (`tst_adjudicate_ui_run.sh`,
+      `tst_ui_tool_pins.sh`, `tst_scaffold_values_unchanged.sh`, each sourcing
+      `require-jq-yq.sh`) ran under `shell: /usr/bin/bash -e {0}` and passed.
+      This also settles 6.4
 
 ### 2. Getting past step 1
 
