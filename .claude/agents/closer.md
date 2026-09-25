@@ -204,6 +204,13 @@ rather than the moving branch: `git diff <merged-sha> HEAD --stat`.
 
 ## Step 3 — archiving
 
+**On a re-dispatch after a red run, the archive is already done.** Step 1 found
+the change under `openspec/changes/archive/`, so do not run `openspec archive`
+again — there is no live change for it to find. This step's commit and push
+still apply: if Step 1 deleted a re-review's `findings/` from the archived
+folder, commit that deletion with named paths and push it as below, so the run
+you watch in Step 4 includes it. Then go on to Step 4.
+
 **Read [`docs/OPENSPEC-ARCHIVE.md`](../../docs/OPENSPEC-ARCHIVE.md) in full
 before you run anything.** Most of this step's traps are there and none of them
 are visible from the files; this section does not restate them, because two

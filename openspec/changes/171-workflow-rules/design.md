@@ -287,11 +287,11 @@ following it keeps a marker for behaviour that is now specified. The
 `spec-writer`, which is the #162 loop this change exists to end.
 
 The durable fix is `tester.md` saying this itself, so that `RUNNER.md` points
-to it rather than carrying the rule in a brief. That edit is outside this
-change and is with the owner. Until it lands, the brief carries the
-difference. If it does, `RUNNER.md`'s step 1 should keep only what the brief
-names, the commit and the closed markers, and point to `tester.md` for what a
-closed marker becomes, so the rule is stated once.
+to it rather than carrying the rule in a brief. The owner authorised that edit
+for this piece, so `tester.md` now says what a decided marker becomes, and
+`RUNNER.md`'s step 1 keeps only what the brief names — the commit and the
+decided markers — and points to `tester.md` for the rest. The rule is stated
+once.
 
 ### `--admin` is forbidden in Step 6, with a pointer from "What you never do"
 
@@ -343,21 +343,23 @@ already says the same thing, so the two files agree once more.
   #171 names three cases (a findings pass, an owner instruction, a red-CI fix)
   and does not name this one. → Reported in the hand-back as a candidate for a
   follow-up issue. It is not in scope here.
-- **[`tester.md` says "Keep the markers and report each one — the spec-writer
+- **[`tester.md` said "Keep the markers and report each one — the spec-writer
   decides".]** Once the `spec-writer` has decided before the tester runs, that
-  sentence is out of date. A tester following it would keep a marker for
-  behaviour that is now specified. → `tester.md` is outside this change's
-  authorisation, so this goes in the hand-back as a proposed owner edit. Until
-  then, `RUNNER.md` has the tester's brief name the `spec-writer`'s commit and
-  the markers it closed. A runner that leaves that sentence out of a brief gets
-  the old behaviour, and nothing checks the brief.
-- **[A re-dispatched `closer` does not yet know Step 3 is done.]** After a red
-  run, `closer.md`'s Step 1 finds the change archived, but Step 3 does not say
-  the archive is already done, so a fresh `closer` may run `openspec archive` on
-  a change that is no longer live. → That edit is outside this change and is
-  with the owner. If made, it belongs in Step 3: `openspec archive` is not run
-  again, and Step 3's commit and push still apply to a `findings/` deleted in
-  Step 1, so the run the `closer` watches includes the deletion.
+  sentence was out of date: a tester following it would keep a marker for
+  behaviour that is now specified. → The owner authorised the `tester.md` edit
+  for this piece. `tester.md` now says what a tester does with a marker the
+  brief names as decided (reword to cite the scenario, or remove) and keeps
+  "must not remove" for an **open** marker only. `RUNNER.md` step 1 carries only
+  what the brief must list, and points to `tester.md` for the rest, so the rule
+  is stated once. The residual risk: a runner that leaves the list out of a
+  brief gets the old behaviour, and nothing checks the brief.
+- **[A re-dispatched `closer` did not know Step 3 was done.]** After a red run,
+  `closer.md`'s Step 1 finds the change archived, but Step 3 did not say the
+  archive was already done, so a fresh `closer` could run `openspec archive` on
+  a change that is no longer live. → The owner authorised the edit for this
+  piece. Step 3 now opens with the re-dispatch case: `openspec archive` is not
+  run again, and Step 3's commit and push still apply to a `findings/` deleted
+  in Step 1, so the run the `closer` watches includes the deletion.
 - **[PR #132 edits the same template and the same README paragraph.]** → The
   second to merge reconciles them. `proposal.md` lists the overlapping hunks.
   The re-review row's wording does not depend on lane names, so #132's merge of

@@ -358,12 +358,11 @@ markers it is being asked to judge.
 Then the markers and tests are brought into line with the new spec text: by the
 `dev-writer` if the `spec-writer` changed the behaviour, and then the `tester`;
 otherwise by the `tester` directly. Either brief names the `spec-writer`'s
-commit and says which markers it decided — its hand-back says which — and that
-each of those is now **closed**: reworded or removed to match the new spec
-text, not kept as an open question for the review round. `tester.md` still says
-to keep every marker and report it, so without that sentence a tester keeps
-them, a reviewer rediscovers them, and the piece goes round the loop this step
-exists to prevent.
+commit and which markers it decided — its hand-back says which. What a tester
+does with a decided marker is [`tester.md`](tester.md)'s; the brief's job is
+the list, because a tester keeps every marker it is not told is decided, a
+reviewer rediscovers them, and the piece goes round the loop this step exists to
+prevent.
 
 **Do not put markers to the owner.** Deciding them is the `spec-writer`'s job.
 Escalate only what it returns as a product decision, and state the choice: the
