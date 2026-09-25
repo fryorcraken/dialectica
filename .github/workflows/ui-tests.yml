@@ -1,0 +1,394 @@
+name: UI tests
+
+# Runs the sitometres end-to-end specs against a real Basecamp: real clicks
+# through the QML inspector, the real module transport, and the real
+# `dialectica` core module against a real on-disk store.
+#
+# Kept out of ci.yml on purpose: it builds a Basecamp, where every job in ci.yml
+# is seconds to a few minutes. The CHEAP half of this suite — parsing every spec
+# against the harness schema, and the adjudicator's own tests — is the `ui-specs`
+# job in ci.yml, because it needs no Basecamp.
+#
+# ─── lgs does the building and the installing; sitometres does the driving ───
+#
+# Modelled on radicle-logos-module's ui-tests.yml, with one deliberate move
+# further towards `lgs`: every step that builds or installs something is an
+# `lgs basecamp` verb. `setup` builds the pinned dev Basecamp (inspector
+# included) and seeds the profiles; `install` builds all three modules —
+# `delivery_module` included — and installs them into a profile. sitometres
+# then launches that Basecamp against that profile's installed tree, staging
+# nothing of its own.
+#
+# The one thing `lgs` does not do here is LAUNCH, and that is deliberate:
+# sitometres must own the Basecamp process to read its stdout live, which is
+# where the per-step "no new QML errors" check comes from. Attached to an
+# `lgs basecamp launch`, those checks are suppressed. The e2e-ui-suite
+# change's design.md records the whole trade.
+
+on:
+  push:
+    branches: [main]
+  # On PRs, and not post-merge only. The defect class this layer exists for —
+  # a view that breaks only inside the host — is introduced by a PR, and a
+  # signal that arrives after the merge arrives after the damage. See design.md,
+  # "CI cost and cadence".
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ui-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  spec:
+    name: sitometres ${{ matrix.spec }} spec
+    runs-on: ubuntu-latest
+    # A backstop against a pathological cold run, not an estimate. Basecamp's
+    # own doctests use the same figure for the same from-source build.
+    timeout-minutes: 120
+
+    # One job per spec. They share the expensive prefix — the Basecamp build —
+    # which the store cache serves once the first run warms it.
+    #
+    # THE MATRIX IS THE ONE HAND-MAINTAINED LIST HERE, and it is the shape that
+    # goes stale silently: a spec added to the tree and not to this list runs
+    # nowhere, passes nothing, and is indistinguishable from a spec that
+    # passes. The `every spec is in the matrix` step below closes it.
+    #
+    # fail-fast is off: when two specs break, both are worth seeing.
+    strategy:
+      fail-fast: false
+      matrix:
+        spec: [join]
+
+    env:
+      SPEC: dialectica-ui/tests/ui/${{ matrix.spec }}.yaml
+
+      # The profile `lgs basecamp install` installs into and the run is driven
+      # against. `install` fills both seeded profiles; one is enough to run in.
+      PROFILE: alice
+
+      # Kept in step with ci.yml's build job, and released rather than a git
+      # rev. v0.3.1's `setup` has no `--inspector` flag and needs none here:
+      # `[repos.basecamp].attr = "app"` is the dev build, which carries the
+      # inspector already (asserted below).
+      LGS_VERSION: "0.3.1"
+
+      # Streams nix output into the step log instead of a `.scaffold/logs/`
+      # file on a runner about to be destroyed. `setup` and `install` both go
+      # through `run_logged`, which reads it.
+      LOGOS_SCAFFOLD_PRINT_OUTPUT: "1"
+
+      # Pin the VERSION, never a range or `latest`: a moving ref would silently
+      # change the tool that gates every spec here. The same version is used by
+      # ci.yml's `ui-specs` job to validate the specs.
+      SITOMETRES: "@paradoxcomputer/sitometres@0.1.2"
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      # Two unrelated needs, one apt transaction:
+      #
+      #   * the graphics libraries Basecamp resolves at load time. It carries
+      #     its own Qt but NOT host graphics, so a bare runner dies with
+      #     `libOpenGL.so.0: cannot open shared object file`.
+      #   * `tomlq`, which reads scaffold.toml as TOML below. `yq` is the
+      #     PYTHON package that ships it; the runner's preinstalled `yq` is the
+      #     Go one and has no `tomlq`.
+      #
+      # The runner image preconfigures third-party apt repos this job does not
+      # use, and one of them failing takes `apt-get update` down with it —
+      # radicle's identical step failed that way on a 403 from
+      # packages.microsoft.com. Every package below is Ubuntu's own, so the
+      # extra sources are moved aside by pattern, and `update` may fail:
+      # `install` is the real gate.
+      - name: Install graphics runtime libraries and tomlq
+        run: |
+          set -eu
+          sudo mkdir -p /etc/apt/disabled-sources.d
+          # `find -exec` rather than a glob: no match must not be an error.
+          sudo find /etc/apt/sources.list.d -maxdepth 1 \
+            \( -name '*.list' -o -name '*.sources' \) \
+            ! -name 'ubuntu.sources' ! -name 'ubuntu.list' \
+            -exec mv -v -t /etc/apt/disabled-sources.d {} +
+          sudo apt-get update -qq \
+            || echo "::warning::apt-get update reported errors; install is the gate, continuing"
+          sudo apt-get install -y --no-install-recommends \
+            libopengl0 libglx0 libgl1 libegl1 libglu1-mesa libvulkan1 yq
+          tomlq --version
+
+      # Every spec file in the tree must be in the matrix above. A count is
+      # sound in both directions because the first test proves THIS job's
+      # name exists in the tree: across all N jobs, N distinct names are proven
+      # present, so a directory holding more than N files has one running
+      # nowhere. `strategy.job-total` is the whole matrix, not this job's entry.
+      - name: Every spec in the tree is in the matrix
+        env:
+          JOB_TOTAL: ${{ strategy.job-total }}
+        run: |
+          set -eu
+          test -f "$SPEC" || {
+            echo "::error::$SPEC does not exist — the matrix names a spec the tree does not have"
+            exit 1
+          }
+          # Both extensions, because the validator in ci.yml accepts both: a
+          # `.yml` spec left out of this count would validate green and run
+          # nowhere. Counted, it trips this check, and the fix is to rename it.
+          found=$(find dialectica-ui/tests/ui -maxdepth 1 \( -name '*.yaml' -o -name '*.yml' \) | wc -l)
+          test "$found" -eq "$JOB_TOTAL" || {
+            echo "::error::dialectica-ui/tests/ui holds $found spec(s) but the matrix expands to $JOB_TOTAL job(s)"
+            echo "::error::a spec outside the matrix runs nowhere and passes nothing — add it to ui-tests.yml as <name>.yaml"
+            find dialectica-ui/tests/ui -maxdepth 1 \( -name '*.yaml' -o -name '*.yml' \)
+            exit 1
+          }
+          echo "ok: $found spec(s), $JOB_TOTAL matrix job(s)"
+
+      # scaffold.toml's VALUES, read before any `lgs basecamp` verb touches the
+      # file. Two uses:
+      #
+      #   * BASECAMP_REV keys the store cache. It is derived here rather than
+      #     written into this file, so bumping `[repos.basecamp].pin` cannot
+      #     leave the cache keyed on the old rev — which fails silently, as a
+      #     job that recompiles Basecamp on every run.
+      #   * the snapshot is what the "lgs left scaffold.toml's values alone"
+      #     step compares against after `setup` and `install`, both of which
+      #     rewrite the file.
+      - name: Read scaffold.toml before lgs touches it
+        run: |
+          set -eu
+          pin=$(tomlq -r '.repos.basecamp.pin' scaffold.toml)
+          # A short, empty or branch-name pin still makes a usable cache key
+          # while not being the rev anyone meant; `tomlq -r` prints "null" for
+          # a missing key. Lowercase is required because the pin goes into the
+          # key verbatim and two spellings would key two caches.
+          printf '%s' "$pin" | grep -Eq '^[0-9a-f]{40}$' || {
+            echo "::error::[repos.basecamp].pin is '$pin', expected a full 40-char lowercase sha"
+            exit 1
+          }
+          echo "BASECAMP_REV=$pin" >> "$GITHUB_ENV"
+          echo "BASECAMP_REV=$pin (from scaffold.toml)"
+          tomlq -S . scaffold.toml > "$RUNNER_TEMP/scaffold-values-before.json"
+
+      # SHA-pinned, and `install_url` pins the NIX VERSION for the reason
+      # ci.yml's build job documents: the UI module CANNOT build on Nix <= 2.24,
+      # because `dialectica-ui/flake.nix` declares a relative path input.
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+        with:
+          install_url: https://releases.nixos.org/nix/nix-2.35.2/install
+          nix_path: nixpkgs=channel:nixos-unstable
+          # The logos substituter is anonymously readable. Set in nix.conf
+          # because a flake's own extra-substituters is honoured only for a
+          # trusted user.
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            extra-substituters = https://cache.nix.logos.co/public
+            extra-trusted-public-keys = public:l4HrXgL4nw246+LBh2SOJyhz64BoGegOYLheT/iIAPU=
+            accept-flake-config = true
+
+      # What makes a repeat run fast: most of the cold cost is pulling the
+      # closure, and a restored store removes the download. Keyed on the pinned
+      # rev, and on scaffold.toml and the flakes, so a changed lgpm or
+      # delivery pin gets a fresh key while still restoring from the same rev's
+      # prefix.
+      #
+      # v7, not v5: on v5 radicle's identical step cached nothing — restore
+      # failed on the retired legacy cache API and save on root-owned daemon
+      # state. SHA-pinned like every other third-party action here: `v7` is a
+      # tag, and a tag is a mutable ref.
+      - name: Cache the Nix store
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
+        with:
+          primary-key: nix-ui-${{ runner.os }}-${{ env.BASECAMP_REV }}-${{ hashFiles('scaffold.toml', 'dialectica/flake.nix', 'dialectica/flake.lock', 'dialectica-ui/flake.nix', 'dialectica-ui/flake.lock') }}
+          restore-prefixes-first-match: nix-ui-${{ runner.os }}-${{ env.BASECAMP_REV }}-
+          gc-max-store-size-linux: 8G
+          purge: true
+          purge-prefixes: nix-ui-${{ runner.os }}-
+          purge-created: 604800
+
+      # Cache the BINARY, not `~/.cargo` — same reasoning as ci.yml's pair of
+      # steps. Exact-match key with no restore-keys, deliberately.
+      - name: Cache lgs
+        id: lgs-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cargo/bin/lgs
+          key: lgs-${{ runner.os }}-${{ env.LGS_VERSION }}
+
+      # Gated on the cache miss rather than using `--force`: a plain
+      # `cargo install` over an existing binary exits 101.
+      - name: Install logos-scaffold
+        if: steps.lgs-cache.outputs.cache-hit != 'true'
+        run: cargo install logos-scaffold --version ${{ env.LGS_VERSION }} --locked
+
+      # Builds `[repos.basecamp]` at its pin and attr — `app`, the DEV build,
+      # which has the QML inspector compiled in (the SHIPPING outputs pass
+      # `enableInspector = false`) — plus lgpm, and seeds the alice/bob
+      # profiles. Radicle builds Basecamp with a raw `nix build` to avoid
+      # exactly this verb; here `install` needs the lgpm and the profiles it
+      # makes, so they are used rather than incidental.
+      - name: Build Basecamp and seed the profiles (lgs basecamp setup)
+        run: lgs basecamp setup
+
+      # Builds every `[modules.*]` entry, dependencies first, and installs the
+      # results into both profiles. THIS is what puts `delivery_module` where
+      # Basecamp can load it: it is `role = "dependency"`, which `install`
+      # builds and `lgs basecamp build` does not. PR #120 built with `build`,
+      # got two artefacts of the three the app needs, and failed at step 1.
+      #
+      # The pin it builds is scaffold.toml's own, so nothing here names a
+      # second copy of it.
+      - name: Build and install all three modules (lgs basecamp install)
+        run: lgs basecamp install
+
+      # Both verbs above rewrite scaffold.toml — CLAUDE.md records that any
+      # `lgs basecamp` verb does. The comments it strips do not matter on a
+      # runner; a changed VALUE would, because the run would then exercise a
+      # Basecamp or module set this repo does not declare. So the values, not
+      # the text, are compared.
+      - name: lgs left scaffold.toml's values alone
+        run: |
+          set -eu
+          tomlq -S . scaffold.toml > "$RUNNER_TEMP/scaffold-values-after.json"
+          diff -u "$RUNNER_TEMP/scaffold-values-before.json" "$RUNNER_TEMP/scaffold-values-after.json" || {
+            echo "::error::an lgs basecamp verb changed a value in scaffold.toml — see the diff above"
+            exit 1
+          }
+          echo "ok: scaffold.toml's values are unchanged"
+
+      # Where the pieces are, from lgs rather than from knowledge of its layout:
+      #
+      #   * the Basecamp binary `setup` built, from the state file `setup`
+      #     writes and `install` reads — there is no verb that prints it;
+      #   * the profile's module root, the directory `install` wrote into and
+      #     the one Basecamp is pointed at as its user-dir.
+      - name: Locate the Basecamp and the installed profile
+        run: |
+          set -eu
+          state=.scaffold/state/basecamp.state
+          bin=$(sed -n 's/^basecamp_bin=//p' "$state")
+          test -x "$bin" || {
+            echo "::error::$state names basecamp_bin '$bin', which is not an executable"
+            exit 1
+          }
+          lgs basecamp paths "$PROFILE" --json > "$RUNNER_TEMP/paths.json"
+          root=$(jq -er '.module_root' "$RUNNER_TEMP/paths.json")
+          logs=$(jq -er '.app_logs_dir' "$RUNNER_TEMP/paths.json")
+          test -d "$root" || {
+            echo "::error::$PROFILE's module root $root does not exist — did install run?"
+            exit 1
+          }
+          echo "BASECAMP_BIN=$bin" >> "$GITHUB_ENV"
+          echo "MODULE_ROOT=$root" >> "$GITHUB_ENV"
+          echo "APP_LOGS_DIR=$logs" >> "$GITHUB_ENV"
+          echo "basecamp:    $bin"
+          echo "module root: $root"
+          ls -la "$root/modules" "$root/plugins"
+
+      # The inspector must actually be in there. Without this the failure is
+      # sitometres refusing the binary several steps later — or a future
+      # Basecamp flipping `enableInspector` off for `#app`, and this job
+      # silently losing the thing it exists to test. Same needle sitometres
+      # greps for, against the sibling ELF the nix wrapper execs.
+      - name: The build really has the QML inspector
+        run: |
+          set -eu
+          elf="$(dirname "$BASECAMP_BIN")/.LogosBasecamp"
+          test -f "$elf" || {
+            echo "::error::no .LogosBasecamp beside $BASECAMP_BIN — has the nix output layout changed?"
+            exit 1
+          }
+          grep -aq "\[QmlInspector\] Inspector server listening on port" "$elf" || {
+            echo "::error::the setup-built Basecamp has no QML inspector compiled in — sitometres cannot drive it"
+            exit 1
+          }
+          echo "ok: inspector present"
+
+      # `--app-dir` and `--user-dir` are the SAME directory: the module root
+      # `lgs basecamp install` populated. sitometres discovers all three
+      # modules there (`plugins/<name>/`, `modules/<name>/`), and because each
+      # one's source already IS its staging destination it copies nothing —
+      # Basecamp runs against exactly what lgs installed.
+      #
+      # That also makes the user-dir persistent rather than a throwaway, so
+      # Basecamp's own log survives the run into the evidence below. A
+      # throwaway user-dir is reaped on the clean exit a failing spec produces,
+      # and #120's first two runs had no log to diagnose with for that reason.
+      # The throwaway HOME sitometres gives the app is kept, and `--real-home`
+      # is deliberately not passed.
+      #
+      # No `--variant`: sitometres' default is `linux-amd64-dev`, which is what
+      # the dev stack installs.
+      - name: Run the spec
+        # Bounded well inside the job's 120, so a spec that hangs fails HERE,
+        # leaving the later steps to collect logs and upload evidence.
+        timeout-minutes: 30
+        run: |
+          # pipefail is load-bearing: without it the `| tee` below makes the
+          # step's exit status tee's, which is always 0.
+          set -euo pipefail
+          mkdir -p ui-results ui-results/screenshots
+          # --strict: sitometres exits 0 on INCONCLUSIVE by design, and an
+          # inconclusive run proved nothing.
+          npx --yes "$SITOMETRES" run "$SPEC" \
+            --app dialectica_ui \
+            --app-dir "$MODULE_ROOT" \
+            --user-dir "$MODULE_ROOT" \
+            --basecamp "$BASECAMP_BIN" \
+            --strict \
+            --json  "ui-results/${{ matrix.spec }}.json" \
+            --junit "ui-results/${{ matrix.spec }}.xml" \
+            --artifacts ui-results/screenshots \
+            2>&1 | tee ui-results/sitometres.log
+
+      # The exit code cannot see a run that opened the app, executed nothing
+      # further, and reported a clean sheet. So the machine report is read, and
+      # three conditions must hold: the verdict is a pass, every step passed,
+      # and the step count equals the spec's. The adjudicator is a checked-in
+      # script with its own tests (ci.yml's `ui-specs` job runs them), not a
+      # heredoc.
+      - name: The run proved what the spec asks
+        # `always()` so the per-step breakdown prints even when the run step
+        # already failed. It only ever adds a failure, never removes one.
+        if: always()
+        run: |
+          set -eu
+          python3 -c 'import yaml' 2>/dev/null || pip install --quiet pyyaml
+          python3 dialectica-ui/tests/adjudicate-ui-run.py \
+            "ui-results/${{ matrix.spec }}.json" "$SPEC"
+
+      # Basecamp's own log is the only record of what the app did — QML errors,
+      # module load failures, which dependency it could not resolve. Its path is
+      # lgs's `app_logs_dir`, read above, and the file is TIMESTAMPED rather
+      # than `basecamp.log`. Says so when it finds nothing, rather than
+      # uploading an empty directory that reads as "nothing went wrong".
+      - name: Collect Basecamp logs
+        if: failure()
+        run: |
+          set -eu
+          mkdir -p ui-results/logs
+          if [ -n "${APP_LOGS_DIR:-}" ] && [ -d "${APP_LOGS_DIR:-}" ]; then
+            find "$APP_LOGS_DIR" -maxdepth 1 -type f -name 'basecamp_*.log' \
+              -exec cp {} ui-results/logs/ \; || true
+          fi
+          ls -la ui-results/logs || true
+          if [ -z "$(ls -A ui-results/logs 2>/dev/null)" ]; then
+            echo "::warning::no basecamp log was found — the run cannot be diagnosed from this artifact"
+          fi
+
+      - name: Upload failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          # Per spec: upload-artifact refuses a name another job in the same
+          # run already claimed.
+          name: ui-test-evidence-${{ matrix.spec }}
+          path: ui-results/
+          if-no-files-found: warn
