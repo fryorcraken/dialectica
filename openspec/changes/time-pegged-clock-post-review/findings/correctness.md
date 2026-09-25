@@ -112,3 +112,101 @@ checked" for what was verified and how.
 Test coverage gaps (e.g. no end-to-end test for the moderator-race scenario),
 readability of the new doc comments, and architecture/design-record alignment
 are covered by the other reviewer instances for this piece.
+
+## Re-review of 439c192..HEAD
+
+Re-review scope, per dispatch: PR #173, re-reviewing only `git diff 439c192
+HEAD` — the round-1 findings fixes plus the new prose they added (a new doc
+section on `revision.rs`'s `current_version`, a new Decision 11 in
+`design.md`, and a corrected test comment in `authoring.rs`). Read the owner's
+#162 decision comment again; its first line, unchanged from the section
+above:
+
+> **Decision (owner, 2026-09-25): peg the Lamport counter to wall-clock time,
+> as SDS does (LIP-109, `logos-lips/docs/anoncomms/raw/sds.md`, lines 148-155
+> and 184-192).**
+
+- [ ] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/revision.rs:300-302`
+      — the new "What signing an hour ahead buys here, and whom" section on
+      `current_version` claims the ahead-signed version's lead is
+      **permanent**, contradicting the "for up to an hour" bound stated three
+      sentences earlier in the same paragraph, and contradicting the very
+      scenario it cites two sentences later.
+      **Text:** "A revision published after receiving the ahead-signed one
+      carries the greater counter and becomes current. Before the window, an
+      author who signed the maximum counter fixed that version as current
+      **permanently**, and their own later revisions **could never displace
+      it**." The next sentence cites `op-ordering`'s scenario "An op signed
+      ahead of the time leads only until the time passes it" — which is the
+      opposite claim.
+      **Scenario:** `openspec/specs/op-ordering/spec.md:396-400` states the
+      mechanism directly: a second device that never received the
+      ahead-signed op, once **its own current time has passed that counter**,
+      publishes an op that "carries the greater counter" and the ordering
+      rule "places [it] first" — with no dependence on ever receiving the
+      earlier op. Confirmed against the actual functions: `next_counter`
+      (`arrival.rs:297`) is `now_ms.max(clock.saturating_add(1))`, so once a
+      device's own `now_ms` naturally exceeds the ahead-signed counter (which
+      happens after at most one real hour, since the counter cannot be more
+      than `RECEIVE_WINDOW_MS` ahead of *some* peer's clock when signed),
+      **any** subsequent revision from **that same author**, even one signed
+      from the very device that made the ahead-signed op, gets a strictly
+      higher counter (`clock_from_counters` — `arrival.rs:275` — folds the
+      ahead-signed op straight into that device's own clock, so its very next
+      publish is `ahead_counter + 1`). Displacement is not merely possible; it
+      is what a normal subsequent publish, by anyone including the same
+      author, produces. "Fixed... permanently" and "could never displace it"
+      are both false of the code and false of the paragraph's own opening
+      sentence.
+      **Severity:** correctness/documentation — no runtime code changed, but
+      this is new prose this round added specifically to make an archived
+      design claim true (`tasks.md` 4.3), and it overshoots into asserting a
+      permanence the cited requirement explicitly rules out. A maintainer
+      reading only this docstring would conclude the exposure is unbounded,
+      which is wrong and is the opposite error from underselling it.
+      **For context, not a second checkbox:** the same "won such a dispute
+      permanently" construction pre-exists, unchanged by this diff, in
+      `moderation.rs:437-438` (`resolve`'s doc). That file was not touched
+      between `439c192` and `HEAD` so it is outside this re-review's scope,
+      but a fix to the wording here should probably use the same corrected
+      phrasing there too, since `design.md`'s new Decision 11 explicitly
+      frames this paragraph as making the two sites agree.
+
+Nothing else in the `439c192..HEAD` diff drew a correctness finding:
+
+- The corrected test comment in `authoring.rs:1830-1843` was checked by
+  reproducing its claim rather than reading it: mutated `publish`
+  (`authoring.rs:276`) to sign `asserted_ms: next_counter(clock,
+  who.asserted_ms)` instead of `who.asserted_ms`, then ran both named tests.
+  `a_counter_taken_from_the_clock_leaves_the_wall_clock_at_the_current_time`
+  failed exactly as the comment says, on its own `asserted_ms` assertion
+  (`left: 1789732304001, right: 1789729304000`).
+  `the_second_authoring_carries_the_higher_counter` failed too, but exactly
+  where the comment says — on its fixture-drift guard at `authoring.rs:885`
+  ("the fixture has drifted..."), not on the "newest first, by counter"
+  assertion the test is named for. Both outcomes match the comment
+  word-for-word. Mutation reverted; `git status --short` confirmed clean
+  before moving on.
+- The four citation-format rewordings in `arrival.rs`, `op.rs` (twice) and
+  `transport.rs` (from a full archive path to `` the archived `time-pegged-clock`
+  change's `design.md` ``) change no claim, only how the same target is named.
+  `git ls-files openspec/changes/archive` confirms
+  `openspec/changes/archive/2026-09-25-time-pegged-clock/design.md` is still
+  the folder the new wording resolves to.
+- The `design.md` Decision 11 additions were checked against what they
+  describe: the `c1f1a8f` test claim (re-measured above, matches) and the
+  `revision.rs` paragraph (flagged above) are both accurately described as
+  being added; `design.md` itself asserts nothing false independent of the
+  `revision.rs` text it points at.
+- The `op-ordering` spec.md two-sentence split (bold sentence into two
+  paragraphs) changes no WHEN/THEN/AND clause and drops no requirement —
+  confirmed by reading the full requirement block; this is a readability-only
+  edit and out of this dimension.
+
+### Gates run (this re-review)
+
+- `cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p dialectica -p
+  dialectica-core`: **1180 passed** (lib) + **30 passed** (`end_to_end.rs`), 0
+  failed, on the clean tree (after reverting the temporary mutation above).
+- `nix build ./dialectica#lgx` from the tree root: succeeded (no output, exit
+  0).
