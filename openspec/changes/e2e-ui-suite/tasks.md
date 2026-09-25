@@ -3,7 +3,7 @@
 ## Stages
 
 - [ ] ~~spec — `spec-writer`~~ — no spec delta: a test-only piece, `skip_specs: true` in `.openspec.yaml` says why; `proposal.md` is written
-- [ ] design + code — `dev-writer`
+- [x] design + code — `dev-writer`
 - [ ] tests — `tester`
 - [ ] review: correctness — `code-reviewer`
 - [ ] review: security — `code-reviewer`
@@ -41,11 +41,13 @@ D3). Every box below that depends on the run says which CI run ticked it.
       for: dialectica` while sitometres' hint blames `dialectica`; with a
       dev-variant `delivery_module` beside the other two, the app opened and
       steps 1–2 passed (design.md D2)
-- [ ] 2.2 `ui-tests.yml` builds Basecamp with `lgs basecamp setup` and all three
+- [x] 2.2 `ui-tests.yml` builds Basecamp with `lgs basecamp setup` and all three
       modules with `lgs basecamp install`, and runs sitometres against the
-      installed profile root; verified by 4.1
-- [ ] 2.3 `lgs left scaffold.toml's values alone` compares `tomlq -S .` before
-      and after the verbs; verified by a CI run reaching the run step
+      installed profile root. Verified by 4.1: sitometres reported all three
+      modules `in place` in the profile's module root
+- [x] 2.3 `lgs left scaffold.toml's values alone` compares `tomlq -S .` before
+      and after the verbs. It passed in both runs of 4.1. It has not been shown
+      to fail: no run has had a verb change a value
 
 ### 3. The spec, for current `main`
 
@@ -60,7 +62,9 @@ D3). Every box below that depends on the run says which CI run ticked it.
 
 ### 4. Proof
 
-- [ ] 4.1 The `sitometres join spec` job is green on this branch: verdict pass,
-      every step passed, 14 of 14 steps — the run URL goes here
-- [ ] 4.2 That run's job duration recorded here, as design.md D7's measured
-      cost of the `setup`-based job
+- [x] 4.1 The `sitometres join spec` job is green on this branch, twice on the
+      same commit (cold, then warm). In both, the adjudicator printed `verdict:
+      pass`, `[pass]` for each step, and `ok: all 14 steps passed`, against the
+      spec's 14. https://github.com/fryorcraken/dialectica/actions/runs/36090846720
+      (attempts 1 and 2)
+- [x] 4.2 Measured cost is in design.md D7's table: 9m19s cold, 3m16s warm

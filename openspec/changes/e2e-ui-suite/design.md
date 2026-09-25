@@ -242,8 +242,20 @@ and on demand, with no path filter.
   lgpm or delivery pin bump gets a fresh key while still restoring from the
   same rev's prefix.
 
-The `setup`-based job costs more than #120's did (D4). Its measured cost is in
-tasks.md, from this branch's CI runs.
+**Measured on this branch**, same commit, cold and then warm (Actions run
+36090846720, attempts 1 and 2):
+
+|                         | cold (no store cache) | warm (cache restored) |
+|---|---|---|
+| whole job               | 9m19s                 | 3m16s                 |
+| `lgs basecamp setup`    | 4m31s                 | 59s                   |
+| `lgs basecamp install`  | 3m37s                 | 43s                   |
+| the 14 spec steps       | 9.7s                  | 9.6s                  |
+
+The warm figure matches radicle's (3m14s). Moving Basecamp's build from a raw
+`nix build` to `setup` (D4) did not change the warm cost in any way that
+matters. A ci.yml run on the same commit took 7m16s for `Build LGX`, so on a
+warm cache this job is not what a PR waits on.
 
 ### D8 — Pins, and the spec list
 
@@ -301,12 +313,22 @@ that made the call and rendered the wrong result.
   variant 'linux-amd64' which is not supported`. A runner has no such install.
   → It matters to anyone who later writes a local runner. It is upstream
   behaviour, not filed from here.
-- **`setup` pays for an lgpm build and a Basecamp clone on every cold run.**
-  → The store cache covers the nix half. The measured cost is recorded in
-  tasks.md.
+- **`setup` pays for an lgpm build and a Basecamp clone on every run.** → The
+  store cache covers the nix half. Warm, `setup` took 59s (D7).
 - **`basecamp.state` is scaffold's internal file.** A scaffold release could
   rename it. → The locate step fails by name if `basecamp_bin` is not an
   executable, and the `lgs` pin is exact.
+
+- **The paste steps do not type.** In CI, sitometres reported for both `type:`
+  steps *"key events did not reach it; assigned the property instead, so
+  onTextEdited did not fire"*. So the spec proves that `pasteField`'s `text`
+  reaches `DStoaListScreen.pasted` through `onTextChanged`, and the preview and
+  join that follow. It does not prove that a keystroke lands in the field. If
+  the field ever moves to `onTextEdited`, step 9's assignment would no longer
+  reach `pasted`, and step 11 would fail. That is the right way round: the run
+  would go red rather than stay green on a field nobody can fill. → Accepted
+  for this piece. Real keystrokes offscreen inside the host are sitometres'
+  problem to solve, not this view's.
 
 ## What this layer structurally cannot see
 
