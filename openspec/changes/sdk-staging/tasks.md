@@ -14,8 +14,8 @@
 - [x] review: architecture — `code-reviewer`
 - [x] review: spec-test — `spec-test-reviewer`
 - [x] review: design — `design-reviewer`
-- [ ] re-review after `67a6605`: readability — `code-reviewer` — the dev-writer's answer to the readability finding reworded prose in `proposal.md` and `design.md`
-- [ ] re-review after `67a6605`: design — `design-reviewer` — the same commit edited D1's Alternatives in `design.md`. Not re-reviewed: correctness, security, architecture, spec-test, because the commit touches no README, CI, `.gitignore`, `CLAUDE.md` or test ground
+- [x] re-review after `67a6605`: readability — `code-reviewer` — the dev-writer's answer to the readability finding reworded prose in `proposal.md` and `design.md`
+- [x] re-review after `67a6605`: design — `design-reviewer` — the same commit edited D1's Alternatives in `design.md`. Not re-reviewed: correctness, security, architecture, spec-test, because the commit touches no README, CI, `.gitignore`, `CLAUDE.md` or test ground
 - [ ] findings all ticked, `findings/` deleted — `closer`
 - [ ] `openspec validate --strict`, then `archive` — `closer`
 - [ ] CI green, title/body checked, PR merged — `closer`
