@@ -35,6 +35,15 @@ D3). Every box below that depends on the run says which CI run ticked it.
       `node dialectica-ui/tests/validate-ui-specs.mjs` reports `join.yaml: ok
       (14 steps)` against sitometres 0.1.2
 - [x] 1.3 `ui-specs` job in ci.yml runs both of the above on every PR
+- [x] 1.4 `tst_ui_tool_pins.py` keeps the sitometres and lgs pins equal and
+      exact across ci.yml and ui-tests.yml. `ui-specs` runs it.
+      `python3 dialectica-ui/tests/tst_ui_tool_pins.py` passes, and it goes
+      red when either real workflow's copy is changed alone
+      (design.md D8). `yaml` is pinned, and PyYAML is never fetched from PyPI
+- [ ] 1.5 The edited `ui-specs` job (new env, pinned `yaml`, no pip
+      fallback, the pin-check step) and ui-tests.yml (`python3-yaml` in the
+      apt line, no pip fallback) are green in CI. Not yet run: nothing was
+      pushed after these edits
 
 ### 2. Getting past step 1
 

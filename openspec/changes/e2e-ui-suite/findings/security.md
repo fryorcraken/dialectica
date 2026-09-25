@@ -10,7 +10,7 @@ tree — the tree carries one commit not yet pushed to the PR's remote ref.
 
 ## Findings
 
-- [ ] **`dev-writer`** — `.github/workflows/ci.yml:1141`, `.github/workflows/ci.yml:1152`, `.github/workflows/ui-tests.yml:363`
+- [x] **`dev-writer`** — `.github/workflows/ci.yml:1141`, `.github/workflows/ci.yml:1152`, `.github/workflows/ui-tests.yml:363`
       — two dependencies installed in CI with no version pin at all, in the
       same jobs that go out of their way to pin everything else.
       **Scenario:** `ci.yml`'s `ui-specs` job runs
@@ -46,6 +46,37 @@ tree — the tree carries one commit not yet pushed to the PR's remote ref.
       review (nothing was pushed, per the runner's instruction). The gap is
       established by reading the workflow text and confirming the absence of
       any lockfile, not by observing a floating install in an actual run.
+
+      **Fixed** in the commit that ticks this box. There are two halves, and
+      the second closes the gap differently from your suggestion.
+      - `yaml` is now `yaml@2.9.0` in `ui-specs`. That is the version
+        sitometres' own `package-lock.json` resolves (paradoxcomputer/
+        sitometres `2fba210`), so it exists, and it is the parser sitometres
+        was tested against.
+      - PyYAML is no longer fetched at all, rather than being pinned to
+        `pyyaml==<version>`. Both `import yaml || pip install --quiet pyyaml`
+        lines are gone. ui-tests.yml names `python3-yaml` in its existing
+        Ubuntu apt transaction. `ui-specs` uses the runner image's copy and
+        fails on the import, by name, if the image ever drops it. The
+        fallback was already not what supplied PyYAML. On Actions run
+        36091870189 (the `UI spec validation` job), that step finished all
+        its adjudicator runs 0.3s after starting, which is too fast for a
+        PyPI download. That is inferred from timing: pip ran `--quiet`, so
+        nothing was logged either way. A pinned pip install would also need
+        `actions/setup-python`. My unverified understanding is that the
+        system Python on ubuntu-24.04 refuses `pip install` under PEP 668.
+        Either way, it adds a network fetch and a second trust root where
+        none is needed. design.md D8 records the rejected alternative.
+      - Residual, deferred to design.md Risks ("sitometres' own dependencies
+        are resolved at run time"): sitometres' transitive dependencies
+        still resolve within its declared ranges, in both `npm install` and
+        `npx --yes`. Closing that needs a committed lockfile. Generating one
+        needs an `npm install`, and the owner's rule keeps that out of local
+        hands.
+      **Not verified by a CI run.** Nothing is pushed. `tst_ui_tool_pins.py`
+      and `tst_scaffold_values_unchanged.py` both parse the edited workflows
+      and pass locally. Whether `npm install … yaml@2.9.0` and the apt line
+      succeed on a runner is for the closer's CI run to show.
 
 ## Areas checked and found clean
 

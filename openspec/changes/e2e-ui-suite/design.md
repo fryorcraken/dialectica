@@ -301,6 +301,46 @@ warm cache this job is not what a PR waits on.
   not on this path. (This was PLAN.md's paragraph. PLAN.md is gone and this is
   now the only copy.)
 - **`lgs` is v0.3.1** from crates.io, in step with ci.yml's `build` job.
+- **The two shared pins are two literals kept equal by a check.**
+  sitometres appears in ci.yml's `ui-specs` job and in ui-tests.yml, and lgs
+  appears in ci.yml's `build` job and in ui-tests.yml. Each is a job-level
+  `env:` value. `dialectica-ui/tests/tst_ui_tool_pins.py`, run by `ui-specs`,
+  fails when the two copies differ, when either is not an exact version, when
+  either is missing, or when a `run:` body writes a version itself. That last
+  case matters because a literal in a `run:` body would bypass the `env:` value
+  the check compares. Before this, only a comment kept them in step. If the
+  sitometres copies drift, `ui-specs` validates against a schema the run does
+  not enforce, and both jobs stay green.
+  **Rejected:** a single file both workflows load into `$GITHUB_ENV`. It moves
+  the version out of the job that uses it, and it adds a load step to each job
+  whose correctness only a CI run can show. ui-tests.yml also reads
+  `env.LGS_VERSION` in a cache key, which would then work only for steps after
+  the load, an ordering trap. **Rejected:** repository variables (`vars.*`),
+  which live outside the repo, so a bump appears in no diff. **Rejected:**
+  ci.yml reading ui-tests.yml's value at run time, which is proven only in CI
+  and ties one workflow's execution to the other's layout.
+  **What breaks without it, measured:** changing ui-tests.yml's `SITOMETRES`
+  to `0.1.3` turns the check's "the workflows as committed" case red, and so
+  does writing `@paradoxcomputer/sitometres@0.1.3` back into the `ui-specs`
+  `run:` body. Its other six cases each start from the real pair with exactly
+  one change applied, so the check's power to fail is itself tested.
+- **The spec validator's `yaml` is `yaml@2.9.0`**, the version sitometres' own
+  `package-lock.json` resolves (paradoxcomputer/sitometres `2fba210`). Left
+  unversioned, npm would install whatever `latest` was on the day.
+- **PyYAML comes from the runner image or Ubuntu's archive, never PyPI.** An
+  `import yaml || pip install pyyaml` fallback is what this rules out, because
+  the fallback fetches whatever PyPI serves on the day. ui-tests.yml names
+  `python3-yaml` in its apt transaction. `ui-specs` relies on the
+  image and fails on the import, by name, if the image ever drops it. That
+  failure is wanted: the alternative is a silent fetch. The evidence that the
+  image supplies it is inferred from timing, not logged, because pip ran with
+  `--quiet`. On Actions run 36091870189 (the `UI spec validation` job), the
+  step running `import yaml || pip install` finished all its adjudicator runs
+  0.3s after it started. That is too fast for a PyPI download, so the import
+  must have succeeded. **Rejected:** `actions/setup-python` plus
+  `pip install pyyaml==6.0.2`. It pins a version, but it adds an action and a
+  network fetch where no fetch is needed. The package index is also a second
+  trust root, beside the image the job already trusts.
 - **The spec list is derived from the directory.** The validator globs
   `tests/ui/*.y{a,}ml` and fails on zero files. The matrix in ui-tests.yml is
   the one hand-kept list, and each job asserts that the directory holds exactly
@@ -348,6 +388,14 @@ that made the call and rendered the wrong result.
   behaviour, not filed from here.
 - **`setup` pays for an lgpm build and a Basecamp clone on every run.** → The
   store cache covers the nix half. Warm, `setup` took 59s (D7).
+- **sitometres' own dependencies are resolved at run time.** Both jobs pin
+  sitometres and ui-specs pins `yaml`, but without a lockfile, anything
+  sitometres depends on resolves within sitometres' declared ranges on the day.
+  `npx --yes` in ui-tests.yml does the same. Closing that needs a committed
+  `package-lock.json`, and generating one needs an `npm install`, which the
+  owner's rule keeps out of local hands. → Accepted for this piece. The
+  exposure is bounded because neither workflow has a secret (security
+  review). A lockfile is the fix if that changes.
 - **`basecamp.state` is scaffold's internal file.** A scaffold release could
   rename it. → The locate step fails by name if `basecamp_bin` is not an
   executable, and the `lgs` pin is exact.

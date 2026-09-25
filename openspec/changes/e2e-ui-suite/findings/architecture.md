@@ -8,7 +8,7 @@ against radicle-logos-module's `.github/workflows/ui-tests.yml` and
 
 ## Finding
 
-- [ ] **`dev-writer`** — `.github/workflows/ui-tests.yml:89` and
+- [x] **`dev-writer`** — `.github/workflows/ui-tests.yml:89` and
       `.github/workflows/ci.yml:1141` — the sitometres version pin is
       duplicated across two workflow files with nothing but a comment to keep
       them in sync, which is the exact "hand-maintained list goes stale
@@ -51,6 +51,29 @@ against radicle-logos-module's `.github/workflows/ui-tests.yml` and
       `tst_scaffold_values_unchanged.py`'s "extract the real step by name,
       don't retype it" — that greps both workflow files for the pin and fails
       if they disagree.
+
+      **Fixed** in the commit that ticks this box, using the check option,
+      for both pins. ci.yml's `ui-specs` job now keeps sitometres as a
+      job-level `env: SITOMETRES` and installs `"$SITOMETRES"`. New
+      `dialectica-ui/tests/tst_ui_tool_pins.py` is wired into `ui-specs` as
+      "The two UI workflows pin the same tool versions". It parses both
+      workflows and fails when ci.yml `ui-specs`/`build` and ui-tests.yml
+      `spec` disagree on `SITOMETRES` or `LGS_VERSION`, when either value is
+      not an exact version (D8's "never a range", which only a comment had
+      enforced), when either is missing, or when a `run:` body writes a
+      version itself and so bypasses the compared value. Mutations run on
+      the real files: `SITOMETRES` changed to `0.1.3` in ui-tests.yml only
+      turned "the workflows as committed" red, and so did putting
+      `@paradoxcomputer/sitometres@0.1.3` back into the `ui-specs` `run:`
+      body. Before this change, the first of those passed every gate,
+      because nothing read the two strings. Both were reverted, and the
+      check is green. The other six cases are in-file fixtures, each the
+      real pair with exactly one change applied. design.md D8 records why
+      the choice was a check rather than one home (a `$GITHUB_ENV` file,
+      `vars.*`, or a runtime cross-read), and what breaks without it.
+      **Proven locally only for the check.** The `ui-specs` job's new step
+      and env have not run in CI. Nothing is pushed, so that is for the
+      closer's CI run.
 
 ## What was checked and is clean
 

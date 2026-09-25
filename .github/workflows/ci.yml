@@ -1123,9 +1123,19 @@ jobs:
   # The file list is GLOBBED from the directory by the script, never kept
   # beside it, and the script fails on an empty directory — a validator that
   # reports success over zero files is a gate that cannot fail.
+  #
+  # PyYAML, which every Python script below imports, comes from the runner
+  # image and is never fetched. An unpinned `pip install` would pull whatever
+  # PyPI served that day. If an image drops it, the import fails by name, and
+  # that is the outcome wanted. The e2e-ui-suite change's design.md, D8.
   ui-specs:
     name: UI spec validation
     runs-on: ubuntu-latest
+    env:
+      # The same version ui-tests.yml runs the specs with. A different one here
+      # would validate against a schema the run does not enforce, and both jobs
+      # would stay green. `tst_ui_tool_pins.py` below fails if the two differ.
+      SITOMETRES: "@paradoxcomputer/sitometres@0.1.2"
     steps:
       - uses: actions/checkout@v7
 
@@ -1133,12 +1143,14 @@ jobs:
         with:
           node-version: "24"
 
-      # The same pinned version ui-tests.yml runs the specs with. A different
-      # version here would validate against a schema the run does not enforce.
+      # `yaml` is pinned for the same reason sitometres is: with no version,
+      # npm installs whatever `latest` is on the day. 2.9.0 is the version
+      # sitometres' own lockfile resolves, so the validator parses a spec with
+      # the same parser sitometres was tested against.
       - name: Specs parse against the sitometres schema
         run: |
           set -eu
-          npm install --no-save --silent @paradoxcomputer/sitometres@0.1.2 yaml
+          npm install --no-save --silent "$SITOMETRES" yaml@2.9.0
           node dialectica-ui/tests/validate-ui-specs.mjs
 
       # The adjudicator decides whether an end-to-end run proved anything, so
@@ -1147,10 +1159,14 @@ jobs:
       # than a heredoc for exactly this reason: both of the QML gates' defects
       # shipped through review because a heredoc cannot be run without pushing.
       - name: The run adjudicator catches what it claims to
-        run: |
-          set -eu
-          python3 -c 'import yaml' 2>/dev/null || pip install --quiet pyyaml
-          python3 dialectica-ui/tests/tst_adjudicate_ui_run.py
+        run: python3 dialectica-ui/tests/tst_adjudicate_ui_run.py
+
+      # Each workflow keeps its own literal for the tools the two share, where
+      # someone reading that job can see it. This step keeps the literals equal
+      # and exact. design.md D8 says why two literals and a check, rather than
+      # one file both workflows load.
+      - name: The two UI workflows pin the same tool versions
+        run: python3 dialectica-ui/tests/tst_ui_tool_pins.py
 
   # ─── rust ────────────────────────────────────────────────────────────────
   # The core module's whole decision surface. `src/core.rs` holds every
@@ -1469,6 +1485,9 @@ jobs:
       # on this path. `nix build`'s stderr arrives via the bail, so a failure
       # with no detail means nix wrote nothing to stderr, not that streaming
       # broke.
+      #
+      # ui-tests.yml installs the same version. `tst_ui_tool_pins.py`, run by
+      # the `ui-specs` job, fails if the two differ.
       LGS_VERSION: "0.3.1"
       # Kept, but honestly: this does NOTHING for `lgs basecamp build` (see
       # above — that path never reaches `run_logged`). It is correct and
