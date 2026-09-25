@@ -798,6 +798,48 @@ mod tests {
     }
 
     #[test]
+    fn a_revision_by_someone_else_changes_nothing_through_the_feed() {
+        // `feed-read`: "A revision by someone else changes nothing" — pinned
+        // through the FEED's own read. `post-revision`'s
+        // `every_key_but_the_authors_is_rejected` and
+        // `a_strangers_revision_loses_to_an_older_one_by_the_author` pin the
+        // authorisation rule itself, but nothing built a root revised by a
+        // non-author key and read it through `all_of`/`list_threads` — a
+        // feed-local copy of "any Revise op targeting this root", instead of
+        // calling the shared resolver, would not be caught by either of those.
+        let head = a_thread(2, "the original words");
+        let impostor = a_key(9);
+        let revision = Op {
+            stoa: a_stoa(),
+            author: impostor.public_key(),
+            clock: None,
+            kind: OpKind::Revise {
+                target: head.op.id(),
+                body: "a stranger's rewrite".to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&impostor);
+        assert!(
+            revision.verify(),
+            "the op is authentic; it is the AUTHORITY that must fail"
+        );
+        let log = a_log(vec![head.clone(), revision]);
+
+        let rows = all_of(&log, false);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0].current_version, rows[0].thread,
+            "a stranger's revision must not become the current version"
+        );
+        assert!(!rows[0].is_revised);
+        assert_eq!(
+            rows[0].body.text, "the original words",
+            "the row must still render the root's own body, not the stranger's rewrite"
+        );
+    }
+
+    #[test]
     fn a_body_is_sanitised_before_it_leaves_core() {
         // The obligation, at the boundary it actually has to hold at. The op
         // must keep the bytes exactly (op.rs pins that separately); what the
@@ -1720,6 +1762,51 @@ mod tests {
             "the reply must not move its thread, nor appear as a row"
         );
         assert_eq!(row_for(&after, &second).reply_count(), 1);
+    }
+
+    #[test]
+    fn revising_a_root_does_not_move_its_row() {
+        // `feed-read`, "Revising a root does not move its row": two roots, the
+        // SECOND row's root is revised by its author, and the sequence must be
+        // unchanged. Unlike the reply test above, both threads exist before and
+        // after — a build that re-sorted on "most recently touched" would still
+        // pass a fixture with only one row to displace, so this one needs two.
+        let first = a_post_at(2, None, 5, "first");
+        let second = a_post_at(3, None, 4, "second");
+        let before_log = a_log(vec![first.clone(), second.clone()]);
+        let before: Vec<String> = all_of(&before_log, false)
+            .iter()
+            .map(|r| r.thread.clone())
+            .collect();
+        assert_eq!(
+            before,
+            vec![first.op.id().to_hex(), second.op.id().to_hex()],
+            "the higher counter, `first`, must be placed first before any revision"
+        );
+
+        let second_author = a_key(3);
+        let revision = Op {
+            stoa: a_stoa(),
+            author: second_author.public_key(),
+            clock: None,
+            kind: OpKind::Revise {
+                target: second.op.id(),
+                body: "second, revised".to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&second_author);
+        let after_log = a_log(vec![first, second.clone(), revision]);
+        let after = all_of(&after_log, false);
+        assert_eq!(
+            after.iter().map(|r| r.thread.clone()).collect::<Vec<_>>(),
+            before,
+            "revising the second row's root must not move it to the front"
+        );
+        assert!(
+            row_for(&after, &second).is_revised,
+            "the fixture must actually reach a revised state, or this passes for the wrong reason"
+        );
     }
 
     /// A log that answers `get`/`iter`/`iter_stoa` from a table of `(id, entry)`

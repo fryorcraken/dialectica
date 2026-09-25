@@ -7429,13 +7429,7 @@ mod tests {
         // this as well as a removed one. Presence-only checking is the gap the
         // spec-test reviewer measured on the slate reply, by adding a
         // `displayName` to every candidate and watching the suite stay green.
-        let mut keys: Vec<&str> = row
-            .as_object()
-            .unwrap()
-            .keys()
-            .map(|k| k.as_str())
-            .collect();
-        keys.sort_unstable();
+        let keys = sorted_keys(row);
         // This row's thread has no reply, so `latestReply` is ABSENT from it —
         // the one key of the row that may be. The set with it present is pinned
         // by `a_feed_row_with_a_reply_carries_latest_reply_and_nothing_else_new`.
@@ -7472,7 +7466,7 @@ mod tests {
         // measured on the slate reply, where adding a `displayName` to every
         // candidate left the suite green.
         assert!(
-            !keys.contains(&"displayName"),
+            !keys.iter().any(|k| k == "displayName"),
             "a feed row must carry no display name: {out}"
         );
 
@@ -7529,15 +7523,8 @@ mod tests {
             "a reply is not a row: {out}"
         );
         let row = &v["items"][0];
-        let mut keys: Vec<&str> = row
-            .as_object()
-            .unwrap()
-            .keys()
-            .map(|k| k.as_str())
-            .collect();
-        keys.sort_unstable();
         assert_eq!(
-            keys,
+            sorted_keys(row),
             [
                 "attachments",
                 "author",
@@ -7993,6 +7980,32 @@ mod tests {
     }
 
     #[test]
+    fn a_missing_stoa_is_distinguishable_from_a_wrong_typed_one() {
+        // `feed-read`: "A missing Stoa is refused distinguishably from a
+        // wrong-typed one" — proven here through the feed's own request path.
+        // `a_malformed_feed_request_is_the_error_shape_and_carries_no_items`
+        // exercises both `{}` and `{"stoa":7}` but only asserts "error, no
+        // items"; until now the distinguishability property itself was proven
+        // only through `get_capabilities`/`publish_post`, never through a feed
+        // handler, so a feed-specific regression that collapsed the two
+        // messages would not have been caught by any test that runs the feed.
+        let log = log_with_body("hello");
+        let missing: serde_json::Value =
+            serde_json::from_str(&list_threads(r#"{}"#, &log, &feed_genesis())).unwrap();
+        let wrong_typed: serde_json::Value =
+            serde_json::from_str(&list_threads(r#"{"stoa":7}"#, &log, &feed_genesis())).unwrap();
+        let missing_message = missing["error"].as_str().unwrap();
+        let wrong_typed_message = wrong_typed["error"].as_str().unwrap();
+        assert_ne!(
+            missing_message, wrong_typed_message,
+            "a missing `stoa` and a wrong-typed one must be refused with different messages"
+        );
+        // The hardcoded literals, not values read back out of the code.
+        assert_eq!(missing_message, "missing field: stoa");
+        assert_eq!(wrong_typed_message, "stoa must be a string");
+    }
+
+    #[test]
     fn a_feed_asked_for_a_stoa_the_genesis_record_does_not_describe_is_refused() {
         // Pairing a moderator set with the wrong Stoa would apply one Stoa's
         // authority to another's posts. Refused rather than served with
@@ -8035,6 +8048,27 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert!(v.get("error").is_none(), "got {out}");
         assert_eq!(v["items"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_feed_page_size_of_zero_is_served_exactly_like_no_per_page() {
+        // `feed-read`: "A page size of zero is served at the default" — its own
+        // wording is end-to-end ("the two replies are identical"), and until now
+        // it was pinned only at the pure-function level
+        // (`feed::tests::per_page_is_clamped_at_both_ends`) and, for the wire,
+        // only for `thread-read`
+        // (`an_oversized_thread_page_is_served_at_the_cap_and_zero_at_the_default`,
+        // which checks an item count rather than full identity). Two rows, so a
+        // clamp bug that merely happened to leave item COUNT unchanged (e.g. a
+        // divergent ordering or a stray field) would still be caught by
+        // comparing the whole reply.
+        let log = log_with_a_hidden_thread();
+        let omitted = list_threads(&feed_request(""), &log, &feed_genesis());
+        let explicit_zero = list_threads(&feed_request(r#""perPage":0"#), &log, &feed_genesis());
+        assert_eq!(
+            omitted, explicit_zero,
+            "a `perPage` of 0 must be served exactly like no `perPage` at all"
+        );
     }
 
     #[test]
@@ -8145,6 +8179,74 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert!(v.get("error").is_some(), "got {out}");
         assert!(v.get("items").is_none());
+    }
+
+    #[test]
+    fn the_feed_and_the_thread_read_agree_on_the_opened_thread_the_author_and_the_sanitising() {
+        // `feed-read`: "The thread id opens the thread", "The feed and the
+        // thread read name an author alike" and "The feed and the thread read
+        // sanitise alike" — three Scenarios that compare a feed row to a
+        // thread read of the same root. spec-test review found nothing
+        // exercising both `list_threads` and `read_thread` in one place, so a
+        // regression specific to one reader's own author-naming or sanitising
+        // would pass every test that runs only that reader. The body and
+        // attachment are hostile so the sanitising comparison is not trivially
+        // true of two untouched strings.
+        let stoa = feed_genesis().address().unwrap();
+        let poster = feed_key(2);
+        let hostile_body = "p\u{0430}ypal\u{202E}gnp.js";
+        let hostile_attachment = "cid\u{202E}txt.exe";
+        let root = Op {
+            stoa,
+            author: poster.public_key(),
+            clock: None,
+            kind: OpKind::Post {
+                thread: None,
+                parent: None,
+                body: hostile_body.to_string(),
+                attachments: vec![hostile_attachment.to_string()],
+            },
+        }
+        .sign(&poster);
+        let mut log = MemoryOpLog::new();
+        log.append(root.clone(), Arrival::unordered()).unwrap();
+
+        let feed_out = list_threads(&feed_request(""), &log, &feed_genesis());
+        let feed_v: serde_json::Value = serde_json::from_str(&feed_out).unwrap();
+        let row = &feed_v["items"][0];
+        let thread_id = row["thread"].as_str().unwrap().to_string();
+        assert_eq!(
+            thread_id,
+            root.op.id().to_hex(),
+            "sanity: the row's thread is the root's own id"
+        );
+
+        let thread_req = format!(r#"{{"stoa":"{}","thread":"{thread_id}"}}"#, stoa.to_hex());
+        let thread_out = read_thread(&thread_req, &log, &feed_genesis(), A_TIME);
+        let thread_v: serde_json::Value = serde_json::from_str(&thread_out).unwrap();
+        assert!(
+            thread_v.get("error").is_none(),
+            "the row's `thread` must open the thread: {thread_out}"
+        );
+        let item = &thread_v["items"][0];
+        assert_eq!(
+            item["id"].as_str(),
+            Some(thread_id.as_str()),
+            "the thread's first item must be the root the row names: {thread_out}"
+        );
+
+        assert_eq!(
+            row["author"], item["author"],
+            "the feed and the thread read must name the author alike: feed {feed_out} thread {thread_out}"
+        );
+        assert_eq!(
+            row["body"], item["body"],
+            "the feed and the thread read must sanitise the body alike: feed {feed_out} thread {thread_out}"
+        );
+        assert_eq!(
+            row["attachments"], item["attachments"],
+            "the feed and the thread read must sanitise attachments alike: feed {feed_out} thread {thread_out}"
+        );
     }
 
     // ─── The genesis record travelling with the request ───────────────────

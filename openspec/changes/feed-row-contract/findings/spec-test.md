@@ -34,7 +34,7 @@ Decision 3's own table) and it turned exactly that one test red — see Part 2 b
 
 ## Part 1 — scenario coverage
 
-- [ ] **`tester`** — "Revising a root does not move its row" (feed-read, *The
+- [x] **`tester`** — "Revising a root does not move its row" (feed-read, *The
       rows are the Stoa's authentic thread heads…*) has no covering test.
       **Scenario:** the existing revision tests
       (`a_row_renders_the_current_version_and_says_it_was_edited`,
@@ -47,7 +47,19 @@ Decision 3's own table) and it turned exactly that one test red — see Part 2 b
       sequence is unchanged — the same shape `a_new_reply_does_not_move_its_threads_row`
       already uses for a new reply.
 
-- [ ] **`tester`** — Three explicit feed-read Scenarios comparing the feed to a
+      **Outcome: fixed.** Added `feed::tests::revising_a_root_does_not_move_its_row`
+      (`dialectica/rust-lib/dialectica-core/src/feed.rs`), in exactly the fix
+      shape suggested: two roots at counters 5 and 4 (`first` sorts before
+      `second`), the second row's root revised by its own author, and the
+      thread-id sequence asserted unchanged. **Predicted vs observed:**
+      matched. Mutated `list_threads` to add `rows.sort_by_key(|r|
+      !r.is_revised)` right after the row-building loop (a stand-in for "most
+      recently revised first") and reran the test — it failed:
+      `left: ["a673...", "52d9..."] right: ["52d9...", "a673..."]`, i.e. the
+      revised row (`second`) jumped to the front. Reverted the mutation;
+      `git diff --stat` on `feed.rs` shows only the +45 lines the new test
+      added.
+- [x] **`tester`** — Three explicit feed-read Scenarios comparing the feed to a
       thread read have no test exercising both `list_threads`/`all_of` and
       `read_thread` in one place: **"The thread id opens the thread"** (a row's
       `thread` passed to a thread read of the same Stoa returns that thread with
@@ -60,7 +72,25 @@ Decision 3's own table) and it turned exactly that one test red — see Part 2 b
       break silently if the feed and the thread reader diverged on sanitising or
       on the author spelling, and nothing currently observes the agreement.
 
-- [ ] **`tester`** (lower severity) — "A page size of zero is served at the
+      **Outcome: fixed.** Added
+      `wire::tests::the_feed_and_the_thread_read_agree_on_the_opened_thread_the_author_and_the_sanitising`
+      (`dialectica/rust-lib/dialectica-core/src/wire.rs`, in the feed-handler
+      section, right after `the_feed_handler_is_never_a_panic`). One root with
+      a hostile body (`"p\u{0430}ypal\u{202E}gnp.js"`) and a hostile attachment
+      (`"cid\u{202E}txt.exe"`) is read once through `list_threads` and once
+      through `read_thread` on `row["thread"]`; the test asserts the thread
+      opens (no error, first item's `id` equals the row's `thread`), that
+      `row["author"] == item["author"]`, and that `row["body"]`/
+      `row["attachments"]` equal the thread item's, covering all three cited
+      Scenarios in one fixture since they share the same "read both ways and
+      compare" shape. **Predicted vs observed:** matched. Mutated `feed.rs`'s
+      row assembly from `body: sanitise(version.body())` to
+      `body: sanitise(&format!("{}!", version.body()))` (a feed-only
+      normalisation bug) and reran — failed on the body-alike assertion,
+      `left: "pаypalgnp.js!" right: "pаypalgnp.js"`. Reverted;
+      `git diff --stat` on `feed.rs` unaffected by this mutation (test-only
+      insertion remains).
+- [x] **`tester`** (lower severity) — "A page size of zero is served at the
       default" is pinned at the pure-function level
       (`feed.rs::per_page_is_clamped_at_both_ends`, comparing
       `clamp_per_page(Some(0))` to `clamp_per_page(None)`) but not at the wire
@@ -73,7 +103,21 @@ Decision 3's own table) and it turned exactly that one test red — see Part 2 b
       because the scenario's own wording is end-to-end and nothing exercises it
       end-to-end for the feed.
 
-- [ ] **`tester`** (lower severity, judgement call) — Two feed-read properties
+      **Outcome: fixed.** Added
+      `wire::tests::a_feed_page_size_of_zero_is_served_exactly_like_no_per_page`
+      (`dialectica/rust-lib/dialectica-core/src/wire.rs`, right after
+      `an_oversized_per_page_is_clamped_rather_than_refused`), comparing the
+      full `list_threads` reply string for `feed_request("")` against
+      `feed_request(r#""perPage":0"#)` on `log_with_a_hidden_thread()` (two
+      rows, so a divergence that happened to preserve item count would still
+      be caught). **Predicted vs observed:** matched. Mutated
+      `clamp_per_page` from `None | Some(0) => DEFAULT_PER_PAGE` to `None =>
+      DEFAULT_PER_PAGE` (dropping the `Some(0)` arm, so `Some(n) =>
+      n.min(MAX_PER_PAGE)` catches the literal `0` and pages at size zero) and
+      reran — failed: `left` carried the one visible row, `right` was
+      `{"hasMore":true,"items":[],"page":0}`. Reverted; `git diff --stat` on
+      `feed.rs` unaffected by this mutation.
+- [x] **`tester`** (lower severity, judgement call) — Two feed-read properties
       are pinned only through a helper shared with a different capability's
       handler, never through the feed's own request path:
       - "A missing Stoa is refused distinguishably from a wrong-typed one" —
@@ -98,6 +142,32 @@ Decision 3's own table) and it turned exactly that one test red — see Part 2 b
       so today the properties are pinned, just not independently of that sharing
       holding.
 
+      **Outcome: fixed** (took the judgement call; wrote both).
+      - Added `wire::tests::a_missing_stoa_is_distinguishable_from_a_wrong_typed_one`
+        (`wire.rs`, right after `a_malformed_feed_request_is_the_error_shape_and_carries_no_items`),
+        exercising `list_threads` directly on `{}` and `{"stoa":7}` and
+        asserting the two `error` messages differ, hardcoded to the literals
+        `"missing field: stoa"` and `"stoa must be a string"` (matching the
+        style of `a_wrong_typed_field_is_distinguishable_from_a_missing_one`
+        at `wire.rs:10082`, which pins `publish_post` the same way).
+        **Predicted vs observed:** matched. Mutated `parse_stoa` so the
+        wrong-typed arm returns `error_json("missing field: stoa")` too
+        (collapsing both messages) and reran — failed: `left: "missing
+        field: stoa" right: "missing field: stoa"`. Reverted; `git diff` on
+        `wire.rs` for this line shows no change.
+      - Added `feed::tests::a_revision_by_someone_else_changes_nothing_through_the_feed`
+        (`dialectica/rust-lib/dialectica-core/src/feed.rs`, right after
+        `an_unrevised_row_reports_the_two_ids_as_equal_and_is_not_edited`): a
+        root revised by a key other than its author, read through `all_of`,
+        asserting `current_version == thread`, `is_revised` false, and the
+        row's body is still the root's own text. **Predicted vs observed:**
+        matched. Mutated `revision.rs`'s `is_valid_revision` to drop the
+        trailing `&& candidate.op.op.author == original.op.op.author` clause
+        and reran — failed: `left: "adb3..." (the stranger's revision) right:
+        "65de..." (the root)`. Reverted; `git diff --stat` on `revision.rs`
+        shows no changes (this finding required no edit to that file — the
+        mutation was applied and reverted only to prove the new test, and the
+        file carries no test changes of its own for this finding).
 Everything else scoped to this delta — the request's `stoa`/`genesis`
 validation (missing, wrong type, bad hex, mismatched address),
 `includeHidden`'s three readings, the row-selection rules (forged root, foreign

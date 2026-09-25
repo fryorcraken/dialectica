@@ -40,7 +40,7 @@ Purpose).
 
 ## Finding
 
-- [ ] **`tester`** — `dialectica/rust-lib/dialectica-core/src/wire.rs:7432` and
+- [x] **`tester`** — `dialectica/rust-lib/dialectica-core/src/wire.rs:7432` and
       `wire.rs:7532` — the new `sorted_keys` helper (added at `wire.rs:7569` by
       this change) is not used by the two pre-existing key-set tests it was
       visibly modeled on, leaving three parallel copies of the same
@@ -71,6 +71,21 @@ Purpose).
       not a defect — flagging so `tester` can decide whether to fold the two
       old call sites into `sorted_keys()` while touching this file, not
       demanding it be done before merge.
+
+      **Outcome: fixed.** Folded both call sites into `sorted_keys()`.
+      `the_feed_reply_is_the_ecosystems_pagination_shape` now does
+      `let keys = sorted_keys(row);` (the `!keys.contains(&"displayName")`
+      check became `!keys.iter().any(|k| k == "displayName")`, since
+      `sorted_keys` returns `Vec<String>` rather than `Vec<&str>`), and
+      `a_feed_row_with_a_reply_carries_latest_reply_and_nothing_else_new`'s
+      `assert_eq!(keys, [...])` became `assert_eq!(sorted_keys(row), [...])`
+      directly. This is a pure refactor of test code with no behaviour change
+      to pin — both tests assert the identical key sets before and after, and
+      both still pass (`cargo test -p dialectica-core
+      the_feed_reply_is_the_ecosystems_pagination_shape
+      a_feed_row_with_a_reply_carries_latest_reply_and_nothing_else_new`). No
+      mutation applies: there is nothing here for a test to newly catch, only
+      one fewer copy of logic that could drift.
 
 ## Clean
 
