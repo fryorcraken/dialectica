@@ -1860,14 +1860,17 @@ fn feed_page_json(page: &crate::feed::FeedPage) -> String {
             let mut object = serde_json::json!({
                 "thread": row.thread,
                 "currentVersion": row.current_version,
-                // The public key and NO display name. `generated-names` requires
-                // that a name never travels on any reply: a derived value beside
-                // the material it derives from is two values that must agree and
-                // could disagree, and a name on the wire is one a relay could
-                // strip or forge. A name is derived by whoever holds the key, at
-                // the point of rendering. `a_row_carries_the_public_key_and_no_derived_display_name`
-                // in `feed.rs` pins the absence positively, so restoring a name
-                // here fails rather than passing quietly.
+                // The public key and NO display name. `feed-read` requires the
+                // signing key's hex here and nothing derived from it beside it,
+                // and `generated-names` that a name never travels on any reply:
+                // a derived value beside the material it derives from is two
+                // values that must agree and could disagree, and a name on the
+                // wire is one a relay could strip or forge. A name is derived by
+                // whoever holds the key, at the point of rendering. The row's
+                // whole key set is pinned in this file's tests, and
+                // `a_row_carries_the_public_key_and_no_derived_display_name` in
+                // `feed.rs` pins the struct, so restoring a name here fails
+                // rather than passing quietly.
                 "author": row.author,
                 "body": sanitised_json(&row.body),
                 "attachments": row.attachments.iter().map(sanitised_json).collect::<Vec<_>>(),
@@ -2148,14 +2151,12 @@ fn thread_page_json(page: &crate::thread::ThreadPage) -> String {
                 "thread": item.thread,
                 "id": item.id,
                 "currentVersion": item.current_version,
-                // NO SPEC: `author` carries the public key's hex, and `authorKey`
-                // is gone. `thread-read` requires "every item carries its
-                // author's public key" and "no item carries an author address",
-                // and names no JSON field for either — so which of the two
-                // spellings survives the collapse from two fields to one is this
-                // change's choice. `author` was kept because it is how every
-                // other reply here spells the same job; `design.md` §4 carries
-                // it, including why a missing `authorKey` is the loud failure.
+                // The signer's public key, under `author` and under no other key.
+                // `thread-read`'s *An item's author key travels under the JSON
+                // key `author`* names the spelling, which is the one the feed row
+                // uses for the same job. The item carried a second key,
+                // `authorKey`, until #80. The `feed-row-contract` change's
+                // `design.md` says why `author` was the one kept.
                 "author": item.author,
                 "isRevised": item.is_revised,
                 "moderation": { "state": state },
@@ -7428,13 +7429,7 @@ mod tests {
         // this as well as a removed one. Presence-only checking is the gap the
         // spec-test reviewer measured on the slate reply, by adding a
         // `displayName` to every candidate and watching the suite stay green.
-        let mut keys: Vec<&str> = row
-            .as_object()
-            .unwrap()
-            .keys()
-            .map(|k| k.as_str())
-            .collect();
-        keys.sort_unstable();
+        let keys = sorted_keys(row);
         // This row's thread has no reply, so `latestReply` is ABSENT from it —
         // the one key of the row that may be. The set with it present is pinned
         // by `a_feed_row_with_a_reply_carries_latest_reply_and_nothing_else_new`.
@@ -7471,7 +7466,7 @@ mod tests {
         // measured on the slate reply, where adding a `displayName` to every
         // candidate left the suite green.
         assert!(
-            !keys.contains(&"displayName"),
+            !keys.iter().any(|k| k == "displayName"),
             "a feed row must carry no display name: {out}"
         );
 
@@ -7528,15 +7523,8 @@ mod tests {
             "a reply is not a row: {out}"
         );
         let row = &v["items"][0];
-        let mut keys: Vec<&str> = row
-            .as_object()
-            .unwrap()
-            .keys()
-            .map(|k| k.as_str())
-            .collect();
-        keys.sort_unstable();
         assert_eq!(
-            keys,
+            sorted_keys(row),
             [
                 "attachments",
                 "author",
@@ -7557,6 +7545,269 @@ mod tests {
             "the latest reply is the reply's op id, in the encoding `thread` uses: {out}"
         );
         assert_eq!(row["thread"].as_str(), Some(root.op.id().to_hex().as_str()));
+    }
+
+    /// An object's keys, sorted, for comparison with a set written out by hand.
+    ///
+    /// **The expected set is always a literal at the call site**, never derived
+    /// from the implementation's output or its types. A set derived from the code
+    /// changes along with it and fails on nothing, and an ADDED key is how a
+    /// derived name, a score or a time would reach a reply.
+    fn sorted_keys(v: &serde_json::Value) -> Vec<String> {
+        let mut keys: Vec<String> = v
+            .as_object()
+            .unwrap_or_else(|| panic!("expected a JSON object, got {v}"))
+            .keys()
+            .cloned()
+            .collect();
+        keys.sort_unstable();
+        keys
+    }
+
+    #[test]
+    fn a_feed_row_revised_hidden_with_an_attachment_and_a_voted_reply_carries_no_further_key() {
+        // `feed-read`: "A row MUST NOT carry any other key in any state". The two
+        // tests above cover a plain row with and without a reply. This one puts
+        // every other state on ONE row, because each is a place a field could
+        // plausibly be added: a revision count on a revised row, the deciding op
+        // on a hidden one, a score beside a vote.
+        let stoa = feed_genesis().address().unwrap();
+        let poster = feed_key(2);
+        let root = Op {
+            stoa,
+            author: poster.public_key(),
+            clock: None,
+            kind: OpKind::Post {
+                thread: None,
+                parent: None,
+                body: "the original".to_string(),
+                attachments: vec!["cid-original".to_string()],
+            },
+        }
+        .sign(&poster);
+        let revision = Op {
+            stoa,
+            author: poster.public_key(),
+            clock: None,
+            kind: OpKind::Revise {
+                target: root.op.id(),
+                body: "the revision".to_string(),
+                attachments: vec!["cid-revised".to_string()],
+            },
+        }
+        .sign(&poster);
+        // `feed_key(1)` is the genesis creator, so the Stoa's only moderator.
+        let moderator = feed_key(1);
+        let hide = Op {
+            stoa,
+            author: moderator.public_key(),
+            clock: None,
+            kind: OpKind::Moderate {
+                target: root.op.id(),
+                action: crate::op::ModerationAction::Hide,
+            },
+        }
+        .sign(&moderator);
+        let reply = a_thread_post(3, Some(root.op.id()), Some(root.op.id()), "a reply");
+        let voter = feed_key(4);
+        let vote = Op {
+            stoa,
+            author: voter.public_key(),
+            clock: None,
+            kind: OpKind::Vote {
+                target: reply.op.id(),
+                direction: crate::op::VoteDirection::Up,
+            },
+        }
+        .sign(&voter);
+        let mut log = MemoryOpLog::new();
+        for op in [root.clone(), revision.clone(), hide, reply.clone(), vote] {
+            log.append(op, Arrival::unordered()).unwrap();
+        }
+        assert_eq!(
+            log.len().unwrap(),
+            5,
+            "every op of the fixture must be held"
+        );
+
+        let out = list_threads(
+            &feed_request(r#""includeHidden":true"#),
+            &log,
+            &feed_genesis(),
+        );
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(
+            sorted_keys(&v),
+            ["hasMore", "items", "page"],
+            "the page envelope's field set changed: {out}"
+        );
+        assert_eq!(v["items"].as_array().unwrap().len(), 1, "{out}");
+        let row = &v["items"][0];
+
+        // The fixture REACHED every state it names. Without these, a fixture that
+        // failed to hide or revise would test an ordinary row and pass for the
+        // wrong reason.
+        assert_eq!(row["isHidden"], true, "the root must be hidden: {out}");
+        assert_eq!(row["isRevised"], true, "the root must be revised: {out}");
+        assert_eq!(
+            row["currentVersion"].as_str(),
+            Some(revision.op.id().to_hex().as_str()),
+            "{out}"
+        );
+        assert_eq!(row["replyCount"], 1, "the reply must be counted: {out}");
+        assert_eq!(
+            row["latestReply"].as_str(),
+            Some(reply.op.id().to_hex().as_str()),
+            "{out}"
+        );
+        assert_eq!(
+            row["attachments"].as_array().map(|a| a.len()),
+            Some(1),
+            "{out}"
+        );
+        assert_eq!(row["attachments"][0]["text"], "cid-revised", "{out}");
+
+        assert_eq!(
+            sorted_keys(row),
+            [
+                "attachments",
+                "author",
+                "body",
+                "currentVersion",
+                "isHidden",
+                "isRevised",
+                "latestReply",
+                "replyCount",
+                "thread",
+            ],
+            "the feed row's field set changed: {out}"
+        );
+        // `body` and each attachment are closed too: `{text, removed, marked}` and
+        // nothing else, even where sanitising found nothing.
+        assert_eq!(
+            sorted_keys(&row["body"]),
+            ["marked", "removed", "text"],
+            "the body object's field set changed: {out}"
+        );
+        assert_eq!(
+            sorted_keys(&row["attachments"][0]),
+            ["marked", "removed", "text"],
+            "an attachment object's field set changed: {out}"
+        );
+    }
+
+    #[test]
+    fn the_feed_envelope_carries_exactly_items_page_and_has_more_on_every_page() {
+        // `feed-read`: a successful reply carries exactly three keys and no
+        // count of anything. Read on a page with a successor, on the last page,
+        // and past the end, because a `total` or a `pageCount` is most tempting
+        // exactly where `hasMore` changes.
+        let log = log_with_a_hidden_thread();
+        for (page, want_items, want_more) in [(0, 1, true), (1, 1, false), (5, 0, false)] {
+            let out = list_threads(
+                &feed_request(&format!(
+                    r#""includeHidden":true,"perPage":1,"page":{page}"#
+                )),
+                &log,
+                &feed_genesis(),
+            );
+            let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+            assert_eq!(
+                sorted_keys(&v),
+                ["hasMore", "items", "page"],
+                "page {page}: the page envelope's field set changed: {out}"
+            );
+            // The three pages really are the three cases, so this is not one
+            // shape asserted three times.
+            assert_eq!(v["page"], page, "{out}");
+            assert_eq!(
+                v["items"].as_array().unwrap().len(),
+                want_items,
+                "page {page}: {out}"
+            );
+            assert_eq!(v["hasMore"], want_more, "page {page}: {out}");
+        }
+    }
+
+    #[test]
+    fn the_largest_page_index_is_an_empty_page_and_one_larger_is_refused_by_name() {
+        // `feed-read`: a page past the end is empty rather than refused, and that
+        // includes the largest index this peer accepts. One larger is refused,
+        // and the message names `page`.
+        //
+        // Written from `usize::MAX` rather than a 64-bit literal, because the
+        // largest accepted index is this build's, not a constant of the format.
+        let log = log_with_body("hello");
+        let largest = usize::MAX;
+        let out = list_threads(
+            &feed_request(&format!(r#""page":{largest}"#)),
+            &log,
+            &feed_genesis(),
+        );
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(
+            v.get("error").is_none(),
+            "the largest index is served: {out}"
+        );
+        assert_eq!(v["items"].as_array().map(|a| a.len()), Some(0), "{out}");
+        assert_eq!(
+            v["page"].as_u64(),
+            u64::try_from(largest).ok(),
+            "the index asked for is reported: {out}"
+        );
+        assert_eq!(v["hasMore"], false, "{out}");
+
+        let one_larger = u128::try_from(largest).unwrap() + 1;
+        let out = list_threads(
+            &feed_request(&format!(r#""page":{one_larger}"#)),
+            &log,
+            &feed_genesis(),
+        );
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(
+            v.get("items").is_none(),
+            "a refusal carries no items: {out}"
+        );
+        let message = v["error"].as_str().unwrap_or_else(|| panic!("got {out}"));
+        assert!(
+            message.contains("page"),
+            "the refusal must name the field: {out}"
+        );
+    }
+
+    #[test]
+    fn malformed_pagination_fields_are_refused_by_name() {
+        // `feed-read`: a negative, fractional, exponent-written or non-numeric
+        // `page` or `perPage` is refused, and the message names the field.
+        //
+        // The `perPage` messages are checked for `perPage` and the `page` ones for
+        // `page` but NOT `perPage`: `perPage` does not contain the lowercase
+        // `page`, so a handler that blamed the wrong field fails one half.
+        let log = log_with_body("hello");
+        for field in ["page", "perPage"] {
+            for bad in ["-1", "1.5", "1e2", r#""many""#] {
+                let out = list_threads(
+                    &feed_request(&format!(r#""{field}":{bad}"#)),
+                    &log,
+                    &feed_genesis(),
+                );
+                let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+                assert!(v.get("items").is_none(), "{field}={bad}: {out}");
+                let message = v["error"]
+                    .as_str()
+                    .unwrap_or_else(|| panic!("{field}={bad} must be refused, got {out}"));
+                assert!(
+                    message.contains(field),
+                    "{field}={bad}: the refusal must name {field}: {out}"
+                );
+                if field == "page" {
+                    assert!(
+                        !message.contains("perPage"),
+                        "{field}={bad}: the refusal names the other field: {out}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -7729,6 +7980,32 @@ mod tests {
     }
 
     #[test]
+    fn a_missing_stoa_is_distinguishable_from_a_wrong_typed_one() {
+        // `feed-read`: "A missing Stoa is refused distinguishably from a
+        // wrong-typed one" — proven here through the feed's own request path.
+        // `a_malformed_feed_request_is_the_error_shape_and_carries_no_items`
+        // exercises both `{}` and `{"stoa":7}` but only asserts "error, no
+        // items"; until now the distinguishability property itself was proven
+        // only through `get_capabilities`/`publish_post`, never through a feed
+        // handler, so a feed-specific regression that collapsed the two
+        // messages would not have been caught by any test that runs the feed.
+        let log = log_with_body("hello");
+        let missing: serde_json::Value =
+            serde_json::from_str(&list_threads(r#"{}"#, &log, &feed_genesis())).unwrap();
+        let wrong_typed: serde_json::Value =
+            serde_json::from_str(&list_threads(r#"{"stoa":7}"#, &log, &feed_genesis())).unwrap();
+        let missing_message = missing["error"].as_str().unwrap();
+        let wrong_typed_message = wrong_typed["error"].as_str().unwrap();
+        assert_ne!(
+            missing_message, wrong_typed_message,
+            "a missing `stoa` and a wrong-typed one must be refused with different messages"
+        );
+        // The hardcoded literals, not values read back out of the code.
+        assert_eq!(missing_message, "missing field: stoa");
+        assert_eq!(wrong_typed_message, "stoa must be a string");
+    }
+
+    #[test]
     fn a_feed_asked_for_a_stoa_the_genesis_record_does_not_describe_is_refused() {
         // Pairing a moderator set with the wrong Stoa would apply one Stoa's
         // authority to another's posts. Refused rather than served with
@@ -7771,6 +8048,27 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert!(v.get("error").is_none(), "got {out}");
         assert_eq!(v["items"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_feed_page_size_of_zero_is_served_exactly_like_no_per_page() {
+        // `feed-read`: "A page size of zero is served at the default" — its own
+        // wording is end-to-end ("the two replies are identical"), and until now
+        // it was pinned only at the pure-function level
+        // (`feed::tests::per_page_is_clamped_at_both_ends`) and, for the wire,
+        // only for `thread-read`
+        // (`an_oversized_thread_page_is_served_at_the_cap_and_zero_at_the_default`,
+        // which checks an item count rather than full identity). Two rows, so a
+        // clamp bug that merely happened to leave item COUNT unchanged (e.g. a
+        // divergent ordering or a stray field) would still be caught by
+        // comparing the whole reply.
+        let log = log_with_a_hidden_thread();
+        let omitted = list_threads(&feed_request(""), &log, &feed_genesis());
+        let explicit_zero = list_threads(&feed_request(r#""perPage":0"#), &log, &feed_genesis());
+        assert_eq!(
+            omitted, explicit_zero,
+            "a `perPage` of 0 must be served exactly like no `perPage` at all"
+        );
     }
 
     #[test]
@@ -7881,6 +8179,74 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert!(v.get("error").is_some(), "got {out}");
         assert!(v.get("items").is_none());
+    }
+
+    #[test]
+    fn the_feed_and_the_thread_read_agree_on_the_opened_thread_the_author_and_the_sanitising() {
+        // `feed-read`: "The thread id opens the thread", "The feed and the
+        // thread read name an author alike" and "The feed and the thread read
+        // sanitise alike" — three Scenarios that compare a feed row to a
+        // thread read of the same root. spec-test review found nothing
+        // exercising both `list_threads` and `read_thread` in one place, so a
+        // regression specific to one reader's own author-naming or sanitising
+        // would pass every test that runs only that reader. The body and
+        // attachment are hostile so the sanitising comparison is not trivially
+        // true of two untouched strings.
+        let stoa = feed_genesis().address().unwrap();
+        let poster = feed_key(2);
+        let hostile_body = "p\u{0430}ypal\u{202E}gnp.js";
+        let hostile_attachment = "cid\u{202E}txt.exe";
+        let root = Op {
+            stoa,
+            author: poster.public_key(),
+            clock: None,
+            kind: OpKind::Post {
+                thread: None,
+                parent: None,
+                body: hostile_body.to_string(),
+                attachments: vec![hostile_attachment.to_string()],
+            },
+        }
+        .sign(&poster);
+        let mut log = MemoryOpLog::new();
+        log.append(root.clone(), Arrival::unordered()).unwrap();
+
+        let feed_out = list_threads(&feed_request(""), &log, &feed_genesis());
+        let feed_v: serde_json::Value = serde_json::from_str(&feed_out).unwrap();
+        let row = &feed_v["items"][0];
+        let thread_id = row["thread"].as_str().unwrap().to_string();
+        assert_eq!(
+            thread_id,
+            root.op.id().to_hex(),
+            "sanity: the row's thread is the root's own id"
+        );
+
+        let thread_req = format!(r#"{{"stoa":"{}","thread":"{thread_id}"}}"#, stoa.to_hex());
+        let thread_out = read_thread(&thread_req, &log, &feed_genesis(), A_TIME);
+        let thread_v: serde_json::Value = serde_json::from_str(&thread_out).unwrap();
+        assert!(
+            thread_v.get("error").is_none(),
+            "the row's `thread` must open the thread: {thread_out}"
+        );
+        let item = &thread_v["items"][0];
+        assert_eq!(
+            item["id"].as_str(),
+            Some(thread_id.as_str()),
+            "the thread's first item must be the root the row names: {thread_out}"
+        );
+
+        assert_eq!(
+            row["author"], item["author"],
+            "the feed and the thread read must name the author alike: feed {feed_out} thread {thread_out}"
+        );
+        assert_eq!(
+            row["body"], item["body"],
+            "the feed and the thread read must sanitise the body alike: feed {feed_out} thread {thread_out}"
+        );
+        assert_eq!(
+            row["attachments"], item["attachments"],
+            "the feed and the thread read must sanitise attachments alike: feed {feed_out} thread {thread_out}"
+        );
     }
 
     // ─── The genesis record travelling with the request ───────────────────
@@ -8546,11 +8912,10 @@ mod tests {
         // display name and the mark now read the key's own bytes, so an address
         // was an input to nothing a reader is shown.
         //
-        // NO SPEC: that the surviving JSON field is spelled `author` rather than
-        // `authorKey` is this change's choice — `thread-read` requires the value
-        // and names no field for it. `design.md` §4 carries the reasoning,
-        // including that a caller still reading `authorKey` gets a missing field
-        // rather than a wrong value.
+        // The field is spelled `author`, and `thread-read`'s requirement *An
+        // item's author key travels under the JSON key `author`* now says so.
+        // The spelling was #80's choice, and the `feed-row-contract` change's
+        // `design.md` carries why `author` was kept over `authorKey`.
         let out = read_thread(
             &thread_request(""),
             &a_thread_log(),
@@ -8582,6 +8947,75 @@ mod tests {
                 root.get(absent).is_none(),
                 "an item must not carry {absent}: {out}"
             );
+        }
+    }
+
+    /// Every string anywhere inside `v`, at any depth, with the key path it sits
+    /// under.
+    fn strings_under(v: &serde_json::Value, path: &str, out: &mut Vec<(String, String)>) {
+        match v {
+            serde_json::Value::String(s) => out.push((path.to_string(), s.clone())),
+            serde_json::Value::Array(items) => {
+                for (i, item) in items.iter().enumerate() {
+                    strings_under(item, &format!("{path}[{i}]"), out);
+                }
+            }
+            serde_json::Value::Object(map) => {
+                for (k, item) in map {
+                    strings_under(item, &format!("{path}.{k}"), out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn no_thread_item_holds_its_signers_key_under_any_key_but_author() {
+        // `thread-read`: an item carries its signer's key under `author`, and no
+        // other key holds that key a second time. The test above checks a list of
+        // likely names; this one checks EVERY value, so a second copy under a name
+        // nobody thought of (`signer`, `pk`, `by`) fails too.
+        //
+        // Two different signers, so that "each item's `author` is its own
+        // signer's" cannot be satisfied by a constant.
+        let out = read_thread(
+            &thread_request(""),
+            &a_thread_log(),
+            &feed_genesis(),
+            A_TIME,
+        );
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let items = v["items"].as_array().unwrap();
+        assert_eq!(items.len(), 2, "the fixture is a root and one reply: {out}");
+
+        let root_signer = feed_key(2).public_key().to_hex();
+        let reply_signer = feed_key(3).public_key().to_hex();
+        assert_ne!(root_signer, reply_signer);
+        for (item, signer) in items.iter().zip([&root_signer, &reply_signer]) {
+            assert_eq!(
+                item["author"].as_str(),
+                Some(signer.as_str()),
+                "each item's `author` is its own signer's key: {out}"
+            );
+            assert!(item.get("authorKey").is_none(), "{out}");
+
+            let mut strings = Vec::new();
+            for (key, value) in item.as_object().unwrap() {
+                if key != "author" {
+                    strings_under(value, key, &mut strings);
+                }
+            }
+            // The walk saw something, or an empty walk would pass vacuously.
+            assert!(
+                strings.iter().any(|(path, _)| path == "id"),
+                "the walk must reach the item's other fields: {strings:?}"
+            );
+            for (path, value) in &strings {
+                assert!(
+                    !value.contains(signer.as_str()),
+                    "`{path}` holds the signer's key a second time: {out}"
+                );
+            }
         }
     }
 
