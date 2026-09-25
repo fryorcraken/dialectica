@@ -285,6 +285,24 @@ impl CurrentVersion {
 /// revision of their own post while stamping it with another Stoa's address, and
 /// every reader rendered the rewritten body. [`is_valid_revision`] carries why
 /// the signed preimage does not close that on its own.
+///
+/// # What signing an hour ahead buys here, and whom
+///
+/// **The current version is the one with the greatest counter, and an author can
+/// sign one up to an hour ahead.** The counter is its author's claim about the
+/// time, and `op-ordering`'s receive window refuses one only when it is more than
+/// an hour ahead of the receiving peer's time. Because the authorship check above
+/// admits only this post's author's versions, the lead is over **that author's
+/// own** other versions — one published from a device that had not yet received
+/// the ahead-signed one — for up to an hour. No third party can use it, which is
+/// why this reader's exposure is narrower than [`crate::moderation::resolve`]'s,
+/// where any moderator can. A revision published after receiving the ahead-signed
+/// one carries the greater counter and becomes current. Before the window, an
+/// author who signed the maximum counter fixed that version as current
+/// permanently, and their own later revisions could never displace it. Nothing
+/// here has code of its own for this: the bound is the ordering rule's
+/// (`op-ordering`, "An op signed ahead of the time leads only until the time
+/// passes it"), and every reader of the rule's first entry inherits it.
 pub fn current_version<L: OpLog>(
     log: &L,
     post: &OpId,

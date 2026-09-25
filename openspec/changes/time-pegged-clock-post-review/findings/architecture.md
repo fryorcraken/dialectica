@@ -17,7 +17,7 @@ first; its first line is:
 
 ## Findings
 
-- [ ] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/arrival.rs:199`,
+- [x] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/arrival.rs:199`,
       `op.rs:67`, `op.rs:568`, `transport.rs:477` (diff 1) — the four repointed
       doc comments cite the archived design by its **full folder path**
       (`` `openspec/changes/archive/2026-09-25-time-pegged-clock/design.md`,
@@ -55,6 +55,18 @@ first; its first line is:
       to name a *spec*, `op-ordering`, which is a live, moving document, so
       the replacement deliberately over-specifies to avoid the same staleness
       recurring) — right now neither is written down.
+      **Outcome (`dev-writer`): fixed** in the commit that ticks this box. I
+      took the first option. All four now read "the archived
+      `time-pegged-clock` change's `design.md`", followed by the same Decision
+      numbers as before. `git grep -n -F -e "2026-09-25-time-pegged-clock" --
+      dialectica/rust-lib` returns nothing. I found no reason for the fuller
+      form worth keeping. The staleness the old pointer suffered came from
+      citing a live spec whose text was then removed. A change name picks out
+      an archived `design.md` either way, and the date-prefixed path adds only
+      a string that breaks if the folder is renamed. `design.md`, Risks, first
+      bullet, now says the four cite by change name to match the crate, and
+      names three existing citations of that form. Doc comments only. No test
+      can see a doc comment, so there is no failing test to name.
 
 ## What I checked and found clean
 

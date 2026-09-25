@@ -195,8 +195,8 @@ impl Arrival {
 /// It is a refusal of an authentic op for a field's value, which this system
 /// previously ruled out. The cost — a peer whose clock runs more than an hour
 /// fast has its ops refused, and one running more than an hour slow refuses
-/// honest ops — is worked through for both in the archived
-/// `openspec/changes/archive/2026-09-25-time-pegged-clock/design.md`, Decision 11.
+/// honest ops — is worked through for both in the archived `time-pegged-clock`
+/// change's `design.md`, Decision 11.
 ///
 /// # The same on every peer
 ///

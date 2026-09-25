@@ -30,3 +30,9 @@ Every review row covers this change's own diff **and** `git diff 2eada33 c1f1a8f
 - [x] 3.1 `openspec validate time-pegged-clock-post-review --strict` passes.
 - [x] 3.2 `nix build ./dialectica#lgx` succeeds from the tree root.
 - [x] 3.3 Open the PR on `piece/162-post-review`, naming PR #165 and #162 as what it follows up, without a closing keyword (#162 is closed), and stating that it carries the review of `git diff 2eada33 c1f1a8f`.
+
+## 4. Review findings addressed to `dev-writer`
+
+- [x] 4.1 Cite the archived design by change name in the four repointed doc comments (`arrival.rs`, `op.rs` twice, `transport.rs`), matching the crate's idiom, and record why in `design.md`, Risks. Doc comments only.
+- [x] 4.2 Record in `design.md`, Decision 11, that archived Decision 3's "What pins it" missed the test `c1f1a8f` added. Re-measure the mutation it names rather than quoting it.
+- [x] 4.3 Add the self-only one-hour exposure to `revision::current_version`'s doc, which archived Decision 10 says is there. Record the correction in `design.md`, Decision 11. Doc comment only; no test can see it.

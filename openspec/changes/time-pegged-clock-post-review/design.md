@@ -17,8 +17,10 @@ are not edited.
 
 No code behaviour changes. The rules the reasoning explains are implemented in
 `dialectica-core` (`arrival.rs`, `authoring.rs`, `transport.rs`,
-`log/sqlite.rs`) as #165 left them. The only code edits are four doc comments
-that pointed at the removed reasoning (see Risks).
+`log/sqlite.rs`) as #165 left them. The only code edits are doc comments: four
+that pointed at the removed reasoning (see Risks), and one on
+`revision::current_version` that makes a claim of the archived design true
+(Decision 11).
 
 ## Goals / Non-Goals
 
@@ -343,6 +345,49 @@ whose clock is slow signs behind, by any amount. It follows that:
   later change free to alter the token's form without breaking a caller that
   stayed inside the contract.
 
+### 11. Two corrections to the archived design
+
+The archived design is not edited (Decision 1), so where review of #165's last
+four commits (`git diff 2eada33 c1f1a8f`) found it wrong, the correction is
+here. A reader of the archive should read these two against the Decisions they
+name.
+
+**Archived Decision 3, "What pins it", understates its own coverage.** It says
+the second `op-ordering` scenario, "A counter taken from the clock leaves the
+wall-clock at the current time", is "satisfied by the same line of `publish`",
+with no test of its own. That was written in `c34ec46`. The next commit,
+`c1f1a8f`, added a test for exactly that scenario, and Decision 3 was not
+updated. The scenario is pinned by
+`a_counter_taken_from_the_clock_leaves_the_wall_clock_at_the_current_time`
+(`authoring.rs`). Its fixture holds an op far ahead of the time, so the counter
+takes the clock term and the two fields differ. The first scenario's test,
+`one_reading_of_the_time_signs_both_clock_fields`, cannot see this, because
+there the counter and the wall-clock are the same number.
+
+*What breaks without it:* mutating `publish` to write the counter into the
+wall-clock field (`asserted_ms: next_counter(clock, who.asserted_ms)`) turns that
+test red (left 1,789,732,304,001, right 1,789,729,304,000). Measured again for
+this change. The same mutation also turns
+`the_second_authoring_carries_the_higher_counter` red, but only through its
+fixture-drift guard: the mutated wall-clock changes the second op's bytes and so
+its op id. That test does not assert anything about the wall-clock field, so it
+is not a second guard for this scenario.
+
+**Archived Decision 10's last sentence was true of one of its two sites.** It
+says the one-hour exposure "is recorded in each reader's doc comments too,
+`revision.rs` on `current_version` and `moderation.rs` on `resolve`". At #165's
+merge, `moderation.rs` stated the specific exposure (a moderator can beat an
+opposite action another moderator published within the hour without receiving
+it). `revision.rs` stated only the general bound, that an author may sign up to
+an hour ahead. It did not say what makes this reader's exposure narrower: only
+the post's author's versions are considered, so the lead is over that author's
+own other versions and no third party can use it. This change adds that
+paragraph to `current_version`'s doc, under "What signing an hour ahead buys
+here, and whom", so the archived sentence is now true of both sites. No test can
+see a doc comment. The behaviour it describes is the ordering rule's and is
+pinned by `op-ordering`'s scenario "An op signed ahead of the time leads only
+until the time passes it".
+
 ## Risks / Trade-offs
 
 - **[Code comments pointed at `op-ordering` for reasoning this change removes
@@ -353,7 +398,12 @@ whose clock is slow signs behind, by any amount. It follows that:
   said the window's "reasoning is `op-ordering`'s", which was T5's pointer. This
   change repoints all four to the archived design's Decision 11 (and Decision 1
   for `transport.rs`), and so touches doc comments and nothing else in the
-  code. A sweep of every comment in `dialectica/rust-lib` naming one of the six
+  code. The four cite it as "the archived `time-pegged-clock` change's
+  `design.md`", by the change's name and not by its folder path, because that
+  is how every other archived-design citation in `dialectica-core` is written
+  (`transport.rs` on the `op-ordering` change, `op.rs` on `stoa-metadata-op`,
+  `wire.rs` on `get-stoa`). The dated folder is found from the name with
+  `git ls-files openspec/changes/archive`. A sweep of every comment in `dialectica/rust-lib` naming one of the six
   capabilities found no other that cites a removed passage. `asserted_time.rs`'s
   "`op-ordering` says why the clamp may not be promoted" stays as it is: the
   sentence it points at predates #165 and is kept.

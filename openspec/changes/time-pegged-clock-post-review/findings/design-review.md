@@ -37,7 +37,7 @@ is accurate.
 
 ## Diff 2 — the four unreviewed #165 commits
 
-- [ ] **`dev-writer`** — `openspec/changes/archive/2026-09-25-time-pegged-clock/design.md:127-133`,
+- [x] **`dev-writer`** — `openspec/changes/archive/2026-09-25-time-pegged-clock/design.md:127-133`,
       Decision 3, "What pins it" — the claim understates the change's own test
       coverage, in material this change's own commit range produced.
       **Diff 2, commits `c34ec46` then `c1f1a8f`.** `c34ec46` wrote: "The second
@@ -62,8 +62,23 @@ is accurate.
       between a corrective note in this change's own `design.md` or a rare
       archive correction — but the record as it stands is wrong about its own
       coverage.
+      **Outcome (`dev-writer`): fixed** in the commit that ticks this box, as a
+      corrective note in this change's `design.md`. The archive stays
+      unedited, per this change's Decision 1. The note is the new Decision 11,
+      "Two corrections to the archived design", first paragraph. It names the
+      test, says why the first scenario's test cannot see this, and carries the
+      mutation evidence. I re-ran the mutation rather than quoting it: with
+      `publish`'s `asserted_ms` set to `next_counter(clock, who.asserted_ms)`,
+      `cargo test -p dialectica-core authoring::` failed this test with the
+      same numbers (left 1789732304001, right 1789729304000), and I then
+      restored the line. It also failed a second test,
+      `the_second_authoring_carries_the_higher_counter`. That failure comes from
+      its fixture-drift guard, because the changed wall-clock changes the op
+      id. It is not an assertion about the wall-clock field, and Decision 11
+      says so, so that nobody counts it as a second guard. No code changed for
+      this finding.
 
-- [ ] **`dev-writer`** — `openspec/changes/archive/2026-09-25-time-pegged-clock/design.md:262-265`,
+- [x] **`dev-writer`** — `openspec/changes/archive/2026-09-25-time-pegged-clock/design.md:262-265`,
       Decision 10's closing sentence, against `revision.rs` and `moderation.rs`.
       **Diff 2, commit `ae0c30d`** ("Reword the counter's reasoning in
       moderation.rs and revision.rs"). Decision 10 claims: "The exposure is
@@ -86,3 +101,18 @@ is accurate.
       that makes this reader's exposure narrower than `moderation.rs`'s.
       **Verified:** `git grep -n "up to an hour" dialectica/rust-lib/dialectica-core/src/revision.rs dialectica/rust-lib/dialectica-core/src/moderation.rs`
       shows the asymmetry directly.
+      **Outcome (`dev-writer`): fixed** in the commit that ticks this box.
+      `current_version`'s function doc gains a section, "What signing an hour
+      ahead buys here, and whom". It is modelled on `moderation.rs`'s paragraph
+      on `resolve`. It says the lead is over the author's own other versions,
+      from a device that had not received the ahead-signed one, for up to an
+      hour. It gives the reason: the authorship check admits only the post's
+      author's versions. It says no third party can use it, and links
+      `resolve` as the wider case. It also gives the *before* case from
+      archived Decision 10 and cites the `op-ordering` scenario that pins the
+      behaviour. Archived Decision 10's last sentence is now true of both
+      sites. This change's `design.md`, Decision 11, second paragraph, records
+      that it was not true at #165's merge, and which change made it true.
+      Doc comment only. No test can see it, and the behaviour it describes
+      was already pinned by
+      `an_op_signed_ahead_of_the_time_leads_only_until_the_time_passes_it`.
