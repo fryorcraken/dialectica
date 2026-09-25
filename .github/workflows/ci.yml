@@ -1168,6 +1168,35 @@ jobs:
       - name: The two UI workflows pin the same tool versions
         run: python3 dialectica-ui/tests/tst_ui_tool_pins.py
 
+      # `tomlq` is the one thing this job needs that the image does not carry.
+      # `tst_scaffold_values_unchanged.py` runs the two real `scaffold.toml`
+      # steps out of ui-tests.yml, and those steps read the file as TOML with
+      # `tomlq`; the runner's preinstalled `yq` is the Go one and has no
+      # `tomlq`, same note as ui-tests.yml's own install step. Mirroring that
+      # step's apt-source workaround rather than a bare `apt-get install`:
+      # radicle's identical step once failed `update` on a 403 from a
+      # preconfigured third-party source, so the extra sources are moved aside
+      # first and `install` is the real gate.
+      - name: Install tomlq
+        run: |
+          set -eu
+          sudo mkdir -p /etc/apt/disabled-sources.d
+          sudo find /etc/apt/sources.list.d -maxdepth 1 \
+            \( -name '*.list' -o -name '*.sources' \) \
+            ! -name 'ubuntu.sources' ! -name 'ubuntu.list' \
+            -exec mv -v -t /etc/apt/disabled-sources.d {} +
+          sudo apt-get update -qq \
+            || echo "::warning::apt-get update reported errors; install is the gate, continuing"
+          sudo apt-get install -y --no-install-recommends yq
+          tomlq --version
+
+      # The scaffold-diff guard's own tests, so whether its diff mechanism
+      # tells a changed value from lgs's comment-and-reorder rewrite is
+      # checked on every PR rather than only when a real run happens to trip
+      # it. design.md D11.
+      - name: The scaffold-diff guard tells a changed value from lgs's rewrite
+        run: python3 dialectica-ui/tests/tst_scaffold_values_unchanged.py
+
   # ─── rust ────────────────────────────────────────────────────────────────
   # The core module's whole decision surface. `src/core.rs` holds every
   # decision and `src/lib.rs` holds none, and that shape is FORCED rather than

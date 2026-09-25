@@ -369,6 +369,59 @@ not asserted, for a different reason: every requirement this spec observes is
 about an effect, and asserting that a call happened would pass against a view
 that made the call and rendered the wrong result.
 
+### D11 — `tst_scaffold_values_unchanged.py` is wired into `ui-specs`, not left unrun
+
+A design review filed a real gap: `tst_scaffold_values_unchanged.py` (the
+"lgs left scaffold.toml's values alone" guard's own tests, same rationale as
+D1's adjudicator tests — "a checked-in script with its own tests... both of
+this repo's QML gate defects shipped through review because a heredoc cannot
+be run without pushing") was checked in with no CI job running it. Unlike its
+sibling `tst_adjudicate_ui_run.py`, `git grep tst_scaffold_values_unchanged --
+.github/` returned nothing: the guard's own diff mechanism could regress and
+no PR gate would notice, the exact failure mode D1 exists to close, reopened
+for this one test.
+
+**Chosen:** wire it into `ci.yml`'s `ui-specs` job, alongside its sibling. It
+needs one thing the job did not already carry: `tomlq`, because the test runs
+the two real `scaffold.toml`-diff steps extracted verbatim out of
+`ui-tests.yml`, and those steps read the file as TOML with `tomlq`. The
+install step mirrors `ui-tests.yml`'s own (moving aside preconfigured
+third-party apt sources before `update`, treating `install` as the real gate)
+rather than a bare `apt-get install`, for the same reason that step gives:
+radicle's identical step once failed `update` on a 403 from a third-party
+source. PyYAML needs no new step — D8 already established it comes from the
+runner image for every other script `ui-specs` runs, and this script imports
+it the same way.
+
+**What this adds to the cheap job:** one apt transaction for a single
+package (`yq`, providing `tomlq`) and one Python script, both seconds-scale —
+the same order of cost as the job's existing `npm install` and two other
+Python steps, not the minutes-scale cost D7's split exists to keep off every
+PR. It does not touch `ui-tests.yml` or D7's measured table: that table is
+`ui-tests.yml`'s own steps, and this addition is entirely inside `ui-specs`.
+
+**Rejected:** recording in `design.md` that the guard-test is deliberately
+left unrun. Nothing about it needs Basecamp, Nix, `lgs` or a network — its own
+docstring says so ("checkable without `lgs`, Nix or a network") — so there was
+no structural reason it could not run in the cheap job, only that it had not
+yet been asked to. A "deliberately not run" note would have recorded an
+oversight as if it were a decision.
+
+**Verified:** running the exact command the new step invokes,
+`python3 dialectica-ui/tests/tst_scaffold_values_unchanged.py`, against its own
+built-in fixtures (no `.github/` file needs mutating to see this: the test
+constructs "before" and "after" `scaffold.toml` snapshots itself) shows the
+three cases the guard exists to tell apart: unchanged values exit 0, a
+comment-and-reorder rewrite with every value identical (what `lgs` actually
+does) exits 0, and one hex digit changed in a pin exits 1 and names the cause.
+That third case is what "the wiring can fail" means here: the command the new
+`ui-specs` step now runs is not a command that exits 0 unconditionally — it
+goes red on the regression it is meant to catch. Whether the new `ui-specs` step itself runs green in the real GitHub Actions
+image — the apt transaction succeeding, `tomlq --version` resolving, the step
+graph executing in the order written — is, like the rest of this piece's Risks
+section ("The full run is proven only in CI"), provable only by a CI run: no
+local substitute was run for that half, and none is claimed here.
+
 ## Risks / Trade-offs
 
 - **The full run is proven only in CI.** Locally, sitometres launches Basecamp

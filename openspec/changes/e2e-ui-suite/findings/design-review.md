@@ -13,7 +13,7 @@ config) are all recorded and the code matches what is recorded, and the
 `role = "dependency"` and the pin values all check out against the live repo
 state. One real gap found, below.
 
-- [ ] **`tester`** — a checked-in guard-test exists but is wired into no CI job,
+- [x] **`tester`** — a checked-in guard-test exists but is wired into no CI job,
       unlike every sibling it was modelled on
       `dialectica-ui/tests/tst_scaffold_values_unchanged.py` is a new file (not
       present on `origin/main`, not mentioned in `design.md`) that pins the
@@ -37,6 +37,50 @@ state. One real gap found, below.
       is deliberately not run in CI (e.g. if it needs something `ui-specs`
       does not have) — right now neither has happened, so the omission reads
       as an oversight rather than a decision.
+
+      **fixed.** Wired `tst_scaffold_values_unchanged.py` into `ci.yml`'s
+      `ui-specs` job (`.github/workflows/ci.yml`), alongside
+      `tst_adjudicate_ui_run.py` and `tst_ui_tool_pins.py`. It needed one thing
+      the job did not already have — `tomlq`, since the test runs the two real
+      `scaffold.toml`-diff steps extracted verbatim from `ui-tests.yml`, and
+      those read the file as TOML with `tomlq`. Added an "Install tomlq" step
+      that mirrors `ui-tests.yml`'s own (move aside preconfigured third-party
+      apt sources, then `install` is the real gate) rather than a bare
+      `apt-get install`. PyYAML needed no new step: D8 already established the
+      runner image supplies it for every other script this job runs.
+      Recorded as design.md D11, including why "record it as deliberately
+      unrun" was rejected — the test's own docstring says it needs no Basecamp,
+      Nix or network, so nothing structural stopped it running in the cheap job.
+
+      **How I showed the wiring can fail:** ran the exact command the new step
+      invokes, `python3 dialectica-ui/tests/tst_scaffold_values_unchanged.py`,
+      locally. It is not a command that exits 0 unconditionally — against its
+      own built-in fixtures it exits 0 for values genuinely unchanged, exits 0
+      for the comment-and-reorder rewrite `lgs` actually performs, and **exits
+      1, naming the cause and showing the diff, when one hex digit of a pin
+      changes** — the regression the guard exists to catch. That is the
+      predicted failure and it is what was observed; no local substitute exists
+      for "does the new CI step itself execute and pass inside GitHub's ubuntu
+      image" — like the rest of this run, that half is provable only by a CI
+      run (design.md D11, Risks: "The full run is proven only in CI").
+
+      One blocked action along the way, reported rather than worked around: an
+      attempt to mutate `ui-tests.yml`'s own "lgs left scaffold.toml's values
+      alone" step (removing its `exit 1`, to show a live regression escaping
+      notice pre-fix) was refused by the auto-mode classifier as "Security Test
+      Removal." Not retried. The mutated line was reverted immediately
+      (confirmed via `git diff --stat .github/workflows/ui-tests.yml`, clean);
+      it was not needed anyway, since the test's own fixtures already
+      demonstrate the failing case without touching any tracked file.
+
+      Ran `python3 dialectica-ui/tests/tst_ui_tool_pins.py` and
+      `python3 dialectica-ui/tests/tst_adjudicate_ui_run.py` afterwards as a
+      sanity check that editing `ci.yml` broke neither the pin check (which
+      parses the same file) nor the adjudicator's own tests — both still pass.
+
+      `git diff --stat` at commit time: `.github/workflows/ci.yml`,
+      `openspec/changes/e2e-ui-suite/design.md`, and this findings file. No
+      implementation file outside test/CI/design scope touched.
 
 ## The four owner-requested decisions, checked individually
 
