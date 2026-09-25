@@ -2597,11 +2597,13 @@ mod tests {
         assert_eq!(log.len().unwrap(), 0);
     }
 
-    // NO SPEC: the spec does not say what an op this peer ALREADY HOLDS does when
-    // it arrives again beyond the window — possible only if this peer's clock was
-    // set back after admitting it. This refuses it as `AheadOfTime`, because the
-    // window runs before the append that would have reported `AlreadyPresent`.
-    // The log is unchanged either way.
+    // `op-transport`, "A held op arriving again beyond the window is refused, and
+    // stays held" — possible only if this peer's time moved back after it
+    // admitted the op. Validation precedes every lookup by a property of the op,
+    // and "is this op already held?" is a lookup by op id: here it is the append,
+    // which is what would report `AlreadyPresent`. So the window refuses first,
+    // and the held op is left as it was. This was a `NO SPEC:` marker until that
+    // requirement said so.
     #[test]
     fn a_held_op_arriving_again_beyond_the_window_is_refused_rather_than_reported_as_held() {
         let stoa = a_stoa("Agora");

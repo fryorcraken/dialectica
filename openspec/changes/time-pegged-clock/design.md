@@ -109,17 +109,28 @@ doc records that every other millisecond value in `core` is the *reading* peer's
 clock, and the receiving peer is a reading peer. `thread.rs` and `wire.rs` already
 call that value `now_ms`.
 
-### 3. One instant signs both clock fields at publish
+### 3. One field carries the one reading that signs both clock fields
 
-`publish` computes `next_counter(clock, who.asserted_ms)` and signs the same
-`asserted_ms` as the wall-clock field. An honest op whose author's clock was
-behind the current time therefore carries a counter equal to its wall-clock.
+`op-ordering` requires a publish to take its current time once and sign that
+value as the wall-clock field too ("One reading of the time signs both clock
+fields"). The decision here is how that one reading reaches `publish`: as the
+single existing field `Authorship::asserted_ms`. `publish` computes
+`next_counter(clock, who.asserted_ms)` and signs the same `asserted_ms` as the
+wall-clock field.
 
-*Considered:* a second field, `Authorship::now_ms`, for the counter. *Rejected*
-because a peer has one reading of the time. Two fields let a caller pass two
-values that disagree, and a test built on two values would exercise a state the
-adapter never produces. The spec does not require the two to be equal, so the
-equality is marked `NO SPEC` in `authoring.rs`.
+*Considered:* a second field, `Authorship::now_ms`, for the counter. *Rejected*:
+two fields let a caller pass two values that disagree, which is the state the
+spec forbids. With one field the forbidden state cannot be written down, so
+nothing has to check for it. A test built on two values would also exercise a
+state the adapter never produces.
+
+*What pins it:* `one_reading_of_the_time_signs_both_clock_fields`
+(`authoring.rs`) signs at a time other than the fixture constant and asserts
+that the counter and the wall-clock are both that time. It covers the spec's
+first scenario, where the clock is behind the time. The second scenario, where
+the counter comes from the clock and the wall-clock stays at the time, is
+satisfied by the same line of `publish`: the field is signed as passed, whatever
+`next_counter` returned.
 
 This does not make the wall-clock field decide anything. The counter is computed
 from the host's time, not read from the field. The field is written from the
@@ -251,7 +262,9 @@ greater counter and lead it.
 
 This is specified once, in `op-ordering` ("An op signed ahead of the time leads
 only until the time passes it"), because every reader inherits it from the
-rule. No reader has code of its own for it.
+rule. No reader has code of its own for it. The exposure is recorded in each
+reader's doc comments too, `revision.rs` on `current_version` and `moderation.rs`
+on `resolve`, because this folder is archived and the code stays.
 
 ### 11. A receiver whose own clock is wrong
 
@@ -318,10 +331,14 @@ next op, because each receiver's limit is still its own time plus one hour.
   below every op published after this change. The owner ruled that no migration
   is needed, because nothing has been released.
 - **[A peer that holds an op, and then has its clock set back by more than an
-  hour, refuses that op if it arrives again]** → The refusal is `AheadOfTime`,
-  not `AlreadyPresent`, because the window runs before the append that would
-  have reported the duplicate. The log is unchanged either way. This is marked
-  `NO SPEC` in `transport.rs`.
+  hour, refuses that op if it arrives again]** → `op-transport` requires this
+  ("An op this peer already holds is judged like any other arrival"). The
+  refusal is `AheadOfTime`, not `AlreadyPresent`: validation precedes every
+  lookup by op id, and in `receive` that lookup is the append, which is what
+  reports the duplicate. The held op is left as it was. The cost is a log line
+  that reads as a fresh refusal of an op the peer already holds.
+  `a_held_op_arriving_again_beyond_the_window_is_refused_rather_than_reported_as_held`
+  (`transport.rs`) pins it.
 - **[The adapter does not call `receive` yet]** → When it does, it must pass the
   host's `now_ms()`, never the event's `timestamp`. The types differ (Decision
   2), so the mistake takes a cast to write.

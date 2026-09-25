@@ -256,11 +256,12 @@ pub struct Authorship<'a> {
 ///
 /// # One instant signs both clock fields
 ///
-/// The current time the counter is pegged to is `who.asserted_ms`, the same
-/// value signed as the wall-clock. A peer has one reading of the time, and the
-/// adapter samples it once (`now_ms()`). A second field for the counter's time
-/// would let a caller pass two readings that disagree, and a test built on two
-/// would exercise a state the adapter never produces. `design.md` Decision 3.
+/// `op-ordering` requires a publish to take its current time once and sign it
+/// as both the counter's basis and the wall-clock field. That reading is
+/// `who.asserted_ms`, which the adapter samples once (`now_ms()`). A second
+/// field for the counter's time would let a caller pass two readings that
+/// disagree, which is the state the requirement forbids; with one field it
+/// cannot be written down. `design.md` Decision 3.
 ///
 /// That does not make the wall-clock field decide anything: the counter is
 /// computed from the host's time, and nothing reads the field to compute it.
@@ -1709,11 +1710,11 @@ mod tests {
         );
     }
 
-    // NO SPEC: the spec requires the counter to take "the peer's current Unix
-    // time in milliseconds" and the wall-clock to be the author's assertion, and
-    // does not say they are the same reading. This signs ONE reading into both
-    // (`design.md` Decision 3), so an op whose clock was behind the time carries
-    // a counter equal to its wall-clock.
+    // `op-ordering`, "One reading of the time signs the counter and the
+    // wall-clock alike": a publish takes its current time once and signs it as
+    // both the counter's basis and the wall-clock field, so an op whose clock
+    // was behind the time carries a counter equal to its wall-clock. This was a
+    // `NO SPEC:` marker until the publish requirement said so.
     #[test]
     fn one_reading_of_the_time_signs_both_clock_fields() {
         // A time other than `A_TIME`, so neither field can be right by
