@@ -4754,6 +4754,19 @@ mod tests {
             let v = keep_through_the_wire(&dir, nonce, Some(nonce), index, &Unlock::Unencrypted);
             assert_eq!(v["kept"], false, "index {index}: {v}");
             assert!(v.get("address").is_none(), "index {index}: {v}");
+            // `identity-onboarding`: a well-formed index naming no candidate is
+            // NOT malformed. It is the not-kept reply with a reason, and never
+            // the error shape `each_malformed_kind_of_index_is_refused_by_name`
+            // pins for a malformed one. `SLATE_SIZE` is the spec scenario's "one
+            // greater than the last position in that set".
+            assert!(
+                v["reason"].as_str().is_some_and(|r| !r.is_empty()),
+                "index {index}: a not-kept reply carries a reason: {v}"
+            );
+            assert!(
+                v.get("error").is_none(),
+                "index {index} is well-formed and must not be the error shape: {v}"
+            );
             assert!(
                 !dir.keystore_path().exists(),
                 "index {index} wrote a keystore"
@@ -5047,6 +5060,120 @@ mod tests {
                 "a malformed request for {bad:?} wrote a keystore"
             );
         }
+    }
+
+    /// Every malformed kind `identity-onboarding` lists for a keep request's
+    /// `index`, as the raw JSON text sent. Each is paired with the kind it stands
+    /// for, so a failure names the spec's bullet and not only the spelling.
+    ///
+    /// `18446744073709551616` is `u64::MAX + 1`. serde_json does not hold it as an
+    /// integer; it falls back to `f64`, so it reaches `parse_index`'s
+    /// non-integer arm and never its `try_from` arm. That arm is reachable only on
+    /// a target whose `usize` is narrower than 64 bits, and CI builds none. This
+    /// input is therefore the only "too large" spelling a test on this target can
+    /// send.
+    const MALFORMED_INDEXES: [(&str, &str); 8] = [
+        ("negative", "-1"),
+        ("fractional", "1.5"),
+        ("a whole number written with a decimal point", "0.0"),
+        ("a whole number written with an exponent", "1e2"),
+        ("a string", r#""two""#),
+        ("an array", "[]"),
+        ("a boolean", "true"),
+        (
+            "larger than this peer can represent",
+            "18446744073709551616",
+        ),
+    ];
+
+    #[test]
+    fn each_malformed_kind_of_index_is_refused_by_name() {
+        // `identity-onboarding`, *A malformed `index` in a keep request is refused
+        // with a message naming `index`*. The stoa and slate are valid and the
+        // slate is LIVE, so `index` is the only thing wrong with each request. A
+        // fixture with a stale slate would be refused as not-kept before `index`
+        // mattered, and a fixture with a bad stoa would be refused naming `stoa`.
+        //
+        // `index` is parsed by `parse_index`, the function behind the feed's `page`
+        // and `perPage`. Until this test, dropping the field name from its
+        // messages was caught only by the feed's
+        // `malformed_pagination_fields_are_refused_by_name`, a test about a
+        // different method whose requirement does not cover `index`.
+        let nonce = SlateNonce::generate().unwrap();
+        for (kind, raw) in MALFORMED_INDEXES {
+            let dir = OnboardingDir::new("keep-index-by-name");
+            let v = keep_with_raw_index(&dir, nonce, Some(nonce), raw, &Unlock::Unencrypted);
+            let message = v["error"]
+                .as_str()
+                .unwrap_or_else(|| panic!("an index that is {kind} ({raw}) must be refused: {v}"));
+            assert!(
+                message.contains("index"),
+                "the refusal of an index that is {kind} ({raw}) must name `index`: {v}"
+            );
+            for field in ["kept", "publicKey", "path", "encrypted", "reason"] {
+                assert!(
+                    v.get(field).is_none(),
+                    "an index that is {kind} ({raw}) is refused as the error shape, \
+                     which carries no `{field}`: {v}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_malformed_index_stores_nothing() {
+        // The spec: "no master key is stored and no choice is recorded that were
+        // not there before". Two peers, because the claim is about NEW writes. A
+        // fresh peer shows no keystore appears. A peer already holding a master
+        // key shows the file is not rewritten, which "the file does not exist"
+        // cannot express.
+        let nonce = SlateNonce::generate().unwrap();
+
+        let fresh = OnboardingDir::new("keep-index-stores-nothing-fresh");
+        let existing = OnboardingDir::new("keep-index-stores-nothing-existing");
+        let minted = as_json(&create_identity(
+            "{}",
+            &existing.keystore_path(),
+            &Unlock::Unencrypted,
+        ));
+        assert!(
+            minted.get("error").is_none(),
+            "the fixture must start with a master key on disk: {minted}"
+        );
+        let before = std::fs::read(existing.keystore_path()).expect("the keystore reads");
+
+        for (kind, raw) in MALFORMED_INDEXES {
+            let v = keep_with_raw_index(&fresh, nonce, Some(nonce), raw, &Unlock::Unencrypted);
+            assert!(v.get("error").is_some(), "{kind} ({raw}): {v}");
+            assert!(
+                !fresh.keystore_path().exists(),
+                "an index that is {kind} ({raw}) wrote a keystore on a fresh peer"
+            );
+            assert_eq!(
+                fresh.paths().path_for(&a_stoa()).unwrap(),
+                None,
+                "an index that is {kind} ({raw}) recorded a choice"
+            );
+
+            let v = keep_with_raw_index(&existing, nonce, Some(nonce), raw, &Unlock::Unencrypted);
+            assert!(v.get("error").is_some(), "{kind} ({raw}): {v}");
+            assert_eq!(
+                std::fs::read(existing.keystore_path()).unwrap(),
+                before,
+                "an index that is {kind} ({raw}) rewrote the existing master key"
+            );
+            assert_eq!(
+                existing.paths().path_for(&a_stoa()).unwrap(),
+                None,
+                "an index that is {kind} ({raw}) recorded a choice"
+            );
+        }
+
+        // The same fixture DOES store on a well-formed index, or every assertion
+        // above could hold because this fixture can never store anything.
+        let ok = keep_with_raw_index(&fresh, nonce, Some(nonce), "0", &Unlock::Unencrypted);
+        assert_eq!(ok["kept"], true, "got {ok}");
+        assert!(fresh.keystore_path().exists());
     }
 
     // ─── Who the user is ──────────────────────────────────────────────────
@@ -9030,6 +9157,144 @@ mod tests {
                     "`{path}` holds the signer's key a second time: {out}"
                 );
             }
+        }
+    }
+
+    /// A five-item thread in which **two pairs of items share an author**: the
+    /// root and one reply by key 2, two replies by key 3, one by key 4.
+    ///
+    /// The shared authors are the point. `a_thread_log` has one item per
+    /// author, so a position computed from the author alone is unique there and
+    /// every position test using it passes. Issue #166 measured exactly that:
+    /// `"position": item.author` in `thread_page_json` turned only
+    /// `no_thread_item_holds_its_signers_key_under_any_key_but_author` red, and
+    /// only because the value copied in was the signer's key.
+    ///
+    /// Five items, so a `perPage` of 2 gives three pages with the last one
+    /// partial. A per-page index then repeats on every page.
+    fn a_thread_log_with_shared_authors() -> (MemoryOpLog, usize) {
+        let root = a_thread_root();
+        let under_root = |seed: u8, body: &str| {
+            a_thread_post(seed, Some(root.op.id()), Some(root.op.id()), body)
+        };
+        let ops = [
+            root.clone(),
+            under_root(3, "first by three"),
+            under_root(3, "second by three"),
+            under_root(2, "the root's author again"),
+            under_root(4, "by four"),
+        ];
+        let len = ops.len();
+        let mut log = MemoryOpLog::new();
+        for op in ops {
+            log.append(op, Arrival::unordered()).unwrap();
+        }
+        (log, len)
+    }
+
+    /// Read the thread page by page at `per_page`, returning `(id, author,
+    /// position)` for every item in the order the pages returned them.
+    ///
+    /// Reads until `hasMore` is false, with a bound so that a handler reporting
+    /// `hasMore: true` forever fails instead of hanging.
+    fn thread_positions_at(log: &MemoryOpLog, per_page: usize) -> Vec<(String, String, String)> {
+        let mut seen = Vec::new();
+        for page in 0..=16 {
+            let out = read_thread(
+                &thread_request(&format!(r#""page":{page},"perPage":{per_page}"#)),
+                log,
+                &feed_genesis(),
+                A_TIME,
+            );
+            let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+            for item in v["items"].as_array().unwrap_or_else(|| panic!("got {out}")) {
+                let text = |key: &str| {
+                    item[key]
+                        .as_str()
+                        .unwrap_or_else(|| panic!("`{key}` must be text: {out}"))
+                        .to_string()
+                };
+                seen.push((text("id"), text("author"), text("position")));
+            }
+            if v["hasMore"] == false {
+                return seen;
+            }
+        }
+        panic!("the thread never reported its last page at perPage {per_page}");
+    }
+
+    #[test]
+    fn no_two_items_of_a_thread_share_a_position_even_when_they_share_an_author() {
+        // `thread-read`, *Two items of one thread never share a position*: the
+        // thread's items, read across every page, carry pairwise-unequal
+        // positions.
+        //
+        // Read at `perPage` 2, so the whole-thread claim is tested across three
+        // pages rather than inside one. The fixture's shared authors are what
+        // make this discriminate between a position and a per-author value.
+        let (log, len) = a_thread_log_with_shared_authors();
+        let items = thread_positions_at(&log, 2);
+
+        // The read reached every item exactly once, or distinct positions over a
+        // truncated or duplicated read would prove nothing.
+        let ids: std::collections::BTreeSet<&String> = items.iter().map(|(id, _, _)| id).collect();
+        assert_eq!(items.len(), len, "every item is read once: {items:?}");
+        assert_eq!(ids.len(), len, "every item is read once: {items:?}");
+        // And the fixture has the property the test depends on.
+        let authors: std::collections::BTreeSet<&String> =
+            items.iter().map(|(_, author, _)| author).collect();
+        assert!(
+            authors.len() < len,
+            "the fixture must have two items by one author: {items:?}"
+        );
+
+        for (i, (id_a, _, position_a)) in items.iter().enumerate() {
+            for (id_b, _, position_b) in &items[i + 1..] {
+                assert_ne!(
+                    position_a, position_b,
+                    "items {id_a} and {id_b} share the position {position_a:?}: {items:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_position_is_the_same_whatever_page_size_the_read_used() {
+        // `thread-read`, *A position indexes the whole thread and does not
+        // restart per page*: an item's position is the same value whatever page
+        // size the read used.
+        //
+        // Compared by ITEM ID against a one-page read, not against literal
+        // values. The spec contracts the property and deliberately leaves a
+        // later change free to alter the token's form, so this asserts the
+        // property and leaves
+        // the value to `thread::tests::every_item_carries_its_index_in_the_whole_thread_as_its_position`,
+        // which pins the current implementation one layer down.
+        //
+        // What this catches is a position that depends on the page, such as an
+        // index restarting on every page. A constant or per-author value is the
+        // same at every page size and passes here. The test above is the one
+        // that catches those.
+        let (log, len) = a_thread_log_with_shared_authors();
+        let by_id =
+            |items: Vec<(String, String, String)>| -> std::collections::BTreeMap<String, String> {
+                items
+                    .into_iter()
+                    .map(|(id, _, position)| (id, position))
+                    .collect()
+            };
+        let whole = by_id(thread_positions_at(&log, crate::thread::MAX_PER_PAGE));
+        assert_eq!(
+            whole.len(),
+            len,
+            "one page holds the whole thread: {whole:?}"
+        );
+        for per_page in [1, 2, 3] {
+            let paged = by_id(thread_positions_at(&log, per_page));
+            assert_eq!(
+                paged, whole,
+                "at perPage {per_page}, an item's position differs from the one-page read"
+            );
         }
     }
 
