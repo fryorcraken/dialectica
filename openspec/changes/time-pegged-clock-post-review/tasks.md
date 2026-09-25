@@ -3,7 +3,7 @@
 Every review row covers this change's own diff **and** `git diff 2eada33 c1f1a8f`, the four commits merged with #165 after its review round. `proposal.md`, "Review scope", names them.
 
 - [x] spec — `spec-writer`
-- [ ] design + code — `dev-writer`
+- [x] design + code — `dev-writer`
 - [ ] ~~tests — `tester`~~ — does not apply: this change alters no behaviour, so there is nothing new to test. The four #165 commits under review carry their own tests, and `spec-test-reviewer` reads those.
 - [ ] review: correctness — `code-reviewer`
 - [ ] review: security — `code-reviewer`
@@ -22,11 +22,11 @@ Every review row covers this change's own diff **and** `git diff 2eada33 c1f1a8f
 
 ## 2. Check nothing outside the specs relied on the removed text
 
-- [x] 2.1 Search `dialectica/` for comments or tests that point at a removed passage as their authority, with `git grep -n -F` on the removed passages' distinctive phrases and on "`op-ordering` states". Result: three doc comments, in `arrival.rs` and twice in `op.rs`, say "`op-ordering` states the cost", which O18's removal makes false. Not edited, because this change changes no code. Recorded in `design.md`, Risks, and reported to the runner.
-- [x] 2.2 Confirm no test changes. No file under `dialectica/` or `dialectica-ui/` is in this change's diff, and `cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p dialectica -p dialectica-core` passes.
+- [x] 2.1 Sweep `dialectica/rust-lib` for comments that cite a removed passage, with `git grep -n -F -e "<capability>" -- dialectica/rust-lib` once for each of `op-ordering`, `op-transport`, `op-format`, `thread-read`, `feed-view` and `post-revision`, checking each hit against `proposal.md`'s removed passages. Result: four doc comments cite removed reasoning. Three say "`op-ordering` states the cost" (O18): `arrival.rs` on `RECEIVE_WINDOW_MS`, and `op.rs` twice. One says the window's "reasoning is `op-ordering`'s" (T5): `transport.rs` on `receive`. No other hit cites a removed passage.
+- [x] 2.2 Repoint those four comments to the archived `2026-09-25-time-pegged-clock/design.md`, Decision 11 (and Decision 1 for `transport.rs`), after checking that Decision 11 works the cost through. Doc comments only: no test and no code line changes, and `cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p dialectica -p dialectica-core` and the CI clippy command pass.
 
 ## 3. Gates
 
 - [x] 3.1 `openspec validate time-pegged-clock-post-review --strict` passes.
 - [x] 3.2 `nix build ./dialectica#lgx` succeeds from the tree root.
-- [ ] 3.3 Open the PR on `piece/162-post-review`, naming PR #165 and #162 as what it follows up, without a closing keyword (#162 is closed), and stating that it carries the review of `git diff 2eada33 c1f1a8f`.
+- [x] 3.3 Open the PR on `piece/162-post-review`, naming PR #165 and #162 as what it follows up, without a closing keyword (#162 is closed), and stating that it carries the review of `git diff 2eada33 c1f1a8f`.

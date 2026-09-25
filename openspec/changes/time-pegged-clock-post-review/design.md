@@ -15,9 +15,10 @@ carries. Throughout, **"archived design"** means
 **"archived proposal"** means the `proposal.md` beside it. Both are history and
 are not edited.
 
-There is no code in this change. The rules the reasoning explains are
-implemented in `dialectica-core` (`arrival.rs`, `authoring.rs`, `transport.rs`,
-`log/sqlite.rs`) as #165 left them.
+No code behaviour changes. The rules the reasoning explains are implemented in
+`dialectica-core` (`arrival.rs`, `authoring.rs`, `transport.rs`,
+`log/sqlite.rs`) as #165 left them. The only code edits are four doc comments
+that pointed at the removed reasoning (see Risks).
 
 ## Goals / Non-Goals
 
@@ -344,17 +345,18 @@ whose clock is slow signs behind, by any amount. It follows that:
 
 ## Risks / Trade-offs
 
-- **[Three code comments point at `op-ordering` for a statement this change
-  removes]** → In `dialectica/rust-lib/dialectica-core/src/`: `arrival.rs`, on
-  `RECEIVE_WINDOW_MS` ("`op-ordering` states the cost"), and `op.rs` twice, in
-  the module doc's "forgeable counter" bullet ("`op-ordering` states the cost")
-  and on the wall-clock field `asserted_ms` ("`op-ordering` states that cost").
-  The cost was O18, which leaves the spec here, so once this is archived all
-  three point at text that is not there. The fix is a comment edit repointing
-  them to the archived design's Decision 11. It is not made in this change,
-  which was scoped to change no code; it is open for the owner to route.
-  `asserted_time.rs`'s "`op-ordering` says why the clamp may not be promoted"
-  stays true, because the sentence it points at predates #165 and is kept.
+- **[Code comments pointed at `op-ordering` for reasoning this change removes
+  from it]** → Four doc comments in `dialectica/rust-lib/dialectica-core/src/`
+  did. `arrival.rs`, on `RECEIVE_WINDOW_MS`, and `op.rs` twice (the module doc's
+  "forgeable counter" bullet, and the wall-clock field `asserted_ms`) said
+  "`op-ordering` states the cost", which was O18. `transport.rs`, on `receive`,
+  said the window's "reasoning is `op-ordering`'s", which was T5's pointer. This
+  change repoints all four to the archived design's Decision 11 (and Decision 1
+  for `transport.rs`), and so touches doc comments and nothing else in the
+  code. A sweep of every comment in `dialectica/rust-lib` naming one of the six
+  capabilities found no other that cites a removed passage. `asserted_time.rs`'s
+  "`op-ordering` says why the clamp may not be promoted" stays as it is: the
+  sentence it points at predates #165 and is kept.
 - **[A spec read alone now states rules without #165's reasons]** → That is the
   README's rule working as intended. The reasons are in this file and the
   archived design, which the archive keeps together with the change.
@@ -363,5 +365,6 @@ whose clock is slow signs behind, by any amount. It follows that:
 
 ## Migration Plan
 
-None. No behaviour, code or stored data changes. On archive, the deltas replace
+None. No behaviour or stored data changes, and the code changes only in doc
+comments. On archive, the deltas replace
 the requirements #165 touched in six files under `openspec/specs/`.
