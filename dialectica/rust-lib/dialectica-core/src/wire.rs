@@ -1486,8 +1486,9 @@ pub fn master_key_from(
 /// # There is no `order` parameter, and that is the decision
 ///
 /// §9.1 proposes `order` with `new` and `active`. A Lamport counter now reaches
-/// us, inside the signed op, and the feed leads with it — but a counter is
-/// **causal, not temporal**, so it still cannot answer `new`, and `active` needs
+/// us, inside the signed op, and the feed leads with it — but a counter is its
+/// author's unverified claim about the time, so it still cannot answer `new`
+/// (a claim about when posts were written), and `active` needs
 /// a reply fold nothing computes. Serving either name would mean serving the
 /// convergent order under a label it does not earn.
 /// **An accepted-but-degraded parameter is a method
@@ -10680,15 +10681,16 @@ mod tests {
         // The id the publish will produce, computed independently so the
         // assertion does not depend on a reply the panic prevented.
         //
-        // The clock is spelled out because the publish path stamps one: counter
-        // 1 for a first op into an empty log, and `A_TIME` because that is what
-        // `by()` supplies. Leaving it `None` would compute the id of a DIFFERENT
-        // op and the lookup would find nothing — which is what this test caught.
+        // The clock is spelled out because the publish path stamps one: a first
+        // op into an empty log is counted at the current time, and both fields
+        // are `A_TIME` because that is what `by()` supplies. Leaving it `None`
+        // would compute the id of a DIFFERENT op and the lookup would find
+        // nothing — which is what this test caught.
         let expected = crate::op::Op {
             stoa: publish_stoa(),
             author: key.public_key(),
             clock: Some(crate::op::OpClock {
-                counter: 1,
+                counter: A_TIME,
                 asserted_ms: A_TIME,
             }),
             kind: OpKind::Post {

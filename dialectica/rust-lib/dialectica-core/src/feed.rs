@@ -21,19 +21,20 @@
 //! transport — and [`cmp_ops`](crate::arrival::cmp_ops) leads with it, so this
 //! feed **is** counter-ordered. The old premise is withdrawn.
 //!
-//! **The name is still `convergent`, on a different and narrower argument.** A
-//! Lamport counter is **causal, not temporal**: it says its author had seen
-//! something at N, never *when*. Two ops at counters five apart were not written
-//! five of anything apart, and an author who has seen nothing publishes at one
-//! however long they waited. So `new` remains a claim this ordering cannot
-//! support, and `convergent` remains what it can: every peer holding the same
-//! ops computes the same sequence, which is now true *because* the counter is in
-//! the preimage rather than despite there being nothing to order on.
+//! **The name is still `convergent`, on a different and narrower argument.** The
+//! counter is pegged to its author's clock, so it carries that author's claim
+//! about the time, raised above every counter the author held. Nothing verifies
+//! the claim: an author may sign up to an hour ahead of a receiver's time, and a
+//! slow clock signs behind by any amount. So `new` — a claim about when posts
+//! were written — remains one this ordering cannot support, and `convergent`
+//! remains what it can: every peer holding the same ops computes the same
+//! sequence, which is true *because* the counter is in the preimage.
 //!
-//! The op's wall-clock is **not** the answer either, and must not be read as
-//! one. It is display-only, reachable only as formatted text
-//! (see [`crate::asserted_time`]), and ordering on a value its author chooses
-//! freely is the censorship vector `op-ordering` refuses.
+//! The op's wall-clock field is **not** the answer either, and must not be read
+//! as one. It is display-only, reachable only as formatted text
+//! (see [`crate::asserted_time`]), and nothing checks it — the receive window
+//! reads the counter — so ordering on it would be ordering on a value bounded by
+//! nothing.
 //!
 //! There is no ordering parameter, no comparator to select, and no enum with
 //! variants nothing implements. A second ordering is a change to this module

@@ -308,7 +308,9 @@ pub fn current_version<L: OpLog>(
         //
         // Among versions carrying counters this IS the latest in the forum's
         // order — an author's later revision carries the higher counter. It is
-        // NOT the latest by any clock: a Lamport order is causal, not temporal.
+        // NOT the latest by any clock: the counter is the author's unverified
+        // claim about the time, and a version signed ahead of it leads the
+        // author's other devices' versions for up to the receive window's hour.
         // Among versions carrying none the rule falls back to ascending op id,
         // which carries no recency at all. See this module's documentation.
         .find(|entry| is_valid_revision(entry, &original))

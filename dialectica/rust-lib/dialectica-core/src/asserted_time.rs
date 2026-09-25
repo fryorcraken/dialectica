@@ -57,8 +57,13 @@
 /// and far below the range in which a rendered date stops looking odd.
 ///
 /// **Pinned by a hardcoded assertion**, for the reason
-/// [`crate::arrival::ADVANCE_BOUND`] is: `cargo mutants` does not mutate a
+/// [`crate::arrival::RECEIVE_WINDOW_MS`] is: `cargo mutants` does not mutate a
 /// `const`.
+///
+/// **Not the receive window, and not to be merged with it.** The window reads
+/// the counter and decides admission; this reads the wall-clock field and
+/// decides only how it is shown. `op-ordering` says why the clamp may not be
+/// promoted into a rule.
 pub const FUTURE_ALLOWANCE_MS: u64 = 24 * 60 * 60 * 1000;
 
 /// The earliest asserted time that is presented as the author wrote it.

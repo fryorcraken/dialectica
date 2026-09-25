@@ -847,8 +847,15 @@ impl OpLog for SqliteOpLog {
     /// "no second source of truth", and a column derived per-row from the op is
     /// not one.
     ///
-    /// No `ORDER BY`: [`clock_from_counters`] sorts, and its fold is a function
-    /// of the set rather than of the sequence.
+    /// No `ORDER BY`: [`clock_from_counters`] is a maximum, a function of the
+    /// set rather than of the sequence.
+    ///
+    /// **Not `SELECT MAX(score_epoch)`, although the clock is now a maximum.**
+    /// `append` writes the counter through an `as i64` cast, so a counter of
+    /// 2^63 or more is stored negative and SQL's `MAX` ranks it below every
+    /// small one. The rows are read back into `u64` and folded here, where the
+    /// cast is reversed exactly. `the_clock_override_agrees_with_the_trait_default_it_replaces`
+    /// fails on the SQL form.
     fn clock(&self, stoa: &Address) -> Result<u64, OpLogError> {
         let mut stmt = self
             .conn
@@ -1596,10 +1603,15 @@ mod tests {
         //
         // The shapes below are the ones where they could diverge: a counter-less
         // op (must be filtered by BOTH, and is the row whose stored epoch is
-        // NULL), `u64::MAX` (stored as `-1` by the `as i64` cast, so a naive
-        // read-back would make it a small negative rather than the maximum),
-        // and a gap large enough that the advance bound decides — which makes
-        // the answer depend on the fold rather than on the maximum.
+        // NULL), and `u64::MAX` (stored as `-1` by the `as i64` cast, so a naive
+        // read-back would make it a small negative rather than the maximum).
+        //
+        // **This is also the guard on folding in Rust rather than in SQL**
+        // (`design.md` Decision 7). The receive window keeps a counter this
+        // large out of the receive path, but `append` admits it, and the
+        // clock must agree with the trait's definition over whatever the store
+        // holds. A `SELECT MAX(score_epoch)` override returns 9 here, because
+        // `-1` sorts below every small counter.
         let mut log = SqliteOpLog::in_memory().unwrap();
         let counters = [3u64, 1, u64::MAX, 2, 9];
         for (n, counter) in counters.iter().enumerate() {
@@ -1621,10 +1633,44 @@ mod tests {
             "the column read and the body decode must fold to one clock"
         );
         // Pinned independently, so that two agreeing wrong answers still fail.
-        // Sorted, the counters are 1, 2, 3, 9, MAX: the fold climbs 1 → 2 → 3,
-        // then 9 is within ADVANCE_BOUND of 3 so it climbs to 9, and `u64::MAX`
-        // is not, so it is refused.
-        assert_eq!(by_override, 9, "the fold, computed by hand");
+        // The clock is the highest counter held, and the highest of 3, 1, MAX,
+        // 2 and 9 is MAX.
+        assert_eq!(by_override, u64::MAX, "the highest counter, by hand");
+    }
+
+    #[test]
+    fn the_clock_survives_a_restart_and_a_rebuild_in_another_sequence() {
+        // `op-ordering`: "A rebuild reaches the same answer as the original
+        // ingest", with counters far apart. Under the advance bound this fixed
+        // the clock BELOW the far counter; now it is the highest held, through
+        // the override that serves the publish path, after a restart and after a
+        // rebuild appending the same ops in reverse.
+        let dir = TempDir::new("clock-rebuild");
+        let stoa = a_stoa("Agora");
+        let counters = [1u64, 1_789_729_304_000, 42, u64::MAX, 7];
+        let ops: Vec<SignedOp> = counters
+            .iter()
+            .enumerate()
+            .map(|(n, c)| signed(a_post_at(&format!("op {n}"), *c)))
+            .collect();
+
+        let original_path = dir.file("original.sqlite");
+        let mut original = SqliteOpLog::open(&original_path).unwrap();
+        for op in &ops {
+            original.append(op.clone(), Arrival::unordered()).unwrap();
+        }
+        let ingested = original.clock(&stoa).unwrap();
+        drop(original);
+        assert_eq!(ingested, u64::MAX, "the highest counter held");
+
+        let reopened = SqliteOpLog::open(&original_path).unwrap();
+        assert_eq!(reopened.clock(&stoa).unwrap(), ingested, "after a restart");
+
+        let mut rebuilt = SqliteOpLog::open(&dir.file("rebuilt.sqlite")).unwrap();
+        for op in ops.iter().rev() {
+            rebuilt.append(op.clone(), Arrival::unordered()).unwrap();
+        }
+        assert_eq!(rebuilt.clock(&stoa).unwrap(), ingested, "after a rebuild");
     }
 
     #[test]
