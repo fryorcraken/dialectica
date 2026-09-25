@@ -31,8 +31,9 @@ Carried over from `origin/piece/e2e-sitometres`:
 
 - the sitometres specification `dialectica-ui/tests/ui/join.yaml`, updated for
   current `main` (below);
-- the report adjudicator `dialectica-ui/tests/adjudicate-ui-run.py` and its tests
-  `tst_adjudicate_ui_run.py`;
+- the report adjudicator and its tests, Python there and ported to shell here
+  (`dialectica-ui/tests/adjudicate-ui-run.sh`, `tst_adjudicate_ui_run.sh`;
+  design.md D12 says why);
 - the schema validator `dialectica-ui/tests/validate-ui-specs.mjs`, which parses
   every specification without building a host;
 - the expensive workflow `.github/workflows/ui-tests.yml`, which builds a
@@ -147,8 +148,8 @@ The adjudicator's own tests pin the checkable ones.
 ## Impact
 
 - **New files:** `dialectica-ui/tests/ui/join.yaml`,
-  `dialectica-ui/tests/adjudicate-ui-run.py`,
-  `dialectica-ui/tests/tst_adjudicate_ui_run.py`,
+  `dialectica-ui/tests/adjudicate-ui-run.sh`,
+  `dialectica-ui/tests/tst_adjudicate_ui_run.sh`,
   `dialectica-ui/tests/validate-ui-specs.mjs`, `.github/workflows/ui-tests.yml`.
 - **Modified:** `.github/workflows/ci.yml`. It gets the validation job and loses
   the stale "no e2e harness" claims at its header, in the `LGS_VERSION`

@@ -26,24 +26,25 @@ D3). Every box below that depends on the run says which CI run ticked it.
 
 ### 1. Carried from PR #120
 
-- [x] 1.1 `adjudicate-ui-run.py` and `tst_adjudicate_ui_run.py` brought over;
-      `python3 dialectica-ui/tests/tst_adjudicate_ui_run.py` passes, and
-      disabling the step-count branch turns red exactly the checks design.md
-      D1 lists, and no others (re-measured after the tester's "more steps"
-      case was added; D1 holds the count so this line cannot go stale beside it)
+- [x] 1.1 The adjudicator and its tests brought over, and ported to shell by
+      6 below (`adjudicate-ui-run.sh`, `tst_adjudicate_ui_run.sh`);
+      `dialectica-ui/tests/tst_adjudicate_ui_run.sh` passes, and disabling
+      the step-count branch turns red exactly the checks design.md D1 lists,
+      and no others (D1 holds the count so this line cannot go stale beside it)
 - [x] 1.2 `validate-ui-specs.mjs` brought over;
       `node dialectica-ui/tests/validate-ui-specs.mjs` reports `join.yaml: ok
       (14 steps)` against sitometres 0.1.2
 - [x] 1.3 `ui-specs` job in ci.yml runs both of the above on every PR
-- [x] 1.4 `tst_ui_tool_pins.py` keeps the sitometres and lgs pins equal and
+- [x] 1.4 `tst_ui_tool_pins.sh` keeps the sitometres and lgs pins equal and
       exact across ci.yml and ui-tests.yml. `ui-specs` runs it.
-      `python3 dialectica-ui/tests/tst_ui_tool_pins.py` passes, and it goes
-      red when either real workflow's copy is changed alone
-      (design.md D8). `yaml` is pinned, and PyYAML is never fetched from PyPI
-- [ ] 1.5 The edited `ui-specs` job (new env, pinned `yaml`, no pip
-      fallback, the pin-check step) and ui-tests.yml (`python3-yaml` in the
-      apt line, no pip fallback) are green in CI. Not yet run: nothing was
-      pushed after these edits
+      `dialectica-ui/tests/tst_ui_tool_pins.sh` passes, and it goes red when
+      either real workflow's copy is changed alone (design.md D8). `yaml` is
+      pinned, and no YAML library is fetched from a package index
+- [ ] 1.5 The edited `ui-specs` job (new env, pinned `yaml`, `yq` installed
+      ahead of the three shell scripts) and ui-tests.yml (`yq` without
+      `python3-yaml` in the apt line, the shell adjudicator) are green in CI.
+      Not yet run: nothing was pushed after these edits. The closer's push is
+      the first run, and it also settles 6.4
 
 ### 2. Getting past step 1
 
@@ -61,7 +62,7 @@ D3). Every box below that depends on the run says which CI run ticked it.
       and after the verbs. It passed in both runs of 4.1. It has not been shown
       to fail: no run has had a verb change a value. **Tester, partial:** the
       guard's own comparison mechanism (`tomlq -S .` snapshotted, then diffed)
-      is now pinned by `tst_scaffold_values_unchanged.py`, which extracts both
+      is now pinned by `tst_scaffold_values_unchanged.sh`, which extracts both
       real steps from `ui-tests.yml` by name and runs them against fixture
       `scaffold.toml`s: it fails on one hex digit of a pin changed, and does
       NOT fail on a comment-stripped, key-reordered, differently-quoted rewrite
@@ -133,7 +134,7 @@ down precisely enough for someone with CI access to run them.
    commit and a CI run, which "do not push anything" rules out for this agent.
 
 2. **`lgs left scaffold.toml's values alone`, never shown to fail — partially
-   closed.** See 2.3 above: `tst_scaffold_values_unchanged.py` now proves the
+   closed.** See 2.3 above: `tst_scaffold_values_unchanged.sh` now proves the
    guard's `tomlq -S .` + `diff` mechanism distinguishes a changed value from
    an `lgs`-shaped comment/reorder rewrite, entirely locally (no `lgs`, no
    Nix, no Basecamp). What is still unproven is whether `lgs basecamp
@@ -148,3 +149,47 @@ down precisely enough for someone with CI access to run them.
    (evidence `lgs` really does leave values alone) or going red (evidence it
    does not, which would be a real finding about `lgs`, not about this test).
    Not run here, for the same reason as item 1.
+
+### 6. YAML read with the `yq` CLI, not PyYAML (owner: "Use CLI yaml checker")
+
+design.md D12 holds the reasoning. Every mutation below was made, run and
+reverted, and `git diff` was empty afterwards.
+
+- [x] 6.1 `adjudicate-ui-run.py` is replaced by `adjudicate-ui-run.sh`, which
+      reads the spec with `yq` and the report with `jq`; the three conditions
+      are unchanged. Its tests are `tst_adjudicate_ui_run.sh`. Mutations,
+      predicted then observed:
+      - the count branch disabled: 5 red predicted, the same 5 observed (D1);
+      - the missing-report guard disabled: 3 red predicted (jq exits 2, so
+        "exit 1" joins the two message checks), 3 observed;
+      - the yq guard disabled, with the count comparison still `-ne`: the
+        foreign-yq case's 3 checks red, and the adjudicator printed `ok: all 2
+        steps passed`. That finding made the comparison fail closed. With it,
+        1 red predicted ("names the cause"), 1 observed.
+- [x] 6.2 `tst_ui_tool_pins.py` is replaced by `tst_ui_tool_pins.sh`: `yq` turns
+      each workflow into JSON once, and the check is one jq program. Mutations,
+      predicted then observed: ui-tests.yml's `SITOMETRES` set to `0.1.3`, 1
+      red ("as committed"), observed 1; a sitometres literal written into the
+      `ui-specs` `run:` body, 1 red, observed 1; the equality branch disabled,
+      2 red, observed 2; the `run:`-body branch disabled, 2 red, observed 2;
+      the exact-version branch disabled, 1 red, observed 1; the missing-pin
+      branch disabled, 1 red, observed 1 (jq's own error in place of the name).
+- [x] 6.3 `tst_scaffold_values_unchanged.py` is replaced by
+      `tst_scaffold_values_unchanged.sh`, which extracts both real steps with
+      `yq` and runs them under Actions' `bash` flags. Mutations of the real
+      steps in ui-tests.yml, predicted then observed: the AFTER step's `diff`
+      replaced by `true`, 3 red, observed 3; both snapshots taken with `cat`
+      instead of `tomlq -S .`, 2 red, observed 2; the AFTER step renamed, the
+      test stops and names the step, observed.
+- [x] 6.4 `python3-yaml` is gone from ui-tests.yml's apt line. `ui-specs`
+      installs `yq` before the three scripts rather than after, and relies on
+      no PyYAML in the image. Both install steps print `command -v yq` and
+      `yq --version`. Which `yq` wins on PATH on the runner is inferred from
+      the runner image's install script (D12) and has not been observed. It
+      is proven only by CI, and 1.5 covers it
+- [x] 6.5 `validate-ui-specs.mjs` stays as the one Node script: sitometres
+      has no validate verb, and `run` launches a Basecamp after validating
+      (D12)
+- [x] 6.6 All four new scripts pass locally under `sh` (bash here) and under
+      busybox `ash`. CI's `sh` is dash, which has not been run. No tool call
+      was refused during this pass

@@ -72,7 +72,7 @@ jobs:
       # against. `install` fills both seeded profiles; one is enough to run in.
       PROFILE: alice
 
-      # Kept in step with ci.yml's build job, which `tst_ui_tool_pins.py`
+      # Kept in step with ci.yml's build job, which `tst_ui_tool_pins.sh`
       # checks, and released rather than a git rev. v0.3.1's `setup` has no
       # `--inspector` flag and needs none here:
       # `[repos.basecamp].attr = "app"` is the dev build, which carries the
@@ -86,7 +86,7 @@ jobs:
 
       # Pin the VERSION, never a range or `latest`: a moving ref would silently
       # change the tool that gates every spec here. ci.yml's `ui-specs` job
-      # validates the specs with the same version, and `tst_ui_tool_pins.py`
+      # validates the specs with the same version, and `tst_ui_tool_pins.sh`
       # fails if the two differ or either stops being exact.
       SITOMETRES: "@paradoxcomputer/sitometres@0.1.2"
 
@@ -97,17 +97,17 @@ jobs:
         with:
           node-version: "24"
 
-      # Three unrelated needs, one apt transaction:
+      # Two unrelated needs, one apt transaction:
       #
       #   * the graphics libraries Basecamp resolves at load time. It carries
       #     its own Qt but NOT host graphics, so a bare runner dies with
       #     `libOpenGL.so.0: cannot open shared object file`.
-      #   * `tomlq`, which reads scaffold.toml as TOML below. `yq` is the
-      #     PYTHON package that ships it; the runner's preinstalled `yq` is the
-      #     Go one and has no `tomlq`.
-      #   * PyYAML, for the adjudicator, from Ubuntu's archive like the rest,
-      #     and named here rather than trusted to arrive as another package's
-      #     dependency. It is never fetched from PyPI unpinned.
+      #   * `yq`, Ubuntu's jq-wrapper yq. It ships `tomlq`, which reads
+      #     scaffold.toml as TOML below, and its `yq` is what the adjudicator
+      #     reads the spec with. The runner's preinstalled `yq` is a different
+      #     tool, the Go one, with no `tomlq` and not jq's language; this
+      #     package installs over it at /usr/bin/yq, and the adjudicator
+      #     refuses by name to run on the wrong one. design.md D12.
       #
       # The runner image preconfigures third-party apt repos this job does not
       # use, and one of them failing takes `apt-get update` down with it —
@@ -115,7 +115,7 @@ jobs:
       # packages.microsoft.com. Every package below is Ubuntu's own, so the
       # extra sources are moved aside by pattern, and `update` may fail:
       # `install` is the real gate.
-      - name: Install graphics runtime libraries and tomlq
+      - name: Install graphics runtime libraries and yq
         run: |
           set -eu
           sudo mkdir -p /etc/apt/disabled-sources.d
@@ -127,7 +127,9 @@ jobs:
           sudo apt-get update -qq \
             || echo "::warning::apt-get update reported errors; install is the gate, continuing"
           sudo apt-get install -y --no-install-recommends \
-            libopengl0 libglx0 libgl1 libegl1 libglu1-mesa libvulkan1 yq python3-yaml
+            libopengl0 libglx0 libgl1 libegl1 libglu1-mesa libvulkan1 yq
+          command -v yq
+          yq --version
           tomlq --version
 
       # Every spec file in the tree must be in the matrix above. A count is
@@ -357,15 +359,15 @@ jobs:
       # further, and reported a clean sheet. So the machine report is read, and
       # three conditions must hold: the verdict is a pass, every step passed,
       # and the step count equals the spec's. The adjudicator is a checked-in
-      # script with its own tests (ci.yml's `ui-specs` job runs them), not a
-      # heredoc.
+      # shell script with its own tests (ci.yml's `ui-specs` job runs them),
+      # not a heredoc.
       - name: The run proved what the spec asks
         # `always()` so the per-step breakdown prints even when the run step
         # already failed. It only ever adds a failure, never removes one.
         if: always()
         run: |
           set -eu
-          python3 dialectica-ui/tests/adjudicate-ui-run.py \
+          dialectica-ui/tests/adjudicate-ui-run.sh \
             "ui-results/${{ matrix.spec }}.json" "$SPEC"
 
       # Basecamp's own log is the only record of what the app did — QML errors,

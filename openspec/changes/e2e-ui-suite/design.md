@@ -41,40 +41,48 @@ the exit code cannot see a run that opened the app, executed nothing further,
 and reported a clean sheet. The third condition is the one that catches that;
 without it the first two pass on an empty run.
 
-**Chosen:** a checked-in adjudicator, `dialectica-ui/tests/adjudicate-ui-run.py`,
-with its own tests, run on every PR by ci.yml's `ui-specs` job. **Rejected:**
+**Chosen:** a checked-in adjudicator, `dialectica-ui/tests/adjudicate-ui-run.sh`,
+with its own tests (`tst_adjudicate_ui_run.sh`), run on every PR by ci.yml's
+`ui-specs` job. It was a Python script until D12 ported it to shell. **Rejected:**
 radicle's inline heredoc, which is the same logic but cannot be run without
 pushing a branch — both of this repo's QML gate defects shipped through review
 for exactly that reason.
 
-**What breaks without the count branch, measured** (last re-run with the
-condition replaced by `False and …`, after the "more steps" case landed):
-disabling `len(steps) != expected` turns exactly five checks in
-`tst_adjudicate_ui_run.py` red — both of the stopped-early case's, both of the
+**What breaks without the count branch, measured** on the shell port, with the
+comparison replaced by `true || …`: exactly five checks in
+`tst_adjudicate_ui_run.sh` go red — both of the stopped-early case's, both of the
 "more steps than the spec" case's added by `tester` (the other direction of the
 same inequality: a phantom or double-logged step, not merely a dropped one),
 and "reports the count" in the every-condition case — and the stopped-early
-fixture then prints `ok: all 2 steps passed`. (#120's design stated a count of
-three but attributed two of them to the every-condition case; the
-stopped-early/every-condition attribution above is the measured one, and the
-script's docstring says it. The count moved from three to five when the tester
-added the "more steps" case, which #120 and this piece's first pass had not
-tested.)
+fixture then prints `ok: all 2 steps passed`. That is the same five the Python
+version lost, so the port kept the power to fail. (#120's design stated a count
+of three but attributed two of them to the every-condition case. The count moved
+from three to five when the tester added the "more steps" case, which #120 and
+this piece's first pass had not tested.)
+
+**The count comparison fails closed**, and that is a guard of its own. It is
+written `[ "$count" -eq "$expected" ] || problem …`, not `if [ … -ne … ]`,
+because `[` returns 2, not 1, when either side is not an integer, and an `if`
+reads that error as "not unequal" and passes the run. Measured: with D12's
+yq guard also disabled and a YAML-answering `yq` first on PATH, the `-ne` form
+printed `ok: all 2 steps passed` and exited 0.
 
 **A missing report is a failure that says nothing was proved.** None of the
 three conditions covers this case, so it is a chosen behaviour, marked
-`NO SPEC:` in `tst_adjudicate_ui_run.py`. sitometres writes the report from a
+`NO SPEC:` in `tst_adjudicate_ui_run.sh`. sitometres writes the report from a
 `finally`, so the report is missing only when the process never reached its
 exit: a job timeout or an OOM kill. The adjudicator exits 1 and says that,
-instead of crashing on a missing-file traceback. Both outcomes fail the step.
-The difference is the diagnosis: "nothing was proved (job timeout?)" names the
-likely cause, and a missing-file traceback reads as a bug in the adjudicator.
-**Rejected:** exit 0 with a warning, because an absent report is the absence
-of evidence, which is the one thing this script exists not to pass. **What
-breaks without the guard, measured:** replacing the `os.path.exists` check with
-`False and …` turns exactly two checks red, "names the real cause" and "is
-not a traceback". "exit 1" stays green, because the traceback exits 1 too, so
-the message is all the guard adds.
+instead of passing on jq's `Could not open file` error. Both outcomes fail the
+step. The difference is the diagnosis: "nothing was proved (job timeout?)"
+names the likely cause, and a missing-file error reads as a bug in the
+adjudicator. **Rejected:** exit 0 with a warning, because an absent report is
+the absence of evidence, which is the one thing this script exists not to
+pass. **What breaks without the guard, measured** on the shell port, with the
+`[ ! -e "$report" ]` test replaced by `false && …`: exactly three checks go red,
+"exit 1" (jq exits 2 on a missing file, and `set -e` passes that on), "names
+the real cause" and "is not jq's missing-file error". The Python version lost
+two, because its traceback also exited 1; here the guard also fixes the exit
+code.
 
 `set -o pipefail` precedes the `| tee`, or the step's status is `tee`'s, which
 is always 0.
@@ -304,7 +312,7 @@ warm cache this job is not what a PR waits on.
 - **The two shared pins are two literals kept equal by a check.**
   sitometres appears in ci.yml's `ui-specs` job and in ui-tests.yml, and lgs
   appears in ci.yml's `build` job and in ui-tests.yml. Each is a job-level
-  `env:` value. `dialectica-ui/tests/tst_ui_tool_pins.py`, run by `ui-specs`,
+  `env:` value. `dialectica-ui/tests/tst_ui_tool_pins.sh`, run by `ui-specs`,
   fails when the two copies differ, when either is not an exact version, when
   either is missing, or when a `run:` body writes a version itself. That last
   case matters because a literal in a `run:` body would bypass the `env:` value
@@ -319,28 +327,24 @@ warm cache this job is not what a PR waits on.
   which live outside the repo, so a bump appears in no diff. **Rejected:**
   ci.yml reading ui-tests.yml's value at run time, which is proven only in CI
   and ties one workflow's execution to the other's layout.
-  **What breaks without it, measured:** changing ui-tests.yml's `SITOMETRES`
-  to `0.1.3` turns the check's "the workflows as committed" case red, and so
-  does writing `@paradoxcomputer/sitometres@0.1.3` back into the `ui-specs`
-  `run:` body. Its other six cases each start from the real pair with exactly
-  one change applied, so the check's power to fail is itself tested.
+  **What breaks without it, measured** on the shell port: changing
+  ui-tests.yml's `SITOMETRES` to `0.1.3` turns the check's "the workflows as
+  committed" case red and nothing else, and so does writing
+  `@paradoxcomputer/sitometres@0.1.3` into the `ui-specs` `run:` body. Its
+  other six cases each start from the real pair with exactly one jq edit
+  applied, so the check's power to fail is itself tested. Each branch of the
+  check was also disabled in turn: the equality branch turns the two "bumps"
+  cases red, the `run:`-body branch the two "writes a version" cases, the
+  exact-version branch the "range" case, and the missing-pin branch the
+  "removed" case, which then reports jq's own `null (null) cannot be matched`
+  error instead of the missing pin by name.
 - **The spec validator's `yaml` is `yaml@2.9.0`**, the version sitometres' own
   `package-lock.json` resolves (paradoxcomputer/sitometres `2fba210`). Left
   unversioned, npm would install whatever `latest` was on the day.
-- **PyYAML comes from the runner image or Ubuntu's archive, never PyPI.** An
-  `import yaml || pip install pyyaml` fallback is what this rules out, because
-  the fallback fetches whatever PyPI serves on the day. ui-tests.yml names
-  `python3-yaml` in its apt transaction. `ui-specs` relies on the
-  image and fails on the import, by name, if the image ever drops it. That
-  failure is wanted: the alternative is a silent fetch. The evidence that the
-  image supplies it is inferred from timing, not logged, because pip ran with
-  `--quiet`. On Actions run 36091870189 (the `UI spec validation` job), the
-  step running `import yaml || pip install` finished all its adjudicator runs
-  0.3s after it started. That is too fast for a PyPI download, so the import
-  must have succeeded. **Rejected:** `actions/setup-python` plus
-  `pip install pyyaml==6.0.2`. It pins a version, but it adds an action and a
-  network fetch where no fetch is needed. The package index is also a second
-  trust root, beside the image the job already trusts.
+- **No YAML library is fetched from a package index.** The rule this bullet
+  used to carry, PyYAML from the image and never from PyPI, is moot since D12:
+  nothing imports PyYAML. `yq` comes from Ubuntu's archive in both jobs, and
+  the `yaml` npm package above is exact.
 - **The spec list is derived from the directory.** The validator globs
   `tests/ui/*.y{a,}ml` and fails on zero files. The matrix in ui-tests.yml is
   the one hand-kept list, and each job asserts that the directory holds exactly
@@ -369,36 +373,37 @@ not asserted, for a different reason: every requirement this spec observes is
 about an effect, and asserting that a call happened would pass against a view
 that made the call and rendered the wrong result.
 
-### D11 — `tst_scaffold_values_unchanged.py` is wired into `ui-specs`, not left unrun
+### D11 — `tst_scaffold_values_unchanged.sh` is wired into `ui-specs`, not left unrun
 
-A design review filed a real gap: `tst_scaffold_values_unchanged.py` (the
-"lgs left scaffold.toml's values alone" guard's own tests, same rationale as
-D1's adjudicator tests — "a checked-in script with its own tests... both of
-this repo's QML gate defects shipped through review because a heredoc cannot
-be run without pushing") was checked in with no CI job running it. Unlike its
-sibling `tst_adjudicate_ui_run.py`, `git grep tst_scaffold_values_unchanged --
-.github/` returned nothing: the guard's own diff mechanism could regress and
-no PR gate would notice, the exact failure mode D1 exists to close, reopened
-for this one test.
+A design review filed a real gap: the "lgs left scaffold.toml's values alone"
+guard's own tests (same rationale as D1's adjudicator tests — "a checked-in
+script with its own tests... both of this repo's QML gate defects shipped
+through review because a heredoc cannot be run without pushing") were checked
+in with no CI job running them. Unlike the adjudicator's tests, `git grep
+tst_scaffold_values_unchanged -- .github/` returned nothing: the guard's own
+diff mechanism could regress and no PR gate would notice, the exact failure
+mode D1 exists to close, reopened for this one test.
 
-**Chosen:** wire it into `ci.yml`'s `ui-specs` job, alongside its sibling. It
-needs one thing the job did not already carry: `tomlq`, because the test runs
-the two real `scaffold.toml`-diff steps extracted verbatim out of
-`ui-tests.yml`, and those steps read the file as TOML with `tomlq`. The
-install step mirrors `ui-tests.yml`'s own (moving aside preconfigured
-third-party apt sources before `update`, treating `install` as the real gate)
-rather than a bare `apt-get install`, for the same reason that step gives:
-radicle's identical step once failed `update` on a 403 from a third-party
-source. PyYAML needs no new step — D8 already established it comes from the
-runner image for every other script `ui-specs` runs, and this script imports
-it the same way.
+**Chosen:** wire it into `ci.yml`'s `ui-specs` job, alongside its siblings. It
+runs the two real `scaffold.toml`-diff steps, extracted by name out of
+`ui-tests.yml` with `yq`, and those steps read the file as TOML with `tomlq`.
+Both come from the `yq` package (D12), which the job installs once, ahead of
+all three scripts that need it. The install step mirrors `ui-tests.yml`'s own
+(moving aside preconfigured third-party apt sources before `update`, treating
+`install` as the real gate) rather than a bare `apt-get install`, for the same
+reason that step gives: radicle's identical step once failed `update` on a 403
+from a third-party source.
+
+The extracted bodies run under `bash --noprofile --norc -eo pipefail`, the
+command Actions uses for a `bash` step, so the test runs them the way the
+workflow does.
 
 **What this adds to the cheap job:** one apt transaction for a single
-package (`yq`, providing `tomlq`) and one Python script, both seconds-scale —
-the same order of cost as the job's existing `npm install` and two other
-Python steps, not the minutes-scale cost D7's split exists to keep off every
-PR. It does not touch `ui-tests.yml` or D7's measured table: that table is
-`ui-tests.yml`'s own steps, and this addition is entirely inside `ui-specs`.
+package and one shell script, both seconds-scale — the same order of cost as
+the job's existing `npm install`, not the minutes-scale cost D7's split
+exists to keep off every PR. It does not touch D7's measured table: that
+table is `ui-tests.yml`'s own steps, and this addition is entirely inside
+`ui-specs`.
 
 **Rejected:** recording in `design.md` that the guard-test is deliberately
 left unrun. Nothing about it needs Basecamp, Nix, `lgs` or a network — its own
@@ -407,20 +412,111 @@ no structural reason it could not run in the cheap job, only that it had not
 yet been asked to. A "deliberately not run" note would have recorded an
 oversight as if it were a decision.
 
-**Verified:** running the exact command the new step invokes,
-`python3 dialectica-ui/tests/tst_scaffold_values_unchanged.py`, against its own
-built-in fixtures (no `.github/` file needs mutating to see this: the test
-constructs "before" and "after" `scaffold.toml` snapshots itself) shows the
-three cases the guard exists to tell apart: unchanged values exit 0, a
-comment-and-reorder rewrite with every value identical (what `lgs` actually
+**Verified locally:** running the exact command the step invokes,
+`dialectica-ui/tests/tst_scaffold_values_unchanged.sh`, over its own fixtures
+shows the three cases the guard exists to tell apart: unchanged values exit 0,
+a comment-and-reorder rewrite with every value identical (what `lgs` actually
 does) exits 0, and one hex digit changed in a pin exits 1 and names the cause.
-That third case is what "the wiring can fail" means here: the command the new
-`ui-specs` step now runs is not a command that exits 0 unconditionally — it
-goes red on the regression it is meant to catch. Whether the new `ui-specs` step itself runs green in the real GitHub Actions
-image — the apt transaction succeeding, `tomlq --version` resolving, the step
-graph executing in the order written — is, like the rest of this piece's Risks
-section ("The full run is proven only in CI"), provable only by a CI run: no
-local substitute was run for that half, and none is claimed here.
+
+**What breaks, measured** by editing the real steps in `ui-tests.yml` and
+reverting each edit:
+
+- the AFTER step's `diff` replaced by `true`: the value-changed case's three
+  checks go red, and nothing else does;
+- both snapshots taken with `cat scaffold.toml` instead of `tomlq -S .`, which
+  is #120's text comparison: the comment-and-reorder case's two checks go red,
+  and nothing else does;
+- the AFTER step renamed: the test stops before any case and names the step it
+  could not find.
+
+Whether the `ui-specs` step itself runs green in the real GitHub Actions
+image — the apt transaction succeeding, the jq-wrapper `yq` winning on PATH,
+the step graph executing in the order written — is, like the rest of this
+piece's Risks section ("The full run is proven only in CI"), provable only by
+a CI run: no local substitute was run for that half, and none is claimed here.
+
+### D12 — YAML is read with the `yq` command-line tool, never with PyYAML
+
+The owner's instructions, verbatim: **"Use CLI yaml checker"** and **"I don't
+understand why you are using Python locally for yaml checks"**. The
+adjudicator, the tool-pin check and the scaffold-guard test each parsed YAML
+with `import yaml`. Each is now a POSIX shell script. Nothing in this suite
+imports PyYAML or runs Python, `python3-yaml` is gone from ui-tests.yml's apt
+line, and the `ui-specs` job no longer relies on the runner image having
+PyYAML.
+
+**Chosen: `yq`, the jq wrapper (kislyuk/yq), for YAML, and `jq` for the JSON
+report.** It is Ubuntu's `yq` package, which both workflows already installed
+for `tomlq`, so dropping PyYAML adds no dependency. Its filters are jq filters,
+so the report (JSON, `jq`) and the spec (YAML, `yq`) are read in one language,
+and the tool-pin check turns each workflow into JSON once and is then a single
+jq program. For the record, the tool is written in Python on PyYAML
+(kislyuk/yq's `pyproject.toml` requires `PyYAML >= 5.3.1`). What the owner's
+instruction removes is our own Python. The parser is now a packaged CLI from
+Ubuntu's archive, so no script here imports a parser, and none is fetched
+from a package index.
+
+**Rejected: mikefarah/yq, the Go `yq` the runner image preinstalls.** Three
+reasons. It ships no `tomlq`, and replacing `tomlq` with its TOML reader would
+change the scaffold guard itself, which only CI could then prove. The image
+installs it from the `latest` release when the image is built
+(actions/runner-images, `install-yq.sh`), so its version moves with image
+updates and not with anything this repository controls. And the owner's
+machine has the jq wrapper, so these scripts run there as written; they were
+run locally with yq 4.1.2 and jq 1.8.1.
+
+**The two share a name, so the scripts check which one they got**
+(`require-jq-yq.sh`). The image installs the Go binary at `/usr/bin/yq`, the
+same path the apt package installs to, and dpkg replaces a file no package
+owns. So after the install step the jq wrapper should be the `yq` on PATH.
+That is inferred from the two install scripts, not observed. Both install steps
+now print `command -v yq` and `yq --version`, so the first CI run shows which
+one it got. The guard tests the one property the scripts rely on, YAML in and
+JSON out (`a: [1, 2]` must come back as `{"a":[1,2]}`), rather than parsing a
+version string. **What breaks without it, measured:** a stand-in `yq` that
+answers in YAML is put first on PATH, and the guard call is disabled.
+`tst_adjudicate_ui_run.sh`'s "a yq that is not the jq wrapper is refused by
+name" case then loses "names the cause", and the run fails only on a count
+message whose "spec has" value is YAML text. Before D1's count comparison was
+made to fail closed, the same mutation made the adjudicator print `ok: all 2
+steps passed` and exit 0. A foreign `yq` passed the run, and that is what this
+guard is for.
+
+**Why shell for each script, given what was left once YAML was a CLI call:**
+
+- **The adjudicator.** It makes three comparisons over the report's JSON, which
+  jq answers directly.
+- **The tool-pin check.** It compares two documents, which is a jq program. The
+  failing cases are jq edits of the real workflows' JSON, which is the same
+  "the real pair with exactly one change" discipline the Python version
+  followed with `copy.deepcopy`.
+- **The scaffold-guard test.** Its job was already to run two bash step bodies.
+  Python only extracted them by name, which is now one `yq` query.
+
+  It follows `tst_check_bindings.sh`, the repo's model for a shell check and its
+  test: extract the real code by name, fail loudly on a miss, and pin both
+  directions.
+
+None of the three needed a general-purpose language once parsing was a
+command. Each runs from ci.yml by its executable bit, as the other `tst_*.sh`
+gates do. Locally they were run under `sh`, which is bash on this machine, and
+under busybox `ash`. CI's `sh` is dash, and that is proven only in CI.
+
+**`validate-ui-specs.mjs` stays, as the one Node script.** sitometres has no
+command that validates a spec. At paradoxcomputer/sitometres `ab6b3ea`,
+`src/cli.ts` knows five verbs: `smoke`, `run`, `inspect`, `init` and `doctor`.
+`run` does validate first (`loadSpec`), but then it boots: it looks for a
+Basecamp and launches it. As a checker, it cannot tell "valid spec" from "no
+Basecamp here" except by the wording of an error, and on a machine with a
+Basecamp it launches one, which the owner's rules forbid locally. The schema
+itself is `validateSpec`, exported from sitometres' library (`src/index.ts`)
+and not from any verb. **Rejected:** `sitometres run` as a validator, for the
+reason above. **Rejected:** a `yq` or jq version of the schema. It would check
+our copy of the schema, not the one the run enforces, and it would go stale in
+silence on a sitometres bump, which is the drift D8's pin check exists to
+prevent. The validator keeps parsing with `yaml@2.9.0` rather than taking
+`yq`'s JSON, because `run` parses specs with that library (`loadSpec` calls
+`YAML.parse`). The validator therefore reads the document the run will read.
 
 ## Risks / Trade-offs
 

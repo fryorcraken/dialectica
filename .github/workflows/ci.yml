@@ -1124,17 +1124,18 @@ jobs:
   # beside it, and the script fails on an empty directory — a validator that
   # reports success over zero files is a gate that cannot fail.
   #
-  # PyYAML, which every Python script below imports, comes from the runner
-  # image and is never fetched. An unpinned `pip install` would pull whatever
-  # PyPI served that day. If an image drops it, the import fails by name, and
-  # that is the outcome wanted. The e2e-ui-suite change's design.md, D8.
+  # The scripts below are shell. They read YAML with `yq`, the jq wrapper from
+  # Ubuntu's archive, and JSON with `jq`; nothing here parses YAML in Python.
+  # The spec validator is the one Node script, because the schema it checks
+  # against lives in sitometres' library and no CLI verb exposes it. The
+  # e2e-ui-suite change's design.md, D12.
   ui-specs:
     name: UI spec validation
     runs-on: ubuntu-latest
     env:
       # The same version ui-tests.yml runs the specs with. A different one here
       # would validate against a schema the run does not enforce, and both jobs
-      # would stay green. `tst_ui_tool_pins.py` below fails if the two differ.
+      # would stay green. `tst_ui_tool_pins.sh` below fails if the two differ.
       SITOMETRES: "@paradoxcomputer/sitometres@0.1.2"
     steps:
       - uses: actions/checkout@v7
@@ -1153,31 +1154,18 @@ jobs:
           npm install --no-save --silent "$SITOMETRES" yaml@2.9.0
           node dialectica-ui/tests/validate-ui-specs.mjs
 
-      # The adjudicator decides whether an end-to-end run proved anything, so
-      # its own guards are checked here, on every PR, rather than only being
-      # exercised by the expensive workflow. It is a checked-in script rather
-      # than a heredoc for exactly this reason: both of the QML gates' defects
-      # shipped through review because a heredoc cannot be run without pushing.
-      - name: The run adjudicator catches what it claims to
-        run: python3 dialectica-ui/tests/tst_adjudicate_ui_run.py
-
-      # Each workflow keeps its own literal for the tools the two share, where
-      # someone reading that job can see it. This step keeps the literals equal
-      # and exact. design.md D8 says why two literals and a check, rather than
-      # one file both workflows load.
-      - name: The two UI workflows pin the same tool versions
-        run: python3 dialectica-ui/tests/tst_ui_tool_pins.py
-
-      # `tomlq` is the one thing this job needs that the image does not carry.
-      # `tst_scaffold_values_unchanged.py` runs the two real `scaffold.toml`
-      # steps out of ui-tests.yml, and those steps read the file as TOML with
-      # `tomlq`; the runner's preinstalled `yq` is the Go one and has no
-      # `tomlq`, same note as ui-tests.yml's own install step. Mirroring that
-      # step's apt-source workaround rather than a bare `apt-get install`:
+      # `yq`, the jq wrapper, is the one thing this job needs that the image
+      # does not carry. The three scripts below read YAML with it, and the
+      # scaffold.toml steps they extract from ui-tests.yml read TOML with the
+      # `tomlq` it ships. The runner's preinstalled `yq` is a different tool,
+      # the Go one, with no `tomlq` and not jq's language; this package
+      # installs over it at /usr/bin/yq, and each script refuses by name to run
+      # on the wrong one (design.md D12). Same install as ui-tests.yml's, with
+      # its apt-source workaround rather than a bare `apt-get install`:
       # radicle's identical step once failed `update` on a 403 from a
       # preconfigured third-party source, so the extra sources are moved aside
       # first and `install` is the real gate.
-      - name: Install tomlq
+      - name: Install yq
         run: |
           set -eu
           sudo mkdir -p /etc/apt/disabled-sources.d
@@ -1188,14 +1176,31 @@ jobs:
           sudo apt-get update -qq \
             || echo "::warning::apt-get update reported errors; install is the gate, continuing"
           sudo apt-get install -y --no-install-recommends yq
+          command -v yq
+          yq --version
           tomlq --version
+
+      # The adjudicator decides whether an end-to-end run proved anything, so
+      # its own guards are checked here, on every PR, rather than only being
+      # exercised by the expensive workflow. It is a checked-in script rather
+      # than a heredoc for exactly this reason: both of the QML gates' defects
+      # shipped through review because a heredoc cannot be run without pushing.
+      - name: The run adjudicator catches what it claims to
+        run: dialectica-ui/tests/tst_adjudicate_ui_run.sh
+
+      # Each workflow keeps its own literal for the tools the two share, where
+      # someone reading that job can see it. This step keeps the literals equal
+      # and exact. design.md D8 says why two literals and a check, rather than
+      # one file both workflows load.
+      - name: The two UI workflows pin the same tool versions
+        run: dialectica-ui/tests/tst_ui_tool_pins.sh
 
       # The scaffold-diff guard's own tests, so whether its diff mechanism
       # tells a changed value from lgs's comment-and-reorder rewrite is
       # checked on every PR rather than only when a real run happens to trip
       # it. design.md D11.
       - name: The scaffold-diff guard tells a changed value from lgs's rewrite
-        run: python3 dialectica-ui/tests/tst_scaffold_values_unchanged.py
+        run: dialectica-ui/tests/tst_scaffold_values_unchanged.sh
 
   # ─── rust ────────────────────────────────────────────────────────────────
   # The core module's whole decision surface. `src/core.rs` holds every
@@ -1515,7 +1520,7 @@ jobs:
       # with no detail means nix wrote nothing to stderr, not that streaming
       # broke.
       #
-      # ui-tests.yml installs the same version. `tst_ui_tool_pins.py`, run by
+      # ui-tests.yml installs the same version. `tst_ui_tool_pins.sh`, run by
       # the `ui-specs` job, fails if the two differ.
       LGS_VERSION: "0.3.1"
       # Kept, but honestly: this does NOTHING for `lgs basecamp build` (see
