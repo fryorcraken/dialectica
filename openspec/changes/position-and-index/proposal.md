@@ -8,7 +8,8 @@ of that change's scope.
    and the author's asserted time, as two separate fields* already forbids it:
    *Two items of one thread never share a position* fails whenever two items share
    an author. The existing fixtures never have two items by one author, so no test
-   sees it. **The requirement exists, and the tests are what is missing.**
+   sees it. **The requirement exists, and the tests are what is missing**, with
+   one exception, given under What Changes: a position equal to the item's op id.
 2. **Nothing requires a malformed `index` in a keep request to be refused by
    name.** `index` is parsed by the same code as the feed's `page` and `perPage`,
    and `feed-read` requires a refusal of those to name the field. No spec says the
@@ -28,9 +29,24 @@ of that change's scope.
   The requirement also says where it stops. A well-formed integer that names no
   candidate is not malformed: *A selection outside the current set is refused*
   already governs it, with a not-kept reply rather than the error shape.
-- **Item 1 adds no requirement.** Its work is tests: a fixture holding two items
-  by the same author, and mutations (a constant position, a per-author position,
-  a position that restarts on every page) each shown red.
+- **Item 1 is mostly tests**: a fixture holding two items by the same author, and
+  mutations (a constant position, a per-author position, a position that restarts
+  on every page) each shown red.
+- **Item 1 also clarifies `thread-read`'s position requirement, in one respect.**
+  The issue asks for a test that fails for *any* position breaking *An item
+  carries its ordering position…*. One value could not be judged against the
+  text: a position equal to the item's own op id. It is unique within a read and
+  the same at every page size, so it passes every existing scenario. The
+  requirement says the position *"SHALL identify where an item sits"*, and an op
+  id identifies the item, not where it sits. But no scenario tested that, so the
+  question could not be settled. The requirement now states it: the position is
+  determined by the place alone, so two reads of one thread that return different
+  items at the same place give them the same position. It gains a scenario that
+  checks this by reading a thread with a hidden reply once with hidden content
+  included and once without. The uniqueness sentence is narrowed to *within one
+  read*, because under the place rule one position can belong to two different
+  items when two reads return different sequences. The token's form stays open,
+  as the requirement already intends.
 
 ## Capabilities
 
@@ -47,8 +63,39 @@ None.
   *Every entry point refuses malformed input rather than guessing* is left
   unchanged: it requires the refusal but says nothing about the message.
 
-`thread-read` is not modified. Item 1 is tests against a requirement it already
-has.
+- `thread-read`: MODIFIED *An item carries its ordering position and the
+  author's asserted time, as two separate fields*. Two edits and one scenario;
+  the rest of the block is copied unchanged. Its uniqueness sentence now reads
+  *"for two distinct items returned by one read of a thread, taken across all of
+  that read's pages"*. A new paragraph says the position is determined by the
+  place alone. A new scenario, *The item at a place carries that place's position
+  in every read*, tests that paragraph. The current code already behaves this way:
+  the position is the item's index in the sequence the read returned.
+
+## Deliberately left unspecified
+
+### The reason a malformed `index`'s message gives
+
+`18446744073709551616` (one past `u64::MAX`) is refused with a message naming
+`index`. The reason it gives is the one for a decimal point or an exponent, which
+is wrong for that input (see `design.md`, Risks). The spec requires the message
+to **name `index`**. It does not require the message to give the right reason,
+and this change does not add that. The reasons are:
+
+- The owner's decision (issue #166, comment 5832956024) fixes the name and nothing
+  else about the message. `feed-read` requires the same for `page` and `perPage`,
+  which share this parser. Contracting the reason for `index` alone would make
+  `index` the only one of the three whose wording is contracted.
+- The error shape is one string, and no caller branches on its wording. The
+  field name is the part a caller or a person needs in order to find which input
+  was wrong. The rest is diagnostic prose.
+- If the wording were contracted, a test would have to pin the text of each
+  kind's message. That test would fail on a harmless rewording and still pass a
+  message that is misleading in some new way.
+
+The wrong reason is a defect in wording, not in the contract. If it is worth
+fixing, it belongs in its own issue against the parser, which would fix it for
+all three fields at once.
 
 ## Impact
 
@@ -62,6 +109,9 @@ has.
     `index`, and prove it by mutating the field name out of the message.
   - A thread fixture with two items by the same author, read across pages, with
     the mutations above.
+  - A thread with a hidden reply that has a reply after it, read with and without
+    hidden content. The positions at each place match across the two reads.
+    Proven by mutating the position to the item's op id.
 - **Out of scope:**
   - The `NO SPEC:` marker in `thread_page_json` on the field *name* `position`.
     The issue excludes it.
