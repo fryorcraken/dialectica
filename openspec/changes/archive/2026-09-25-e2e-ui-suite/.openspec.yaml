@@ -1,0 +1,22 @@
+# `schema` is REQUIRED for this file to be valid change metadata, and without it
+# `skip_specs` is silently NOT HONOURED. It must name a known schema; this
+# project's is the built-in `spec-driven`, set in `openspec/config.yaml`.
+schema: spec-driven
+created: 2026-09-25
+
+# No spec delta: this change adds an end-to-end test target, not a requirement.
+#
+# Every behaviour the join-refusal specification asserts is already contracted,
+# by `stoa-navigation-view` (the no-key state, the paste field, malformed versus
+# unjoinable, preview before join, a refused join enrolling nobody) and
+# `view-navigation` (which screen is shown). Driving those contracts against a
+# running host observes them differently; it does not change them.
+#
+# PR #120 did write a capability for this, `e2e-ui-harness`, contracting the
+# GATE: how a report is adjudicated, the inspector check, the host pin's single
+# source, evidence retention. It is deliberately not carried as a capability.
+# Those are obligations on CI tooling, not on dialectica, and a clause
+# describing a test rather than the system is what the archived `core-e2e`
+# change declined to add for the same reason. They move to design.md's
+# Decisions instead, and the adjudicator's own tests pin the checkable ones.
+skip_specs: true
