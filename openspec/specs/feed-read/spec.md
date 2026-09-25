@@ -1,13 +1,15 @@
 # feed-read Specification
 
 ## Purpose
-Defines reading a Stoa's feed of thread heads, the list `listThreads` answers with. The requirements below cover the two fields each row reports about its thread's replies: how many there are, and which one is latest. The row's other fields, the pagination, and which threads appear as rows in what order are not contracted here, beyond the requirement that a thread's replies leave the rows and their order unchanged.
+Defines reading a Stoa's feed of thread heads, the list `listThreads` answers with.
 
-Three boundaries are named rather than restated:
+Five boundaries are named rather than restated:
 
 - **`thread-read` owns which posts belong to a thread**, through its requirement *Membership is derived from the parent chain, and a post's own thread field is never trusted*, and owns which of them a default read returns. This capability counts and ranks what that rule places, and defines no membership rule of its own.
-- **`op-ordering` owns what orders two ops.** This capability uses that order to pick the latest reply and does not compare any value itself.
-- **`moderation-resolution` owns whether a reply is hidden.** This capability says what a row's reply fields do with that answer.
+- **`op-ordering` owns what orders two ops.** This capability uses that order and does not compare any value itself.
+- **`moderation-resolution` owns whether a post is hidden.** This capability says what the feed does with that answer.
+- **`post-revision` owns which version of a post is current.** This capability reports that answer and does not restate how it is reached.
+- **`generated-names` owns that a display name never travels.** This capability says what a row carries instead.
 
 Publishing, any ordering of the feed other than the one it already has, and anything about a reply beyond its op id are out of scope.
 
