@@ -48,12 +48,17 @@ pushing a branch — both of this repo's QML gate defects shipped through review
 for exactly that reason.
 
 **What breaks without the count branch, measured:** disabling
-`len(steps) != expected` turns exactly three checks in
-`tst_adjudicate_ui_run.py` red — both of the stopped-early case's, and
-"reports the count" in the every-condition case — and the stopped-early fixture
-then prints `ok: all 2 steps passed`. (#120's design stated the same count of
-three but attributed two of them to the every-condition case; the attribution
-above is the measured one, and the script's docstring now says it.)
+`len(steps) != expected` turns exactly five checks in
+`tst_adjudicate_ui_run.py` red — both of the stopped-early case's, both of the
+"more steps than the spec" case's added by `tester` (the other direction of the
+same inequality: a phantom or double-logged step, not merely a dropped one),
+and "reports the count" in the every-condition case — and the stopped-early
+fixture then prints `ok: all 2 steps passed`. (#120's design stated a count of
+three but attributed two of them to the every-condition case; the
+stopped-early/every-condition attribution above is the measured one, and the
+script's docstring says it. The count moved from three to five when the tester
+added the "more steps" case, which #120 and this piece's first pass had not
+tested.)
 
 `set -o pipefail` precedes the `| tee`, or the step's status is `tee`'s, which
 is always 0.

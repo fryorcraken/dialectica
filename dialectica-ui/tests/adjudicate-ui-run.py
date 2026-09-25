@@ -17,8 +17,10 @@ So three conditions are read off the machine report, and all three must hold:
 The THIRD is the one that carries the weight. Drop it and an empty run
 satisfies the other two and reads as a pass — which is worse than a red run,
 because it reads as evidence when it is the absence of evidence. Measured:
-removing the `len(steps) != expected` branch below turns exactly three checks
-in `tst_adjudicate_ui_run.py` red — both of the "stopped early" case's, and
+removing the `len(steps) != expected` branch below turns exactly five checks
+in `tst_adjudicate_ui_run.py` red — both of the "stopped early" case's, both of
+the "more steps than the spec" case's (the other direction of the same
+inequality — a phantom or double-logged step, not merely a dropped one), and
 "reports the count" in the every-condition case — and the stopped-early fixture
 then prints `ok: all 2 steps passed`.
 

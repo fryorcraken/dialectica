@@ -4,7 +4,9 @@
 
 - [ ] ~~spec — `spec-writer`~~ — no spec delta: a test-only piece, `skip_specs: true` in `.openspec.yaml` says why; `proposal.md` is written
 - [x] design + code — `dev-writer`
-- [ ] tests — `tester`
+- [x] tests — `tester` — see "5. Tester's pass" below: one new test added
+      (`tst_scaffold_values_unchanged.py`), one gap in `tst_adjudicate_ui_run.py`
+      closed, and two items left explicitly unproven for the owner
 - [ ] review: correctness — `code-reviewer`
 - [ ] review: security — `code-reviewer`
 - [ ] review: readability — `code-reviewer`
@@ -47,7 +49,20 @@ D3). Every box below that depends on the run says which CI run ticked it.
       modules `in place` in the profile's module root
 - [x] 2.3 `lgs left scaffold.toml's values alone` compares `tomlq -S .` before
       and after the verbs. It passed in both runs of 4.1. It has not been shown
-      to fail: no run has had a verb change a value
+      to fail: no run has had a verb change a value. **Tester, partial:** the
+      guard's own comparison mechanism (`tomlq -S .` snapshotted, then diffed)
+      is now pinned by `tst_scaffold_values_unchanged.py`, which extracts both
+      real steps from `ui-tests.yml` by name and runs them against fixture
+      `scaffold.toml`s: it fails on one hex digit of a pin changed, and does
+      NOT fail on a comment-stripped, key-reordered, differently-quoted rewrite
+      with every value identical — the shape CLAUDE.md says every `lgs
+      basecamp` verb performs. So the check can tell a value change from an
+      `lgs`-style rewrite. What remains unproven, because it is a fact about
+      `lgs` rather than about the diff: whether `lgs basecamp setup` or
+      `install` themselves ever rewrite a VALUE (as opposed to only stripping
+      comments and reordering). That needs a real `lgs` run, which the owner's
+      rule keeps out of local hands and which no CI run so far has had reason
+      to exercise. See item 2 in "5. Tester's pass" below.
 
 ### 3. The spec, for current `main`
 
@@ -68,3 +83,55 @@ D3). Every box below that depends on the run says which CI run ticked it.
       spec's 14. https://github.com/fryorcraken/dialectica/actions/runs/36090846720
       (attempts 1 and 2)
 - [x] 4.2 Measured cost is in design.md D7's table: 9m19s cold, 3m16s warm
+
+### 5. Tester's pass
+
+The dev-writer flagged two things it had never seen go red. One is now closed
+locally; the other needs a CI run this piece does not push on its own, per the
+owner's "do not push anything" instruction. Both mutations below are written
+down precisely enough for someone with CI access to run them.
+
+1. **`join.yaml`'s no-key-state step, never seen red with the create
+   affordance present — still unproven.** The concern is real: nothing has
+   ever exercised the case where `createTitleField`/`createStoaButton` exist in
+   the tree at the same time the no-key snapshot is taken, so nobody has
+   watched the `not_text:` half of that step actually catch it. This is
+   structurally an e2e-only question — component tests run with the host
+   absent, and the question is specifically about the interaction between
+   sitometres' `text:`/`not_text:` matchers and the real inspector's element
+   tree — so it cannot be closed locally, and the owner's rules keep sitometres
+   and a directly-launched Basecamp out of local hands.
+
+   **The mutation to run in CI, and the expected outcome:** in
+   `dialectica-ui/src/qml/DStoaListScreen.qml`, the `Loader` guarding the
+   create block reads `active: screen.machineKey.state === "held"` (line 919).
+   Change it to `active: true`, leave `join.yaml` untouched, and run the
+   `sitometres join spec` job. Expected: the step named "a fresh profile is
+   offered a key and not a Stoa" fails, because `createTitleField` and
+   `createStoaButton` now exist in the tree the `not_text:` half is matched
+   against; the adjudicator should report that step as not-pass and, because
+   sitometres does not continue past a failed `wait_for`, likely also report a
+   short step count. Revert the one-line change immediately after the run,
+   whichever way it goes, and record the observed output here — a red run
+   confirms the check discriminates; a green run means the check or the
+   `Loader` binding needs another look before this is trusted further.
+
+   Reported to the owner rather than run, because running it needs a pushed
+   commit and a CI run, which "do not push anything" rules out for this agent.
+
+2. **`lgs left scaffold.toml's values alone`, never shown to fail — partially
+   closed.** See 2.3 above: `tst_scaffold_values_unchanged.py` now proves the
+   guard's `tomlq -S .` + `diff` mechanism distinguishes a changed value from
+   an `lgs`-shaped comment/reorder rewrite, entirely locally (no `lgs`, no
+   Nix, no Basecamp). What is still unproven is whether `lgs basecamp
+   setup`/`install` themselves ever produce a value change for this guard to
+   catch — that is a fact about `lgs`, not about the diff, and needs a real
+   run of those verbs to observe. **A CI mutation that would test the real
+   thing, if the owner wants it run:** temporarily add an unused key under
+   `[modules.dialectica_ui]` (or any table `lgs basecamp install` rewrites) in
+   `scaffold.toml` immediately before the "Read scaffold.toml before lgs
+   touches it" step, structured so `install`'s own rewrite would plausibly
+   normalise or drop it — expected outcome is either the guard staying green
+   (evidence `lgs` really does leave values alone) or going red (evidence it
+   does not, which would be a real finding about `lgs`, not about this test).
+   Not run here, for the same reason as item 1.

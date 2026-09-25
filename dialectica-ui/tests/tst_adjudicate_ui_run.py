@@ -75,6 +75,15 @@ def main():
     check("exit 1", code == 1, f"(got {code})")
     check("names the cause", "did not execute the whole spec" in out, out)
 
+    print("a report with MORE steps than the spec fails too, not just fewer")
+    # The code reads `len(steps) != expected`, not `<`: a phantom or
+    # double-logged step is the same "the report and the spec disagree on what
+    # ran" problem as a stopped-early run, and nothing above proved the check
+    # catches this direction. Spec declares two, report carries three.
+    code, out = run({"verdict": "pass", "steps": [step("a"), step("b"), step("c")]}, 2)
+    check("exit 1", code == 1, f"(got {code})")
+    check("names the cause", "did not execute the whole spec" in out, out)
+
     print("a failed step inside a passing report fails, and is named")
     code, out = run({"verdict": "pass", "steps": [step("a"), step("b", "fail")]}, 2)
     check("exit 1", code == 1, f"(got {code})")
