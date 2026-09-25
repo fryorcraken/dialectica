@@ -116,3 +116,66 @@ is accurate.
       Doc comment only. No test can see it, and the behaviour it describes
       was already pinned by
       `an_op_signed_ahead_of_the_time_leads_only_until_the_time_passes_it`.
+
+## Re-review of 439c192..HEAD
+
+Scope per dispatch: the answers to the two findings above, landed as new
+Decision 11 in `design.md` and the new "What signing an hour ahead buys here,
+and whom" section on `revision::current_version`'s doc comment
+(`revision.rs:285-303`), plus the four citation rewordings in `arrival.rs`,
+`op.rs` (×2) and `transport.rs` that `architecture.md` asked for. I read the
+owner's decision comment on issue #162
+(https://github.com/fryorcraken/dialectica/issues/162#issuecomment-5826096926)
+first; its first line is "Decision (owner, 2026-09-25): peg the Lamport
+counter to wall-clock time, as SDS does". Nothing in `439c192..HEAD` touches
+that decision's scope — this range is entirely the two prior findings' fixes
+plus a doc-comment reword — so there is nothing here to check against it
+beyond confirming the range does not reopen it, which it does not
+(`git diff 439c192 HEAD --stat` touches no publish/receive-window code beyond
+the doc comments already listed).
+
+**Decision 11's mutation claim, checked against the code, not just read.** I
+mutated `publish` in `authoring.rs` (`asserted_ms: who.asserted_ms` →
+`asserted_ms: next_counter(clock, who.asserted_ms)`, the same change Decision
+11 and the commit message for `c1f1a8f` describe) and ran
+`cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p dialectica-core
+authoring::`. Both failures Decision 11 claims occurred, with the numbers it
+quotes: `a_counter_taken_from_the_clock_leaves_the_wall_clock_at_the_current_time`
+failed with `left: 1789732304001, right: 1789729304000`, matching Decision 11
+exactly. `the_second_authoring_carries_the_higher_counter` also failed, but —
+as both Decision 11 and the corrected fixture comment
+(`authoring.rs:1826-1841`, from `394f786`) say — on its own fixture-drift
+guard (`authoring.rs:885-892`, "the fixture has drifted..."), not on the
+assertion the test's own body names, `newest first, by counter`
+(`authoring.rs:895`). I restored the mutation afterwards;
+`git status --short` is clean before this commit.
+
+**Decision 11 and the `394f786` comment agree with each other and with the
+code.** Neither describes a different mutation or a different failure mode
+than what actually happens; the fixture-drift guard really is a guard for a
+different property (which op id sorts higher, not the wall-clock's value), and
+both documents say so rather than claiming it as a second pin on the scenario.
+
+**The `revision::current_version` addition matches what the finding asked
+for and what `moderation::resolve` already states.** It names the specific
+exposure (self-only, up to an hour, over the author's own other versions from
+a device that had not received the ahead-signed one), gives the reason
+(the authorship check above admits only the post's author's versions), says no
+third party can use it, cross-references `moderation::resolve` as the wider
+case, and cites the `op-ordering` scenario that pins the underlying rule
+(`An op signed ahead of the time leads only until the time passes it`, present
+at `openspec/specs/op-ordering/spec.md:396`). Archived Decision 10's sentence
+is now true of both sites, as Decision 11 claims.
+
+**Citation reword (`arrival.rs`, `op.rs` ×2, `transport.rs`).** All four now
+read "the archived `time-pegged-clock` change's `design.md`" rather than the
+dated folder path, matching three pre-existing citations of that form
+(`transport.rs` on `op-ordering`, `op.rs` on `stoa-metadata-op`, `wire.rs` on
+`get-stoa`, all cited in `design.md`'s Risks section). This is a citation-form
+change, not a decision; it carries no new claim to check against the archive
+or the issue.
+
+**No new findings.** `cargo test --manifest-path dialectica/rust-lib/Cargo.toml
+-p dialectica -p dialectica-core` passes in full (1180 + 30 + 0 dialectica-core
+tests, 0 dialectica tests, 0 doc-tests). `nix build ./dialectica#lgx` from the
+tree root succeeds. `tasks.md` is not ticked by me, per dispatch.
