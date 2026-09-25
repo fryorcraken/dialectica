@@ -83,6 +83,34 @@ TestCase {
         compare(main.stoaCount, 0)
     }
 
+    // The case above cannot tell WHICH property `stoaCount` reads: on a first
+    // read that fails, the guarded `visibleRows` and the unguarded
+    // `lastListing` are both empty. A failed RELOAD is where they part —
+    // `lastListing` keeps the previous good page on purpose (a failure must
+    // not blank a good listing underneath a banner), and only the guard turns
+    // it into 0 for a reader outside the screen. So this is the one fixture in
+    // which a `stoaCount` bound past the guard reads 2 instead of 0.
+    function test_a_failed_reload_does_not_count_the_listing_it_kept() {
+        // The bridge reads `replies` at call time, so changing it between the
+        // two reads is what makes the second one fail.
+        var replies = { "list_stoas": spec.twoStoas, "get_master_key": spec.noKey }
+        var main = spec.makeMain(replies)
+        var list = findChild(main, "stoaList")
+        compare(main.stoaCount, 2, "the first listing is read")
+
+        replies["list_stoas"] = '{"error":"store unreadable"}'
+        list.reload()
+
+        compare(main.listReadState, "failed")
+        // The precondition that makes this case discriminate. If the screen
+        // ever blanks its kept listing on failure, this fails here rather than
+        // leaving the assertion below unable to tell the two sources apart.
+        compare(list.lastListing.length, 2,
+                "the failed reload left the previous listing in place")
+        compare(main.stoaCount, 0,
+                "a listing the screen has said was not read is not counted")
+    }
+
     function test_the_paste_failure_is_the_list_screens_own() {
         var main = spec.makeMain({ "list_stoas": spec.twoStoas, "get_master_key": spec.noKey })
         var list = findChild(main, "stoaList")

@@ -71,7 +71,10 @@ D3). Every box below that depends on the run says which CI run ticked it.
       (design.md D5); validated by 1.2
 - [x] 3.2 Five `readonly` handles on `Main.qml` (design.md D6);
       `tst_e2e_handles.qml` passes, and binding each handle to a constant turns
-      its test red (both mutations run, then reverted)
+      its test red (both mutations run, then reverted). Binding `stoaCount`
+      to the unguarded `list.lastListing.length` turns
+      `test_a_failed_reload_does_not_count_the_listing_it_kept` red and
+      nothing else (design.md D6)
 - [x] 3.3 Whole QML suite, `check_qml_members.sh` and `check_qml_reachable.py`
       green with the handles added
 

@@ -221,6 +221,18 @@ constant, or `joinFailure` to a merely non-empty value, turns that handle's
 test red. The fixtures are input-dependent for that reason: two rows, a failing
 listing, and a refusal compared by text.
 
+**`stoaCount` needs a failed RELOAD, not a failed first read.** It must read
+`visibleRows`, the guarded projection, and not `lastListing`, which keeps the
+previous good page across a failed reload on purpose. On a first read that
+fails, both are empty, so a fixture built only on that case cannot tell them
+apart. Measured by the correctness review and again here: with `stoaCount`
+bound to `list.lastListing.length`, every test the file had before
+`test_a_failed_reload_does_not_count_the_listing_it_kept` stayed green, and
+that test alone goes red (`Actual 2, Expected 0`). It also asserts
+`lastListing` still holds two rows after the failure. That is the precondition
+that makes the case discriminate, so if the screen ever blanks its kept
+listing, the test fails there instead of going quietly blind.
+
 ### D7 — CI cost and cadence: the split stays, and the expensive job runs on PRs
 
 **Chosen:** keep #120's split. The cheap `ui-specs` job in ci.yml (the spec

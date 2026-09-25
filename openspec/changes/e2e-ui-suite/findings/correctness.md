@@ -44,7 +44,7 @@ not a new unverified claim.
 
 ## Findings
 
-- [ ] **`dev-writer`** — `dialectica-ui/tests/tst_e2e_handles.qml` — the
+- [x] **`dev-writer`** — `dialectica-ui/tests/tst_e2e_handles.qml` — the
       `stoaCount` handle's pinning test cannot distinguish the guarded
       projection (`list.visibleRows.length`, what `Main.qml` actually binds)
       from an unguarded one (`list.lastListing.length`) in the one failure
@@ -83,6 +83,19 @@ not a new unverified claim.
       pin these bindings against drift has a gap in exactly the failure mode
       (a stale-but-nonempty copy read past its guard) this codebase has
       shipped before (per CLAUDE.md's "dialectica's one test defect family").
+
+      **Fixed** in the commit that ticks this box: new
+      `test_a_failed_reload_does_not_count_the_listing_it_kept` lists two
+      rows, switches the fake's `list_stoas` reply to an error, calls
+      `list.reload()`, and asserts `listReadState === "failed"`,
+      `list.lastListing.length === 2` (the precondition that makes the case
+      discriminate), then `stoaCount === 0`. Mutation, run by me on this
+      tree: `stoaCount: list.lastListing.length`. Before this change, all 6
+      checks stayed green (your measurement, confirmed: the five pre-existing
+      tests still pass under the mutation). After it, the new test fails
+      (`Actual 2, Expected 0`, `tst_e2e_handles.qml:110`) and nothing else
+      does. Reverted, and 7/7 are green on the real binding. Recorded in
+      design.md D6 and tasks.md 3.2.
 
 ## Confirmed correct by direct mutation (no action needed, recorded for the record)
 
