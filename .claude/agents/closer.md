@@ -75,7 +75,7 @@ Two files answer this, and both are greppable rather than a matter of opinion.
 below say:
 
 ```
-git ls-files -- "openspec/changes/*<name>/tasks.md"
+git ls-files -- "openspec/changes/<name>/tasks.md" "openspec/changes/archive/????-??-??-<name>/tasks.md"
 ```
 
 On a first dispatch that prints `openspec/changes/<name>/tasks.md`. On a
@@ -85,8 +85,10 @@ both gates in that folder instead. Step 3 of [`RUNNER.md`](RUNNER.md)'s "From
 the `dev-writer`'s hand-back to the merge" says why the stage block and any
 re-review findings are there. An archived folder with no
 `findings/` means the re-review raised none, since the earlier `closer` deleted
-it. **Two paths back** means something was written to the pre-archive folder
-after the archive: stop and report both.
+it. **More than one path back, or none**, stop and report what came back — you
+cannot tell which block is the piece's. More than one most likely means
+something was written to the pre-archive folder after the archive; none means
+the name is wrong.
 
 **The findings gate**, run from your own worktree — it holds the piece's commits,
 so relative paths resolve:

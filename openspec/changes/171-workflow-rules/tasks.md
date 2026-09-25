@@ -104,3 +104,23 @@ named on each task is that reading.
 - [x] 6.6 `design.md`: the reasoning for 6.1 to 6.5 is in the Decisions
       entries they belong to, and the `closer`'s Step 3 gap is in Risks.
 - [x] 6.7 `openspec validate 171-workflow-rules --strict` passes.
+
+### 7. After the `spec-writer`'s ruling (`1244ae5`)
+
+- [x] 7.1 `closer.md` Step 1 uses the exact pathspec
+      `git ls-files -- "openspec/changes/<name>/tasks.md" "openspec/changes/archive/????-??-??-<name>/tasks.md"`
+      in place of 6.3's suffix glob, and stops on more than one path or none.
+      Verify: the pathspec returns nothing for `clock`, only op-clock for
+      `op-clock`, and only the live folder for `171-workflow-rules`.
+- [x] 7.2 `RUNNER.md` step 3's brief: a re-reviewer writes the file afresh in
+      the archived folder only if it has a finding.
+- [x] 7.3 `RUNNER.md` "What you read": the `tasks.md` and `findings/` rows
+      point at the archived folder and "Rebuild the state". "Rebuild the
+      state" gets the paragraph saying the paths have moved, with the same
+      pathspec. Its four commands are unchanged. Step 3 points to that
+      paragraph for finding the block rather than saying it again.
+- [x] 7.4 `design.md`: the pathspec entry cites what was measured and why the
+      suffix glob was dropped. It says why the command appears in both
+      `closer.md` and `RUNNER.md`. The `findings/` bullet points at
+      `RUNNER.md` step 3.
+- [x] 7.5 `openspec validate 171-workflow-rules --strict` passes.

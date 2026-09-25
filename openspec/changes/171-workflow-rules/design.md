@@ -129,32 +129,74 @@ The `closer` deletes `findings/` in its Step 1 and archives in Step 3, both
 before it watches CI in Step 4. So by the time a red run comes back, the change
 folder has moved to `openspec/changes/archive/<date>-<name>/`, and the stage
 block with it. `RUNNER.md` says the untick and the round's line go in that
-`tasks.md`. `closer.md`'s Step 1 finds the folder with
-`git ls-files -- "openspec/changes/*<name>/tasks.md"` rather than assuming
-`openspec/changes/<name>/`. That pathspec matches the live folder and the
-archived one alike, measured against both on this tree, so one command serves a
-first dispatch and a re-dispatch without the `closer` having to know which it
-is.
+`tasks.md`.
 
-What breaks without it: a re-dispatched `closer` greps
+**Both readers of the block find it by exact path.** The command is:
+
+```
+git ls-files -- "openspec/changes/<name>/tasks.md" "openspec/changes/archive/????-??-??-<name>/tasks.md"
+```
+
+It names the live folder and the archived one, so one command serves a first
+dispatch and a re-dispatch without the reader having to know which it is.
+
+Measured on this tree when the change was written:
+
+- `171-workflow-rules` returns only the live folder;
+- `op-clock` returns only `archive/2026-09-16-op-clock`;
+- `time-pegged-clock` returns only `archive/2026-09-25-time-pegged-clock`;
+- `home-screen-key-states` returns only its own folder, not
+  `archive/2026-09-24-home-screen-key-states-followup`;
+- `clock`, which names no change, returns nothing.
+
+**The suffix glob `openspec/changes/*<name>/tasks.md` was the first version,
+and is ruled out.** `*` matches any prefix, so it also matches every change
+whose name ends in `<name>`: `*clock` returns both `op-clock` and
+`time-pegged-clock`. The date pattern pins the prefix to exactly the
+`YYYY-MM-DD-` that every folder under `openspec/changes/archive/` carries
+(`git ls-files -- "openspec/changes/archive/*/proposal.md"` lists them).
+
+What breaks without the exact path: a re-dispatched `closer` greps
 `openspec/changes/<name>/`, which no longer exists, sees no unticked row, and
 passes Step 1. The runner's untick would sit in a file nothing reads. That is
 exactly the case the untick exists for, so without the path the row would
-guard every post-review commit except the one #171 names by kind.
+guard every post-review commit except the one #171 names by kind. With the
+suffix glob instead, a piece named `clock` would find another change's block
+as well, and a `closer` taking the first line would gate on the wrong piece.
+
+**The command appears twice, in `closer.md` Step 1 and in `RUNNER.md`'s
+"Rebuild the state", and that is deliberate.** Each is the file of an agent
+that has to run it, and neither agent reads the other's file as a matter of
+course. A pointer from one to the other would leave the reader at the gate
+without the command it is about to type. What the two copies share is only
+the command. Why the block moves, because the `closer` archives before it
+watches CI, is stated once, in `RUNNER.md` step 3; `closer.md` and "Rebuild
+the state" say where it is, not why. What each reader does with the answer
+differs, so each file states its own.
+
+**The runner's rebuild commands otherwise fail in a way that reads as
+state.** After a red run, the grep on `openspec/changes/<name>/tasks.md`
+errors, `grep -c "^## Stages"` errors, and `openspec list` no longer shows the
+change, next to a sentence saying `0` means untracked. So "What you read" and
+"Rebuild the state" both point at the archived folder, and the latter says
+how to recognise a piece in that state: an open PR whose change `openspec list`
+no longer shows.
 
 `closer.md` points to `RUNNER.md` for why the block is there rather than
 restating it. It adds two things only the `closer` needs:
 
 - **An archived folder with no `findings/` means the re-review raised none.**
-  The first `closer` deleted it, and a re-reviewer writes it afresh only when it
-  has a finding (see "The re-review brief carries what differs"). Without this
-  sentence, `grep` on a missing
-  directory errors, and a `closer` could read the error as a failed gate.
-- **Two `tasks.md` paths back means stop.** It means something recreated the
-  pre-archive folder after the archive, most likely an untick or a findings
-  file written at the old path. Without this, a `closer` taking the archived
-  path would pass Step 1 over a block the runner meant to leave unticked
-  elsewhere.
+  The first `closer` deleted it, and `RUNNER.md` step 3 has a re-reviewer write
+  it afresh only when it has a finding. Without this sentence, `grep` on a
+  missing directory errors, and a `closer` could read the error as a failed
+  gate.
+- **More than one path back, or none, means stop and report what came back.**
+  The `closer` cannot tell which block is the piece's. More than one most
+  likely means something recreated the pre-archive folder after the archive,
+  such as an untick or a findings file written at the old path. None means the
+  name is wrong. Without this, a `closer` taking the archived path would pass
+  Step 1 over a block the runner meant to leave unticked elsewhere, and a
+  `closer` given a wrong name would find no rows and read that as all ticked.
 
 ### "Every commit that merges" defines what needs re-review, and tracking commits do not count
 
@@ -201,6 +243,14 @@ runner reads reviewers by filename. That folder, because it is where the
 re-dispatched `closer`'s Step 1 runs the gate (see the re-review row entry). A file written
 anywhere else is one the gate never sees, and the finding in it would not block
 the merge.
+
+**Only a re-reviewer with a finding writes that file.** A clean re-review adds
+no box either way: before the archive it appends nothing, and after it it
+writes no file and says so in its report. The unconditional version was
+ruled out by the `closer`'s own gate. `code-reviewer.md` has every reviewer
+write a findings file, reporting clean areas in prose, and the `closer`'s
+`grep -rc "^- \["` requires every file to be non-zero. A fresh file with no
+box would send the piece back to the runner over a review that found nothing.
 
 The alternative was editing four reviewer files. It is ruled out by scope: the
 owner authorised edits for what these four issues ask for, and none asks for a

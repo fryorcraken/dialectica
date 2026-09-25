@@ -44,8 +44,8 @@ You read exactly enough to decide the next dispatch:
 
 | Read | For |
 |---|---|
-| `openspec/changes/<name>/tasks.md` — the `## Stages` block | which stage is next, and whether anyone is on it |
-| `ls openspec/changes/<name>/findings/` — **the filenames** | whether a reviewer has reported, and which dimension |
+| `openspec/changes/<name>/tasks.md` — the `## Stages` block (once the `closer` has archived: `openspec/changes/archive/<date>-<name>/`, see "Rebuild the state") | which stage is next, and whether anyone is on it |
+| `ls openspec/changes/<name>/findings/` — **the filenames** (once the `closer` has archived: `openspec/changes/archive/<date>-<name>/`, see "Rebuild the state") | whether a reviewer has reported, and which dimension |
 | `grep -rn "^- \[ \]"` over `findings/` | whether anything is unanswered, as a count |
 | the `closer`'s report | whether the piece closed, or what stopped it |
 
@@ -85,6 +85,15 @@ grep -c "^## Stages" openspec/changes/<name>/tasks.md
 
 `0` means untracked, not done. Changes predating the rule answer `0`; a new one
 should not, since the `spec-writer` writes the block first.
+
+**Once the `closer` has archived, these paths have moved.** A piece whose PR is
+open but whose change `openspec list` no longer shows was archived and not
+merged, usually because of a red run. Its block is in
+`openspec/changes/archive/<date>-<name>/tasks.md`, with `findings/` beside it.
+Find it with
+`git ls-files -- "openspec/changes/<name>/tasks.md" "openspec/changes/archive/????-??-??-<name>/tasks.md"`
+and run the greps there. A grep on the old path errors, and that error is
+neither an empty block nor `0`.
 
 A struck-through row keeps its empty box, so read the strike, not the box.
 
@@ -408,7 +417,9 @@ what lands after review ranges from one line to a rewrite:
   new findings are appended as boxes to its existing findings file. If the
   `closer` has already deleted `findings/` — it does so before archiving, so a
   red-CI fix meets this — the brief says to write that file afresh, under the
-  same name, in the archived change folder named below.
+  same name, in the archived change folder named below — and only if it has a
+  finding. A clean re-review writes no file and says so in its report, since a
+  fresh file with no box fails the `closer`'s every-file-non-zero check.
 
 A re-review can raise findings of its own, whose fixes are commits, which need
 the next round. Each round covers only what landed since the last, so rounds
@@ -436,10 +447,10 @@ lets it see the fix was never read.
 **By then the block has moved.** The `closer` archives before it watches CI, so
 after a red run the change folder is
 `openspec/changes/archive/<date>-<name>/`, not `openspec/changes/<name>/`. The
-untick and the round's line go in the `tasks.md` there; read the block there,
-and `findings/` beside it; and a re-dispatched `closer`'s Step 1 reads the same
-folder. The archive moved the old path away, so there is nothing left there to
-untick.
+untick and the round's line go in the `tasks.md` there — "Rebuild the state"
+above says how to find it — and a re-dispatched `closer`'s Step 1 reads the
+same folder. The archive moved the old path away, so there is nothing left
+there to untick.
 
 **When unsure, re-review.** The `closer` waits.
 
