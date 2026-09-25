@@ -8,12 +8,12 @@
       `nix build --inputs-from ./dialectica logos-module-builder#rust-sdk-src -o dialectica/logos-rust-sdk-src`
       finds exactly one byte-identical occurrence in `README.md` and one in
       `.github/workflows/ci.yml`, and zero in `.gitignore` or `CLAUDE.md` (issue's third "Done when"). The other two "Done when" items are checked by running the commands (task 2.1) and by CI's own first run (task 3.4), neither of which a unit or component test can substitute for.
-- [ ] review: correctness — `code-reviewer`
-- [ ] review: security — `code-reviewer`
-- [ ] review: readability — `code-reviewer`
-- [ ] review: architecture — `code-reviewer`
-- [ ] review: spec-test — `spec-test-reviewer`
-- [ ] review: design — `design-reviewer`
+- [x] review: correctness — `code-reviewer`
+- [x] review: security — `code-reviewer`
+- [x] review: readability — `code-reviewer`
+- [x] review: architecture — `code-reviewer`
+- [x] review: spec-test — `spec-test-reviewer`
+- [x] review: design — `design-reviewer`
 - [ ] findings all ticked, `findings/` deleted — `closer`
 - [ ] `openspec validate --strict`, then `archive` — `closer`
 - [ ] CI green, title/body checked, PR merged — `closer`
