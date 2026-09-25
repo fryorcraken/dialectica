@@ -106,3 +106,110 @@ first; its first line is:
 
 Only architecture was in scope for this instance; correctness, security and
 readability are separate `code-reviewer` rows.
+
+## Re-review of 439c192..HEAD
+
+Read the owner's decision comment on issue #162 again for this pass; its first
+line is unchanged from what is quoted above. Reviewed `git diff 439c192 HEAD`
+in full: `arrival.rs`, `op.rs`, `transport.rs` (citation rewording),
+`authoring.rs` (a test-comment rewording), `revision.rs` (a new doc-comment
+section), `design.md` (new Decision 11 and an expanded Risks bullet),
+`openspec/specs/op-ordering/spec.md`'s delta (paragraph split, no wording
+change), and `tasks.md` (new §4, all three rows ticked).
+
+**The finding in my own file is closed correctly.** All four doc comments
+(`arrival.rs:199`, `op.rs:67`, `op.rs:568`, `transport.rs:477`) now read
+`` the archived `time-pegged-clock` change's `design.md` `` — the option the
+finding offered of matching the crate's existing idiom, not the "record why the
+fuller form is kept" alternative. `git grep -n -F -e
+"2026-09-25-time-pegged-clock" -- dialectica/rust-lib` returns nothing, so no
+literal archive path survives in source. `design.md`'s Risks bullet now names
+the reasoning (three existing citations of the same change-name form:
+`transport.rs` on `op-ordering`, `op.rs` on `stoa-metadata-op`, `wire.rs` on
+`get-stoa`) rather than leaving the choice unexplained, which is what the
+finding asked for. This closes clean.
+
+- [ ] **`dev-writer`** — `openspec/changes/time-pegged-clock-post-review/design.md:348-393`
+      (Decision 11) — the two corrections this piece records against the
+      archived `time-pegged-clock` design (archived Decision 3's "What pins
+      it" missing a test that was in fact added; archived Decision 10's claim
+      that both `revision.rs` and `moderation.rs` state the same exposure, true
+      of only one) live **only** in this piece's `design.md`, and Decision 1
+      (same file) rules the archived `design.md` and `proposal.md` are "history
+      and are not edited" — confirmed: `git diff 439c192 HEAD --
+      openspec/changes/archive/` is empty, and the archived folder carries
+      nothing beyond `.openspec.yaml`, `design.md`, `proposal.md`, `specs/`,
+      `tasks.md` (no index, changelog or pointer file). **Scenario:** a future
+      engineer reads `openspec/changes/archive/2026-09-25-time-pegged-clock/design.md`
+      directly — reached by following one of the very citations this piece just
+      fixed (`` the archived `time-pegged-clock` change's `design.md`, Decision
+      11 ``, `arrival.rs:199`) to the right file, then reading a neighbouring
+      Decision in it — and takes Decision 3's "satisfied by the same line of
+      `publish`, with no test of its own" at face value: they either duplicate
+      `a_counter_taken_from_the_clock_leaves_the_wall_clock_at_the_current_time`
+      believing it doesn't exist, or cite the absence of a test in a future
+      design doc. Nothing in the archived file, its directory, or
+      `docs/OPENSPEC-ARCHIVE.md` points forward to the correction. The two
+      dated folders will very likely sit next to each other in a directory
+      listing (`2026-09-25-time-pegged-clock` and, once this piece archives,
+      `<merge-date>-time-pegged-clock-post-review`) if this piece merges the
+      same day it was reviewed, but that is incidental alphabetical proximity,
+      not a citation, and does not hold if the merge slips a day or a later
+      unrelated change's folder name sorts between them. This is not a case the
+      crate's existing "cite by change name, `git ls-files
+      openspec/changes/archive` finds the folder" idiom (design.md's own Risks
+      bullet, just fixed above) covers either: that idiom finds the *archived*
+      design from a citation naming it; it does nothing for a reader who is
+      already inside the archived design and has no reason to go looking for a
+      second, later change that corrects it. **Not a defect in this piece's own
+      reasoning** — the corrections themselves are accurate (verified: `c1f1a8f`
+      does add the named test, and `revision.rs`'s doc, pre-this-change, did
+      lack the paragraph `moderation.rs` had) — this is a placement/
+      discoverability gap between two documents, which is the kind of thing
+      Decision 1 already had to reason about once (why cite rather than
+      duplicate) and did not extend to "how does a reader who starts at the
+      *old* document learn a *newer* one revised it." Possible resolutions,
+      none decided here: a convention (recorded in `docs/OPENSPEC-ARCHIVE.md` or
+      this piece's Decision 11) that a correcting change adds a sibling file
+      to the corrected archive folder rather than editing `design.md` or
+      `proposal.md` themselves — which would need the owner's sign-off, since it
+      relaxes Decision 1's "not edited" to "not edited, but a sibling file may
+      be added"; or accepting the gap as a known limit of an immutable-archive
+      policy and saying so in Decision 11 rather than leaving it implicit. Severity: real
+      but narrow — it affects a reader of the archived file specifically, not
+      any reader of live code or live specs, since the doc comments this piece
+      fixed and the new `revision.rs` paragraph both cite the *current* state
+      (`op-ordering`'s live spec, or this piece's own Decision 11) rather than
+      the corrected archived Decisions, so no live citation trail actually
+      terminates on the stale text without a detour through the archive
+      itself.
+
+## What I checked and found clean, this pass
+
+- **`authoring.rs`'s test-comment reword** (`a_counter_taken_from_the_clock_leaves_the_wall_clock_at_the_current_time`)
+  is a comment-only change (confirmed: the diff touches only `//` lines, the
+  `#[test]` line and body are untouched) and matches what it now claims —
+  re-ran the named mutation by hand (temporarily changing `publish` to write
+  `next_counter(clock, who.asserted_ms)` into `asserted_ms`) and confirmed this
+  test fails directly on its own `asserted_ms` assertion, while
+  `the_second_authoring_carries_the_higher_counter` fails on its fixture-drift
+  guard rather than on the property its name asserts, matching the comment's
+  new claim exactly. Reverted after measuring.
+- **`revision.rs`'s new doc-comment section** cites `op-ordering`'s live
+  scenario ("An op signed ahead of the time leads only until the time passes
+  it") and `moderation::resolve`, both of which exist as named
+  (`openspec/specs/op-ordering/spec.md`, `moderation.rs`). No behaviour change:
+  the diff is doc-comment-only, confirmed by the full `git diff`.
+- **`tasks.md` §4** rows match what `design.md` and the source diff actually
+  record — no row claims work the diff doesn't show, and no landed work is
+  missing a row.
+- **`op-ordering` spec delta**: splitting the two bolded sentences into their
+  own paragraphs and dropping the bold changes no requirement text (`git diff`
+  shows no word added or removed, only `**...** **...**` → two paragraphs).
+  Readability-shaped, not an architecture concern, and not this dimension's to
+  duplicate.
+- **`cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p dialectica -p
+  dialectica-core`**: 1180 + 30 tests, 0 failed.
+- **`nix build ./dialectica#lgx`**: succeeded.
+
+Only architecture was in scope for this re-review pass.
