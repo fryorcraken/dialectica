@@ -26,7 +26,7 @@ part 3 leans on.
 
 **Goals:** each of the two checks seen red in CI for the reason it exists,
 then green again on the revert, with both run URLs and predicted-versus-observed
-in `tasks.md`; a branch tip that is the revert, not a break; the owner's
+in `tasks.md`; a branch tip with neither break in it; the owner's
 yq/jq rule in CLAUDE.md.
 
 **Non-Goals:** any change to what the checks assert; a local run of
@@ -92,6 +92,19 @@ fail it otherwise.
 The guard runs before the spec, so this run cannot also say anything about
 sitometres: the job stops at the guard. That is why the two proofs are two
 pushes (D3).
+
+The red run bore this out: the diff was exactly that one key, and the step
+exited 1 with its own error (`tasks.md` 3.1). It also showed something the
+prediction missed. The adjudicator step runs on `always()`, found no report
+because sitometres never started, and printed its missing-report diagnosis,
+"sitometres was killed before it could write one (job timeout?)". The step's
+failure is correct, since nothing was proved. Its stated cause is wrong
+whenever an earlier step stopped the job, and archived D1 chose that wording
+because "a missing-file error reads as a bug in the adjudicator". The
+diagnosis now misleads in the other direction, on every run an earlier guard
+stops. That behaviour is the adjudicator's, which the proposal keeps out of
+any capability, so it is a review finding for this piece rather than a change
+made here.
 
 ### D2 — The no-key step's break is archived `tasks.md` 5.1, unchanged
 

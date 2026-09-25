@@ -3,7 +3,7 @@
 ## Stages
 
 - [ ] ~~spec — `spec-writer`~~ — no spec delta: a test-only piece, `skip_specs: true` in `.openspec.yaml` says why; `proposal.md` is written
-- [ ] design + code — `dev-writer`
+- [x] design + code — `dev-writer` — design.md written; CLAUDE.md line; both proofs red then green in CI (Implementation 2 and 3)
 - [ ] tests — `tester`
 - [ ] review: correctness — `code-reviewer`
 - [ ] review: security — `code-reviewer`
@@ -83,17 +83,50 @@ out before the next push.
 
 ### 3. The scaffold guard goes red on a value `lgs` itself changed
 
-- [ ] 3.1 Break: an unknown key under `[modules.dialectica_ui]` in
+- [x] 3.1 Break: an unknown key under `[modules.dialectica_ui]` in
       `scaffold.toml`, pushed alone. Predicted (design.md D1): "lgs left
       scaffold.toml's values alone" exits 1 with its `::error::`, its diff
       showing that key present before and absent after, and the job stops
       there, before sitometres. ci.yml green. Answers: `lgs` 0.3.1's own
       rewrite drops a key it does not know, and the real step in CI reports it
       as a changed value
-- [ ] 3.2 Revert pushed; both workflows green on it
+
+      **Observed, on head `d3d24e2`, the break pushed alone:** UI tests
+      https://github.com/fryorcraken/dialectica/actions/runs/36142050293
+      failed. `lgs basecamp setup` and `lgs basecamp install` both ran green,
+      then "lgs left scaffold.toml's values alone" printed a one-hunk diff
+      whose only change is `-      "e2e_suite_review_probe": "a key lgs does
+      not know; setup's rewrite should drop it",` under `dialectica_ui`, and
+      `::error::an lgs basecamp verb changed a value in scaffold.toml — see the
+      diff above`. "Locate", "The build really has the QML inspector" and "Run
+      the spec" were skipped, so sitometres never started. As predicted.
+      **The record answers the second question:** the value that differed was
+      one `lgs`'s own rewrite changed, since no step of the job writes
+      `scaffold.toml` between the snapshots. It therefore also answers the
+      first, whether the real step fires in CI on a changed value. It does not
+      say which of the two verbs dropped the key (design.md D1).
+      **Not predicted:** "The run proved what the spec asks", which runs on
+      `always()`, also failed, with `no JSON report — sitometres was killed
+      before it could write one (job timeout?), so nothing was proved`. The
+      exit is right and the stated cause is wrong: sitometres was never
+      started. Reported as a finding (design.md D1), not changed here.
+      CI https://github.com/fryorcraken/dialectica/actions/runs/36142050127
+      green in every job, as predicted, including `Lint`'s
+      "scaffold.toml kept the values a lgs verb can silently rewrite"
+- [x] 3.2 Revert pushed; both workflows green on it. **Observed, on head
+      `c4d8f04`** (the pull_request merge `ad0e9f5` onto `main` at `8368b2f`,
+      the same base as 3.1): UI tests
+      https://github.com/fryorcraken/dialectica/actions/runs/36142854131
+      green, the guard printing `ok: scaffold.toml's values are unchanged` and
+      the adjudicator `verdict: pass`, `ok: all 14 steps passed`; CI
+      https://github.com/fryorcraken/dialectica/actions/runs/36142854166
+      green in every job
 
 ### 4. Hand-back
 
-- [ ] 4.1 Branch tip is not a break: `git diff 8368b2f -- scaffold.toml
-      dialectica-ui/src/qml/DStoaListScreen.qml` is empty, and both workflows
-      are green on the tip
+- [x] 4.1 Neither break is in the branch's net diff: `git diff --stat 8368b2f
+      HEAD -- scaffold.toml dialectica-ui/src/qml/DStoaListScreen.qml` prints
+      nothing. The tip is this record, a documentation-only commit on top of
+      the 3.2 revert; its own CI state is reported in the hand-back and on the
+      PR, not here, because this file cannot name a run of the commit that
+      contains it
