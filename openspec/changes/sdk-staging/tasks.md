@@ -4,7 +4,10 @@
 
 - [ ] ~~spec — `spec-writer`~~ — no spec delta: docs and CI tooling only, `skip_specs: true` in `.openspec.yaml` says why; `proposal.md` is written
 - [x] design + code — `dev-writer`
-- [ ] tests — `tester`
+- [ ] ~~tests — `tester`~~ — no test added: the change touches neither Rust core logic nor QML, so neither existing test layer can see it. The one candidate, a gate asserting README and `ci.yml` carry the same staging command, is design.md's explicit Non-Goal ("A gate is a follow-up if drift is ever observed; it is not built speculatively here" — Risks/Trade-offs on D3), reasoning this repo has applied elsewhere (no speculative gates). Independently confirmed instead of gated: `git grep -F` of the exact command
+      `nix build --inputs-from ./dialectica logos-module-builder#rust-sdk-src -o dialectica/logos-rust-sdk-src`
+      finds exactly one byte-identical occurrence in `README.md` and one in
+      `.github/workflows/ci.yml`, and zero in `.gitignore` or `CLAUDE.md` (issue's third "Done when"). The other two "Done when" items are checked by running the commands (task 2.1) and by CI's own first run (task 3.4), neither of which a unit or component test can substitute for.
 - [ ] review: correctness — `code-reviewer`
 - [ ] review: security — `code-reviewer`
 - [ ] review: readability — `code-reviewer`
