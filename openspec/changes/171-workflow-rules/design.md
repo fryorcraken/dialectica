@@ -124,15 +124,55 @@ after the row was ticked, and the re-dispatched `closer` checks the same block.
 re-review would be back to a rule the runner has to remember, and #171 is two
 cases of that failing on one day.
 
-### "Every commit that merges" defines what needs re-review, and tick-only commits do not count
+**After a red run, that block is in the archive, and the untick goes there.**
+The `closer` deletes `findings/` in its Step 1 and archives in Step 3, both
+before it watches CI in Step 4. So by the time a red run comes back, the change
+folder has moved to `openspec/changes/archive/<date>-<name>/`, and the stage
+block with it. `RUNNER.md` says the untick and the round's line go in that
+`tasks.md`. `closer.md`'s Step 1 finds the folder with
+`git ls-files -- "openspec/changes/*<name>/tasks.md"` rather than assuming
+`openspec/changes/<name>/`. That pathspec matches the live folder and the
+archived one alike, measured against both on this tree, so one command serves a
+first dispatch and a re-dispatch without the `closer` having to know which it
+is.
+
+What breaks without it: a re-dispatched `closer` greps
+`openspec/changes/<name>/`, which no longer exists, sees no unticked row, and
+passes Step 1. The runner's untick would sit in a file nothing reads. That is
+exactly the case the untick exists for, so without the path the row would
+guard every post-review commit except the one #171 names by kind.
+
+`closer.md` points to `RUNNER.md` for why the block is there rather than
+restating it. It adds two things only the `closer` needs:
+
+- **An archived folder with no `findings/` means the re-review raised none.**
+  The first `closer` deleted it, and a re-reviewer writes it afresh only when it
+  has a finding (see "The re-review brief carries what differs"). Without this
+  sentence, `grep` on a missing
+  directory errors, and a `closer` could read the error as a failed gate.
+- **Two `tasks.md` paths back means stop.** It means something recreated the
+  pre-archive folder after the archive, most likely an untick or a findings
+  file written at the old path. Without this, a `closer` taking the archived
+  path would pass Step 1 over a block the runner meant to leave unticked
+  elsewhere.
+
+### "Every commit that merges" defines what needs re-review, and tracking commits do not count
 
 A findings pass always adds at least one commit, because the fixer flips the box
 and appends the outcome. If every commit counted, every piece would owe a
 re-review of box ticks. Counting only commits that change content keeps the rule
-meaningful:
+meaningful. `RUNNER.md` lists what is tracking rather than content: a box
+flipped, a finding's outcome in `findings/`, a stage-row tick, and the runner's
+own record line under the re-review row.
 
 - `findings/` is deleted before merge.
 - A stage-row tick is tracking.
+- **The runner's record lines merge**, because `tasks.md` is archived with the
+  change. They are still tracking: they record what the flow did, not what the
+  change does. If they counted, recording round 1 would itself be a commit that
+  owes round 2, and no round could ever close the row. That is why the list
+  names them explicitly: "commits that change something which merges", read
+  literally, covers them.
 
 A commit that moves durable reasoning into `design.md` does count. It merges,
 and it is the design-reviewer's material.
@@ -151,6 +191,16 @@ exists. `RUNNER.md` tells the runner to put three things in the brief:
 - that new findings are appended as boxes to the existing file.
 
 Appending still works with the findings gate, which only counts boxes.
+
+**When `findings/` is already gone, the file is written afresh in the archived
+folder.** The `closer` deletes `findings/` in its Step 1, before it archives.
+So a re-review after a red run has no file to append to. `RUNNER.md` has the
+brief say to write it under the same name, in
+`openspec/changes/archive/<date>-<name>/findings/`. Same name, because the
+runner reads reviewers by filename. That folder, because it is where the
+re-dispatched `closer`'s Step 1 runs the gate (see the re-review row entry). A file written
+anywhere else is one the gate never sees, and the finding in it would not block
+the merge.
 
 The alternative was editing four reviewer files. It is ruled out by scope: the
 owner authorised edits for what these four issues ask for, and none asks for a
@@ -226,6 +276,23 @@ If the `spec-writer` changed the behaviour, the code is now wrong, so the
 anyway, and its brief names the `spec-writer`'s commit so it writes against the
 new text.
 
+**The brief also says which markers the `spec-writer` decided, and that each is
+now closed:** reworded or removed to match the new spec text, not kept. The
+runner learns which from the `spec-writer`'s hand-back. The reason is
+`tester.md`, which says "Keep the markers and report each one — the spec-writer
+decides". That was right when the `spec-writer` decided after the review round,
+and it is out of date now that it decides before the `tester` runs. A tester
+following it keeps a marker for behaviour that is now specified. The
+`spec-test-reviewer` then finds the marker and routes it back to the
+`spec-writer`, which is the #162 loop this change exists to end.
+
+The durable fix is `tester.md` saying this itself, so that `RUNNER.md` points
+to it rather than carrying the rule in a brief. That edit is outside this
+change and is with the owner. Until it lands, the brief carries the
+difference. If it does, `RUNNER.md`'s step 1 should keep only what the brief
+names, the commit and the closed markers, and point to `tester.md` for what a
+closed marker becomes, so the rule is stated once.
+
 ### `--admin` is forbidden in Step 6, with a pointer from "What you never do"
 
 The rule sits in Step 6, where a `closer` is standing when `gh pr merge` refuses.
@@ -281,7 +348,16 @@ already says the same thing, so the two files agree once more.
   sentence is out of date. A tester following it would keep a marker for
   behaviour that is now specified. → `tester.md` is outside this change's
   authorisation, so this goes in the hand-back as a proposed owner edit. Until
-  then, `RUNNER.md` has the tester's brief name the `spec-writer`'s commit.
+  then, `RUNNER.md` has the tester's brief name the `spec-writer`'s commit and
+  the markers it closed. A runner that leaves that sentence out of a brief gets
+  the old behaviour, and nothing checks the brief.
+- **[A re-dispatched `closer` does not yet know Step 3 is done.]** After a red
+  run, `closer.md`'s Step 1 finds the change archived, but Step 3 does not say
+  the archive is already done, so a fresh `closer` may run `openspec archive` on
+  a change that is no longer live. → That edit is outside this change and is
+  with the owner. If made, it belongs in Step 3: `openspec archive` is not run
+  again, and Step 3's commit and push still apply to a `findings/` deleted in
+  Step 1, so the run the `closer` watches includes the deletion.
 - **[PR #132 edits the same template and the same README paragraph.]** → The
   second to merge reconciles them. `proposal.md` lists the overlapping hunks.
   The re-review row's wording does not depend on lane names, so #132's merge of

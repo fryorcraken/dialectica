@@ -358,7 +358,12 @@ markers it is being asked to judge.
 Then the markers and tests are brought into line with the new spec text: by the
 `dev-writer` if the `spec-writer` changed the behaviour, and then the `tester`;
 otherwise by the `tester` directly. Either brief names the `spec-writer`'s
-commit.
+commit and says which markers it decided — its hand-back says which — and that
+each of those is now **closed**: reworded or removed to match the new spec
+text, not kept as an open question for the review round. `tester.md` still says
+to keep every marker and report it, so without that sentence a tester keeps
+them, a reviewer rediscovers them, and the piece goes round the loop this step
+exists to prevent.
 
 **Do not put markers to the owner.** Deciding them is the `spec-writer`'s job.
 Escalate only what it returns as a product decision, and state the choice: the
@@ -378,9 +383,9 @@ runs.** That includes:
 - a fix for a red CI run (step 4 sends it back here).
 
 What counts is **every commit that changes something which merges**. A commit
-that only flips boxes — a finding's outcome in `findings/`, which is deleted
-before merge, or a stage-row tick — needs no review. A commit moving reasoning
-into `design.md` does.
+that only records tracking — a box flipped, a finding's outcome in `findings/`,
+a stage-row tick, or your own record line under the re-review row — needs no
+review. A commit moving reasoning into `design.md` does.
 
 **A green CI run and the author's own mutation runs are not review, and a
 warning the owner did not answer is not consent.** Two pieces merged unreviewed
@@ -401,7 +406,10 @@ what lands after review ranges from one line to a rewrite:
 - **The brief** names the commit range to read — for `spec-test-reviewer`, only
   the spec and test files in it, since it stays blind to the implementation —
   and says the reviewer's stage row is already ticked and stays so, and that
-  new findings are appended as boxes to its existing findings file.
+  new findings are appended as boxes to its existing findings file. If the
+  `closer` has already deleted `findings/` — it does so before archiving, so a
+  red-CI fix meets this — the brief says to write that file afresh, under the
+  same name, in the archived change folder named below.
 
 A re-review can raise findings of its own, whose fixes are commits, which need
 the next round. Each round covers only what landed since the last, so rounds
@@ -425,6 +433,14 @@ dispatch forks from it. **If a commit lands after it is ticked — a red-CI fix
 — untick it** and add the next round's line: the `closer`'s Step 1 refuses to
 run while a row other than its own is unticked, and that is the only thing that
 lets it see the fix was never read.
+
+**By then the block has moved.** The `closer` archives before it watches CI, so
+after a red run the change folder is
+`openspec/changes/archive/<date>-<name>/`, not `openspec/changes/<name>/`. The
+untick and the round's line go in the `tasks.md` there; read the block there,
+and `findings/` beside it; and a re-dispatched `closer`'s Step 1 reads the same
+folder. The archive moved the old path away, so there is nothing left there to
+untick.
 
 **When unsure, re-review.** The `closer` waits.
 

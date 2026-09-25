@@ -71,6 +71,23 @@ git rev-parse --abbrev-ref HEAD
 
 Two files answer this, and both are greppable rather than a matter of opinion.
 
+**Find the change folder first**, because it is not always where the commands
+below say:
+
+```
+git ls-files -- "openspec/changes/*<name>/tasks.md"
+```
+
+On a first dispatch that prints `openspec/changes/<name>/tasks.md`. On a
+re-dispatch after a red run, an earlier `closer` has already archived the
+change, and it prints `openspec/changes/archive/<date>-<name>/tasks.md`: run
+both gates in that folder instead. Step 3 of [`RUNNER.md`](RUNNER.md)'s "From
+the `dev-writer`'s hand-back to the merge" says why the stage block and any
+re-review findings are there. An archived folder with no
+`findings/` means the re-review raised none, since the earlier `closer` deleted
+it. **Two paths back** means something was written to the pre-archive folder
+after the archive: stop and report both.
+
 **The findings gate**, run from your own worktree — it holds the piece's commits,
 so relative paths resolve:
 

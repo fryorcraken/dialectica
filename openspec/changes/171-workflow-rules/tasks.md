@@ -81,3 +81,26 @@ named on each task is that reading.
 - [x] 5.1 `openspec validate --strict 171-workflow-rules` passes.
 - [x] 5.2 Push to the remote piece ref by refspec, and open the PR with
       `Closes #171`, `#170`, `#169` and `#133` on their own lines.
+
+### 6. After the `spec-writer` callback (`6c2149c`)
+
+- [x] 6.1 `RUNNER.md` step 3, "What counts": tracking is a box flipped, a
+      finding's outcome in `findings/`, a stage-row tick, or the runner's own
+      record line under the re-review row. Verify: the record line is named in
+      the list.
+- [x] 6.2 `RUNNER.md` step 3: after the `closer` has archived, the stage block
+      and `findings/` are in `openspec/changes/archive/<date>-<name>/`, and the
+      untick goes there. Verify: the paragraph after the untick names the
+      archived path.
+- [x] 6.3 `closer.md` Step 1 finds the change folder with
+      `git ls-files -- "openspec/changes/*<name>/tasks.md"` and runs both gates
+      there, pointing to `RUNNER.md` for why. Verify: the pathspec returns the
+      live folder for `171-workflow-rules` and the archived one for `op-clock`
+      on this tree.
+- [x] 6.4 `RUNNER.md`'s re-review brief: if `findings/` is gone, the reviewer
+      writes the file afresh under the same name in the archived folder.
+- [x] 6.5 `RUNNER.md` step 1: the brief after the `spec-writer` names the
+      markers it closed, and says each is reworded or removed, not kept.
+- [x] 6.6 `design.md`: the reasoning for 6.1 to 6.5 is in the Decisions
+      entries they belong to, and the `closer`'s Step 3 gap is in Risks.
+- [x] 6.7 `openspec validate 171-workflow-rules --strict` passes.
