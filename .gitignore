@@ -28,13 +28,8 @@ dialectica/rust-lib/generated/
 # convenience and must never be committed, or the checkout would pin an SDK the
 # builder does not deliver.
 #
-# Stage it at the rev `dialectica/flake.nix` pins — read the rev from there
-# rather than from this comment, because which SDK you get is a property of the
-# builder pin (PHASE0-FINDINGS.md §2), and a stale rev here would quietly stage
-# a different SDK than the build links against:
-#
-#   nix build github:logos-co/logos-module-builder/<rev from flake.nix>#rust-sdk-src \
-#     -o dialectica/logos-rust-sdk-src
+# How to stage it is in README.md, "Building" — the one place it is written
+# down, so that this comment cannot drift from it.
 #
 # `cargo test` cannot run without this: the path dependency is ungated, so
 # cargo fails at manifest resolution before build.rs cfg gating can help.

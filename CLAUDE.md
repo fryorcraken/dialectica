@@ -218,7 +218,17 @@ this project a stalled session.
   the prefix costs a click on its own, and the script already sets that
   variable. A `VAR=value` prefix is never the answer here — where a command
   needs an environment, the wrapper that sets it is the supported shape, and
-  for scaffold-gated Rust code that wrapper is `nix build .#lgx`.
+  for scaffold-gated Rust code that wrapper is `nix build ./dialectica#lgx`
+  (the repository root has no flake, so `.#lgx` fails there).
+
+- **In a fresh worktree, stage the SDK yourself before `cargo test`.** A new
+  tree has no `dialectica/logos-rust-sdk-src`, and without it cargo fails with
+  `failed to load manifest for dependency logos-rust-sdk` before compiling
+  anything. The staging command is in `README.md`, "Building" — read it there
+  rather than copying it here, because two copies drift. It is a plain
+  `nix build`, so it costs no approval click. Do not stop and wait for someone
+  to stage it for you: an agent that stops before changing anything loses its
+  worktree, which is what happened on #91.
 
 - **Never `readlink` or `ls` a `/nix/store` path** to find where a build
   artefact went. Use the documented artefact paths under `.scaffold/basecamp/`.

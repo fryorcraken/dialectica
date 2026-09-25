@@ -1235,8 +1235,10 @@ jobs:
       # payloads. Was v27, four majors stale.
       #
       # `install_url` matches the `build` job's. This job does NOT need the
-      # version floor — it builds one `github:` flake with no relative path
-      # input — but two jobs installing two different Nixes is a difference
+      # version floor: the only lock file it evaluates is dialectica/flake.lock
+      # (through `--inputs-from` below), and that lock holds `github` and `git`
+      # inputs only — no relative `path` input, which is what Nix <= 2.24
+      # rejects. But two jobs installing two different Nixes is a difference
       # nobody would think to check when only one of them breaks. See the long
       # note on the same step in `build` for what the floor is and why.
       - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
@@ -1260,38 +1262,29 @@ jobs:
       # which names neither Nix nor the builder. So the SDK has to be staged
       # first, from the SAME builder the module links against.
       #
-      # The rev is READ OUT OF dialectica/flake.lock rather than written here.
-      # That is the self-invalidating half and it is the point: a literal rev
-      # in this file would be a second source of truth, and the failure mode of
-      # a stale one is not an error — it is `cargo test` passing against an SDK
-      # the module does not actually link, which is a green gate testing the
-      # wrong thing. PHASE0-FINDINGS §2 is the whole essay on why an SDK's
-      # capabilities are a property of the builder pin and move with it.
+      # This is the README's "Building" command, byte for byte, and it must
+      # stay that way: this step is the only thing that runs the README's
+      # line, so a CI command that differs from it is not testing it.
       #
-      # (The .gitignore's example command names tag 0.2.6. Do not copy that
-      # number: dialectica/flake.nix deliberately pins PAST the newest tag
-      # because 0.2.6 cannot build a Rust module on a cold cache —
-      # PHASE0-FINDINGS §8. Reading the lock is what keeps this correct
-      # whichever way the pin moves.)
+      # `--inputs-from ./dialectica` turns each input of dialectica/flake.lock
+      # into a registry entry, so `logos-module-builder` resolves to the
+      # LOCKED builder and no rev is written anywhere. That is the point: a
+      # literal rev here would be a second source of truth, and the failure
+      # mode of a stale one is not an error — it is `cargo test` passing
+      # against an SDK the module does not actually link, which is a green
+      # gate testing the wrong thing. PHASE0-FINDINGS §2 is the whole essay on
+      # why an SDK's capabilities are a property of the builder pin and move
+      # with it. Without the flag the name resolves nowhere and the step
+      # fails, rather than falling back to an unpinned builder
+      # (measured: D1 of the `sdk-staging` OpenSpec change's design.md).
+      #
+      # The `test -f` turns "the builder's output changed shape" into a
+      # failure HERE, rather than as the manifest error quoted above, one step
+      # later in `Formatting`.
       - name: Stage the logos-rust-sdk source the builder pins
         run: |
           set -eu
-          rev=$(python3 - <<'PY'
-          import json, sys
-          lock = json.load(open("dialectica/flake.lock"))
-          root = lock["nodes"][lock["root"]]
-          key = root["inputs"]["logos-module-builder"]
-          node = lock["nodes"][key]["locked"]
-          # A `follows` node has no rev of its own, and a non-github input
-          # would need a different flake ref below. Say so rather than
-          # producing a plausible-looking empty string.
-          assert node.get("type") == "github", f"unexpected builder input type {node.get('type')!r}"
-          assert node.get("rev"), "logos-module-builder node has no rev"
-          print(f"{node['owner']}/{node['repo']}/{node['rev']}")
-          PY
-          )
-          echo "builder pin from dialectica/flake.lock: $rev"
-          nix build "github:$rev#rust-sdk-src" -o dialectica/logos-rust-sdk-src -L
+          nix build --inputs-from ./dialectica logos-module-builder#rust-sdk-src -o dialectica/logos-rust-sdk-src
           test -f dialectica/logos-rust-sdk-src/Cargo.toml
 
       - name: Formatting
