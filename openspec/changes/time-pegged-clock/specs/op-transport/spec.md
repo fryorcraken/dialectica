@@ -21,6 +21,8 @@ A refusal SHALL NOT partially apply: a refused payload SHALL leave the op log, t
 
 **The window is judged last, and only on an op that would otherwise be admitted.** A payload that fails any other check MUST be reported as that failure, even if its counter is also beyond the window. The window's rule and its reasoning belong to `op-ordering` and are not restated here. What this capability adds is that the window is checked at this boundary, before anything is stored, and is reported as a refusal of its own. A forgery reported as "too far ahead" would describe a forged op by a field its forger chose.
 
+**An op this peer already holds is judged like any other arrival.** Validation precedes every lookup by a property of the op, as the opening of this requirement says, and finding whether an op is already held is a lookup by its op id. An arriving op whose counter is beyond the window MUST therefore be refused as ahead of this peer's time even when the peer already holds that op, and MUST NOT be reported as already held. The refusal leaves the held op as it was. This can happen only when this peer's current time has moved back after it admitted the op.
+
 **Forgery is one refusal here rather than two, and that is a narrowing.** This list previously separated a bad signature from a key that did not bind to a separately-claimed author. An op names its author by carrying that author's public key and by nothing else, so there is no second identifier a key could fail to bind to: substituting the author substitutes the key, and the signature then fails under it. The forged-authorship case is therefore wholly caught by the signature check, and a peer that reported the two apart would be reporting a distinction its inputs cannot make.
 
 #### Scenario: A payload on an unknown channel is refused
@@ -67,6 +69,13 @@ A refusal SHALL NOT partially apply: a refused payload SHALL leave the op log, t
 - **THEN** the first is reported as failing verification
 - **AND** the second is reported as a Stoa mismatch
 - **AND** neither is reported as ahead of this peer's time
+
+#### Scenario: A held op arriving again beyond the window is refused, and stays held
+
+- **WHEN** a peer admits an op, its current time then moves back so that the op's counter is more than one hour ahead of it, and the same op arrives again
+- **THEN** the second arrival is refused, reported as ahead of this peer's time
+- **AND** it is not reported as already held
+- **AND** the peer still holds exactly one entry for the op, the one it admitted
 
 #### Scenario: Refusal leaves nothing behind
 

@@ -11,7 +11,7 @@ is the scope of this piece; its first line is:
 
 ## Findings
 
-- [ ] **`spec-writer`** — `authoring.rs:1712`'s `NO SPEC:` marker: the spec
+- [x] **`spec-writer`** — `authoring.rs:1712`'s `NO SPEC:` marker: the spec
       requires the counter to take "the peer's current Unix time in
       milliseconds" and the wall-clock field to carry "the author's assertion",
       but never says whether a publish must read the clock once for both or may
@@ -27,7 +27,24 @@ is the scope of this piece; its first line is:
       spec should require one reading, or is content to leave it to the
       implementation as it does today.
 
-- [ ] **`spec-writer`** — `transport.rs:2600`'s `NO SPEC:` marker: the spec says
+      **Outcome (spec-writer): fixed.** `op-ordering`'s publish requirement now
+      carries "One reading of the time signs both clock fields": a publish MUST
+      take its current time once, and the wall-clock field MUST carry the value
+      the counter was computed from. Closable without the owner, because the
+      clock requirement's leak analysis already relied on it ("a counter at its
+      author's own time reveals that author's clock reading, which the
+      wall-clock field of an honest op already discloses"), which is only exact
+      with one reading. Two fields remain, so this is not the merge the owner
+      reserved. Two scenarios: "One reading of the time signs the counter and
+      the wall-clock alike" (clock behind the time; pinned by the existing
+      `one_reading_of_the_time_signs_both_clock_fields`) and "A counter taken
+      from the clock leaves the wall-clock at the current time" (clock above
+      the time; **no publish-level test yet** — `arrival.rs`'s
+      `a_clock_at_or_ahead_of_the_current_time_yields_one_above_it` checks the
+      counter only, not the signed wall-clock). The code already does this
+      (`design.md` Decision 3), so the marker can go.
+
+- [x] **`spec-writer`** — `transport.rs:2600`'s `NO SPEC:` marker: the spec says
       nothing about an op this peer **already holds** arriving again once this
       peer's own clock has been set backward past the op's counter minus the
       window. The code refuses it as `AheadOfTime` (the window is judged before
@@ -41,6 +58,18 @@ is the scope of this piece; its first line is:
       affects a later arrival" and "the same op arriving again... admitted
       exactly as an op arriving for the first time would be" clauses are silent
       on what "the same op, but already held" should report. Worth a decision.
+
+      **Outcome (spec-writer): fixed**, as the code already behaves. The
+      existing `op-transport` requirement "Every inbound payload is validated
+      before it reaches storage" already requires validation "before any
+      property of it is used to look anything up", and "is this op already
+      held?" is a lookup by op id. The window is one of that requirement's
+      validations, so it must run first and the answer is `AheadOfTime`. The
+      delta now says so in a paragraph ("An op this peer already holds is
+      judged like any other arrival") and a scenario, "A held op arriving again
+      beyond the window is refused, and stays held", pinned by the existing
+      `a_held_op_arriving_again_beyond_the_window_is_refused_rather_than_reported_as_held`.
+      No change to the code; the marker can go.
 
 ## What was checked and found clean
 

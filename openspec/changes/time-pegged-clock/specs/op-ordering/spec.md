@@ -14,6 +14,8 @@ This is the send rule of the SDS protocol (LIP-109), `max(timeNowInMs, current_l
 
 **Saturation, not overflow.** Where one above the clock would exceed the maximum representable counter, the value MUST saturate at the maximum rather than wrap. A wrapping counter would place the highest op below the lowest, inverting the order for every op in the Stoa at once.
 
+**One reading of the time signs both clock fields.** A publish MUST take its current time once. The op's wall-clock field MUST carry the same value as the current time its counter was computed from, so an op whose author's clock was behind that time carries a counter equal to its wall-clock. The counter is computed from the time and not read from the field, so this gives the wall-clock field no part in any decision. It is what makes exact the clock requirement's statement that a counter at its author's own time discloses nothing the wall-clock field of an honest op does not.
+
 #### Scenario: A first op in a Stoa carries the current time
 
 - **WHEN** a peer holding no ops of a Stoa publishes into it
@@ -29,6 +31,18 @@ This is the send rule of the SDS protocol (LIP-109), `max(timeNowInMs, current_l
 
 - **WHEN** a peer holding an op of a Stoa whose counter is at or above the peer's current Unix time in milliseconds publishes into that Stoa
 - **THEN** the op's counter is one above the highest counter the peer holds for that Stoa
+
+#### Scenario: One reading of the time signs the counter and the wall-clock alike
+
+- **WHEN** a peer whose clock for a Stoa is behind its current Unix time in milliseconds publishes into that Stoa
+- **THEN** the op's counter equals that current time
+- **AND** the op's wall-clock equals that same current time
+
+#### Scenario: A counter taken from the clock leaves the wall-clock at the current time
+
+- **WHEN** a peer whose clock for a Stoa is above its current Unix time in milliseconds publishes into that Stoa
+- **THEN** the op's counter is one above that clock
+- **AND** the op's wall-clock equals the peer's current time, not the counter
 
 #### Scenario: Publishing after receiving advances past what was received
 

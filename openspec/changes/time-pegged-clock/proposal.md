@@ -168,8 +168,9 @@ These are reasoning, not behaviour. Each belongs in a Decisions entry.
   the publish path and the receive path. The spec forbids using the timestamp
   the transport hands in with a message as the reference. That timestamp is also
   nanoseconds where every other delivery event is ISO-8601 (delivery bug #26).
-  Whether publish takes the same instant it signs into the wall-clock field is a
-  design choice. The spec does not fix it.
+  The spec requires publish to compute the counter from one reading of the time
+  and to sign that same reading as the wall-clock field. How that reading
+  reaches `core` is the design's.
 - **Overflow.** Neither the window comparison nor `max(now, clock + 1)` may
   overflow or panic, because a panic on the receive path aborts the module
   process. The SQLite log stores counters in `score_epoch` through an `as i64`
@@ -189,14 +190,16 @@ None.
 
 ### Modified Capabilities
 
-- `op-ordering`: the publish rule becomes `max(now, clock + 1)`. The clock
+- `op-ordering`: the publish rule becomes `max(now, clock + 1)`, with the
+  wall-clock field signed from the same reading of the time. The clock
   becomes the highest counter held. The advance-bound requirement is removed,
   and a one-hour receive window is added. The reply scenario is corrected. The
   "wall-clock decides nothing" and display-clamp requirements are narrowed to
   the wall-clock field, and they state the reversal. The first requirement's
   reason for rejecting the transport clock is corrected.
 - `op-transport`: the window refusal joins the inbound validation list, and the
-  "decides nothing beyond admitting it" requirement names it.
+  "decides nothing beyond admitting it" requirement names it. An op already held
+  that arrives again beyond the window is refused like any other arrival.
 - `op-format`: the rationale for admitting the counter, and for never refusing
   an implausible wall-clock, is rewritten. It no longer rests on "a counter is
   not a claim about time" or "no op is dropped for a clock".
