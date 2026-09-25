@@ -119,3 +119,92 @@ disclosure comments; no refusal, bound or check changed.
 - No panic-reachable path touched by either diff (no indexing, slicing,
   `unwrap`/`expect`, or arithmetic changed — only doc comments, spec prose and
   one new test).
+
+## Re-review of 439c192..HEAD
+
+I read the owner's decision comment on issue #162 again for this pass. Its
+first line, unchanged from the first round:
+
+> **Decision (owner, 2026-09-25): peg the Lamport counter to wall-clock time,
+> as SDS does (LIP-109, `logos-lips/docs/anoncomms/raw/sds.md`, lines 148-155
+> and 184-192).**
+
+Scope: `git diff 439c192 HEAD`. Code changes are doc comments only —
+`arrival.rs`, `op.rs` (×2), `transport.rs` reword an archived-design citation
+from a full path to the change's name (verified the folder exists:
+`openspec/changes/archive/2026-09-25-time-pegged-clock/`, matching the
+convention `design.md`'s own Risks section now states). The one substantive
+addition is `revision.rs`'s new "What signing an hour ahead buys here, and
+whom" section on `current_version`, ticking `tasks.md` 4.3.
+
+**The claim under test:** "Because the authorship check above admits only
+this post's author's versions, the lead is over that author's own other
+versions … No third party can use it."
+
+I checked this against the code, not the doc's own reasoning:
+
+- `is_valid_revision` (`revision.rs:382-400`) requires, of any candidate
+  competing for "current": same kind (`Revise`), same Stoa, `op.verify()`
+  (signature valid under the key carried as `author`), and
+  `candidate.op.op.author == original.op.op.author`. The last condition runs
+  regardless of the candidate's counter — a candidate with a counter an hour
+  ahead is filtered by the exact same line as one with a counter of zero.
+  There is no code path in `current_version` that consults a counter before
+  authorship is decided, and no separate "fast path" for a high counter that
+  skips the author comparison.
+- **Mutation performed and reverted**: replaced
+  `&& candidate.op.op.author == original.op.op.author` with `&& true` in
+  `is_valid_revision` and ran
+  `cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p dialectica -p dialectica-core revision::`.
+  Result: **7 of 43 `revision::` tests failed**
+  (`a_revision_by_a_stranger_is_dropped`,
+  `a_strangers_revision_is_dropped_when_it_is_the_only_one`,
+  `a_strangers_revision_loses_to_an_older_one_by_the_author`,
+  `every_key_but_the_authors_is_rejected`,
+  `a_dropped_version_does_not_make_a_post_look_revised`,
+  `two_peers_holding_the_same_ops_resolve_to_the_same_version`,
+  `resolving_against_a_log_of_junk_never_panics`), each printing the stranger's
+  or forger's body as the resolved current version instead of the true
+  author's. This is the check the doc's claim rests on, and it is not merely
+  asserted in prose — a hostile peer's forged-authorship attempt is caught
+  here whatever counter it carries. The mutation was reverted before
+  committing; `git status --short` shows only the findings file changed.
+- `a_strangers_revision_loses_to_an_older_one_by_the_author` in particular
+  already puts a non-author op **ahead in `iter_target`'s order** (i.e. with
+  the higher effective rank) and shows it still loses — this is the general
+  case that a counter-driven lead is a strict subset of. No test builds the
+  specific fixture of a stranger's revision carrying a counter within the
+  one-hour window (there is no `a_revision_at`-equivalent taking a non-author
+  key), but the property the doc claims does not depend on how the candidate
+  came to lead the order, and the mutation above confirms the one line that
+  would have to break for a hostile peer to benefit is exercised.
+- Cross-checked the doc's comparison to `moderation::resolve` ("any moderator
+  can", where `revision.rs` says "no third party can"): `moderation::resolve`
+  filters candidates only by `moderators.authorises(e)` — any op signed by any
+  authorised moderator for that Stoa is eligible, so moderator A's ahead-signed
+  `Hide` can beat moderator B's `Unhide` within the hour. That is a materially
+  wider exposure (two different people) than `revision.rs`'s (one person
+  against their own other devices), so the comparative claim is accurate.
+  `moderation.rs` was not touched in this diff (confirmed:
+  `git diff 439c192 HEAD -- .../moderation.rs .../feed.rs` is empty) and its
+  own doc comment predates this round, so it is not itself part of what I'm
+  re-reviewing here.
+- Worked through the "permanently" language by hand against `next_counter`
+  (`clock.saturating_add(1)).max(now_ms)`) and `OpLog::clock` (max counter held
+  per Stoa, all authors): on the **same** device/log that already holds the
+  ahead-signed op, any subsequent revision necessarily gets a counter above it
+  (the log's own clock now reflects it), so it is never "stuck" there — the
+  exposure the doc describes is specifically a second device/log that has not
+  yet incorporated the ahead-signed op's counter into its own clock. That
+  matches "one published from a device that had not yet received the
+  ahead-signed one" in the new text. No test exercises this two-device
+  scenario directly (`current_version` takes one log), but the property is a
+  restatement of the ordering rule (`op-ordering`'s "An op signed ahead of the
+  time leads only until the time passes it"), which is `arrival.rs`'s and is
+  outside this diff.
+
+**No security finding to route.** The doc's claim holds under the code as it
+stands today, and the one check it depends on (`is_valid_revision`'s
+authorship comparison) is exercised by seven existing tests that fail the
+moment it is bypassed. Nothing in this diff weakens, reorders, or bypasses
+that check.
