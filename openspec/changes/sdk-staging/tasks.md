@@ -16,7 +16,7 @@
 - [x] review: design — `design-reviewer`
 - [x] re-review after `67a6605`: readability — `code-reviewer` — the dev-writer's answer to the readability finding reworded prose in `proposal.md` and `design.md`
 - [x] re-review after `67a6605`: design — `design-reviewer` — the same commit edited D1's Alternatives in `design.md`. Not re-reviewed: correctness, security, architecture, spec-test, because the commit touches no README, CI, `.gitignore`, `CLAUDE.md` or test ground
-- [ ] findings all ticked, `findings/` deleted — `closer`
+- [x] findings all ticked, `findings/` deleted — `closer` — all six findings files were clean-pass reports (five with zero checkboxes, per the reviewers' brief to write the file even with nothing found; `readability.md`'s one finding was fixed in `67a6605` and re-reviewed clean). Scanned all six for prose outside a checkbox asking for a change before deleting: none found.
 - [ ] `openspec validate --strict`, then `archive` — `closer`
 - [ ] CI green, title/body checked, PR merged — `closer`
 
