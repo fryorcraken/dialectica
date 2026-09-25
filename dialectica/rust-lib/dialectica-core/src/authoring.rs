@@ -1829,8 +1829,18 @@ mod tests {
     // the counter came out to", because in that scenario they are the same
     // number. This fixture separates them: a mutation that wrote the counter
     // into the wall-clock field (matching the letter of "one reading signs
-    // both fields" while dropping which VALUE each field gets) would still
-    // pass every other test in this file, and only fails here.
+    // both fields" while dropping which VALUE each field gets) fails here
+    // directly, on the `asserted_ms` assertion below.
+    //
+    // Measured, not assumed: that same mutation also trips
+    // `the_second_authoring_carries_the_higher_counter`, but not on the
+    // assertion that test names ("newest first, by counter") — it panics
+    // earlier, on that test's own fixture-drift guard, because writing the
+    // counter into `asserted_ms` changes the op's signed bytes and can flip
+    // which of the two ops' ids sorts higher. That guard exists to protect a
+    // different fixture property and would stop firing under a re-rolled
+    // body, so this fixture — not that one — is what actually pins the
+    // wall-clock value.
     #[test]
     fn a_counter_taken_from_the_clock_leaves_the_wall_clock_at_the_current_time() {
         let stoa = a_stoa("Agora");
