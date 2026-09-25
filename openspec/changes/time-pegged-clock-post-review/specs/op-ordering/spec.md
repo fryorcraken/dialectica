@@ -68,7 +68,9 @@ This is what makes the clock monotone across a restart and across a rebuild-by-r
 
 **What a reader can check, and what only an implementation can.** The scenarios below assert the *consequences* of deriving on demand — the value survives a restart, survives a rebuild in a different append sequence, and is the same on two peers that received the same ops in different sequences. They do not assert that no counter was recorded beside the ops, because no caller can observe that: a stored counter kept perfectly in step with the log is indistinguishable from a derivation through the read interface, and the cases where it would diverge (a restore from backup, a replay reaching further back, a crash between the append and the counter update) are not reachable through this contract's own operations. The "never stored" sentence above is therefore a **constraint on the implementation**, discharged structurally rather than by a scenario, and `design.md` carries how. Writing it as a scenario clause would be a requirement no test could distinguish from its negation.
 
-**The clock is the highest counter held, with no exception for a counter far above the rest.** **The clock does not read the current time.**
+The clock is the highest counter held, with no exception for a counter far above the rest.
+
+The clock does not read the current time.
 
 The clock SHALL be scoped per Stoa. Ops of one Stoa never order against ops of another, so a shared clock would leak one Stoa's activity into another's counters, letting a reader in a quiet Stoa infer that the peer is busy elsewhere.
 

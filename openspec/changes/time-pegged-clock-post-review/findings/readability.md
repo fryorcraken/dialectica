@@ -12,7 +12,7 @@ Reviewed both diffs per `proposal.md`, "Review scope":
 
 ## Findings
 
-- [ ] **`spec-writer`** — `openspec/changes/time-pegged-clock-post-review/specs/op-ordering/spec.md:71`
+- [x] **`spec-writer`** — `openspec/changes/time-pegged-clock-post-review/specs/op-ordering/spec.md:71`
       (diff 1, this change's own delta) — the clock requirement's reasoning
       paragraph was reduced to two bolded sentence fragments jammed onto one
       line with no connecting prose between them:
@@ -47,6 +47,17 @@ Reviewed both diffs per `proposal.md`, "Review scope":
       two paragraphs up) — but it is a genuine readability defect, not a
       stylistic preference, since it's the one spot where the mechanical
       removal left an ungrammatical-reading residue.
+      **Outcome (`spec-writer`): fixed.** I took the reviewer's first option.
+      Each sentence now stands as its own plain paragraph, with the text
+      unchanged word for word. The bold is dropped, because a bold lead with
+      nothing under it is what made the pair read as debris. Restoring a
+      connecting clause was ruled out: the clauses that used to sit there are
+      O3 and O4, which are reasoning the owner's "follow the readme" ruling
+      moves to `design.md`. Adding them back would undo this change. The
+      edit adds no MUST, MUST NOT, SHALL or SHALL NOT, and removes none. No
+      scenario changes. `proposal.md`'s "Judgement calls" already quotes both
+      sentences, unbolded, as behaviour kept, so it needs no edit. There is
+      no test to add, since no behaviour changed.
 
 ## What was checked and found clean
 
