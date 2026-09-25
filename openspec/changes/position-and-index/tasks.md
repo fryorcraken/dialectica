@@ -43,7 +43,7 @@ refactor that makes room for one.
 - [x] 2.4 `malformed_pagination_fields_are_refused_by_name` still passes,
   unchanged. Verified by the full suite.
 
-## 3. Positions at the wire (`thread-read`, no spec change)
+## 3. Positions at the wire (`thread-read`)
 
 - [x] 3.1 Add the `a_thread_log_with_shared_authors` fixture (five items, two
   pairs sharing an author) and a page-walking reader. The uniqueness test
@@ -56,6 +56,13 @@ refactor that makes room for one.
   `a_position_is_the_same_whatever_page_size_the_read_used`. Verified red under
   the per-page index. It is green under the constant and the per-author value
   by design, as noted in the test and in `design.md` D2.
+- [ ] 3.4 *The item at a place carries that place's position in every read*
+  (the `tester`'s, per `design.md` D5): a wire test that hides a reply with
+  another reply after it, then reads the thread across every page with
+  `includeHidden` true and without. It asserts that the items at each place both
+  reads fill carry the same position, and that the following reply carries a
+  different position in each read. Verified red with the position set to the
+  item's op id in `thread_page_json`, and under a constant position.
 
 ## 4. Gates
 

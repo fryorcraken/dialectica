@@ -1,8 +1,19 @@
 ## Context
 
-See `proposal.md` for why. This change adds tests. The one spec addition, in
-`identity-onboarding`, pins behaviour the code already has. **No production code
-changes.**
+See `proposal.md` for why. This change adds tests and two spec deltas. **No
+production code changes.** Both deltas pin behaviour the code already has:
+
+- `identity-onboarding` ADDS *A malformed `index` in a keep request is refused
+  with a message naming `index`*. The owner decided this on issue #166
+  (2026-09-25), and `proposal.md` records the decision. The keep handler already
+  refuses that way, through the parser it shares with the feed's `page` and
+  `perPage`.
+- `thread-read` MODIFIES *An item carries its ordering position and the author's
+  asserted time, as two separate fields*, so that a position is determined by
+  the item's place alone. `thread::read_thread` already assigns it that way.
+  `resolve_item` drops a hidden reply the read did not ask for, and only after
+  that does `read_thread` enumerate what is left (`placed.at(index)`). The
+  position is therefore the item's index in the sequence that read returned.
 
 Two facts about the code decide where the tests go.
 
@@ -26,8 +37,9 @@ Two facts about the code decide where the tests go.
 **Goals:**
 
 - Put each position scenario in *An item carries its ordering position…* under
-  a wire-level test. Each test must go red under at least one of the issue's
-  three mutations, and every mutation must turn at least one test red.
+  a wire-level test. Between them, the tests must go red for every mutation the
+  issue names (a constant, a per-author value, an index that restarts on every
+  page) and for a position taken from the item itself, such as its op id.
 - Put each scenario of the new `identity-onboarding` requirement under a
   wire-level test. The test must fail when `index` is dropped from any
   `parse_index` message reachable on this target.
@@ -39,7 +51,8 @@ Two facts about the code decide where the tests go.
 - `{"index":null}` answering `missing field: index`. `proposal.md` leaves it
   as an open question, and it is out of scope for this piece.
 - Pinning the message text for any malformed `index`. The spec requires the
-  message to name `index` and nothing more.
+  message to name `index` and nothing more. `proposal.md`'s *Deliberately left
+  unspecified* gives the reasons.
 
 ## Decisions
 
@@ -67,12 +80,13 @@ of `parse_index`'s messages. Drop it from the wrong-type arm (`"must be a
 number"`) and `each_malformed_kind_of_index_is_refused_by_name` goes red on
 `"two"`, `[]` and `true`, as does the feed's
 `malformed_pagination_fields_are_refused_by_name`. I measured the first by
-mutation while writing this. The `tester` owns the full proofs.
+mutation. The `tester` owns the full proofs.
 
 ### D2. The position tests assert properties at the wire, not values
 
-**Chosen:** two tests in `wire.rs` that read through `read_thread`, the wire
-handler. They compare positions to each other rather than to literals.
+**Chosen:** tests in `wire.rs` that read through `read_thread`, the wire
+handler. They compare positions to each other rather than to literals. Two are
+written:
 
 - `no_two_items_of_a_thread_share_a_position_even_when_they_share_an_author`
   reads every page at `perPage` 2 and asserts pairwise inequality. It goes red
@@ -85,22 +99,24 @@ handler. They compare positions to each other rather than to literals.
   and the per-author value**, because both are the same at every page size.
   The test says so in a comment, so nobody reads its green as covering them.
 
+The third, for the place rule, is D5.
+
 **Considered:** asserting the literal positions `"0".."4"` at the wire, as the
 core test does one layer down.
 
 **Ruled out** because `thread-read` deliberately leaves the token's form open:
 *"Contracting only that keeps a later change free to alter the token's form
-without breaking a caller that stayed inside the contract."* A wire test pinning `"0"` would turn that
-freedom into a breaking change. The core test already pins the current value,
-where it is an implementation fact rather than a contract.
+without breaking a caller that stayed inside the contract."* A wire test pinning
+`"0"` would turn that freedom into a breaking change. The core test already pins
+the current value, where it is an implementation fact rather than a contract.
 
-**Where this is blind:** a position equal to the item's own id is unique and
-the same at every page size, so both tests pass it. Whether that breaks *"The
-position SHALL identify where an item sits in the whole thread's sequence"* is
-a question the spec's wording cannot settle by a test that stays out of the
-token's form. The core value test is what stands in its way today. It is not
-among the issue's mutations and is recorded here so it is not mistaken for
-covered.
+**What these two cannot see.** A position taken from the item itself, such as
+its op id, is unique within a read and the same at every page size, so both
+tests pass it. The scenario *The item at a place carries that place's position
+in every read* is what fails it, and D5 is how that is tested. Its test is task
+3.4 in `tasks.md`, which the `tester` writes. While that box is unticked, the
+only thing standing in the way of an op-id position is the core value test,
+which sits one layer below `thread_page_json`, where #166's mutation was made.
 
 ### D3. The thread fixture has two pairs of items sharing an author, and five items
 
@@ -124,17 +140,79 @@ and the `i64` helper now delegates to it. The malformed kinds sit in one table,
 test and the stores-nothing test both iterate it, so the two cannot disagree
 about what "malformed" means.
 
+### D5. A position belongs to the place, and the test compares two reads rather than pinning a value
+
+**Why the op id is not a position.** The issue asks for a test that fails for
+*any* position breaking *An item carries its ordering position…*. One value
+could not be judged against the text as it stood: the item's own op id. It is
+unique within a read and the same at every page size, so it passed every
+scenario the requirement had. The requirement did say the position *"SHALL
+identify where an item sits in the whole thread's sequence"*, and an op id
+identifies **the item, not where the item sits**. No scenario tested that
+sentence, though, so no test could fail an op id without pinning the token's
+form, which D2 rules out. Which values count as a position is observable
+behaviour, so it was settled in the spec rather than here. `thread-read` now
+says the position is determined by the place alone, and that two reads returning
+different items at one place give them the same position.
+
+That rule is also why the uniqueness sentence was narrowed to *one read*. Under
+the place rule, the position at a place belongs to the hidden reply in a read
+that includes it and to the reply after it in a read that does not. "No two
+items of a thread ever share a position" would contradict that; "no two items
+of one read" does not.
+
+**Chosen for the test:** read one thread twice across every page, once with
+`includeHidden` true and once without, where a moderator has hidden a reply that
+has another reply after it. Compare the two reads place by place, and compare the
+following reply's position across the two reads. `includeHidden` is the wire's
+way to get two different sequences out of one log without changing the log.
+
+The scenario has two clauses, and each fails a different kind of wrong value:
+
+- **The following reply carries a different position in each read.** Any value
+  computed from the item alone is the same for one item in both reads, so this
+  clause fails all of them together: the op id, the author, a hash of either, and
+  a constant. It is the clause that does the work against #166's class of defect.
+- **At each place both reads fill, the two items carry the same position.** This
+  fails a value that changes between reads but not with the place, such as a
+  per-read counter or a random token.
+
+It is not designed to catch an index that restarts on every page. Both reads use
+the same page size, so a per-page index agrees at every place. The page-size test
+in D2 catches that.
+
+**Considered:**
+
+- **Asserting the position is not the item's id and not its author.** Ruled out
+  because it is a list of known-bad values. It passes a hash of the id, or any
+  other field of the item, and nothing would notice the list had gone stale.
+  The place rule fails every item-derived value at once, including ones nobody
+  has thought of.
+- **Pinning literal positions at the wire.** Ruled out for the reason in D2.
+
+**What breaks without it** is for the `tester` to measure, under task 3.4. The
+proposal names the mutation: set the position to the item's op id in
+`thread_page_json`. D2's two tests stay green under that mutation, and this one
+is expected to go red.
+
 ## Risks / Trade-offs
 
-- **[`u64::MAX + 1` never reaches the "too large" message]** →
-  `18446744073709551616` is not held as an integer by serde_json. It falls back
-  to `f64` and is refused as *"index must be a non-negative integer written
-  without a decimal point or exponent"*, which I confirmed by running it. The
-  message names `index`, which is all the spec requires, but the reason it gives
-  is wrong for that input. `parse_index`'s `try_from` arm ("larger than this
-  build can represent") is reachable only where `usize` is narrower than 64 bits.
-  The message text is observable behaviour the spec leaves open, so this is
-  reported to the spec-writer rather than changed here.
+- **[`u64::MAX + 1` gives the wrong reason]** → `18446744073709551616` is not
+  held as an integer by serde_json. It falls back to `f64` and is refused as
+  *"index must be a non-negative integer written without a decimal point or
+  exponent"*, which I confirmed by running it. `parse_index`'s `try_from` arm
+  ("larger than this build can represent") is reachable only where `usize` is
+  narrower than 64 bits. The message names `index`, which is all the spec
+  requires. `proposal.md`'s *Deliberately left unspecified* records why the
+  reason is not contracted, and that a fix belongs in its own issue against the
+  parser, covering `page` and `perPage` at the same time.
 - **[The page-size test alone would pass a constant]** → By design (D2). The
   uniqueness test covers it, and both tests' comments say which mutation each
   one catches.
+- **[The place test depends on a hidden reply being dropped from the default
+  read]** → That is `thread-read`'s moderation behaviour, not something this
+  change adds. If a later change kept hidden replies in the default read, the two
+  reads would return the same sequence, and the test would lose its power to
+  tell a place-derived value from an item-derived one. The scenario's AND clause
+  expects the following reply's position to differ between the reads, so that
+  change turns the test red rather than leaving it green and blind.
