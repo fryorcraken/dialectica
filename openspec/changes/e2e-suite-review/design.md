@@ -98,16 +98,31 @@ pushes (D3).
 **Chosen:** `createBlockLoader`'s `active:` in `DStoaListScreen.qml` set to
 `true`, `join.yaml` untouched. The step "a fresh profile is offered a key and
 not a Stoa" is the only one that says the create affordance is absent, and its
-`not_text:` half has never been seen to fail with the affordance present.
+`not_text:` half had never been seen to fail with the affordance present.
 
-The prediction, from sitometres at the pinned tag (`v0.1.2`, `6dc23e2`):
-`notText` fails when `resolveAll` finds any node for the selector, and it is
-not one of the checks `isIrrecoverable` lets a `wait_for` give up on early, so
-the step polls to the spec's 30s default and then fails. `run` builds its
-`Runner` with `continueExecution: false`, so the report ends at that step.
-The adjudicator should then print `verdict: fail`, four `[pass]` lines and
-one `[fail]`, and three errors: the verdict, `report has 5 steps, spec has 14`,
-and the step by name.
+What the red run showed (`tasks.md` 2.1 has the run): the step failed on both
+`not_text:` selectors, each naming the element it still found, after polling
+to the spec's 30s default. That matches sitometres at the pinned tag (`v0.1.2`,
+`6dc23e2`): `notText` fails when `resolveAll` finds any node for the selector,
+and it is not one of the checks `isIrrecoverable` lets a `wait_for` give up on
+early.
+
+**One prediction was wrong, and it matters for archived D1.** The run
+was expected to end its report at the failed step, because `run` builds its
+`Runner` with `continueExecution: false`, and so to trip the adjudicator's
+step-count condition. It did not. sitometres 0.1.2 records every step it did
+not attempt as `inconclusive` ("9 later step(s) were not attempted"), so the
+report held all 14 steps and the count matched. The run went red on conditions
+1 and 2 (the verdict, and the failed and inconclusive steps), not on 3.
+
+So a run that stops early after a failure does not reach the count condition
+on this sitometres; the per-step condition catches it first. Archived D1 says
+the count is "the one that catches" a run that "executed nothing further, and
+reported a clean sheet", and that stays true: an empty or short report is what
+the count guards, and `tst_adjudicate_ui_run.sh` pins it with fixtures. What
+this run adds is that the real tool pads rather than truncates in the case
+observed here, so the count condition is a backstop for a report sitometres did
+not write this way, not the condition an early stop usually trips.
 
 **Rejected:** breaking the spec instead, by deleting its `not_text:` list. That
 proves the adjudicator counts, which D1 of the archive already proves locally,

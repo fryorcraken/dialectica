@@ -38,19 +38,48 @@ out before the next push.
 
 ### 2. The no-key step goes red with the create affordance present
 
-- [ ] 2.1 Break: `createBlockLoader`'s `active:` set to `true` in
+- [x] 2.1 Break: `createBlockLoader`'s `active:` set to `true` in
       `DStoaListScreen.qml`, pushed alone. Predicted (design.md D2): the
       `sitometres join spec` job fails; the adjudicator prints `verdict: fail`,
       four `[pass]`, one `[fail]` on "a fresh profile is offered a key and not
       a Stoa", and three errors (verdict, `report has 5 steps, spec has 14`,
-      the step by name). ci.yml's `qml` job also red, on exactly the three
+      the step by name). ci.yml's `QML lint` job also red, on exactly the three
       `tst_stoa_screens.qml` tests the break reddened locally (Qt 6.10.3,
       133 passed, 3 failed; `tst_navigation.qml` and `tst_render_probe.qml`,
       the other two specs that instantiate the screen, stayed green):
       `test_the_create_affordance_is_not_instantiated_when_no_key_is_held`,
       `test_a_failed_query_is_the_could_not_be_read_state_carrying_the_cores_words`
       and `test_a_reply_claiming_a_key_without_naming_one_is_not_the_key_held_state`
-- [ ] 2.2 Revert pushed; both workflows green on it
+
+      **Observed, on head `53930e4`, the break pushed alone:**
+      UI tests https://github.com/fryorcraken/dialectica/actions/runs/36140112191
+      failed. "Run the spec" exited 1 on step 5, "a fresh profile is offered a
+      key and not a Stoa", after its 30s: `waitFor never came true within
+      30000ms`, with `does not see "{\"objectName\":\"createTitleField\"}" —
+      still visible on QQuickTextInput` and the same for `createStoaButton` on
+      `FlatButton_QMLTYPE_135`. Steps 1–4 passed. The adjudicator printed
+      `verdict: fail`, four `[pass]`, one `[fail]` on that step, and nine
+      `[inconclusive]`, then two errors: the verdict, and "steps that did not
+      pass" naming step 5 and the nine after it. "lgs left scaffold.toml's
+      values alone" was green, so the guard did not stand in front of it.
+      **The prediction was wrong about the count.** sitometres 0.1.2 did not
+      end the report at the failed step: it printed `9 later step(s) were not
+      attempted` and wrote them into the report as `inconclusive`, so the
+      report held 14 steps, the count condition held, and no count error was
+      printed. The run is red on conditions 1 and 2 (design.md D2).
+      CI https://github.com/fryorcraken/dialectica/actions/runs/36140112290
+      failed in `QML lint` only, on "QML component tests": `tst_stoa_screens.qml`
+      133 passed, 3 failed, the three named above, every other spec green, as
+      predicted. `Lint`, `UI spec validation`, `Rust core tests` and
+      `Build LGX` green
+- [x] 2.2 Revert pushed; both workflows green on it. **Observed, on head
+      `785df81`** (the pull_request merge `279d10a` onto `main` at `8368b2f`,
+      the same base as 2.1): UI tests
+      https://github.com/fryorcraken/dialectica/actions/runs/36141018728
+      green, the adjudicator printing `verdict: pass` and `ok: all 14 steps
+      passed`, the guard `ok: scaffold.toml's values are unchanged`; CI
+      https://github.com/fryorcraken/dialectica/actions/runs/36141018879
+      green in every job
 
 ### 3. The scaffold guard goes red on a value `lgs` itself changed
 
