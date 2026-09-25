@@ -125,3 +125,44 @@ prune once this commit is cherry-picked.
 Did not edit `tasks.md` (the runner ticks the readability row) and did not
 edit anything under `.claude/`. No role-file change is suggested by this
 review.
+
+## Re-review of 67a6605
+
+Read issue #168 with `gh issue view 168 --json body,comments`, including the
+owner's 2026-09-25 comment, before starting this re-review.
+
+The fix takes the second fix shape offered in the original finding: it drops
+both dangling references rather than writing a new clause to explain the
+trap. Checked that this answers the finding and leaves nothing dangling:
+
+- `git grep -n -F "shallow" openspec/ CLAUDE.md docs/ README.md .gitignore
+  .github/` matches only lines inside this findings file itself (the
+  original finding text and the "Fixed" note describing the fix) — zero
+  matches in `proposal.md` or `design.md`. The two dangling references are
+  gone and nothing new introduces the term.
+- `proposal.md:71-73` now reads self-contained: "No `flake.nix` change and
+  no re-export of the builder's output. The owner's comment says that if
+  `--inputs-from` works, the re-export is unnecessary. `design.md` D1
+  records it among the alternatives." The new cross-reference resolves:
+  `design.md:38` has `### D1. Resolve the builder with --inputs-from
+  ./dialectica`, and the re-export bullet sits inside D1's "Alternatives,
+  and what ruled each out" list (`design.md:82-85`), so "D1 records it among
+  the alternatives" is accurate, not just plausible-sounding.
+  `git grep -n "design\.md" openspec/changes/sdk-staging/proposal.md` shows
+  this is the only design.md cross-reference in the file — a new pattern for
+  this doc, but not a inconsistent one, since nothing else in proposal.md
+  needed one before.
+- `design.md:82-85`, the re-export bullet, now stands on two grounds only:
+  the owner's ruling and the restated reason ("the build's own flake is not
+  changed to serve developer tooling"). Both are already established
+  earlier in the same document (Non-Goals, D1's own text), so the bullet
+  does not lean on anything unstated.
+- `git log --all -G shallow --oneline -- openspec/` confirms the underlying
+  factual claim in the dev-writer's "Fixed" note: no commit in this
+  project's history ever defines the "shallow-`//`" term — it entered
+  already dangling in `d9f747b`/`c658303` and `67a6605` is the commit that
+  removes both references. The dev-writer's claim that "nothing can source
+  the explanation" holds.
+
+No new findings. Both changed passages are clear standalone prose with a
+resolvable cross-reference, and the commit fully answers the finding.
