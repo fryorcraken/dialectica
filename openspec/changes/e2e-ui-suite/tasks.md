@@ -8,7 +8,7 @@
       (`tst_scaffold_values_unchanged.py`), one gap in `tst_adjudicate_ui_run.py`
       closed, and two items left explicitly unproven for the owner
 - [ ] review: correctness — `code-reviewer`
-- [ ] review: security — `code-reviewer`
+- [x] review: security — `code-reviewer`
 - [ ] review: readability — `code-reviewer`
 - [x] review: architecture — `code-reviewer`
 - [ ] review: spec-test — `spec-test-reviewer`
