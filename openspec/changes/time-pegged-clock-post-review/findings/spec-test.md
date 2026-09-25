@@ -104,3 +104,90 @@ No checkbox findings. Both diffs are clean against the spec-test review's
 checks: every scenario and MUST/SHALL in diff 1 survives verbatim, matching the
 proposal's own inventory; the tail's two new scenarios in diff 2 are each pinned
 by a test that can fail, and the mutation run against the second confirms it.
+
+## Re-review of 439c192..HEAD
+
+Scope per the runner's brief: only what landed after the first review round
+(`git diff 439c192 HEAD`), restricted to its spec and test parts. Read the
+owner's decision comment on issue #162 again to confirm scope; first line
+quoted above still applies unchanged — this diff makes no scope-affecting
+change, it only carries out already-in-scope items from the first review round
+(a spec-text clarification and a test-comment correction).
+
+`git diff 439c192 HEAD --stat` touches eleven files. Of those, only two are
+spec/test material:
+
+- `openspec/changes/time-pegged-clock-post-review/specs/op-ordering/spec.md`
+- `dialectica/rust-lib/dialectica-core/src/authoring.rs` (test-module comment
+  only)
+
+The rest (`arrival.rs`, `op.rs`, `revision.rs`, `transport.rs` doc comments;
+`design.md`; `findings/architecture.md`, `findings/design-review.md`,
+`findings/readability.md`; `tasks.md`) are doc-comment citation rewording, new
+design reasoning, or other reviewers' findings/tracking files — out of this
+role's scope, left unread beyond confirming none of them touch a test module
+or a spec requirement.
+
+**Spec change.** The only edit to `spec.md` is in the "A peer's Lamport clock
+is a function of the ops it holds" requirement: the bolded single line
+
+> **The clock is the highest counter held, with no exception for a counter far
+> above the rest.** **The clock does not read the current time.**
+
+is split into two plain paragraphs with the bold markup removed:
+
+> The clock is the highest counter held, with no exception for a counter far
+> above the rest.
+>
+> The clock does not read the current time.
+
+Compared word-for-word: identical text, reflowed into two sentences and
+de-emphasized. No requirement wording changed. Clean.
+
+**Test change.** The corrected comment sits on
+`a_counter_taken_from_the_clock_leaves_the_wall_clock_at_the_current_time`
+(`authoring.rs`). It replaces the first review round's overstated claim (that
+a mutation writing the counter into the wall-clock field "would still pass
+every other test in this file, and only fails here") with two narrower,
+checkable claims: (1) this test fails directly, on its own `asserted_ms`
+assertion; (2) `the_second_authoring_carries_the_higher_counter` also trips
+under the same mutation, but on that test's own op-id fixture-drift guard, not
+on the assertion its name promises.
+
+**Measured, not just read**, since this is exactly the shape part 2 exists to
+catch (a comment asserting what a mutation does or does not touch). Mutated
+`publish` (`authoring.rs:275-276`) so
+`asserted_ms: who.asserted_ms` became `asserted_ms: next_counter(clock,
+who.asserted_ms)` — the wall-clock field now holds the counter, matching the
+letter of "one reading signs both fields" while dropping which value each
+field gets, exactly the mutation the comment names. Ran both named tests
+(`cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p dialectica-core
+<name>`):
+
+- `a_counter_taken_from_the_clock_leaves_the_wall_clock_at_the_current_time`
+  **failed**, on the `asserted_ms` assertion at line 1883-1884
+  (`assertion left == right failed: the wall-clock stays at this peer's
+  current time, not at the value the clock term produced for the counter`,
+  `left: 1789732304001 right: 1789729304000`) — exactly the assertion the
+  comment says it fails on.
+- `the_second_authoring_carries_the_higher_counter` **also failed**, but on
+  its own precondition guard at line 885 (`the fixture has drifted: the
+  second op's id no longer sorts ABOVE the first's...`) rather than on the
+  "successive counters" assertion its name and body describe — exactly the
+  distinction the comment draws.
+
+Restored the mutation immediately afterward (`git diff --stat
+dialectica/rust-lib/dialectica-core/src/authoring.rs` empty before commit).
+The comment now says truly what the named test catches and what else fails
+under the same mutation, and why. No mutation left in the tree.
+
+No new checkbox findings. Both changes in this diff are clean: the spec split
+carries no requirement-text change, and the test comment's claims are each
+confirmed by measurement rather than assumed.
+
+### Verification run before hand-back
+
+- `cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p dialectica -p
+  dialectica-core`: all passed, 0 failed (tree clean of mutation at the time
+  of this run).
+- `nix build ./dialectica#lgx` from the tree root: succeeded.
