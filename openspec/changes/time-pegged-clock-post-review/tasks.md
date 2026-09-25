@@ -5,12 +5,12 @@ Every review row covers this change's own diff **and** `git diff 2eada33 c1f1a8f
 - [x] spec — `spec-writer`
 - [x] design + code — `dev-writer`
 - [ ] ~~tests — `tester`~~ — does not apply: this change alters no behaviour, so there is nothing new to test. The four #165 commits under review carry their own tests, and `spec-test-reviewer` reads those.
-- [ ] review: correctness — `code-reviewer`
-- [ ] review: security — `code-reviewer`
-- [ ] review: readability — `code-reviewer`
-- [ ] review: architecture — `code-reviewer`
-- [ ] review: spec-test — `spec-test-reviewer`
-- [ ] review: design — `design-reviewer`
+- [x] review: correctness — `code-reviewer`
+- [x] review: security — `code-reviewer`
+- [x] review: readability — `code-reviewer`
+- [x] review: architecture — `code-reviewer`
+- [x] review: spec-test — `spec-test-reviewer`
+- [x] review: design — `design-reviewer`
 - [ ] findings all ticked, `findings/` deleted — `closer`
 - [ ] `openspec validate --strict`, then `archive` — `closer`
 - [ ] CI green, title/body checked, PR merged — `closer`
