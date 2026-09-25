@@ -4557,6 +4557,19 @@ mod tests {
         index: i64,
         unlock: &Unlock,
     ) -> serde_json::Value {
+        keep_with_raw_index(dir, nonce, live, &index.to_string(), unlock)
+    }
+
+    /// [`keep_through_the_wire`] with `index` spliced into the request as raw
+    /// JSON text, so a test can send what an `i64` cannot spell: `1.5`, `1e2`,
+    /// `"two"`, `[]`, or an integer past `u64::MAX`.
+    fn keep_with_raw_index(
+        dir: &OnboardingDir,
+        nonce: SlateNonce,
+        live: Option<SlateNonce>,
+        index: &str,
+        unlock: &Unlock,
+    ) -> serde_json::Value {
         let mut session = a_session();
         // Set the live slate directly rather than by generating one, so a test can
         // present a nonce that is stale, forged or absent — the cases this helper
