@@ -9,7 +9,7 @@
       closed, and two items left explicitly unproven for the owner
 - [x] review: correctness — `code-reviewer`
 - [x] review: security — `code-reviewer`
-- [ ] review: readability — `code-reviewer`
+- [x] review: readability — `code-reviewer`
 - [x] review: architecture — `code-reviewer`
 - [ ] review: spec-test — `spec-test-reviewer`
 - [x] review: design — `design-reviewer`
