@@ -66,3 +66,48 @@ Risks/Trade-offs section). D1 in particular carries measured evidence for its
 guard claim (the `--inputs-from` table), which is the kind of mutation-style
 evidence this review looks for, even though nothing here is a guard in the
 usual code sense.
+
+## Re-review of 67a6605
+
+Read issue #168 fresh with `gh issue view 168 --repo fryorcraken/dialectica
+--json body,comments`, including the owner's 2026-09-25 comment.
+
+This commit answers the readability finding's dangling "shallow-`//` trap"
+reference by dropping it from both `design.md` D1's re-export alternative and
+`proposal.md`'s matching out-of-scope bullet, rather than reconstructing an
+explanation nothing ever committed.
+
+Checked:
+
+- **D1's re-export alternative still gives a reason, not just a ruling.**
+  After the edit it reads: "The owner's comment on #168 ruled it unnecessary
+  if `--inputs-from` works. It does, so the build's own flake is not changed
+  to serve developer tooling." That is a complete "what was chosen /
+  constraint / what ruled it out" — the reason is not the trap, it is "the
+  build's own flake is not changed to serve developer tooling", which was
+  already present before this commit and does not depend on the dropped
+  sentence.
+- **The issue comment itself never defines the trap either** ("If it holds,
+  the re-export and the shallow-`//` trap in the proposal are unnecessary" —
+  named, not explained), so dropping rather than reconstructing is the
+  correct call against the source, not only against `git log`.
+- **No dangling reference survives.** `git grep -n -F "shallow"` across
+  `openspec/`, `CLAUDE.md`, `docs/`, `README.md`, `.gitignore`, and
+  `.github/` matches only the readability findings file itself (which
+  documents the removal) — matches the commit's own claim.
+- **`proposal.md`'s out-of-scope bullet now points to D1** ("`design.md` D1
+  records it among the alternatives") rather than repeating the trap
+  reference, keeping the two documents in one place of truth rather than two
+  independent mentions.
+- **Matches the issue as corrected.** The owner's comment's two corrections
+  (the #91 runs did use the pinned SDK; `--inputs-from` alone plausibly
+  suffices) are both still reflected in D1's alternatives #4 and #5 — this
+  commit touched neither of those, and they were not asked to be revisited.
+
+No new findings. Ran both verification commands from the brief on this tree:
+`cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p dialectica -p
+dialectica-core` — 1180 + 30 tests passed, 0 failed, matching the commit's
+own recorded count. `nix build ./dialectica#lgx` — succeeded (one retry
+needed after a transient `SQLite database ... is busy` eval-cache warning on
+the first invocation, which is unrelated to this change and did not fail the
+build; the immediate retry produced a clean, silent success).
