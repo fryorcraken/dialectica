@@ -53,9 +53,14 @@ another file.
     is quoted word for word** from the hand-back, since no file holds it.
   - **After the `spec-writer`, the `dev-writer` goes next if the behaviour
     changed; otherwise the `tester` does.** Either brief names the
-    `spec-writer`'s commit, and says the markers it decided are closed: each
-    is reworded or removed to match the new spec text, not kept as an open
-    question for the review round.
+    `spec-writer`'s commit and the markers it decided.
+  - **`tester.md` says what a decided marker becomes** — the owner authorised
+    this edit for the piece in session, beyond the four issues' text, because
+    `tester.md`'s "Keep the markers and report each one" contradicts the new
+    routing. A marker the brief names as decided is closed: reworded to cite
+    the scenario now covering it, or removed. Any other marker stays open, and
+    "must not remove" covers only a test carrying an open one. `RUNNER.md`
+    points to `tester.md` rather than restating this.
   - With no marker and no reported decision, the `tester` is next, as before.
 - **#171: every change made after the review round is reviewed before the
   `closer` runs.** `RUNNER.md` requires review of every commit added to the
@@ -135,6 +140,10 @@ another file.
     - **An archived folder with no `findings/` passes the findings gate.** The
       earlier `closer` deleted it and no re-reviewer has had a finding since.
       A `grep` error for the missing directory is not a failed gate.
+    - **A re-dispatched `closer` does not archive again.** `closer.md` Step 3
+      says so (owner-authorised in session): `openspec archive` is not rerun,
+      but Step 3's commit and push still apply to a `findings/` deleted in
+      Step 1, so the run it watches includes the deletion.
 - **#170: forbid `--admin` in `closer.md`.** The file names `gh pr merge
   --admin`, and any change to branch protection, as things the `closer` never
   does, including when the owner has granted merge-on-green. Branch protection
@@ -166,11 +175,6 @@ another file.
   conflict it resolves, and its archive commit. The re-review rule covers
   commits made before the `closer` is dispatched, and a red-CI fix made after
   it. `design.md`'s Risks names the rebase gap as a follow-up candidate.
-- **Editing `tester.md`**, whose "Keep the markers and report each one" is out
-  of date once the `spec-writer` has decided a marker before the `tester` runs.
-  None of the four issues asks for a `tester.md` change, so it goes to the
-  owner as a proposal. Until then, the `tester`'s brief carries the
-  difference, as the #169 item above says.
 - **Changing the size of the first review round.** Every reviewer row stays. A
   change with no source diff still gets all six reviewers. Only the re-review
   after that round is left to the runner's judgement.
@@ -224,8 +228,11 @@ None. This change edits agent instructions and no system behaviour, so
 - `.claude/agents/spec-writer.md`: the stage-block template (#171).
 - `.claude/agents/closer.md`: Step 6 and "What you never do" (#170); Step 1,
   for where a re-dispatched `closer` reads the stage block after the archive
-  (#171); and the closing paragraph, which points to `RUNNER.md`'s re-review
-  step rather than restating it (#171).
+  (#171); Step 3, which a re-dispatched `closer` does not re-archive in
+  (#171, owner-authorised); and the closing paragraph, which points to
+  `RUNNER.md`'s re-review step rather than restating it (#171).
+- `.claude/agents/tester.md`: what a marker the brief names as decided becomes,
+  and "must not remove" narrowed to open markers (#169, owner-authorised).
 - `.claude/agents/README.md`: one paragraph (#133). Its "one row per stage,
   then three rows the `closer` owns" stays as it is: the re-review row is one
   more row before the `closer`'s three, so the sentence still holds.
