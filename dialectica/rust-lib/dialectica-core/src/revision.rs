@@ -82,11 +82,12 @@
 //!
 //! **It is not the same as being latest by any clock, and the distinction is
 //! worth keeping.** A Lamport counter is a causal order: it guarantees that a
-//! revision written after seeing an earlier one orders after it. It says nothing
-//! about wall-clock time, and a reader must not be told the current version is
-//! the most recent by any measure of time. For one author revising their own
-//! post the two coincide in practice, which is why this module can promise what
-//! it promises.
+//! revision written after seeing an earlier one orders after it. The counter is
+//! pegged to its author's clock, but only as that author's unverified claim
+//! about the time — an author may sign up to an hour ahead of a receiver's time
+//! — so a reader must not be told the current version is the most recent by any
+//! measure of time. For one author revising their own post the two coincide in
+//! practice, which is why this module can promise what it promises.
 //!
 //! **This section previously said the opposite**, and the correction is the
 //! whole of what the op clock bought here: it read *"`cmp_ops` leads with the
@@ -181,8 +182,9 @@ pub struct CurrentVersion {
     ///
     /// "First" is not "newest" — see this module's documentation. Where the
     /// competing revisions carry counters it is a genuine last-write-wins answer
-    /// in the **causal** sense; where they do not, it is a convergent arbitrary
-    /// choice. Neither is a temporal one.
+    /// in the **causal** sense, ordered by counters that are their author's
+    /// unverified claim about the time; where they do not, it is a convergent
+    /// arbitrary choice. Neither is the newest by any verified clock.
     pub current: Entry,
 }
 

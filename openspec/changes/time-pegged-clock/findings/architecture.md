@@ -18,7 +18,7 @@ leaving it asserted once and unverified.
 
 One gap found, in the doc comments of a module `design.md` itself analyses.
 
-- [ ] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/moderation.rs:101-107`
+- [x] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/moderation.rs:101-107`
       — stale "causal, not temporal" reasoning survives in the one reader of
       `cmp_ops`'s leading entry that the sweep (tasks.md 4.1) did not touch, and
       it now contradicts what six sibling modules say.
@@ -67,6 +67,21 @@ One gap found, in the doc comments of a module `design.md` itself analyses.
       degraded branch is already discussed), so the risk lives beside the code
       that carries it rather than only in an OpenSpec change folder that will be
       archived.
+
+      **Fixed** in the commit that ticks this box: both halves as suggested. The
+      module doc (`moderation.rs:101-111`) now gives the counter as its
+      author's unverified claim about the time, in the wording the sibling
+      modules use. `resolve`'s doc carries the moderator race from Decision 10
+      beside the last-write-wins paragraph it qualifies. The same sweep found
+      two more stale sites the first pass missed, both in `revision.rs`: the
+      module doc (line 84, "says nothing about wall-clock time") and
+      `CurrentVersion::current` ("Neither is a temporal one"). Both are
+      reworded. `tasks.md` 4.1 now lists `moderation.rs` and adds the second
+      grep (`git grep -n -i -e temporal -- dialectica/rust-lib`). Every hit
+      that grep has left is about op ids, which do carry no recency. **No test:**
+      the change is doc-only, and no layer can see a doc comment. What checks
+      it is that grep, and it cannot tell a stale sentence from a correct one
+      that uses the same word.
 
 ## What I checked and found clean
 

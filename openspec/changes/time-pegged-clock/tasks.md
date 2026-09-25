@@ -79,9 +79,16 @@
 
 - [x] 4.1 Doc comments citing `ADVANCE_BOUND`, or "causal, not temporal" as the
       reason a counter is not a time, rewritten in `op.rs`, `asserted_time.rs`,
-      `thread.rs`, `feed.rs`, `log/mod.rs`, `revision.rs` and `wire.rs`.
-      Verified by `git grep -n -e ADVANCE_BOUND -- dialectica/rust-lib` finding
-      only sentences that describe it as replaced.
+      `thread.rs`, `feed.rs`, `log/mod.rs`, `revision.rs`, `moderation.rs` and
+      `wire.rs`. Verified by two greps over `dialectica/rust-lib`:
+      `git grep -n -e ADVANCE_BOUND` finds only sentences that describe it as
+      replaced, and `git grep -n -i -e "temporal"` finds no sentence that calls
+      the counter not temporal. The first pass ran only the first grep, which
+      is how `moderation.rs` was missed (architecture finding).
+- [x] 4.2 Decision 10's hour of lead is recorded beside the two readers with a
+      comparison worth exploiting: `revision.rs` on `current_version`, and
+      `moderation.rs` on `resolve` (a moderator signing up to an hour ahead).
+      Doc-only; no test can see it.
 
 ### 5. Gates
 
