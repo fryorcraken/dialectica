@@ -58,20 +58,23 @@
 //!
 //! Each objection is answered somewhere a test can reach:
 //!
-//! - The **forgeable counter** is bounded by [`crate::arrival::ADVANCE_BOUND`]:
-//!   a received counter raises this peer's clock only within a fixed distance,
-//!   so an inflated one buys its author the head of one Stoa's order and moves
-//!   nothing else. Refusing it outright is not available — that is a censorship
-//!   vector — and accepting it unbounded would pin every receiving peer's clock
-//!   at the ceiling, silencing the Stoa for all of them.
+//! - The **forgeable counter** is bounded by the receive window
+//!   ([`crate::arrival::RECEIVE_WINDOW_MS`]): a peer refuses an op whose counter
+//!   is more than one hour ahead of its own current time, so an author can lead
+//!   honest ops by at most that hour and cannot place an op beyond it at all.
+//!   This replaced an advance bound that stored every counter, and it is a
+//!   refusal on purpose — `op-ordering` states the cost.
 //! - The **adversary-set wall clock** is not bounded into safety; it is removed
 //!   from every decision, which is the stronger defence because there is no
-//!   decision left for a forged value to reach.
+//!   decision left for a forged value to reach. The window reads the counter and
+//!   never this field.
 //!
-//! The distinction that makes them two fields rather than one: a Lamport counter
-//! is meaningful only relative to ops a peer has seen, so a bound on it is
-//! expressible in terms of the peer's own knowledge. A wall-clock is an absolute
-//! claim about the world, which a peer has nothing to check against.
+//! **Why they remain two fields, now that both carry a time.** The counter is
+//! pegged to its author's clock ([`crate::arrival::next_counter`]), so it is a
+//! claim about the time just as the wall-clock is. What separates them is what
+//! each is held to: the counter is checked from above against the receiving
+//! peer's own time and is raised past every counter its author held, so it may
+//! order. The wall-clock is checked by nothing, so it may not.
 //!
 //! # What an op does NOT carry, and why each omission is deliberate
 //!
@@ -528,11 +531,12 @@ pub struct OpClock {
     /// The author's Lamport counter for this op's Stoa.
     ///
     /// **Authoritative for every ordering**, and forgeable by its author like
-    /// every other field they sign. The defence is not that the value is
-    /// trustworthy — it is that a received counter advances this peer's own
-    /// clock only within [`crate::arrival::ADVANCE_BOUND`], so an absurd one
-    /// costs its author the head of one Stoa's order and costs every honest peer
-    /// nothing. See [`crate::arrival::clock_from_counters`].
+    /// every other field they sign. An honest author signs the later of its
+    /// current time and one above its clock ([`crate::arrival::next_counter`]).
+    /// The defence is not that the value is trustworthy — it is that a peer
+    /// refuses an op whose counter is more than
+    /// [`crate::arrival::RECEIVE_WINDOW_MS`] ahead of its own time, so an author
+    /// can lead honest ops by at most an hour.
     pub counter: u64,
     /// Milliseconds since the Unix epoch, **as the author asserts them**.
     ///
@@ -554,10 +558,12 @@ pub struct OpClock {
     /// check — it was that the value sat there as a number for whoever wanted to
     /// rank by it.
     ///
-    /// Every representable value is accepted and stored. Refusing an op for an
-    /// implausible clock is a censorship vector: a peer whose system clock is
-    /// skewed would be dropped by every conforming peer at once, silently, with
-    /// no error path by which its author could learn of it.
+    /// Every representable value is accepted and stored: an op whose counter is
+    /// admissible is stored whatever this field says, because the receive window
+    /// reads the counter alone. That is narrower than it was. A skewed clock
+    /// does get an author's ops refused — through the counter, which an honest
+    /// author pegs to the same clock — and `op-ordering` states that cost. What
+    /// holds is that this field is never the reason.
     pub asserted_ms: u64,
 }
 

@@ -38,9 +38,17 @@
 //! **Ordering does not consult the transport's Lamport timestamp or message id,
 //! and cannot**: [`OpEntry`] does not carry an [`Arrival`], so there is nothing
 //! for [`cmp_ops`] to read. A second order would be precisely the disagreement
-//! the original reasoning names, arrived at from the other side — SDS's clock
-//! advances on traffic no application sees and is initialised from
-//! epoch-milliseconds, so it can never agree with a counter advanced on ops.
+//! the original reasoning names, arrived at from the other side. SDS's clock and
+//! this counter both start from epoch-milliseconds and take the same step on
+//! send, but SDS's also advances on traffic no application sees, so the two
+//! advance on different sets of messages and cannot be relied on to agree op
+//! for op.
+//!
+//! # The current time decides a counter and an admission, never a comparison
+//!
+//! [`next_counter`] reads the author's current time and [`exceeds_receive_window`]
+//! reads the receiver's. Neither is an input to [`cmp_ops`], so two peers
+//! holding the same ops still compute the same order from the ops alone.
 //!
 //! # [`Arrival`] survives, and records rather than orders
 //!
@@ -170,48 +178,68 @@ impl Arrival {
     }
 }
 
-/// How far above a peer's own clock a received counter may reach and still raise
-/// it.
+/// How far ahead of a receiving peer's own current time an op's counter may be
+/// and still be admitted: one hour, in milliseconds.
 ///
-/// # What the bound is for, and what it deliberately does not do
+/// # What it replaced, and why it refuses where its predecessor did not
 ///
-/// It does **not** refuse the op. An op carrying an absurd counter is authentic,
-/// verifies, and is a genuine op its author published; refusing it would be
-/// refusing content for a field, which is a censorship vector. It is stored and
-/// it is ordered normally — it simply does not drag this peer's own clock along
-/// with it.
+/// This replaced `ADVANCE_BOUND`, which stored every counter and declined only
+/// to advance the clock past one more than a million above it. That kept the
+/// clock below ops already ordered above it, so an honest peer answering an op
+/// signed far ahead signed a **lower** counter than the op it answered — and
+/// since the thread read became the reverse of [`cmp_ops`] (#159), the answered
+/// reply came after every answer to it. The window removes such an op instead:
+/// nothing more than an hour ahead is stored, so the clock can follow every
+/// counter held, and an answer always carries the greater counter.
 ///
-/// The attack that makes this necessary: a peer whose clock reaches `u64::MAX`
-/// **can never publish again**, because its next op would need a counter above
-/// the maximum. One hostile op would otherwise silence an entire Stoa,
-/// permanently, for everyone who received it. With the bound, the cost of
-/// signing `u64::MAX` is exactly one position at the head of one Stoa's order,
-/// and every honest peer pays nothing. A reader may see it first; a reader may
-/// not be prevented from posting.
+/// It is a refusal of an authentic op for a field's value, which this system
+/// previously ruled out. `op-ordering` states the cost — a peer whose clock runs
+/// more than an hour fast has its ops refused, and one running more than an hour
+/// slow refuses honest ops — and `design.md` works it through for both.
 ///
-/// # Why this value
+/// # The same on every peer
 ///
-/// Far above any honest gap, and far below the ceiling:
-///
-/// - A Stoa producing one op per second continuously needs **11.5 days** to
-///   cover a million, so a peer returning from a long offline period still
-///   advances rather than publishing beneath the whole Stoa.
-/// - Walking from zero to `u64::MAX` a million at a time takes ~1.8 × 10^13
-///   ops, each of which must be published, delivered and stored. The ladder
-///   exists — see [`clock_from_counters`] — and it costs the climber one op per
-///   rung, which is the same price an honest busy Stoa pays.
-///
-/// A round decimal rather than a power of two: nothing here is a bit mask, and a
-/// reader should not go looking for a reason it is 2^20.
+/// A constant rather than a setting, because two peers with different windows
+/// disagree about which ops exist, silently.
 ///
 /// **Pinned by a hardcoded assertion**, following `MAX_FIELD_LEN` and
 /// `LAYOUT_VERSION`: `cargo mutants` does not mutate a `const`, so a value that
-/// drifted here would be invisible to it, and this project has already shipped a
-/// `VERSION_1` defect that left the whole suite green.
-pub const ADVANCE_BOUND: u64 = 1_000_000;
+/// drifted here would be invisible to it.
+pub const RECEIVE_WINDOW_MS: u64 = 60 * 60 * 1000;
 
-/// This peer's Lamport clock for one Stoa, from the counters of the ops it
-/// holds.
+/// Whether an arriving op's counter is further ahead of this peer's current time
+/// than [`RECEIVE_WINDOW_MS`] allows.
+///
+/// # It takes the counter and nothing else
+///
+/// Not an [`crate::op::OpClock`] and not an [`Op`]: `op-ordering` requires that
+/// the op's wall-clock field not affect this decision, and a function handed a
+/// `u64` cannot read a field it was never given. An op carrying no counter is
+/// not subject to the window at all, which is the caller's `Option` to unwrap.
+///
+/// # Called from the receive boundary and from nowhere else
+///
+/// [`crate::transport::receive`] is its one caller. Rebuilding a store,
+/// replaying ops and restoring a snapshot all go through
+/// [`crate::log::OpLog::append`], which takes no time — so a path that holds no
+/// `now_ms` cannot reach this without someone widening the log's API to carry
+/// one. That is what keeps a store rebuilt on a peer whose clock has since been
+/// set back from refusing ops it already admitted. `design.md` Decision 4.
+///
+/// # No arithmetic here can wrap
+///
+/// `saturating_sub` answers every `counter <= now_ms` as zero, which is "not
+/// ahead" — the spec's "no lower bound" — however far in the past the counter
+/// is. The obvious `counter > now_ms + RECEIVE_WINDOW_MS` overflows when
+/// `now_ms` is within an hour of `u64::MAX`, panics in a debug build, and a
+/// panic aborts the module process (PHASE0-FINDINGS §3) on a value the host's
+/// clock chose.
+pub fn exceeds_receive_window(counter: u64, now_ms: u64) -> bool {
+    counter.saturating_sub(now_ms) > RECEIVE_WINDOW_MS
+}
+
+/// This peer's Lamport clock for one Stoa: the highest counter of the ops it
+/// holds, or zero where it holds none.
 ///
 /// # Derived from the ops, never stored
 ///
@@ -224,21 +252,17 @@ pub const ADVANCE_BOUND: u64 = 1_000_000;
 /// each, the stored value is the wrong one and the one a naive implementation
 /// would believe.
 ///
-/// # THE COUNTERS ARE SORTED FIRST, AND THAT IS THE WHOLE CORRECTNESS ARGUMENT
+/// # The maximum, with no exception for a counter far above the rest
 ///
-/// The bound must be measured against a value computed **from the ops held**,
-/// never against whatever this peer's clock happened to be when an op arrived.
-/// Sorting ascending and folding from zero is what makes that true: every peer
-/// climbs the same ladder from the same bottom rung and stops at the same place,
-/// whatever sequence the ops arrived in.
+/// This was an ascending fold that stopped at the first step larger than
+/// `ADVANCE_BOUND`, and the sorting was its whole correctness argument. Both are
+/// gone: the receive window keeps a counter more than an hour ahead out of the
+/// store, so every counter this reads is one the peer admitted, and a maximum is
+/// a function of the set whatever sequence the ops arrived in.
 ///
-/// The arrival-order version is the one that falls out of writing the check on
-/// the receive path, and it is wrong in a way nothing reports. A peer that
-/// received a long run of ordinary ops **before** a `u64::MAX` one would accept
-/// the jump as within the bound; a peer that received the `u64::MAX` op **first**
-/// would refuse it. Same ops, two clocks, no error anywhere — and a peer's own
-/// rebuild would disagree with its own ingest. Deriving from the sorted set
-/// removes the possibility rather than making it unlikely.
+/// **It reads no time.** The current time enters when an op is signed, through
+/// [`next_counter`], and never here, so the clock stays a function of the ops
+/// held and nothing else.
 ///
 /// # Scoped per Stoa by the caller
 ///
@@ -246,51 +270,31 @@ pub const ADVANCE_BOUND: u64 = 1_000_000;
 /// order against ops of another, and a shared clock would leak one Stoa's
 /// activity into another's counters — letting a reader in a quiet Stoa infer
 /// that the peer is busy elsewhere.
-///
-/// A peer holding no ops of a Stoa has a clock of zero, which is this fold over
-/// an empty input.
 pub fn clock_from_counters(counters: impl IntoIterator<Item = u64>) -> u64 {
-    let mut sorted: Vec<u64> = counters.into_iter().collect();
-    sorted.sort_unstable();
-
-    let mut clock = 0u64;
-    for counter in sorted {
-        // A counter at or below the clock moves nothing: a clock never runs
-        // backwards, and an op already accounted for is not a second advance.
-        if counter <= clock {
-            continue;
-        }
-        // `checked_sub` is unnecessary — `counter > clock` is established — but
-        // the subtraction is written this way round deliberately. `clock +
-        // ADVANCE_BOUND` would overflow near the ceiling and panic in a debug
-        // build, and a panic aborts the module process (PHASE0-FINDINGS §3) on
-        // a value an author chose.
-        if counter - clock <= ADVANCE_BOUND {
-            clock = counter;
-        }
-        // Else: over the bound. The op is held and it orders by its counter like
-        // any other — this fold decides only what the CLOCK is, never what is
-        // stored or how anything sorts.
-    }
-    clock
+    counters.into_iter().max().unwrap_or(0)
 }
 
-/// The counter a peer signs into its next op for a Stoa.
+/// The counter a peer signs into its next op for a Stoa: the later of its
+/// current time and one above its clock.
 ///
-/// One above the clock, which states "this op was written knowing of something
-/// at N" and is what makes the counter a causality mechanism rather than a
-/// per-peer sequence.
+/// SDS's send rule (LIP-109, `max(timeNowInMs, current_lamport_timestamp + 1)`),
+/// applied per Stoa. The two halves do different jobs:
+///
+/// - **One above the clock** keeps the counter a causality mechanism: a peer
+///   holding an op at N publishes above N whatever its own time says, so an
+///   answer always carries a greater counter than the op it answers.
+/// - **The current time** lets a peer that holds nothing of a Stoa order
+///   correctly: it publishes among the Stoa's recent ops rather than at one,
+///   below everything it has not yet received.
+///
+/// One `max` rather than a branch on which is larger, because the two cases are
+/// the same expression.
 ///
 /// **Saturating, never wrapping.** A wrapped counter would place the highest op
-/// below the lowest, inverting the order for every op in the Stoa at once — and
-/// it would be reachable by an author who signed `u64::MAX` were the bound ever
-/// removed. Saturation costs one op its position; wrapping costs the Stoa its
-/// order.
-///
-/// A peer publishing at one above its own clock is within any bound by
-/// construction, so a published op never needs a bound check of its own.
-pub fn next_counter(clock: u64) -> u64 {
-    clock.saturating_add(1)
+/// below the lowest, inverting the order for every op in the Stoa at once.
+/// Saturation costs one op its position; wrapping costs the Stoa its order.
+pub fn next_counter(clock: u64, now_ms: u64) -> u64 {
+    now_ms.max(clock.saturating_add(1))
 }
 
 /// One op as the order sees it: the counter it carries, and its id.
@@ -346,14 +350,15 @@ impl<'a> OpEntry<'a> {
 /// the leading op at the front.
 ///
 /// **"Newest first", read as latest in the forum's own order** — and never "most
-/// recent first", which is a claim about time this comparison does not carry. A
-/// Lamport order is causal: it guarantees that a reply written after its author
-/// saw another op orders after it, and it guarantees nothing at all between two
-/// ops neither author had seen. Two people posting simultaneously in different
-/// timezones are separated by op-id hash, and a peer returning from a week
-/// offline publishes at one above what **it** has seen. A reader who expects the
-/// sequence to track wall-clock time will find it does not, and the interface
-/// must not suggest otherwise.
+/// recent first", which is a claim about time this comparison does not verify.
+/// The counter is pegged to its author's clock ([`next_counter`]), so it carries
+/// that author's claim about the time, raised above every counter the author
+/// held. It guarantees that a reply written after its author held another op
+/// orders ahead of it in this rule. Between two ops neither author had seen, it
+/// orders by two unverified clock readings — an author may sign up to
+/// [`RECEIVE_WINDOW_MS`] ahead of a receiver's time, and a slow clock signs
+/// behind. A reader who expects the sequence to track wall-clock time will find
+/// it does not, and the interface must not suggest otherwise.
 ///
 /// # The tiebreak is the op id, and not the transport's message id
 ///
@@ -805,115 +810,31 @@ mod tests {
     }
 
     #[test]
+    fn the_clock_is_the_highest_counter_however_far_apart_the_counters_are() {
+        // The case the advance bound used to decide, and now does not: a gap of
+        // a million and more, and the maximum representable value. A fold that
+        // kept any bound on the step returns something below the maximum here.
+        assert_eq!(clock_from_counters([1, 2_000_001, 3]), 2_000_001);
+        assert_eq!(
+            clock_from_counters([1, 2, 3, u64::MAX]),
+            u64::MAX,
+            "the clock excludes no counter the peer holds"
+        );
+    }
+
+    #[test]
     fn the_clock_does_not_depend_on_the_order_the_counters_are_given_in() {
-        // The convergence property, over a set that includes an over-bound
-        // value — which is exactly where an arrival-order implementation
-        // diverges.
-        let counters = [1u64, 2, 3, u64::MAX, 4, 5];
+        let counters = [1u64, 2, 3, 1_789_729_304_000, 4, 5];
         let forward = clock_from_counters(counters);
         let mut reversed = counters;
         reversed.reverse();
         assert_eq!(forward, clock_from_counters(reversed));
-        // And with the maximal value first, which is the sequence that makes an
-        // arrival-order rule refuse the jump where the forward sequence
-        // accepted it.
         assert_eq!(
             forward,
-            clock_from_counters([u64::MAX, 1, 2, 3, 4, 5]),
+            clock_from_counters([1_789_729_304_000, 1, 2, 3, 4, 5]),
             "the clock must be a function of the SET, not of the sequence"
         );
-    }
-
-    #[test]
-    fn the_advance_bound_accepts_up_to_and_including_itself_and_nothing_past_it() {
-        // **The boundary, from three sides, in one table.** This replaces two
-        // tests named `a_counter_within_the_bound_advances_the_clock` and
-        // `a_counter_exactly_at_the_bound_advances_the_clock` that carried a
-        // BYTE-IDENTICAL assertion — both `clock_from_counters([ADVANCE_BOUND])`
-        // — under a comment claiming they bracketed the edge "from below" and
-        // from above. They bracketed (at, one-past): nothing in the file ever
-        // exercised a counter strictly inside the accepting range, so the
-        // `within` name could not fail for the reason it gave.
-        //
-        // A table rather than three functions, because the only thing that
-        // differs between the cases is the input and the expectation, and three
-        // near-identical functions is what let two of them drift into one.
-        //
-        // Every expectation is a hardcoded relation to `ADVANCE_BOUND` rather
-        // than a value read back out of the function.
-        let cases: &[(&str, u64, u64)] = &[
-            (
-                "strictly inside the accepting range — the case neither of the \
-                 two replaced tests reached",
-                ADVANCE_BOUND / 2,
-                ADVANCE_BOUND / 2,
-            ),
-            (
-                "one below the edge, so the edge is not the only accepted value",
-                ADVANCE_BOUND - 1,
-                ADVANCE_BOUND - 1,
-            ),
-            (
-                "the edge itself: the bound is INCLUSIVE",
-                ADVANCE_BOUND,
-                ADVANCE_BOUND,
-            ),
-            (
-                "one past it is refused the advance, so the clock stays where it \
-                 started",
-                ADVANCE_BOUND + 1,
-                0,
-            ),
-        ];
-
-        for (what, counter, want) in cases {
-            assert_eq!(
-                clock_from_counters([*counter]),
-                *want,
-                "{what}: counter {counter} from a clock of zero"
-            );
-        }
-    }
-
-    #[test]
-    fn a_maximal_counter_does_not_advance_the_clock() {
-        // The hostile author's op. It is held and it orders — this function
-        // decides only the clock.
-        assert_eq!(clock_from_counters([u64::MAX]), 0);
-        // And alongside honest ops, the honest ones still set the clock.
-        assert_eq!(clock_from_counters([1, 2, 3, u64::MAX]), 3);
-    }
-
-    #[test]
-    fn a_peer_can_still_publish_after_receiving_a_maximal_counter() {
-        // The property the bound exists for, stated as the thing a user would
-        // notice: the Stoa is not silenced.
-        let clock = clock_from_counters([5, u64::MAX]);
-        assert_eq!(clock, 5);
-        assert_eq!(next_counter(clock), 6, "the peer publishes normally");
-    }
-
-    #[test]
-    fn a_chain_of_in_bound_steps_climbs_the_ladder() {
-        // The transitive consequence, asserted rather than left implicit: a
-        // SEQUENCE of ops each within the bound of the last does advance the
-        // clock past any one bound. That is correct — each rung cost its author
-        // an op — and a reader who assumed the bound was absolute would be
-        // wrong.
-        let counters = [ADVANCE_BOUND, ADVANCE_BOUND * 2, ADVANCE_BOUND * 3];
-        assert_eq!(clock_from_counters(counters), ADVANCE_BOUND * 3);
-    }
-
-    #[test]
-    fn a_gap_larger_than_the_bound_stops_the_ladder() {
-        // And the other half: one rung too far and the climb stops there,
-        // whatever comes after it.
-        let counters = [ADVANCE_BOUND, ADVANCE_BOUND * 2 + 2, ADVANCE_BOUND * 9];
-        assert_eq!(
-            clock_from_counters(counters),
-            ADVANCE_BOUND,
-            "the first over-bound step stops the advance"
-        );
+        assert_eq!(forward, 1_789_729_304_000);
     }
 
     #[test]
@@ -930,29 +851,121 @@ mod tests {
 
     // ─── Publishing ─────────────────────────────────────────────────────
 
+    /// A peer's current time for the publish tests: 2026-09-18T11:01:44Z.
+    const NOW: u64 = 1_789_729_304_000;
+
     #[test]
-    fn a_first_op_in_a_stoa_carries_one() {
-        assert_eq!(next_counter(clock_from_counters(std::iter::empty())), 1);
+    fn a_first_op_in_a_stoa_carries_the_current_time() {
+        assert_eq!(
+            next_counter(clock_from_counters(std::iter::empty()), NOW),
+            NOW
+        );
+    }
+
+    #[test]
+    fn a_clock_behind_the_current_time_yields_the_current_time() {
+        // Behind by more than one, so "one above the clock" and "the time" are
+        // different answers and only the time is right.
+        let clock = NOW - 500;
+        assert_eq!(next_counter(clock, NOW), NOW);
+        assert_ne!(next_counter(clock, NOW), clock + 1);
+    }
+
+    #[test]
+    fn a_clock_at_or_ahead_of_the_current_time_yields_one_above_it() {
+        // AT the time: one above wins by exactly one, which is the edge a `>`
+        // written for `>=` would get wrong.
+        assert_eq!(next_counter(NOW, NOW), NOW + 1);
+        // Ahead of it, within the hour the window allows a held op to lead by.
+        assert_eq!(next_counter(NOW + 1_000, NOW), NOW + 1_001);
+    }
+
+    #[test]
+    fn a_clock_one_below_the_time_yields_the_time_by_either_rule() {
+        // The one input where both halves of the `max` agree. Pinned so that
+        // the tests above are known to sit on either side of it rather than on
+        // it.
+        assert_eq!(next_counter(NOW - 1, NOW), NOW);
     }
 
     #[test]
     fn publishing_after_receiving_advances_past_what_was_received() {
-        assert_eq!(next_counter(clock_from_counters([7])), 8);
+        // A received op ahead of this peer's time: the clock term decides, and
+        // the answer is above what was received rather than at the time.
+        let received = NOW + 60_000;
+        assert_eq!(
+            next_counter(clock_from_counters([received]), NOW),
+            received + 1
+        );
+    }
+
+    #[test]
+    fn two_publishes_at_one_instant_take_successive_counters() {
+        // The same current time at both publishes, with the first publish's
+        // counter held between them. The second must still be greater, which
+        // only the clock term can give.
+        let first = next_counter(clock_from_counters(std::iter::empty()), NOW);
+        let second = next_counter(clock_from_counters([first]), NOW);
+        assert!(second > first, "{second} must exceed {first}");
     }
 
     #[test]
     fn the_next_counter_saturates_rather_than_wrapping() {
         // Wrapping would place the highest op below the lowest, inverting the
         // order for every op in the Stoa at once.
-        assert_eq!(next_counter(u64::MAX), u64::MAX);
+        assert_eq!(next_counter(u64::MAX, NOW), u64::MAX);
+        assert_eq!(next_counter(u64::MAX, 0), u64::MAX);
+        assert_eq!(next_counter(u64::MAX, u64::MAX), u64::MAX);
     }
 
-    // ─── The constant ───────────────────────────────────────────────────
+    // ─── The receive window ─────────────────────────────────────────────
 
     #[test]
-    fn the_advance_bound_is_pinned_to_a_known_answer() {
+    fn a_counter_exactly_one_hour_ahead_is_within_the_window() {
+        // Hardcoded 3,600,000 rather than the constant, so this sits on the
+        // spec's edge even if the constant drifts.
+        assert!(!exceeds_receive_window(NOW + 3_600_000, NOW));
+    }
+
+    #[test]
+    fn a_counter_one_millisecond_beyond_the_window_exceeds_it() {
+        assert!(exceeds_receive_window(NOW + 3_600_001, NOW));
+    }
+
+    #[test]
+    fn a_counter_at_or_below_the_time_never_exceeds_the_window() {
+        // No lower bound, however far in the past.
+        for counter in [0, 1, NOW - 86_400_000, NOW - 1, NOW] {
+            assert!(
+                !exceeds_receive_window(counter, NOW),
+                "counter {counter} is not ahead of {NOW}"
+            );
+        }
+    }
+
+    #[test]
+    fn extreme_values_do_not_abort_the_window_check() {
+        // Tests run in a debug build, where an overflowing `+` panics — so a
+        // `counter > now_ms + RECEIVE_WINDOW_MS` implementation fails the
+        // second case here by aborting rather than by an assertion.
+        assert!(
+            exceeds_receive_window(u64::MAX, 0),
+            "the maximum is refused"
+        );
+        assert!(
+            !exceeds_receive_window(0, u64::MAX),
+            "zero at the maximal time is admitted"
+        );
+        assert!(!exceeds_receive_window(u64::MAX, u64::MAX));
+        assert!(!exceeds_receive_window(u64::MAX, u64::MAX - 3_600_000));
+        assert!(exceeds_receive_window(u64::MAX, u64::MAX - 3_600_001));
+    }
+
+    #[test]
+    fn the_receive_window_is_pinned_to_one_hour() {
         // `cargo mutants` does not mutate a `const`, so a drifted value here
-        // would be invisible to it.
-        assert_eq!(ADVANCE_BOUND, 1_000_000);
+        // would be invisible to it. Written independently of the constant's own
+        // `60 * 60 * 1000`.
+        assert_eq!(RECEIVE_WINDOW_MS, 3_600_000);
     }
 }

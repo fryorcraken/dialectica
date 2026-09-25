@@ -396,11 +396,13 @@ pub trait OpLog {
     ///
     /// **Taking the first entry is not the same as taking the most recent, and
     /// that is still true now that a counter reaches every op this build
-    /// publishes.** [`cmp_ops`] leads with the op's own counter, which is
-    /// **causal, not temporal**: it says its author had seen something at N,
-    /// never *when*. Among ops carrying no counter — the population predating
-    /// the clock fields — it falls back to *ascending op id*, which carries no
-    /// recency whatever.
+    /// publishes.** [`cmp_ops`] leads with the op's own counter, which is its
+    /// author's unverified claim about the time, raised above every counter the
+    /// author held. An op signed ahead of the time — by up to the hour the
+    /// receive window allows — leads ops from peers that do not hold it until
+    /// their time passes its counter. Among ops carrying no counter — the
+    /// population predating the clock fields — it falls back to *ascending op
+    /// id*, which carries no recency whatever.
     ///
     /// So: take the first entry because that is the position the ordering rule
     /// defines as current, and **do not re-sort or add a tiebreak of your own.**
@@ -429,9 +431,13 @@ pub trait OpLog {
     ///
     /// **The default implementation is the definition**, and an implementor
     /// overriding it for speed is answering the same question a faster way. It
-    /// reads every op of the Stoa and takes the counters; the ordering the read
-    /// returns them in does not matter, because
-    /// [`clock_from_counters`](crate::arrival::clock_from_counters) sorts.
+    /// reads every op of the Stoa and takes the highest counter; the ordering
+    /// the read returns them in does not matter, because
+    /// [`clock_from_counters`](crate::arrival::clock_from_counters) is a maximum.
+    ///
+    /// **It reads no time, and neither does [`OpLog::append`].** That is what
+    /// keeps the receive window — which needs the current time — off every
+    /// rebuild, replay and restore path: none of them has a time to give it.
     fn clock(&self, stoa: &Address) -> Result<u64, OpLogError> {
         Ok(clock_from_counters(
             self.iter_stoa(stoa)?

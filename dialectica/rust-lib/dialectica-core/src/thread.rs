@@ -56,10 +56,13 @@
 //! sequence **backwards**, filters it and pages it. Backwards because the rule
 //! places the higher counter first and a thread reads oldest first (#147). A
 //! reply therefore comes after the reply it answers **only where its counter is
-//! the greater**; where it is not — a counter-less reply, or an answer to a
-//! reply whose counter was over [`crate::arrival::ADVANCE_BOUND`] and so never
-//! advanced the answerer's clock — the reversed sequence stands and the reply
-//! comes first. `thread-read` forbids moving it after its parent, and doing so
+//! the greater**. The publish rule gives it the greater counter whenever both
+//! carry one and the answerer held the reply it answered, including where that
+//! reply was signed ahead of the answerer's time. Where it is not — a
+//! counter-less reply, or an answer whose author did not follow the publish
+//! rule — the reversed sequence stands and the reply comes first. (An answer to
+//! a reply over the old advance bound was the third case; the receive window
+//! closed it.) `thread-read` forbids moving it after its parent, and doing so
 //! would need exactly the comparison this module does not make. There is no
 //! `sort`, no `cmp` and no `max_by` — the same discipline [`crate::revision`],
 //! [`crate::moderation`] and [`crate::feed`] hold, and for the same reason: a
@@ -68,8 +71,10 @@
 //!
 //! **What that order guarantees is convergence, not recency** — and a Lamport
 //! counter reaching every op this build publishes does not change that. The
-//! counter is **causal, not temporal**: it says its author had seen something at
-//! N, never *when*, so two counters five apart are not five of anything apart.
+//! counter is its author's claim about the time, raised above every counter that
+//! author held. Nothing verifies the claim — an author may sign up to an hour
+//! ahead of a receiver's time, and a slow clock signs behind — so two counters
+//! five apart are not five of anything apart.
 //! Among ops carrying none — the population predating the clock fields —
 //! `cmp_ops` falls back to ascending op id, so this read returns them in
 //! DESCENDING op id, a hash carrying no temporal meaning at all. Two peers
@@ -200,10 +205,12 @@ pub struct ThreadItem {
     ///
     /// The counter is a number that means an order, and handing it out would
     /// invite arithmetic on it — differences, gaps, "how far apart were these".
-    /// None of those mean anything: a counter says "the author had seen
-    /// something at N", never *which*, and two counters five apart are not five
-    /// of anything. An index says "this is where it goes" and supports exactly
-    /// the one operation a view needs.
+    /// None of those mean anything: a counter is its author's unverified claim
+    /// about the time, raised above whatever that author held, and two counters
+    /// five apart are not five of anything. Nor is it the returned sequence: the
+    /// replies come in the reverse of the counters' order, and the root comes
+    /// first whatever its counter. An index says "this is where it goes" and
+    /// supports exactly the one operation a view needs.
     ///
     /// # Why a string
     ///
@@ -3160,10 +3167,13 @@ mod tests {
         // scenario — it is the one the amended spec added and the dev-writer's
         // own list did not cover.
         //
-        // `design.md`'s Risks names how this arises for real: an answer's
-        // counter can come out LOWER than the reply it answers when the
-        // answered reply's counter was over `op-ordering`'s advance bound and
-        // never raised the answering peer's clock. `thread.rs` takes counters
+        // How this arises for real: an answer's counter comes out LOWER than the
+        // reply it answers when the answer's author did not follow the publish
+        // rule. (It used to arise honestly too, when the answered reply's
+        // counter was over the old advance bound and never raised the answering
+        // peer's clock; the receive window of `time-pegged-clock` closed that
+        // case, and the spec keeps this scenario for the dishonest one.)
+        // `thread.rs` takes counters
         // as given and performs no comparison of its own, so the fixture states
         // the counters directly rather than reaching for `arrival`'s clock
         // arithmetic — the read cannot tell the two paths apart, and is not

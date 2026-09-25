@@ -67,7 +67,7 @@
 //! passing two `None`s, so that grepping for it finds every place the contract's
 //! gap is being absorbed."
 
-use crate::arrival::Arrival;
+use crate::arrival::{exceeds_receive_window, Arrival};
 use crate::identity::Address;
 use crate::log::{Appended, OpLog, OpLogError};
 use crate::op::{OpError, OpId, SignedOp};
@@ -313,11 +313,12 @@ pub struct InboundMessage<'a> {
 ///
 /// # Each variant is a different cause with a different response
 ///
-/// The spec requires the five refusals be "reported distinguishably from the
+/// The spec requires the six refusals be "reported distinguishably from the
 /// others", and the reason is what a reader does next: a build that is behind, a
-/// corrupt or hostile payload, a forgery, a misdirected or replayed op, and a peer
-/// sending more than the network permits are five problems, and a boundary that
-/// said only "invalid" would send someone looking in the wrong place.
+/// corrupt or hostile payload, a forgery, a misdirected or replayed op, a peer
+/// sending more than the network permits, and an op signed by a clock more than
+/// an hour ahead of this one are six problems, and a boundary that said only
+/// "invalid" would send someone looking in the wrong place.
 ///
 /// [`InboundRefusal::Undecodable`] **carries** the decoder's own error rather than
 /// flattening it to a string: `op-format` already distinguishes eleven ways a byte
@@ -358,6 +359,19 @@ pub enum InboundRefusal {
         named: Address,
         channel_is_for: Address,
     },
+    /// The op's counter is further ahead of this peer's current time than
+    /// [`crate::arrival::RECEIVE_WINDOW_MS`] allows.
+    ///
+    /// Judged last, and only on an op that passed every check above, so a
+    /// forgery is reported as a forgery rather than by a field its forger chose.
+    /// Carries both numbers so a log can say by how much: an op a few minutes
+    /// past the hour reads as a fast clock, and `u64::MAX` reads as a counter
+    /// chosen to jump the order.
+    ///
+    /// **Not a verdict on the op.** Nothing is recorded, so the same bytes
+    /// arriving again once this peer's time is within the window are admitted
+    /// as a first arrival would be.
+    AheadOfTime { counter: u64, now_ms: u64 },
     /// The op log could not be written.
     ///
     /// Not a judgement about the payload: the bytes were a well-formed, authentic
@@ -389,6 +403,12 @@ impl std::fmt::Display for InboundRefusal {
                 "the op names Stoa {} but arrived on the channel for {}",
                 named.to_hex(),
                 channel_is_for.to_hex()
+            ),
+            InboundRefusal::AheadOfTime { counter, now_ms } => write!(
+                f,
+                "the op's counter {counter} is more than an hour ahead of this \
+                 peer's time {now_ms}; it was not stored, and is admitted if it \
+                 arrives again once this peer's time is within the hour"
             ),
             InboundRefusal::Storage(e) => write!(f, "the op could not be stored: {e}"),
         }
@@ -427,6 +447,9 @@ pub struct Admitted {
 ///    bytes legitimate.
 /// 4. **Does it verify?** Signature and author binding together.
 /// 5. **Does it name this channel's Stoa?**
+/// 6. **Is its counter within the receive window of `now_ms`?** Last, so a
+///    payload failing any check above is reported as that failure even where its
+///    counter is also too far ahead. An op carrying no counter is not judged.
 ///
 /// Only then is anything appended. A refusal therefore cannot partially apply:
 /// there is no intermediate mutation to roll back, because the single write is
@@ -447,18 +470,38 @@ pub struct Admitted {
 /// authority is checked later. The two answer different questions against
 /// different inputs, and neither substitutes for the other.
 ///
+/// The window is the one judgement here on a field's value. It asks how an op's
+/// counter stands against this peer's time at this moment, and it is not a
+/// judgement of authority. Its reasoning is `op-ordering`'s, and
+/// [`crate::arrival::RECEIVE_WINDOW_MS`] carries it.
+///
+/// # `now_ms` is this peer's own current time, and nothing the message carries
+///
+/// The caller passes the host's clock (the adapter's `now_ms()`). **Never
+/// `message.timestamp`**: that is the delivery module's reading, in nanoseconds
+/// where every other delivery event is ISO-8601 (delivery bug #26), and the spec
+/// forbids it as the reference. It is a parameter rather than a field of
+/// [`InboundMessage`] so that the struct mirroring the event does not hold two
+/// times side by side, one to be read and one never to be.
+///
+/// **This is the only function that takes a time and appends.** The log's
+/// `append` takes none, which is what keeps the window off every rebuild,
+/// replay and restore path. See [`crate::arrival::exceeds_receive_window`].
+///
 /// # No panic is reachable from any input
 ///
 /// A panic here aborts the module process (`PHASE0-FINDINGS` §3): the caller waits
 /// out a 20-second timeout and every later call reports `MODULE_NOT_LOADED`. The
 /// bytes are chosen by whoever sent them, so a reachable panic is a remotely
-/// triggerable denial of service. There is no indexing, no slicing and no
-/// arithmetic on this path — the size check is a `>` comparison, and the decode is
-/// `op-format`'s, whose own suite covers every prefix of a valid op.
+/// triggerable denial of service. There is no indexing and no slicing on this
+/// path. The size check is a `>` comparison, the decode is `op-format`'s (whose
+/// own suite covers every prefix of a valid op), and the window's one subtraction
+/// saturates.
 pub fn receive<L: OpLog>(
     message: InboundMessage<'_>,
     channels: &OpenChannels,
     log: &mut L,
+    now_ms: u64,
 ) -> Result<Admitted, InboundRefusal> {
     let channel_stoa = *channels
         .stoa_of(message.channel_id)
@@ -489,6 +532,15 @@ pub fn receive<L: OpLog>(
             named: signed.op.stoa,
             channel_is_for: channel_stoa,
         });
+    }
+
+    // LAST of the judgements, and before the append. The counter alone reaches
+    // the predicate, so the wall-clock field cannot affect it; an op carrying no
+    // counter (VERSION_1) has nothing to compare and is not judged.
+    if let Some(counter) = signed.op.clock.map(|c| c.counter) {
+        if exceeds_receive_window(counter, now_ms) {
+            return Err(InboundRefusal::AheadOfTime { counter, now_ms });
+        }
     }
 
     let id = signed.op.id();
@@ -668,6 +720,15 @@ mod tests {
     fn a_key(seed: u8) -> SecretKey {
         SecretKey::from_bytes(&[seed; 32]).unwrap()
     }
+
+    /// The receiving peer's own current time, for the tests that are not about
+    /// it. 2026-09-18T11:01:44Z, the instant `authoring.rs` spells `A_TIME`.
+    ///
+    /// **Deliberately far from `inbound`'s `timestamp`**, which is nanoseconds:
+    /// 1.7 × 10^18 against 1.79 × 10^12, about six orders of magnitude apart. A
+    /// boundary that read one where it should read the other would not agree
+    /// with itself by accident.
+    const NOW_MS: u64 = 1_789_729_304_000;
 
     /// A Stoa address from a genesis record, so the fixture's addresses are the
     /// ones a real peer would hold rather than synthetic bytes.
@@ -1086,6 +1147,7 @@ mod tests {
             },
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap();
 
@@ -1154,6 +1216,7 @@ mod tests {
             },
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap_err();
 
@@ -1176,6 +1239,7 @@ mod tests {
             },
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap();
         let second = receive(
@@ -1187,6 +1251,7 @@ mod tests {
             },
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap();
 
@@ -1216,6 +1281,7 @@ mod tests {
             },
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap();
 
@@ -1247,6 +1313,7 @@ mod tests {
             },
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap();
 
@@ -1287,6 +1354,7 @@ mod tests {
                 },
                 &channels,
                 &mut log,
+                NOW_MS,
             )
             .unwrap();
             assert_eq!(
@@ -1325,6 +1393,7 @@ mod tests {
                     },
                     &channels,
                     &mut log,
+                    NOW_MS,
                 )
                 .unwrap();
                 out.push((admitted.id, log.get(&admitted.id).unwrap().unwrap().arrival));
@@ -1387,6 +1456,7 @@ mod tests {
                 inbound(identity.channel_id(), &payload),
                 &channels,
                 &mut log,
+                NOW_MS,
             )
             .unwrap();
             assert!(log
@@ -1415,6 +1485,7 @@ mod tests {
             inbound("/dialectica/1/c/not-a-channel", &payload),
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap_err();
         assert_eq!(refusal, InboundRefusal::UnknownChannel);
@@ -1429,8 +1500,13 @@ mod tests {
         // A valid op with its last byte flipped: it decodes structurally in some
         // cases and not others, so the fixture is a payload that genuinely cannot
         // decode — truncated below the signature width.
-        let refusal =
-            receive(inbound(identity.channel_id(), b"junk"), &channels, &mut log).unwrap_err();
+        let refusal = receive(
+            inbound(identity.channel_id(), b"junk"),
+            &channels,
+            &mut log,
+            NOW_MS,
+        )
+        .unwrap_err();
         assert!(
             matches!(refusal, InboundRefusal::Undecodable(_)),
             "got {refusal:?}"
@@ -1463,6 +1539,7 @@ mod tests {
             inbound(identity.channel_id(), &payload),
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap_err();
         assert_eq!(refusal, InboundRefusal::FailsVerification);
@@ -1527,6 +1604,7 @@ mod tests {
             inbound(identity.channel_id(), &payload),
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap_err();
         assert_eq!(refusal, InboundRefusal::FailsVerification);
@@ -1553,6 +1631,7 @@ mod tests {
             inbound(identity.channel_id(), &payload),
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap_err();
         assert!(
@@ -1599,6 +1678,7 @@ mod tests {
             inbound(identity.channel_id(), &payload),
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap_err();
         assert_eq!(refusal, InboundRefusal::Undecodable(OpError::BlankTitle));
@@ -1625,6 +1705,7 @@ mod tests {
             inbound(identity.channel_id(), &payload),
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap();
         assert_eq!(admitted.id, op.op.id());
@@ -1649,10 +1730,19 @@ mod tests {
             b"junk".to_vec(),
             oversized,
             signed_post_in(elsewhere, "wrong stoa").to_bytes().unwrap(),
+            signed_post_at(stoa, "too far ahead", u64::MAX, NOW_MS)
+                .to_bytes()
+                .unwrap(),
         ];
         for payload in &refusals {
             assert!(
-                receive(inbound(identity.channel_id(), payload), &channels, &mut log).is_err(),
+                receive(
+                    inbound(identity.channel_id(), payload),
+                    &channels,
+                    &mut log,
+                    NOW_MS
+                )
+                .is_err(),
                 "the fixture must be refused"
             );
         }
@@ -1668,6 +1758,7 @@ mod tests {
             inbound(identity.channel_id(), &payload),
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap();
         assert_eq!(admitted.id, good.op.id());
@@ -1728,6 +1819,10 @@ mod tests {
                 named: a_stoa("Agora"),
                 channel_is_for: a_stoa("Lyceum"),
             },
+            InboundRefusal::AheadOfTime {
+                counter: NOW_MS + 3_600_001,
+                now_ms: NOW_MS,
+            },
             InboundRefusal::Storage(OpLogError::Storage("disk on fire".to_string())),
         ];
         if let Some(r) = all.first() {
@@ -1738,6 +1833,7 @@ mod tests {
                 | InboundRefusal::Undecodable(_)
                 | InboundRefusal::FailsVerification
                 | InboundRefusal::StoaMismatch { .. }
+                | InboundRefusal::AheadOfTime { .. }
                 | InboundRefusal::Storage(_) => {}
             }
         }
@@ -1767,8 +1863,13 @@ mod tests {
         let op = signed_post_in(stoa, "arrives while the disk is unwritable");
         assert!(op.verify(), "the fixture op must pass every earlier guard");
         let bytes = op.to_bytes().unwrap();
-        let refusal =
-            receive(inbound(identity.channel_id(), &bytes), &channels, &mut log).unwrap_err();
+        let refusal = receive(
+            inbound(identity.channel_id(), &bytes),
+            &channels,
+            &mut log,
+            NOW_MS,
+        )
+        .unwrap_err();
 
         assert!(
             matches!(refusal, InboundRefusal::Storage(OpLogError::Storage(_))),
@@ -1806,6 +1907,7 @@ mod tests {
             inbound(identity.channel_id(), &payload),
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap_err();
         assert_eq!(
@@ -1855,6 +1957,7 @@ mod tests {
             inbound(identity.channel_id(), &payload),
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap_err();
         assert_eq!(
@@ -1874,7 +1977,8 @@ mod tests {
         assert!(receive(
             inbound(identity.channel_id(), &mine_payload),
             &channels,
-            &mut log
+            &mut log,
+            NOW_MS
         )
         .is_ok());
     }
@@ -1895,7 +1999,7 @@ mod tests {
         let shorter = &identity.channel_id()[..identity.channel_id().len() - 1];
         for wrong in [longer.as_str(), shorter] {
             assert_eq!(
-                receive(inbound(wrong, &payload), &channels, &mut log).unwrap_err(),
+                receive(inbound(wrong, &payload), &channels, &mut log, NOW_MS).unwrap_err(),
                 InboundRefusal::UnknownChannel,
                 "a prefix match admitted a payload on {wrong}"
             );
@@ -1919,7 +2023,8 @@ mod tests {
         assert!(receive(
             inbound(identity.channel_id(), &payload),
             &channels,
-            &mut log
+            &mut log,
+            NOW_MS
         )
         .is_err());
 
@@ -1947,6 +2052,7 @@ mod tests {
             inbound(identity.channel_id(), &payload),
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap_err();
         assert_eq!(
@@ -1988,6 +2094,7 @@ mod tests {
             inbound(identity.channel_id(), &payload),
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap_err();
         assert!(
@@ -2014,6 +2121,7 @@ mod tests {
             inbound(identity.channel_id(), &payload),
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap_err();
         assert!(
@@ -2054,6 +2162,7 @@ mod tests {
             inbound(identity.channel_id(), &payload),
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap();
         assert_eq!(admitted.id, op.op.id());
@@ -2103,6 +2212,7 @@ mod tests {
             inbound(identity.channel_id(), &payload),
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap_err();
         assert_eq!(
@@ -2114,6 +2224,416 @@ mod tests {
             "an op the live publish path signs must be refused by every peer"
         );
         assert_eq!(log.len().unwrap(), 0, "a refused payload appends nothing");
+    }
+
+    // ─── The receive window ───────────────────────────────────────────────
+
+    /// A post in `stoa` carrying `counter`, with a wall-clock of `asserted_ms`,
+    /// signed by the fixture's author.
+    fn signed_post_at(stoa: Address, body: &str, counter: u64, asserted_ms: u64) -> SignedOp {
+        Op {
+            clock: Some(crate::op::OpClock {
+                counter,
+                asserted_ms,
+            }),
+            ..a_post_in(stoa, body)
+        }
+        .sign(&a_key(2))
+    }
+
+    /// One hour, written independently of `RECEIVE_WINDOW_MS` so these tests
+    /// sit on the spec's edge even if the constant drifts.
+    const ONE_HOUR_MS: u64 = 3_600_000;
+
+    #[test]
+    fn an_op_at_the_edge_of_the_window_is_admitted() {
+        let stoa = a_stoa("Agora");
+        let (channels, mut log, identity) = peer_in(stoa);
+        let op = signed_post_at(stoa, "at the edge", NOW_MS + ONE_HOUR_MS, NOW_MS);
+        let payload = op.to_bytes().unwrap();
+
+        let admitted = receive(
+            inbound(identity.channel_id(), &payload),
+            &channels,
+            &mut log,
+            NOW_MS,
+        )
+        .expect("exactly one hour ahead is within the window");
+        assert_eq!(admitted.appended, Appended::Stored);
+        assert_eq!(log.get(&op.op.id()).unwrap().unwrap().op, op);
+    }
+
+    #[test]
+    fn an_op_one_millisecond_beyond_the_window_is_refused_and_leaves_the_clock_alone() {
+        let stoa = a_stoa("Agora");
+        let (channels, mut log, identity) = peer_in(stoa);
+
+        // A held op first, so "the clock is unchanged" is a claim about a
+        // non-zero clock rather than about an empty log.
+        let held = signed_post_at(stoa, "already here", NOW_MS - 10, NOW_MS - 10);
+        let held_payload = held.to_bytes().unwrap();
+        receive(
+            inbound(identity.channel_id(), &held_payload),
+            &channels,
+            &mut log,
+            NOW_MS,
+        )
+        .unwrap();
+        let clock_before = log.clock(&stoa).unwrap();
+        assert_eq!(clock_before, NOW_MS - 10);
+
+        let beyond = NOW_MS + ONE_HOUR_MS + 1;
+        let op = signed_post_at(stoa, "one past the edge", beyond, NOW_MS);
+        let payload = op.to_bytes().unwrap();
+        let refusal = receive(
+            inbound(identity.channel_id(), &payload),
+            &channels,
+            &mut log,
+            NOW_MS,
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            refusal,
+            InboundRefusal::AheadOfTime {
+                counter: beyond,
+                now_ms: NOW_MS,
+            }
+        );
+        assert_eq!(log.get(&op.op.id()).unwrap(), None, "the op was stored");
+        assert_eq!(log.len().unwrap(), 1);
+        assert_eq!(
+            log.clock(&stoa).unwrap(),
+            clock_before,
+            "a refused op moved the clock"
+        );
+    }
+
+    #[test]
+    fn a_refusal_for_the_window_is_distinguishable_from_every_other() {
+        // Asserted on a refusal `receive` actually returned, not on a variant
+        // built by hand: `every_refusal_is_reported_distinguishably` proves the
+        // variant renders distinctly and cannot prove `receive` produces it.
+        let stoa = a_stoa("Agora");
+        let (channels, mut log, identity) = peer_in(stoa);
+        let payload = signed_post_at(stoa, "far ahead", u64::MAX, NOW_MS)
+            .to_bytes()
+            .unwrap();
+        let refusal = receive(
+            inbound(identity.channel_id(), &payload),
+            &channels,
+            &mut log,
+            NOW_MS,
+        )
+        .unwrap_err();
+        assert!(matches!(refusal, InboundRefusal::AheadOfTime { .. }));
+        for other in every_refusal_variant() {
+            if matches!(other, InboundRefusal::AheadOfTime { .. }) {
+                continue;
+            }
+            assert_ne!(refusal, other);
+            assert_ne!(refusal.to_string(), other.to_string());
+        }
+    }
+
+    #[test]
+    fn a_maximal_counter_is_refused_and_the_peer_can_still_publish() {
+        let stoa = a_stoa("Agora");
+        let (channels, mut log, identity) = peer_in(stoa);
+        let honest = signed_post_at(stoa, "honest", NOW_MS - 5_000, NOW_MS - 5_000);
+        let honest_payload = honest.to_bytes().unwrap();
+        receive(
+            inbound(identity.channel_id(), &honest_payload),
+            &channels,
+            &mut log,
+            NOW_MS,
+        )
+        .unwrap();
+
+        let hostile = signed_post_at(stoa, "u64::MAX", u64::MAX, NOW_MS)
+            .to_bytes()
+            .unwrap();
+        assert!(matches!(
+            receive(
+                inbound(identity.channel_id(), &hostile),
+                &channels,
+                &mut log,
+                NOW_MS,
+            ),
+            Err(InboundRefusal::AheadOfTime { .. })
+        ));
+        assert_eq!(log.clock(&stoa).unwrap(), NOW_MS - 5_000, "clock unchanged");
+
+        // The peer publishes, and its op carries the later of its time and one
+        // above its unchanged clock — here, its time.
+        let key = a_key(7);
+        let published = crate::authoring::post(
+            &mut log,
+            &crate::authoring::Authorship {
+                key: &key,
+                asserted_ms: NOW_MS,
+            },
+            stoa,
+            "still posting".to_string(),
+        )
+        .expect("publishing succeeds after a maximal counter was refused");
+        let counter = log
+            .get(&published.id)
+            .unwrap()
+            .unwrap()
+            .op
+            .op
+            .clock
+            .unwrap()
+            .counter;
+        assert_eq!(counter, NOW_MS);
+    }
+
+    #[test]
+    fn ops_far_in_the_past_are_admitted() {
+        // No lower bound: counters of zero and one, a current time far above.
+        let stoa = a_stoa("Agora");
+        let (channels, mut log, identity) = peer_in(stoa);
+        for counter in [0u64, 1] {
+            let op = signed_post_at(stoa, &format!("at {counter}"), counter, counter);
+            let payload = op.to_bytes().unwrap();
+            let admitted = receive(
+                inbound(identity.channel_id(), &payload),
+                &channels,
+                &mut log,
+                NOW_MS,
+            )
+            .unwrap_or_else(|e| panic!("counter {counter} must be admitted: {e}"));
+            assert_eq!(admitted.appended, Appended::Stored);
+        }
+        assert_eq!(log.len().unwrap(), 2);
+    }
+
+    #[test]
+    fn an_op_carrying_no_counter_is_admitted_whatever_the_time() {
+        // At a current time of zero every counter-carrying op of this era would
+        // be refused, so zero is where a check that treated "no counter" as
+        // some counter would show itself.
+        let stoa = a_stoa("Agora");
+        for now_ms in [0u64, NOW_MS, u64::MAX] {
+            let (channels, mut log, identity) = peer_in(stoa);
+            let op = signed_post_in(stoa, "version one");
+            assert!(op.op.clock.is_none(), "the fixture must carry no counter");
+            let payload = op.to_bytes().unwrap();
+            receive(
+                inbound(identity.channel_id(), &payload),
+                &channels,
+                &mut log,
+                now_ms,
+            )
+            .unwrap_or_else(|e| panic!("refused at now_ms {now_ms}: {e}"));
+        }
+    }
+
+    #[test]
+    fn a_refused_op_is_admitted_when_it_arrives_again_within_the_window() {
+        let stoa = a_stoa("Agora");
+        let counter = NOW_MS + ONE_HOUR_MS + 60_000;
+        let op = signed_post_at(stoa, "early", counter, NOW_MS);
+        let payload = op.to_bytes().unwrap();
+
+        // First arrival: refused.
+        let (channels, mut log, identity) = peer_in(stoa);
+        assert!(receive(
+            inbound(identity.channel_id(), &payload),
+            &channels,
+            &mut log,
+            NOW_MS,
+        )
+        .is_err());
+
+        // A minute later by this peer's clock, the same bytes are within the
+        // hour.
+        let later = NOW_MS + 60_000;
+        let second = receive(
+            inbound(identity.channel_id(), &payload),
+            &channels,
+            &mut log,
+            later,
+        )
+        .expect("the same bytes within the window are admitted");
+
+        // The outcome a FIRST arrival at that time has, on a peer that never
+        // refused it: same admission, same stored entry.
+        let (fresh_channels, mut fresh_log, fresh_identity) = peer_in(stoa);
+        let first_time = receive(
+            inbound(fresh_identity.channel_id(), &payload),
+            &fresh_channels,
+            &mut fresh_log,
+            later,
+        )
+        .unwrap();
+        assert_eq!(second, first_time);
+        assert_eq!(second.appended, Appended::Stored);
+        assert_eq!(
+            log.get(&op.op.id()).unwrap(),
+            fresh_log.get(&op.op.id()).unwrap()
+        );
+        assert_eq!(log.len().unwrap(), fresh_log.len().unwrap());
+    }
+
+    #[test]
+    fn the_decision_does_not_read_the_timestamp_handed_in_with_a_message() {
+        // One op within the window and one beyond, each received at one current
+        // time with three different message timestamps. Each op's decision is
+        // the same across the three, and the two ops' decisions differ — so a
+        // boundary that always admitted or always refused fails too.
+        let stoa = a_stoa("Agora");
+        let within = signed_post_at(stoa, "within", NOW_MS + 1_000, NOW_MS);
+        let beyond = signed_post_at(stoa, "beyond", NOW_MS + ONE_HOUR_MS + 1_000, NOW_MS);
+        for (op, admitted) in [(&within, true), (&beyond, false)] {
+            let payload = op.to_bytes().unwrap();
+            for timestamp in [i64::MIN, i64::MAX, 0] {
+                let (channels, mut log, identity) = peer_in(stoa);
+                let outcome = receive(
+                    InboundMessage {
+                        channel_id: identity.channel_id(),
+                        sender_id: "s",
+                        payload: &payload,
+                        timestamp,
+                    },
+                    &channels,
+                    &mut log,
+                    NOW_MS,
+                );
+                assert_eq!(
+                    outcome.is_ok(),
+                    admitted,
+                    "timestamp {timestamp} changed the decision: {outcome:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_decision_does_not_read_the_wall_clock_field() {
+        // Each op's wall-clock points the OPPOSITE way to its counter, so a
+        // decision read from the wall-clock gives both answers backwards.
+        let stoa = a_stoa("Agora");
+        let (channels, mut log, identity) = peer_in(stoa);
+        let centuries_ahead = NOW_MS + 300 * 365 * 24 * ONE_HOUR_MS;
+        let within = signed_post_at(stoa, "within", NOW_MS + 1_000, centuries_ahead);
+        let beyond = signed_post_at(stoa, "beyond", NOW_MS + ONE_HOUR_MS + 1, NOW_MS);
+
+        let within_payload = within.to_bytes().unwrap();
+        receive(
+            inbound(identity.channel_id(), &within_payload),
+            &channels,
+            &mut log,
+            NOW_MS,
+        )
+        .expect("a counter within the window is stored whatever its wall-clock");
+
+        let beyond_payload = beyond.to_bytes().unwrap();
+        assert!(matches!(
+            receive(
+                inbound(identity.channel_id(), &beyond_payload),
+                &channels,
+                &mut log,
+                NOW_MS,
+            ),
+            Err(InboundRefusal::AheadOfTime { .. })
+        ));
+        assert_eq!(log.len().unwrap(), 1);
+    }
+
+    #[test]
+    fn another_failure_is_reported_ahead_of_the_window() {
+        // Both ops' counters are beyond the window. Each fails an earlier check
+        // too, and must be reported as THAT failure.
+        let here = a_stoa("Agora");
+        let there = a_stoa("Lyceum");
+        let (channels, mut log, identity) = peer_in(here);
+        let beyond = NOW_MS + ONE_HOUR_MS + 1;
+
+        // Verifies nowhere: the body was changed after signing.
+        let signed = signed_post_at(here, "original", beyond, NOW_MS);
+        let tampered = SignedOp {
+            op: Op {
+                kind: OpKind::Post {
+                    thread: None,
+                    parent: None,
+                    body: "tampered".to_string(),
+                    attachments: vec![],
+                },
+                ..signed.op.clone()
+            },
+            signature: signed.signature.clone(),
+        };
+        let tampered_payload = tampered.to_bytes().unwrap();
+        assert_eq!(
+            receive(
+                inbound(identity.channel_id(), &tampered_payload),
+                &channels,
+                &mut log,
+                NOW_MS,
+            )
+            .unwrap_err(),
+            InboundRefusal::FailsVerification
+        );
+
+        // Verifies, but names another Stoa.
+        let elsewhere = signed_post_at(there, "elsewhere", beyond, NOW_MS);
+        assert!(elsewhere.verify());
+        let elsewhere_payload = elsewhere.to_bytes().unwrap();
+        assert_eq!(
+            receive(
+                inbound(identity.channel_id(), &elsewhere_payload),
+                &channels,
+                &mut log,
+                NOW_MS,
+            )
+            .unwrap_err(),
+            InboundRefusal::StoaMismatch {
+                named: there,
+                channel_is_for: here,
+            }
+        );
+        assert_eq!(log.len().unwrap(), 0);
+    }
+
+    // `op-transport`, "A held op arriving again beyond the window is refused, and
+    // stays held" — possible only if this peer's time moved back after it
+    // admitted the op. Validation precedes every lookup by a property of the op,
+    // and "is this op already held?" is a lookup by op id: here it is the append,
+    // which is what would report `AlreadyPresent`. So the window refuses first,
+    // and the held op is left as it was. This was a `NO SPEC:` marker until that
+    // requirement said so.
+    #[test]
+    fn a_held_op_arriving_again_beyond_the_window_is_refused_rather_than_reported_as_held() {
+        let stoa = a_stoa("Agora");
+        let (channels, mut log, identity) = peer_in(stoa);
+        let counter = NOW_MS + 1_000;
+        let op = signed_post_at(stoa, "admitted, then the clock went back", counter, NOW_MS);
+        let payload = op.to_bytes().unwrap();
+        receive(
+            inbound(identity.channel_id(), &payload),
+            &channels,
+            &mut log,
+            NOW_MS,
+        )
+        .unwrap();
+
+        let set_back = NOW_MS - 2 * ONE_HOUR_MS;
+        assert_eq!(
+            receive(
+                inbound(identity.channel_id(), &payload),
+                &channels,
+                &mut log,
+                set_back,
+            )
+            .unwrap_err(),
+            InboundRefusal::AheadOfTime {
+                counter,
+                now_ms: set_back,
+            }
+        );
+        assert_eq!(log.len().unwrap(), 1, "the held op is still held");
     }
 
     // ─── No panic is reachable ────────────────────────────────────────────
@@ -2162,6 +2682,7 @@ mod tests {
                 inbound(identity.channel_id(), &payload),
                 &channels,
                 &mut log,
+                NOW_MS,
             );
         }
     }
@@ -2205,6 +2726,7 @@ mod tests {
                     },
                     &channels,
                     &mut log,
+                    NOW_MS,
                 );
             }
         }
@@ -2215,13 +2737,20 @@ mod tests {
         let stoa = a_stoa("Agora");
         let (channels, mut log, identity) = peer_in(stoa);
 
-        assert!(receive(inbound(identity.channel_id(), b""), &channels, &mut log).is_err());
+        assert!(receive(
+            inbound(identity.channel_id(), b""),
+            &channels,
+            &mut log,
+            NOW_MS
+        )
+        .is_err());
         let good = signed_post_in(stoa, "after");
         let payload = good.to_bytes().unwrap();
         let admitted = receive(
             inbound(identity.channel_id(), &payload),
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap();
         assert_eq!(admitted.id, good.op.id());
@@ -2286,6 +2815,7 @@ mod tests {
             inbound(identity.channel_id(), &payload),
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap();
 
@@ -2527,6 +3057,7 @@ mod tests {
             inbound(identity.channel_id(), &payload),
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap();
         assert_eq!(admitted.id, id);
@@ -2583,6 +3114,7 @@ mod tests {
             inbound(identity.channel_id(), &payload),
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap();
         assert_eq!(admitted.appended, Appended::Stored);
@@ -2619,7 +3151,8 @@ mod tests {
             receive(
                 inbound(identity.channel_id(), &payload),
                 &channels,
-                &mut log
+                &mut log,
+                NOW_MS
             )
             .unwrap_err(),
             InboundRefusal::FailsVerification
@@ -2766,6 +3299,7 @@ mod tests {
             inbound(identity.channel_id(), &payload),
             &channels,
             &mut log,
+            NOW_MS,
         )
         .unwrap();
 

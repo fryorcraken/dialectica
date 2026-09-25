@@ -100,11 +100,15 @@
 //!
 //! **What survived from the old paragraph, because it is still true.** The
 //! leading entry is taken because that is the position the ordering rule defines
-//! as current — **not because it is the most recent**. A Lamport counter is
-//! causal rather than temporal, and among ops carrying none `cmp_ops` falls back
-//! to *ascending op id*, an order carrying no recency whatever. `log/mod.rs`'s
+//! as current — **not because it is the most recent**. The counter is pegged to
+//! its author's clock, so it carries that author's claim about the time, raised
+//! above every counter the author held. Nothing verifies the claim: an author may
+//! sign up to an hour ahead of a receiver's time, and a slow clock signs behind
+//! by any amount. Among ops carrying none `cmp_ops` falls back to *ascending op
+//! id*, an order carrying no recency whatever. `log/mod.rs`'s
 //! [`OpLog::iter_target`] and [`cmp_ops`](crate::arrival::cmp_ops) both state
-//! this; it is not restated here.
+//! this; it is not restated here. What the hour of lead lets a moderator do is
+//! on [`resolve`], beside the comparison it exploits.
 //!
 //! The old paragraph then concluded that the same code is therefore correct
 //! under both orders with no branch. That is the step that was wrong, and
@@ -423,6 +427,18 @@ impl Moderation {
 /// the leading op carries a counter, last-write-wins is real and stands
 /// untouched — biasing there would make every hide permanent, which is a worse
 /// bug than the one this closes.
+///
+/// **"Last" is by the counter, and a moderator can sign one up to an hour
+/// ahead.** The counter is its author's claim about the time, and `op-ordering`'s
+/// receive window refuses one only when it is more than an hour ahead of the
+/// receiving peer's time. So a moderator can sign a `Hide` or `Unhide` up to an
+/// hour ahead and beat an opposite action that another moderator published
+/// within that hour without having received it. A correction published after
+/// receiving it carries the greater counter and wins. Before the window, a
+/// moderator who signed the maximum counter won such a dispute permanently.
+/// Nothing here has code of its own for this: the bound is the ordering rule's
+/// (`op-ordering`, "An op signed ahead of the time leads only until the time
+/// passes it"), and every reader of the rule's first entry inherits it.
 ///
 /// The condition asks about `first` rather than about every candidate, and the
 /// two differ whenever one target's binding moderations are a **mix** of ops

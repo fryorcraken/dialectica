@@ -214,10 +214,12 @@ pub struct Authorship<'a> {
     /// reaches it.
     pub key: &'a SecretKey,
     /// This peer's wall-clock, in milliseconds since the Unix epoch, to be
-    /// signed into the op as the author's assertion.
+    /// signed into the op as the author's assertion — and the current time the
+    /// op's counter is pegged to (see this module's private `publish`).
     ///
-    /// It decides nothing — not here and not on any reader. It is carried
-    /// because a reader is shown a time and expects one.
+    /// As the wall-clock field it decides nothing, here or on any reader. It is
+    /// carried because a reader is shown a time and expects one. The counter
+    /// takes the same instant because a peer has one reading of the time.
     ///
     /// **Named `asserted_ms` and not `now_ms`, deliberately.** Every other
     /// millisecond value in this crate is the *reading* peer's clock, used only
@@ -248,10 +250,21 @@ pub struct Authorship<'a> {
 /// op carries a counter" true by construction rather than by three call sites
 /// each remembering to do it.
 ///
-/// The counter is one above this peer's clock for the op's Stoa, which states
-/// "this op was written knowing of something at N". A peer publishing at one
-/// above its own clock is within [`crate::arrival::ADVANCE_BOUND`] by
-/// construction, so a published op never needs a bound check of its own.
+/// The counter is the later of this peer's current time and one above its clock
+/// for the op's Stoa ([`next_counter`]), so it is above every counter this peer
+/// holds of that Stoa and never behind its time.
+///
+/// # One instant signs both clock fields
+///
+/// `op-ordering` requires a publish to take its current time once and sign it
+/// as both the counter's basis and the wall-clock field. That reading is
+/// `who.asserted_ms`, which the adapter samples once (`now_ms()`). A second
+/// field for the counter's time would let a caller pass two readings that
+/// disagree, which is the state the requirement forbids; with one field it
+/// cannot be written down. `design.md` Decision 3.
+///
+/// That does not make the wall-clock field decide anything: the counter is
+/// computed from the host's time, and nothing reads the field to compute it.
 fn publish<L: OpLog>(log: &mut L, who: &Authorship<'_>, op: Op) -> Result<Published, Refusal> {
     // Read BEFORE the op is signed: the counter is inside the preimage, so it
     // has to be known before there are bytes to sign.
@@ -259,7 +272,7 @@ fn publish<L: OpLog>(log: &mut L, who: &Authorship<'_>, op: Op) -> Result<Publis
 
     let op = Op {
         clock: Some(OpClock {
-            counter: next_counter(clock),
+            counter: next_counter(clock, who.asserted_ms),
             asserted_ms: who.asserted_ms,
         }),
         ..op
@@ -820,12 +833,16 @@ mod tests {
         // And therefore leads in the order. Asserted on the stored ops rather
         // than inferred, so this says WHY the ids differ — a test that only
         // checked `assert_ne!` on the ids would pass for a nonce.
+        //
+        // The body is "two times" rather than "twice" because the pegged counter
+        // (`time-pegged-clock`) re-rolled both digests and "twice" stopped
+        // disagreeing — the drift the guard below exists to catch, caught.
         let stoa = a_stoa("Agora");
         let key = a_key(A_ROOT, &stoa);
         let mut log = a_log();
 
-        let first = post(&mut log, &by(&key), stoa, "twice".to_string()).unwrap();
-        let second = post(&mut log, &by(&key), stoa, "twice".to_string()).unwrap();
+        let first = post(&mut log, &by(&key), stoa, "two times".to_string()).unwrap();
+        let second = post(&mut log, &by(&key), stoa, "two times".to_string()).unwrap();
 
         let counter_of = |id: &OpId| {
             stored(&log, id)
@@ -1639,15 +1656,15 @@ mod tests {
         //
         // **The clock is spelled out rather than copied from `ours`.** Copying
         // would make the byte comparison below tautological: two ops built from
-        // one op's fields are equal whatever the publish path did. Counter 1
-        // because this was the first op into an empty Stoa, and `A_TIME`
-        // because that is what `by()` hands the publish path — so this asserts
+        // one op's fields are equal whatever the publish path did. Both fields
+        // are `A_TIME`: that is what `by()` hands the publish path, and a first
+        // op into an empty Stoa is counted at the current time — so this asserts
         // that the publish path stamps the values the contract says it does.
         let theirs = Op {
             stoa,
             author: key.public_key(),
             clock: Some(OpClock {
-                counter: 1,
+                counter: A_TIME,
                 asserted_ms: A_TIME,
             }),
             kind: OpKind::Post {
@@ -1676,10 +1693,11 @@ mod tests {
     // ─── The counter a publish stamps ─────────────────────────────────────
 
     #[test]
-    fn a_first_op_in_a_stoa_carries_a_counter_of_one() {
-        // One above a clock of zero, which is what a peer holding no ops of that
-        // Stoa has. Asserted on the STORED op, so this is about what was signed
-        // rather than about what a helper returned.
+    fn a_first_op_in_a_stoa_carries_the_current_time() {
+        // A peer holding no ops of the Stoa has a clock of zero, so one above it
+        // is 1 and the current time is the later. Asserted on the STORED op, so
+        // this is about what was signed rather than about what a helper
+        // returned.
         let stoa = a_stoa("Agora");
         let key = a_key(A_ROOT, &stoa);
         let mut log = a_log();
@@ -1687,15 +1705,77 @@ mod tests {
         let published = post(&mut log, &by(&key), stoa, "first".to_string()).unwrap();
         assert_eq!(
             stored(&log, &published.id).op.clock.unwrap().counter,
-            1,
-            "a first op into an empty Stoa carries one"
+            A_TIME,
+            "a first op into an empty Stoa carries the current time"
         );
+    }
+
+    // `op-ordering`, "One reading of the time signs the counter and the
+    // wall-clock alike": a publish takes its current time once and signs it as
+    // both the counter's basis and the wall-clock field, so an op whose clock
+    // was behind the time carries a counter equal to its wall-clock. This was a
+    // `NO SPEC:` marker until the publish requirement said so.
+    #[test]
+    fn one_reading_of_the_time_signs_both_clock_fields() {
+        // A time other than `A_TIME`, so neither field can be right by
+        // agreeing with a fixture constant.
+        let stoa = a_stoa("Agora");
+        let key = a_key(A_ROOT, &stoa);
+        let mut log = a_log();
+        let then = A_TIME + 123_456;
+
+        let published = post(
+            &mut log,
+            &Authorship {
+                key: &key,
+                asserted_ms: then,
+            },
+            stoa,
+            "one instant".to_string(),
+        )
+        .unwrap();
+        let clock = stored(&log, &published.id).op.clock.unwrap();
+        assert_eq!(clock.counter, then);
+        assert_eq!(clock.asserted_ms, then);
+    }
+
+    #[test]
+    fn a_clock_behind_the_current_time_publishes_at_the_time() {
+        // Behind by far more than one, so "one above the clock" and "the time"
+        // are different answers and only the time is right.
+        let stoa = a_stoa("Agora");
+        let key = a_key(A_ROOT, &stoa);
+        let peer = a_key(ANOTHER_ROOT, &stoa);
+        let mut log = a_log();
+        let received = Op {
+            stoa,
+            author: peer.public_key(),
+            clock: Some(OpClock {
+                counter: A_TIME - 86_400_000,
+                asserted_ms: A_TIME - 86_400_000,
+            }),
+            kind: OpKind::Post {
+                thread: None,
+                parent: None,
+                body: "yesterday".to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&peer);
+        log.append(received, Arrival::unordered()).unwrap();
+
+        let published = post(&mut log, &by(&key), stoa, "today".to_string()).unwrap();
+        let counter = stored(&log, &published.id).op.clock.unwrap().counter;
+        assert_eq!(counter, A_TIME);
+        assert_ne!(counter, A_TIME - 86_400_000 + 1);
     }
 
     #[test]
     fn publishing_after_receiving_advances_past_what_was_received() {
-        // The causality property: a peer that has seen an op at N publishes at
-        // above N, which states "this op was written knowing of something at N".
+        // The causality property: a peer that holds an op at N publishes above
+        // N, whatever its own time says. The received op is AHEAD of this peer's
+        // time (within the hour the window allows), so the time alone would
+        // sign below it and only the clock term gives the right answer.
         let stoa = a_stoa("Agora");
         let key = a_key(A_ROOT, &stoa);
         // **A genuinely different author**, which is the half this test used to
@@ -1711,14 +1791,14 @@ mod tests {
         );
         let mut log = a_log();
 
-        // An op from somebody else, carrying a counter well above anything this
-        // peer would have reached on its own.
+        // An op from somebody else, carrying a counter half a minute ahead of
+        // this peer's time.
         let received = Op {
             stoa,
             author: peer.public_key(),
             clock: Some(OpClock {
-                counter: 500,
-                asserted_ms: A_TIME,
+                counter: A_TIME + 30_000,
+                asserted_ms: A_TIME + 30_000,
             }),
             kind: OpKind::Post {
                 thread: None,
@@ -1733,51 +1813,263 @@ mod tests {
         let published = post(&mut log, &by(&key), stoa, "mine".to_string()).unwrap();
         assert_eq!(
             stored(&log, &published.id).op.clock.unwrap().counter,
-            501,
+            A_TIME + 30_001,
             "a publish takes one above the highest counter held"
         );
     }
 
+    // `op-ordering`, "A counter taken from the clock leaves the wall-clock at
+    // the current time": when this peer's clock for a Stoa is ABOVE its
+    // current time, the counter takes the clock term (one above the held
+    // maximum), and the wall-clock field still takes the current time — the
+    // two fields diverge. `one_reading_of_the_time_signs_both_clock_fields`
+    // covers the other branch, where the clock is BEHIND the time and the two
+    // fields end up equal by construction; that fixture cannot tell "the
+    // wall-clock is the current time" apart from "the wall-clock is whatever
+    // the counter came out to", because in that scenario they are the same
+    // number. This fixture separates them: a mutation that wrote the counter
+    // into the wall-clock field (matching the letter of "one reading signs
+    // both fields" while dropping which VALUE each field gets) would still
+    // pass every other test in this file, and only fails here.
     #[test]
-    fn a_peer_can_still_publish_after_receiving_a_maximal_counter() {
-        // **THE attack the advance bound exists to stop, from the publish side.**
-        // An author signs `u64::MAX`. If that raised this peer's clock, its next
-        // op would need a counter above the maximum and the Stoa would be
-        // silenced permanently for everyone who received the op.
-        //
-        // Instead the hostile op is stored, orders by its counter, and costs
-        // this peer nothing: the publish succeeds and takes one above the
-        // peer's own unchanged clock.
+    fn a_counter_taken_from_the_clock_leaves_the_wall_clock_at_the_current_time() {
         let stoa = a_stoa("Agora");
         let key = a_key(A_ROOT, &stoa);
-        // Both received ops are signed by the OTHER peer, for the reason spelled
-        // out on `ANOTHER_ROOT`: a clock scoped to this peer's own authorship
-        // would pass a single-author version of this test.
         let peer = a_key(ANOTHER_ROOT, &stoa);
-        assert_ne!(
-            key.public_key().to_bytes(),
-            peer.public_key().to_bytes(),
-            "the hostile op must come from somebody else"
-        );
         let mut log = a_log();
 
-        let honest = Op {
+        // An op from somebody else, carrying a counter far ahead of this
+        // peer's current time — so this peer's clock for the Stoa ends up
+        // above A_TIME, and the clock term (not the time) decides the
+        // counter of the next publish.
+        let received = Op {
             stoa,
             author: peer.public_key(),
             clock: Some(OpClock {
-                counter: 5,
+                counter: A_TIME + 3_000_000,
+                asserted_ms: A_TIME + 3_000_000,
+            }),
+            kind: OpKind::Post {
+                thread: None,
+                parent: None,
+                body: "from a fast clock".to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&peer);
+        log.append(received, Arrival::unordered()).unwrap();
+
+        let published = post(&mut log, &by(&key), stoa, "mine".to_string()).unwrap();
+        let clock = stored(&log, &published.id).op.clock.unwrap();
+
+        // Both expectations are computed independently of the code under
+        // test, from the fixture's own numbers, rather than read back from
+        // what `publish` produced.
+        assert_eq!(
+            clock.counter,
+            A_TIME + 3_000_001,
+            "the counter is one above the clock this peer holds"
+        );
+        assert_eq!(
+            clock.asserted_ms, A_TIME,
+            "the wall-clock stays at this peer's current time, not at the \
+             value the clock term produced for the counter"
+        );
+        assert_ne!(
+            clock.asserted_ms, clock.counter,
+            "the fixture must actually separate the two fields, or the \
+             assertions above could agree by the two fields happening to \
+             carry the same number"
+        );
+    }
+
+    #[test]
+    fn a_reply_to_an_op_ahead_of_the_time_still_carries_the_greater_counter() {
+        // The case the advance bound got wrong: a parent signed ahead of the
+        // replier's time. Under the bound, an over-bound parent never moved the
+        // clock and its answer signed LOWER. Here the parent is ahead but within
+        // the window, and the reply must carry the greater counter — which is
+        // what places it after its parent in a thread.
+        let stoa = a_stoa("Agora");
+        let key = a_key(A_ROOT, &stoa);
+        let peer = a_key(ANOTHER_ROOT, &stoa);
+        let mut log = a_log();
+        let parent = Op {
+            stoa,
+            author: peer.public_key(),
+            clock: Some(OpClock {
+                counter: A_TIME + 3_000_000,
                 asserted_ms: A_TIME,
             }),
             kind: OpKind::Post {
                 thread: None,
                 parent: None,
-                body: "honest".to_string(),
+                body: "from a fast clock".to_string(),
                 attachments: vec![],
             },
         }
         .sign(&peer);
-        let honest_id = honest.op.id();
-        let hostile = Op {
+        let parent_id = parent.op.id();
+        log.append(parent, Arrival::unordered()).unwrap();
+
+        let answer = reply(
+            &mut log,
+            &by(&key),
+            stoa,
+            parent_id,
+            "an answer".to_string(),
+        )
+        .unwrap();
+        assert!(
+            stored(&log, &answer.id).op.clock.unwrap().counter > A_TIME + 3_000_000,
+            "the answer must carry a greater counter than the op it answers"
+        );
+    }
+
+    /// Hand an op held by one log to another through the real receive boundary,
+    /// at the receiving peer's current time `now_ms`.
+    fn deliver(from: &MemoryOpLog, id: &OpId, to: &mut MemoryOpLog, now_ms: u64) {
+        use crate::transport::{receive, ChannelIdentity, InboundMessage, OpenChannels};
+        let op = stored(from, id);
+        let identity = ChannelIdentity::of(&op.op.stoa);
+        let mut channels = OpenChannels::new();
+        channels.open(&identity);
+        let payload = op.to_bytes().unwrap();
+        receive(
+            InboundMessage {
+                channel_id: identity.channel_id(),
+                sender_id: "a peer",
+                payload: &payload,
+                timestamp: 0,
+            },
+            &channels,
+            to,
+            now_ms,
+        )
+        .expect("the fixture's ops are all within the window");
+    }
+
+    #[test]
+    fn a_reply_carries_a_greater_counter_than_the_post_and_the_rule_places_it_first() {
+        // Issue #162's first item. `op-ordering`'s scenario said "every peer
+        // holding both places the post first", which contradicted the rule it
+        // sat under: the rule places the HIGHER counter first, and the reply
+        // carries it. Pinned here on BOTH peers, over the real receive path, at
+        // one instant — so the reply's counter can only be greater through the
+        // clock term.
+        let stoa = a_stoa("Agora");
+        let author = a_key(A_ROOT, &stoa);
+        let replier = a_key(ANOTHER_ROOT, &stoa);
+
+        // Searched, so that ascending op id would place the POST first: the
+        // assertion below then fails under an id-ordered log rather than
+        // agreeing with it by a coincidence of digests.
+        for n in 0..64u32 {
+            let mut first_peer = a_log();
+            let mut second_peer = a_log();
+            let post_id = post(&mut first_peer, &by(&author), stoa, format!("the post {n}"))
+                .unwrap()
+                .id;
+            deliver(&first_peer, &post_id, &mut second_peer, A_TIME);
+            let reply_id = reply(
+                &mut second_peer,
+                &by(&replier),
+                stoa,
+                post_id,
+                "the reply".to_string(),
+            )
+            .unwrap()
+            .id;
+            if reply_id < post_id {
+                continue;
+            }
+            deliver(&second_peer, &reply_id, &mut first_peer, A_TIME);
+
+            let counter = |log: &MemoryOpLog, id: &OpId| stored(log, id).op.clock.unwrap().counter;
+            assert!(counter(&second_peer, &reply_id) > counter(&second_peer, &post_id));
+            for (which, log) in [("first", &first_peer), ("second", &second_peer)] {
+                let ids: Vec<OpId> = log.iter().unwrap().iter().map(|e| e.id()).collect();
+                assert_eq!(
+                    ids,
+                    vec![reply_id, post_id],
+                    "the {which} peer must place the reply before the post"
+                );
+            }
+            return;
+        }
+        panic!("no body in 64 gave a reply id above the post id");
+    }
+
+    #[test]
+    fn an_op_signed_ahead_of_the_time_leads_only_until_the_time_passes_it() {
+        // One peer holds an op signed half an hour ahead. A second peer that
+        // does not hold it publishes once its own time has passed that counter:
+        // its op carries the greater counter and the rule places it first.
+        let stoa = a_stoa("Agora");
+        let ahead = A_TIME + 1_800_000;
+        let fast = a_key(ANOTHER_ROOT, &stoa);
+        let mut first_peer = a_log();
+        let early = post(
+            &mut first_peer,
+            &Authorship {
+                key: &fast,
+                asserted_ms: ahead,
+            },
+            stoa,
+            "from a fast clock".to_string(),
+        )
+        .unwrap();
+
+        // Searched, so that ascending op id would place the EARLY op first, and
+        // an id-ordered log fails the assertion below rather than passing by a
+        // coincidence of digests. A fixed body did coincide when first written.
+        let later_key = a_key(A_ROOT, &stoa);
+        let (mut second_peer, later) = (0..64u32)
+            .find_map(|n| {
+                let mut log = a_log();
+                let published = post(
+                    &mut log,
+                    &Authorship {
+                        key: &later_key,
+                        asserted_ms: ahead + 1,
+                    },
+                    stoa,
+                    format!("once the time has passed it {n}"),
+                )
+                .unwrap();
+                (published.id > early.id).then_some((log, published))
+            })
+            .expect("no body in 64 gave an id above the early op's");
+        assert!(
+            stored(&second_peer, &later.id).op.clock.unwrap().counter
+                > stored(&first_peer, &early.id).op.clock.unwrap().counter
+        );
+
+        // Both peers, holding both, place the later op first.
+        deliver(&first_peer, &early.id, &mut second_peer, ahead + 1);
+        deliver(&second_peer, &later.id, &mut first_peer, ahead + 1);
+        for log in [&first_peer, &second_peer] {
+            let ids: Vec<OpId> = log.iter().unwrap().iter().map(|e| e.id()).collect();
+            assert_eq!(ids, vec![later.id, early.id]);
+        }
+    }
+
+    #[test]
+    fn a_publish_at_the_maximum_representable_clock_saturates() {
+        // The receive window refuses a `u64::MAX` counter on arrival
+        // (`transport.rs` pins that), but `append` admits one — a store written
+        // before this change, or restored from a snapshot, can hold it. A peer
+        // whose clock is the maximum must still publish, and its counter must
+        // saturate rather than wrap to zero, which would place its op below
+        // every other op in the Stoa.
+        let stoa = a_stoa("Agora");
+        let key = a_key(A_ROOT, &stoa);
+        // Signed by the OTHER peer, for the reason spelled out on
+        // `ANOTHER_ROOT`: a clock scoped to this peer's own authorship would
+        // pass a single-author version of this test.
+        let peer = a_key(ANOTHER_ROOT, &stoa);
+        let mut log = a_log();
+        let maximal = Op {
             stoa,
             author: peer.public_key(),
             clock: Some(OpClock {
@@ -1792,49 +2084,15 @@ mod tests {
             },
         }
         .sign(&peer);
-        let hostile_id = hostile.op.id();
-        log.append(honest, Arrival::unordered()).unwrap();
-        log.append(hostile, Arrival::unordered()).unwrap();
+        log.append(maximal, Arrival::unordered()).unwrap();
+        assert_eq!(log.clock(&stoa).unwrap(), u64::MAX);
 
-        let published = post(&mut log, &by(&key), stoa, "still posting".to_string()).unwrap();
+        let published = post(&mut log, &by(&key), stoa, "still posting".to_string())
+            .expect("publishing at the maximum clock succeeds");
         assert_eq!(
             stored(&log, &published.id).op.clock.unwrap().counter,
-            6,
-            "the maximal op did not raise this peer's clock, so the publish is 5+1"
-        );
-
-        // The hostile op is STORED and it DOES order ahead — the bound decides
-        // the clock, never what is held or how anything sorts. Refusing it
-        // outright would be refusing content for a field, which is the
-        // censorship vector this deliberately does not open.
-        assert!(log.get(&hostile_id).unwrap().is_some(), "it is stored");
-
-        // **The WHOLE order, not just its head.** These three ops have unrelated
-        // digests, so `ids[0] == hostile_id` alone is satisfied by an id-ordered
-        // log with probability one in three and leaves the rest of the sequence
-        // unexamined — and this is the security-relevant half of the advance-bound
-        // requirement (`op-ordering`: "An over-bound op still takes its place in
-        // the order"), so what it must show is the whole placement.
-        //
-        // The counters are u64::MAX > 6 > 5, all distinct, so descending-counter
-        // order is total here and needs no op-id tiebreak: an id-ordered or
-        // insertion-ordered log gives a different vector unless the digests
-        // happen to agree, which the guard below refuses to assume.
-        let ids: Vec<OpId> = log.iter().unwrap().iter().map(|e| e.id()).collect();
-        assert_eq!(
-            ids,
-            vec![hostile_id, published.id, honest_id],
-            "descending counter: the over-bound op leads, then this peer's own \
-             publish at 6, then the honest op at 5"
-        );
-        // And the fixture really does distinguish the counter rule from the op-id
-        // one, rather than the two happening to agree on this triple.
-        let mut by_id = ids.clone();
-        by_id.sort();
-        assert_ne!(
-            ids, by_id,
-            "the fixture has drifted: descending counter and ascending op id now \
-             give the same sequence, so the assertion above distinguishes neither"
+            u64::MAX,
+            "saturated at the maximum, not wrapped"
         );
     }
 
@@ -1854,12 +2112,15 @@ mod tests {
             post(&mut log, &by(&agora_key), agora, "busy".to_string()).unwrap();
         }
 
-        // A first op in the OTHER Stoa still carries one.
+        // A first op in the OTHER Stoa carries the current time. The busy
+        // Stoa's clock is `A_TIME + 4` after five publishes at one instant, so
+        // a shared clock would sign `A_TIME + 5` here.
         let lyceum_key = a_key(A_ROOT, &lyceum);
         let published = post(&mut log, &by(&lyceum_key), lyceum, "quiet".to_string()).unwrap();
+        assert_eq!(log.clock(&agora).unwrap(), A_TIME + 4);
         assert_eq!(
             stored(&log, &published.id).op.clock.unwrap().counter,
-            1,
+            A_TIME,
             "the busy Stoa's counters must not reach the quiet one"
         );
     }
@@ -1930,8 +2191,8 @@ mod tests {
                 .clock
                 .expect("publish must stamp a clock onto an op of every kind");
             assert_eq!(
-                clock.counter, 1,
-                "the first op into an empty log publishes at one above a clock of zero"
+                clock.counter, A_TIME,
+                "the first op into an empty log is counted at the current time"
             );
             assert_eq!(clock.asserted_ms, A_TIME, "and carries the author's time");
         }

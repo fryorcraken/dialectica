@@ -483,11 +483,11 @@ The root post MUST be the first item of the first page. The replies MUST follow 
 
 **What that order guarantees is convergence and causal position, and still not wall-clock recency.** The rule leads with the Lamport counter an op carries in its own signed bytes and places the higher counter first, so its reverse places a reply carrying the higher of two counters after the other, and every peer holding both agrees. Two consequences of reversing the rule's sequence, rather than re-sorting the replies, are part of this contract: replies carrying equal counters MUST come in descending op id, the reverse of the rule's tiebreak; and a reply carrying no counter — one encoded before the clock fields existed — MUST come before every reply that carries one, those among themselves in descending op id. An op id is a hash and carries no temporal meaning whatever.
 
-**Where both carry counters, a reply comes after the reply it answers when its counter is the greater of the two, and the read MUST NOT restore that relation where the counters do not give it.** `op-ordering`'s publish rule gives the answering reply the greater counter when both replies carry counters and the answered reply's counter advanced the answering peer's clock. It does not where either reply carries no counter, nor where the answered reply's counter exceeded `op-ordering`'s advance bound at the answering peer, so that the answer carries the lower counter. In those cases the replies MUST still come in the reverse of the rule's sequence, even where that places a reply before the reply it answers; the read MUST NOT move a reply after its parent.
+**Where both carry counters, a reply comes after the reply it answers when its counter is the greater of the two, and the read MUST NOT restore that relation where the counters do not give it.** `op-ordering`'s publish rule gives the answering reply the greater counter whenever both replies carry counters and the answering peer held the reply it answered when it published. That includes the case where the answered reply's counter was ahead of the answering peer's time. The rule does not give it where either reply carries no counter, nor where the answering reply's author did not follow the publish rule and signed a lower counter. In those cases the replies MUST still come in the reverse of the rule's sequence, even where that places a reply before the reply it answers; the read MUST NOT move a reply after its parent.
 
-**A caller SHALL NOT be told the sequence is chronological.** A counter says its author had seen something at the counter below it; it does not say which op that was, nor when either reply was written, and two replies whose authors had not seen one another's are ordered by counters neither chose with the other in view. The distinction is not pedantic here: the asserted time an item carries is the author's claim and disagrees with the sequence whenever an author's clock is wrong or an author is lying, so a caller presenting the sequence as chronological would be making a claim the items themselves can visibly contradict.
+**A caller SHALL NOT be told the sequence is chronological.** A counter is its author's claim about the time, raised above every counter that author held. It does not say which op the author had seen, and it does not say when either reply was written, because an author's clock can run ahead by up to the hour `op-ordering`'s receive window tolerates, or behind by any amount. Two replies whose authors had not seen each other's are ordered by those two claims. The distinction is not pedantic here. The asserted time an item carries is a separate claim that nothing checks, and it can disagree with the sequence whenever an author lies in it, so a caller presenting the sequence as chronological would be making a claim the items themselves can visibly contradict.
 
-A field MAY be named or described in terms of the order — *latest*, *first*, *position* — where what it names is the ordering rule's position. A field SHALL NOT be named or described in terms of wall-clock time unless it is the author-asserted time, which SHALL be marked as such.
+A field MAY be named or described in terms of the order — *latest*, *first*, *position* — where what it names is a place in the system's order: the ordering rule's, or the sequence this read derives from it. A field SHALL NOT be named or described in terms of wall-clock time unless it is the author-asserted time, which SHALL be marked as such.
 
 A flat sequence is specified rather than a tree because whether a thread view should paginate by reply order or by reply tree is an open question that running against real traffic decides, and a flat page carrying each item's parent does not foreclose either answer. A tree would need a page boundary chosen before anyone knows where one should fall.
 
@@ -521,8 +521,9 @@ A flat sequence is specified rather than a tree because whether a thread view sh
 
 #### Scenario: A reply orders after the reply it answers
 
-- **WHEN** one peer publishes a reply carrying a counter, a second receives it, the first reply's counter advances the second peer's clock, and the second publishes a reply to it carrying a counter
+- **WHEN** one peer publishes a reply carrying a counter, and a second receives it and publishes a reply to it carrying a counter
 - **THEN** the second orders after the first in the returned sequence
+- **AND** this holds when the first reply's counter was ahead of the second peer's current time when the second published
 
 #### Scenario: A reply carrying a lower counter than the reply it answers comes before it
 
@@ -702,7 +703,7 @@ A field the reply would have no meaning for SHALL be omitted rather than sent ho
 
 ### Requirement: An item carries its ordering position and the author's asserted time, as two separate fields
 
-Each item SHALL carry the position the ordering rule gives it, as a field distinct from every other, and SHALL carry the author's asserted time as display text alongside an explicit marker that the value is the author's claim.
+Each item SHALL carry its position in the sequence the read returns, as a field distinct from every other. That sequence is the whole thread's, with the root first and the replies in the reverse of the ordering rule's sequence, as the requirement "The items are a flat sequence in the system's order, with the root first" contracts. Each item SHALL also carry the author's asserted time as display text, alongside an explicit marker that the value is the author's claim.
 
 The two SHALL NOT be one field and SHALL NOT be derivable from one another. A caller needing an item's place in the thread SHALL have a field that is correct to read for that; a caller rendering a time SHALL have a field that is correct to render and that no comparison would accept. **Neither is the asserted time**, which answers no question about order at all.
 
@@ -712,7 +713,7 @@ The two SHALL NOT be one field and SHALL NOT be derivable from one another. A ca
 
 **A caller SHALL NOT be required to sort by it, and SHALL NOT be able to rely on doing so.** This is the part that has to be said explicitly, because the value looks sortable and is not: nothing here promises that comparing two positions in a caller's own natural ordering reproduces the sequence, and a caller that sorted on them would be relying on a property this contract does not give. Nor SHALL a caller rely on the token being a number, on arithmetic over two of them meaning anything, on two items' values being adjacent or any fixed distance apart, or on a position being comparable against one from a **different** thread's read. The read SHALL surface it in a form that does not present itself as a quantity.
 
-The alternatives all invite arithmetic that means nothing. The op's own counter would be the obvious value to hand out, and it is the wrong one: a counter says its author had seen *something* at N and never *which*, so two counters five apart are not five of anything, and a caller subtracting them would compute a number with no referent. What a view needs is to render the returned sequence and to know an item's place in the whole thread across pages, and contracting only that is what keeps a later change free to alter the token's form without breaking a caller that stayed inside the contract.
+The alternatives all invite arithmetic that means nothing. The op's own counter would be the obvious value to hand out, and it is the wrong one, for two reasons. First, it is not the returned sequence: the replies come in the reverse of the counters' order, and the root comes first whatever its counter. Second, a counter is its author's claim about the time, raised above whatever that author held, so two counters five apart are not five places in anything, and a caller subtracting them would compute a number with no referent in the thread. What a view needs is to render the returned sequence and to know an item's place in the whole thread across pages. Contracting only that keeps a later change free to alter the token's form without breaking a caller that stayed inside the contract.
 
 The asserted time SHALL be clamped for display and reported as clamped where it is implausible, per the ordering capability's requirement, and this capability SHALL NOT define a clamp of its own.
 
@@ -723,7 +724,7 @@ An item whose op carries no asserted time — one encoded before the fields exis
 #### Scenario: Every item carries both fields
 
 - **WHEN** a thread's items are read
-- **THEN** each carries a field giving its position in the order
+- **THEN** each carries a field giving its position in the returned sequence
 - **AND** each carries the author's asserted time as display text
 
 #### Scenario: The time is not a number a comparison would accept
