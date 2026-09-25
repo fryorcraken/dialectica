@@ -180,13 +180,12 @@ pub struct FeedRow {
     /// `generated-names`, under *"A name is never unique, never an identifier,
     /// and never numbered"*, which binds whatever renders this row.
     ///
-    /// **No capability owns this reply's shape, and that is stated rather than
-    /// hidden.** `generated-names` forbids a name on a feed row; nothing
-    /// specifies what a feed row *does* carry. So the change from an address's
-    /// hex to the key's was made with the code as its only authority, because
-    /// leaving it would have the row carry an identifier whose derivation no
-    /// longer exists. Writing that requirement is a capability's worth of work
-    /// and is deliberately not bundled into a deletion.
+    /// **`feed-read` contracts this field**, under *A row names its author by the
+    /// signing public key, and by nothing derived from it*: the key that signed
+    /// the root, from the verified op, never an address or any other hash of it.
+    /// The move from an address's hex to the key's in #80 was made before that
+    /// requirement existed. The `feed-row-contract` change wrote it down, so the
+    /// field cannot be re-pointed again without a spec change saying so.
     pub author: String,
     /// The post body, sanitised for display.
     pub body: Sanitised,
@@ -582,6 +581,51 @@ mod tests {
     }
 
     #[test]
+    fn a_parentless_post_carrying_a_thread_field_is_a_row_of_its_own() {
+        // `feed-read`: whether a post is a row is decided by whether it names a
+        // parent, and a parentless post is a row even when its `thread` field
+        // names another thread. The thread it names does not count it, because
+        // `thread-read` never trusts that field.
+        //
+        // The proposal asks the owner whether such a post should be refused as
+        // malformed instead. Until that is answered, this is what the spec says.
+        let genuine = a_thread(2, "the genuine root");
+        let key = a_key(3);
+        let claimant = Op {
+            stoa: a_stoa(),
+            author: key.public_key(),
+            clock: None,
+            kind: OpKind::Post {
+                thread: Some(genuine.op.id()),
+                parent: None,
+                body: "names a thread, no parent".to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&key);
+        assert!(claimant.verify(), "the claimant must be authentic");
+        let log = a_log(vec![genuine.clone(), claimant.clone()]);
+
+        let rows = all_of(&log, false);
+        let threads: Vec<&str> = rows.iter().map(|r| r.thread.as_str()).collect();
+        assert_eq!(rows.len(), 2, "both parentless posts are rows: {threads:?}");
+        assert!(
+            threads.contains(&claimant.op.id().to_hex().as_str()),
+            "the claimant is a row of its own: {threads:?}"
+        );
+        let genuine_row = rows
+            .iter()
+            .find(|r| r.thread == genuine.op.id().to_hex())
+            .expect("the genuine root is a row");
+        assert_eq!(
+            genuine_row.reply_count(),
+            0,
+            "a `thread` field alone places a post under no thread"
+        );
+        assert_eq!(genuine_row.latest_reply(), None);
+    }
+
+    #[test]
     fn a_forged_post_never_reaches_the_feed() {
         // THE read-path check. The log stores forgeries deliberately (§3.3), so
         // a feed that did not verify would render a post attributed to whoever
@@ -850,23 +894,21 @@ mod tests {
         // `names.rs` — `the_lists_carry_no_exclusion_of_any_kind` pins words as
         // PRESENT for exactly this reason.
         //
-        // **The JSON side is pinned separately and more strongly**, by
-        // `the_feed_json_is_pinned_to_the_exact_shape_a_view_is_written_against`
-        // in `wire.rs`, which asserts the row's whole key set — so a restored
-        // `displayName` fails there on an ADDED key. This half pins the struct,
-        // which is where such a field would be added first.
+        // **The JSON side is pinned separately and more strongly**, by the
+        // exact-key-set tests in `wire.rs` —
+        // `the_feed_reply_is_the_ecosystems_pagination_shape`,
+        // `a_feed_row_with_a_reply_carries_latest_reply_and_nothing_else_new` and
+        // `a_feed_row_revised_hidden_with_an_attachment_and_a_voted_reply_carries_no_further_key`
+        // — so a restored `displayName` fails there on an ADDED key. This half
+        // pins the struct, which is where such a field would be added first.
         //
         // Both are wanted: a field on `FeedRow` that never reaches the wire
         // would not violate the requirement but is the step before one that
         // does, and a reader of `feed.rs` should not have to open `wire.rs` to
         // learn that the absence is deliberate.
-        // NO SPEC: that the `author` field carries the signing key's hex is this
-        // change's choice. No capability owns the feed reply's shape —
-        // `generated-names` forbids a name on a feed row and nothing states what
-        // a row does carry — so the move from an author address's hex to the
-        // key's was made with the code as its only authority, because leaving it
-        // would have the row name an author in a form whose derivation no longer
-        // exists. `design.md` §5 carries it.
+        //
+        // `feed-read`'s *A row names its author by the signing public key, and
+        // by nothing derived from it* requires the value asserted below.
         let head = a_thread(4, "mine");
         let log = a_log(vec![head]);
         let rows = all_of(&log, false);
