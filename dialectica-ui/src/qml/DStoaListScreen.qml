@@ -916,7 +916,7 @@ ScreenFrame {
     // on a failed creation is still rendered below.
     Loader {
         objectName: "createBlockLoader"
-        active: true
+        active: screen.machineKey.state === "held"
         Layout.fillWidth: true
 
         sourceComponent: ColumnLayout {
