@@ -84,7 +84,11 @@ another file.
     findings are appended as boxes to that reviewer's existing findings file.
     If the `closer` has already deleted `findings/`, which it does before
     archiving, the file is written afresh at the same name in the change's
-    folder as it now stands, the archived one.
+    folder as it now stands, the archived one, **and only when the reviewer
+    has a finding**. A clean re-review adds no box either way: before the
+    archive it appends nothing, and after it it writes no file, saying so in
+    its report. A fresh file with no box would fail the `closer`'s
+    "every file non-zero" check over a review that found nothing.
 - **#171: the stage-block template gets a place to record a re-review round.**
   The template lives in `spec-writer.md`, which `README.md` names as its only
   copy. It gains one row, placed after the review rows and before the
@@ -114,7 +118,23 @@ another file.
   - **After the `closer` has archived the change, the stage block is in
     `openspec/changes/archive/<date>-<name>/tasks.md`.** The runner's untick
     for a red-CI fix goes there, and a re-dispatched `closer`'s Step 1 reads
-    the block there.
+    the block there. In detail:
+    - **The runner reads the block there, and `findings/` beside it**, for as
+      long as the PR is open. `RUNNER.md`'s "What you read" table and
+      "Rebuild the state" say so, since both otherwise name only
+      `openspec/changes/<name>/`, and a piece archived but not merged no
+      longer appears in `openspec list`.
+    - **The `closer`'s Step 1 finds the folder by exact path**, not by
+      assuming it:
+      `git ls-files -- "openspec/changes/<name>/tasks.md" "openspec/changes/archive/????-??-??-<name>/tasks.md"`.
+      Exactly one path back: it runs both gates in that folder. More than one,
+      or none, it stops and reports what came back: it cannot tell which block
+      is the piece's. More than one most likely means something recreated the
+      pre-archive folder after the archive, such as an untick or findings file
+      written at the old path. None means the name is wrong.
+    - **An archived folder with no `findings/` passes the findings gate.** The
+      earlier `closer` deleted it and no re-reviewer has had a finding since.
+      A `grep` error for the missing directory is not a failed gate.
 - **#170: forbid `--admin` in `closer.md`.** The file names `gh pr merge
   --admin`, and any change to branch protection, as things the `closer` never
   does, including when the owner has granted merge-on-green. Branch protection
@@ -198,8 +218,9 @@ None. This change edits agent instructions and no system behaviour, so
 ## Impact
 
 - `.claude/agents/RUNNER.md`: the hand-back sequence (#169, #171), "The
-  `closer`, and what comes back" (#171), and the re-review row in "What a
-  runner does" (#171).
+  `closer`, and what comes back" (#171), the re-review row in "What a
+  runner does" (#171), and where "What you read" and "Rebuild the state" find
+  the stage block once the change is archived (#171).
 - `.claude/agents/spec-writer.md`: the stage-block template (#171).
 - `.claude/agents/closer.md`: Step 6 and "What you never do" (#170); Step 1,
   for where a re-dispatched `closer` reads the stage block after the archive
