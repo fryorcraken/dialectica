@@ -57,9 +57,10 @@ It writes down current behaviour. It does not redesign the row.
 ### The two markers the issue names, and where each is resolved
 
 The issue cites `feed.rs:657` and `wire.rs:1819`. Both line numbers are from the
-tree at #88.
+tree at #88. This section names each site by the function that holds it rather than
+by a line number, because line numbers drift as the change's own edits land.
 
-- **`feed.rs:657`** is now `feed.rs:863`, in
+- **`feed.rs:657`** is the marker in the `feed.rs` test
   `a_row_carries_the_public_key_and_no_derived_display_name`. The requirement *A row
   names its author by the signing public key, and by nothing derived from it*
   resolves it.
@@ -67,8 +68,8 @@ tree at #88.
   `thread_page_json`: it was the marker on the **thread item's** `author` spelling,
   and it pointed at #88's `design.md` §4 rather than §5. The issue calls it "the test
   that pins the shape" of the feed row, and that description does not hold. The choice
-  it marks is still present twice, at `wire.rs:2151` (`thread_page_json`) and at
-  `wire.rs:8549` (`the_wire_reports_the_author_as_one_key_and_no_name`). The new
+  it marks is present twice in `wire.rs`: in `thread_page_json`, on the item's
+  `author` key, and in the test `the_wire_reports_the_author_as_one_key_and_no_name`. The new
   `thread-read` requirement *An item's author key travels under the JSON key
   `author`* resolves both.
 
@@ -109,11 +110,12 @@ read across two specs.
 - **Stale prose in code the `dev-writer` should correct in the same change:**
   - `FeedRow::author`'s doc comment (`feed.rs`, "No capability owns this reply's
     shape…").
-  - The `NO SPEC:` marker at `feed.rs:863`.
+  - The `NO SPEC:` marker in `a_row_carries_the_public_key_and_no_derived_display_name`.
   - That test's reference to a test named
     `the_feed_json_is_pinned_to_the_exact_shape_a_view_is_written_against`, which
     does not exist in `wire.rs`.
-  - The two thread-read markers at `wire.rs:2151` and `wire.rs:8549`.
+  - The two thread-read markers, in `thread_page_json` and in
+    `the_wire_reports_the_author_as_one_key_and_no_name`.
   - The `thread-read` markers on `position`, `assertedTime` and the moderation
     spellings are **not** resolved here and stay.
 - **Coordination:**

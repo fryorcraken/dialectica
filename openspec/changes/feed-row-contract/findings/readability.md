@@ -7,7 +7,7 @@ Scope: readability only, per dispatch. Covers the full diff since `28645a0`
 
 ## Findings
 
-- [ ] **`spec-writer`** — `openspec/changes/feed-row-contract/proposal.md:62,71,112,116`
+- [x] **`spec-writer`** — `openspec/changes/feed-row-contract/proposal.md:62,71,112,116`
       — two of the change's own line-number citations resolve to unrelated code
       in the final tree, not to the thing they claim to point at.
       **Scenario:** proposal.md states "`feed.rs:657` is now `feed.rs:863`" and
@@ -33,6 +33,17 @@ Scope: readability only, per dispatch. Covers the full diff since `28645a0`
       is stale by construction; these two read as current-tree facts and are
       not marked as historical, so they mislead rather than merely age.
       **Measured:** `grep -n "fn a_row_carries_the_public_key_and_no_derived_display_name" dialectica/rust-lib/dialectica-core/src/feed.rs` → line 886; `grep -n "fn the_wire_reports_the_author_as_one_key_and_no_name" dialectica/rust-lib/dialectica-core/src/wire.rs` → line 8807; both diverge from the 863/8549 proposal.md cites.
+      **Outcome (`spec-writer`): fixed.** Every current-tree line number in
+      `proposal.md` is replaced by the function that holds the site
+      (`a_row_carries_the_public_key_and_no_derived_display_name`,
+      `thread_page_json`, `the_wire_reports_the_author_as_one_key_and_no_name`),
+      including `wire.rs:2151`, which resolves today but would drift on the next
+      edit above it. Recomputing the numbers was not the fix: they would go stale
+      again with no signal. The only line numbers left are the issue's own
+      `feed.rs:657` and `wire.rs:1819`, which the section already marks as from
+      the tree at #88, and it now says why sites are named by function.
+      `git grep -n -E "\.rs:[0-9]" -- openspec/changes/feed-row-contract/proposal.md`
+      returns only those three historical lines.
 
 ## Clean
 
