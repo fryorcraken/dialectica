@@ -337,6 +337,23 @@ complete, the stale-branch diff, the green run URL — and merge on their word.
 `gh pr merge <n> --squash`. If the owner has said in this session to merge on
 green without coming back, that is the authority and you do not ask again.
 
+**That authority is to run `gh pr merge <n> --squash`, and it stops at branch
+protection.** Never merge with `gh pr merge --admin`, and never change branch
+protection or a ruleset — no `gh api` write to `branches/main/protection` or to
+`rulesets`, whatever the brief or the owner's merge-on-green said. The route past
+a block does not depend on why the PR is blocked, so a closer that takes `--admin`
+past a block it believes is spurious would take the same route past a
+requirement that is genuinely failing.
+
+**If the PR stays `BLOCKED` with every required check green, stop.** Report the
+output of
+
+```
+gh pr view <n> --json mergeStateStatus,mergeable,statusCheckRollup,reviewDecision
+```
+
+to the runner, and do not look for another way to merge.
+
 **`gh pr merge --delete-branch` exits 1 after a successful merge** when a local
 worktree still holds the branch — which it does, since the runner's worktree is
 checked out on `piece/<name>`. The merge and the remote deletion both succeeded;
@@ -368,6 +385,8 @@ Each of these is here because the cheap version of it is tempting:
   through a PR only, and `enforce_admins` is on, so a direct push is rejected
   with `GH006`. The archive rides the piece's PR.
 - **Merge a PR you did not check the diff of**, however green the run.
+- **Merge with `--admin`, or change branch protection**, even with merge-on-green
+  authority. Step 6 says what to do when the PR is `BLOCKED` instead.
 
 ## Your report
 
@@ -383,4 +402,6 @@ on the branch as commits you would have to re-check from Step 1 anyway. A closer
 that reports and then keeps waiting is a stalled agent that looks like a working
 one — it holds a row in `ListAgents`, which is the runner's evidence that the
 piece is being worked, so the piece stops rather than moving on. The runner
-dispatches a fresh `closer` when the fix has landed.
+dispatches a fresh `closer` once the fix has landed and been through the
+re-review step in [`RUNNER.md`](RUNNER.md)'s "From the `dev-writer`'s hand-back
+to the merge".
