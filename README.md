@@ -65,7 +65,17 @@ but never reads the `dependencies` array in `metadata.json`, so without it
 `delivery_module` is missing at runtime and the plugin fails to load — visible
 only as a launcher tile that does nothing.
 
-Unit tests run outside Nix:
+Unit tests run outside Nix, once the Logos Rust SDK is staged beside the crate.
+The crate depends on it by a path that only a Nix build fills in, so without
+this step `cargo test` fails with `failed to load manifest for dependency
+logos-rust-sdk`. Run it from the repository root, and again whenever the
+builder pin in `dialectica/flake.lock` moves:
+
+```
+nix build --inputs-from ./dialectica logos-module-builder#rust-sdk-src -o dialectica/logos-rust-sdk-src
+```
+
+Then:
 
 ```
 cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p dialectica -p dialectica-core
