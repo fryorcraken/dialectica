@@ -104,3 +104,106 @@ Reviewed both diffs per `proposal.md`, "Review scope":
 - `nix build ./dialectica#lgx`: succeeded (no output, exit 0).
 
 No mutations were made to the tree during this review (read-only + test/build runs).
+
+## Re-review of 439c192..HEAD
+
+Read the owner's decision comment on #162 again for this pass; first line:
+"**Decision (owner, 2026-09-25): peg the Lamport counter to wall-clock time,
+as SDS does (LIP-109, `logos-lips/docs/anoncomms/raw/sds.md`, lines 148-155
+and 184-192).**"
+
+Reviewed `git diff 439c192 HEAD`: the new `revision.rs` doc paragraph on
+`current_version`, the new Decision 11 in `design.md`, the four reworded
+archived-design citations (`arrival.rs`, `op.rs` ×2, `transport.rs`), the
+split paragraph in the `op-ordering` spec delta, and the corrected
+`authoring.rs` test comment.
+
+The split `op-ordering` paragraph (`specs/op-ordering/spec.md:71,73`) is the
+direct fix for this file's own finding above — confirmed the fix does what
+the outcome note says: each sentence now stands alone, unbolded, word for
+word unchanged, and reads cleanly with no leftover debris. Not re-opened.
+
+The four reworded citations use "the archived `time-pegged-clock` change's
+`design.md`" — checked this phrasing against every other archived-design
+citation in `dialectica-core` (`git grep -n -F "change's \`design.md\`" --
+dialectica/rust-lib`, 20 hits): it matches the established idiom exactly
+(`transport.rs` on `op-ordering`, `op.rs` on `stoa-metadata-op`, `wire.rs` on
+`get-stoa`, etc.). The shortening from the full archived path is a genuine
+readability improvement and consistent with the rest of the crate. Two of
+the four rewords, though, left a line unwrapped:
+
+- [ ] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/op.rs:567`
+      — the `asserted_ms` field's doc comment reword left one line far longer
+      than every other line in the same paragraph, instead of rewrapping the
+      whole sentence to the file's normal column width.
+      **Scenario:** line 567 reads `/// change's \`design.md\`, Decision 11,
+      works that cost through. What holds is that this field is` — about 100
+      columns including the `///` prefix, where lines 562–566 and 568 around
+      it (and the equivalent citation at `arrival.rs:198-199`,
+      `transport.rs:476-477`, and `op.rs:66-67`) all sit at roughly 80–85. The
+      trailing line 568 is left holding only "never the reason." — two words
+      — which is the visible tell that the paragraph was edited in place
+      without rewrapping it. A reader scanning the file for its usual rhythm
+      hits one conspicuously long line and one conspicuously short one right
+      after it.
+      **Severity:** cosmetic — no content or meaning is affected, `cargo fmt`
+      does not reach doc comment prose, and this is purely a wrapping
+      regression introduced by this diff's own edit (confirmed via `git diff
+      439c192 HEAD` above; the other three sibling edits in the same diff
+      wrapped correctly). Fix: rewrap lines 565–568 to the paragraph's normal
+      width.
+
+- [ ] **`spec-writer`** — `openspec/changes/time-pegged-clock-post-review/design.md:406`
+      — the same class of defect, in the new sentences the Risks bullet added
+      about the citation-name convention: one line runs far longer than the
+      bullet's other lines instead of being rewrapped.
+      **Scenario:** line 406 reads `` `git ls-files openspec/changes/archive`.
+      A sweep of every comment in `dialectica/rust-lib` naming one of the six
+      `` — noticeably longer than lines 393–405 and 407–409 of the same
+      bullet, which all wrap at roughly 78–82 columns (2-space bullet
+      indent). This is the one paragraph in the bullet where new sentences
+      ("The four cite it as...", "The dated folder is found from the name
+      with...") were spliced into the existing "A sweep of every comment..."
+      sentence without rewrapping the joint.
+      **Severity:** cosmetic, same class as the `op.rs:567` finding above —
+      no content lost, purely a line-wrap inconsistency introduced by this
+      diff (confirmed via `git diff 439c192 HEAD`). Fix: rewrap lines 401–407
+      to the bullet's normal width.
+
+Read `revision.rs`'s new section, "What signing an hour ahead buys here, and
+whom", against its explicit model, `moderation.rs`'s existing "Last" is by
+the counter..." paragraph (`moderation.rs:431-441`, unchanged by this diff).
+The "Before the window, ... permanently" construction that reads ambiguous in
+isolation (is "the window" the one-hour receive-window mechanism, or the
+interval before real time catches up to the ahead-signed counter?) is not a
+new defect: it is copied idiom-for-idiom from `moderation.rs:437-438`, which
+predates this piece and already carries the same phrasing. Since the
+adaptation is deliberate (`design.md`'s Decision 11 says it makes "the
+archived sentence... true of both sites") and matches its model exactly, this
+is not raised as a new finding — flagging it here would be re-litigating
+wording this codebase already settled on elsewhere.
+
+Read the new `design.md` Decision 11 prose ("Two corrections to the archived
+design") in full for grammar and clarity: both corrections are stated
+plainly, each names the commit that introduced the gap, quotes the archived
+sentence being corrected, and states what closes it. No dangling reference,
+no unclear antecedent, nothing needing a rewrite beyond the two line-wrap
+findings above.
+
+Read the `authoring.rs` test-comment correction in full: it replaces the
+overstated "would still pass every other test in this file" claim with a
+precise "fails here directly, on the `asserted_ms` assertion below" plus a
+new "Measured, not assumed" paragraph distinguishing which of the two tests
+the mutation trips and why the sibling test's failure isn't a second guard
+for the same property. Clear, well-scoped, no defect.
+
+### Build/test results (re-review)
+
+- `cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p dialectica -p dialectica-core`: 1180 passed (dialectica-core) + 30 passed (end_to_end), 0 failed.
+- `nix build ./dialectica#lgx`: succeeded (the one line printed, `error
+  (ignored): SQLite database '...eval-cache...' is busy`, is a benign nix
+  eval-cache contention message, not a build failure; `git status --short`
+  was clean afterward and no `result` build error surfaced).
+
+No mutations were made to the tree during this re-review pass (read-only +
+test/build runs).
