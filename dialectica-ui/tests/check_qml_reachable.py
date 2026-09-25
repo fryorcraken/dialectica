@@ -50,7 +50,8 @@ WHAT IT CANNOT SEE, stated because a gate that measured nothing is worse than
 none: it proves a type is INSTANTIATED somewhere the root reaches, not that a
 user can actually get to it at runtime. A screen mounted behind a condition that
 is never true is reachable by this gate and dead to a user. That half is a real
-launch, and `piece/e2e-sitometres` owns it. This is the static half.
+launch — the sitometres specs in `tests/ui/`, run by `ui-tests.yml`, which
+cover only the screens their specs drive. This is the static half.
 """
 
 import pathlib

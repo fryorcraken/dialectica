@@ -6,9 +6,17 @@ name: CI
 #
 #   * radicle is a C++-universal module with a Rust FFI staticlib; dialectica
 #     is a `codegen.rust` cdylib core with NO C++ at all.
-#   * radicle's UI has a C++ backend and a dozen QML components; dialectica's
-#     UI is ONE QML file with four buttons and no backend.
-#   * radicle has a sitometres e2e suite; dialectica has no e2e harness yet.
+#   * radicle's UI has a C++ backend; dialectica's has none — every screen
+#     forwards to core. Deliberately not restated as counts of types or specs:
+#     `ls dialectica-ui/src/qml/` and `ls dialectica-ui/tests/tst_*.qml` answer
+#     that, and cannot go stale. (This line used to say the UI was "ONE QML
+#     file with four buttons", which stopped being true without anyone
+#     noticing.)
+#   * both repos have a sitometres e2e suite. Dialectica's lives in its own
+#     workflow, ui-tests.yml, for the same reason radicle's does: it builds a
+#     Basecamp, so it costs minutes where these jobs cost seconds. The cheap
+#     half — validating every spec against the harness schema, and testing the
+#     run adjudicator — is the `ui-specs` job in THIS file.
 #
 # What did NOT get ported, and why, is written at each job rather than left to
 # be inferred from an absence. See also the "Not yet a job" section at the
@@ -1106,6 +1114,44 @@ jobs:
           fi
           echo "ok: all $on_disk QML spec file(s) ran"
 
+  # ─── ui-specs ────────────────────────────────────────────────────────────
+  # The cheap half of the end-to-end suite. The expensive half is
+  # `.github/workflows/ui-tests.yml`, which builds a Basecamp and runs the
+  # specs; parsing a spec needs none of that, so a malformed one is caught on
+  # every PR in seconds rather than after a Basecamp build.
+  #
+  # The file list is GLOBBED from the directory by the script, never kept
+  # beside it, and the script fails on an empty directory — a validator that
+  # reports success over zero files is a gate that cannot fail.
+  ui-specs:
+    name: UI spec validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      # The same pinned version ui-tests.yml runs the specs with. A different
+      # version here would validate against a schema the run does not enforce.
+      - name: Specs parse against the sitometres schema
+        run: |
+          set -eu
+          npm install --no-save --silent @paradoxcomputer/sitometres@0.1.2 yaml
+          node dialectica-ui/tests/validate-ui-specs.mjs
+
+      # The adjudicator decides whether an end-to-end run proved anything, so
+      # its own guards are checked here, on every PR, rather than only being
+      # exercised by the expensive workflow. It is a checked-in script rather
+      # than a heredoc for exactly this reason: both of the QML gates' defects
+      # shipped through review because a heredoc cannot be run without pushing.
+      - name: The run adjudicator catches what it claims to
+        run: |
+          set -eu
+          python3 -c 'import yaml' 2>/dev/null || pip install --quiet pyyaml
+          python3 dialectica-ui/tests/tst_adjudicate_ui_run.py
+
   # ─── rust ────────────────────────────────────────────────────────────────
   # The core module's whole decision surface. `src/core.rs` holds every
   # decision and `src/lib.rs` holds none, and that shape is FORCED rather than
@@ -1397,8 +1443,11 @@ jobs:
       # rev for TWO flags: `setup --inspector` and `build --print-output`.
       #
       #   * `--inspector` builds a Basecamp with the QML inspector compiled in,
-      #     which sitometres needs to drive the UI. Dialectica has no e2e
-      #     harness, so no job here calls `setup` at all.
+      #     which sitometres needs to drive the UI. Dialectica's e2e harness,
+      #     ui-tests.yml, DOES call `setup` — but without the flag, because
+      #     `[repos.basecamp].attr = "app"` is the dev build, which carries the
+      #     inspector already. (This clause used to say dialectica had no e2e
+      #     harness; the conclusion survived that premise expiring.)
       #   * `build --print-output` really is absent from v0.3.1 (checked in the
       #     scaffold checkout: at that tag only `install` carries the flag).
       #     And the reason that does not matter is NOT that the env var
@@ -1654,29 +1703,31 @@ jobs:
 # next person adds the one that has become affordable rather than rediscovering
 # why it was absent.
 #
-# * NO END-TO-END UI WORKFLOW. Radicle carries a whole second file
-#   (ui-tests.yml, 692 lines) running sitometres specs against a Basecamp built
-#   with the QML inspector. Dialectica has no specs to run: the view is four
-#   buttons, and PHASE0-FINDINGS §6 records that its end-to-end behaviour was
-#   established by a person clicking them. A matrixed e2e workflow over zero
-#   specs would be a job that cannot fail.
+# * THE END-TO-END UI WORKFLOW IS NO LONGER ABSENT — it is ui-tests.yml. This
+#   entry used to argue there was nothing to run ("the view is four buttons")
+#   and set its own re-entry condition: it arrives with the specs. The specs
+#   arrived and nothing noticed for as long as nobody re-read this comment,
+#   which is the reusable part: a deferral with a re-entry condition still
+#   needs someone to check the condition.
 #
-#   When that changes, the expensive lessons to inherit from radicle's file
-#   are: build `#lgx-portable` and pass `--variant linux-amd64` (the dev
-#   default is wrong for the bundle and the failure is a silent non-load);
-#   derive the Basecamp rev from `[repos.basecamp].pin` rather than repeating
-#   it, or the store cache silently keys on the wrong rev and every run is slow
-#   with nothing erroring; and `--strict`, because sitometres exits 0 on
-#   INCONCLUSIVE by design.
+#   Its cheap half is the `ui-specs` job above. The lessons inherited from
+#   radicle's file changed on the way in, and ui-tests.yml carries the
+#   current ones: the DEV `#app` with `.#lgx` modules and no `--variant` (the
+#   portable bundle this entry used to recommend is what forced radicle's
+#   variant override), the Basecamp rev read from `[repos.basecamp].pin`, and
+#   `--strict` plus a check of the machine report, because sitometres exits 0
+#   on INCONCLUSIVE by design.
 #
-# * NOTHING INSTALLS OR LAUNCHES. `lgs basecamp install` would need `setup`
-#   first (it builds basecamp and lgpm and seeds the profiles), and `launch` is
-#   a GUI app. If an install step is ever added, it MUST run
-#   `lgs basecamp modules` BEFORE `install`: install builds the `[modules.*]`
-#   project sources and never reads the `dependencies` array in metadata.json,
-#   so without it delivery_module is absent at runtime and the core fails to
-#   load — while the build stays green and `modules --show` lists the
-#   dependency it never installed (PHASE0-FINDINGS §4).
+# * THIS FILE INSTALLS NOTHING AND LAUNCHES NOTHING; ui-tests.yml installs.
+#   It runs `lgs basecamp setup` and then `install`, which builds every
+#   `[modules.*]` entry — the hand-authored `role = "dependency"` entry for
+#   delivery_module included — and installs it into the seeded profiles. That
+#   entry is what makes `install` enough: install never reads the
+#   `dependencies` array in metadata.json, so WITHOUT the entry delivery_module
+#   is absent at runtime and the core fails to load while the build stays
+#   green (PHASE0-FINDINGS §4). The lint job asserts the entry's role for that
+#   reason. Nothing uses `launch`: sitometres launches the installed Basecamp
+#   itself, because it must own the process to read its log live.
 #
 # * NOTHING RUNS `lgs basecamp doctor`. PLAN.md §11 says to run it before
 #   believing a green build, and it is right — but PHASE0-FINDINGS §8 records
