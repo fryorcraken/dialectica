@@ -6,7 +6,7 @@
 - [x] design + code — `dev-writer` — design.md D1–D6; `seeded-join.yaml`
       green in CI and seen red for its reason (Implementation 3–4); the
       committed reference checked against the core by `seeded_reference.rs`
-- [ ] tests — `tester`
+- [x] tests — `tester`
 - [ ] review: correctness — `code-reviewer`
 - [ ] review: security — `code-reviewer`
 - [ ] review: readability — `code-reviewer`

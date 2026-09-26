@@ -867,6 +867,36 @@ TestCase {
         view.destroy()
     }
 
+    // The other half of `joinCancelButton`'s job, and one no test pressed by
+    // name before this piece: leaving the preview BEFORE acting on it, which
+    // `view-navigation`'s "The return is still available..." requirement
+    // states for both halves in one sentence ("both before acting and after a
+    // join has succeeded"). The button's wiring (`onClicked: screen.cancelled()`)
+    // is a one-line binding, but nothing until now drove it through an actual
+    // click rather than calling `cancelled()` directly, so a click landing on
+    // the wrong control, or `joinCancelButton` losing its `onClicked` in a
+    // future edit, had nothing here to catch it.
+    function test_declining_the_join_preview_leaves_the_list_with_no_join_call() {
+        var target = spec.stoaA
+        var bridge = spec.bridgeFor({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_stoa": '{"error":"no Stoa is held at this address"}',
+            "join_stoa": '{"error":"must not be called"}'
+        })
+        var view = mainComponent.createObject(null, {})
+
+        view.preview(target, "beef")
+        compare(view.screenShown, "join")
+        compare(view.joinState, "previewing")
+
+        spec.visibleNamed(view, "joinCancelButton")[0].clicked()
+
+        compare(view.screenShown, "list")
+        compare(callsTo(bridge, "join_stoa"), 0,
+                "declining the preview must not join")
+        view.destroy()
+    }
+
     // ---- exactly one screen, from one source -----------------------------
 
     function test_exactly_one_screen_is_shown_in_every_reachable_state() {
