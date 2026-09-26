@@ -1010,3 +1010,80 @@ Stylistic only, no box:
   the first round. A reader could wonder whether re-review rounds also hold the
   piece still. They do not need to, because the tail check catches anything
   that lands during one. If the rule over-applies, the only cost is waiting.
+
+## Re-review round 15 `e5dcce4..bad7c88`
+
+- [x] **re-review round 15 `e5dcce4..bad7c88`: no findings** — read
+      `git diff e5dcce4 bad7c88` over `RUNNER.md`, `proposal.md` and
+      `design.md`, `RUNNER.md:683-800` at HEAD cold, and applied the chain and
+      tail bullets by hand to `tasks.md:24-40`; clean
+
+Dimension: **readability only**, narrowed as briefed.
+
+**1. Round-14 box: closed.** I read `RUNNER.md:723-751` without opening
+`proposal.md` and applied it to this tree. `<review>` from the derivation is
+`c222c37b`, and round 1's `c222c37` is a prefix of it. From there the chain
+reaches `9dc235c` (1), `34fd428` (2), `dc1390a` (3 and 4, both starting at
+`34fd428`), `d1c8726` (5), `6d43cda` (6), `d1d2165` (7 and 8), `c4b1df5` (9),
+`842758b` (10), `dd4fe18` (11), `1380d50` (12), `c3bda2b` (13), `e5dcce4` (14)
+and `bad7c88` (15). No line is unreached. Running
+`git diff --no-renames --name-only bad7c88 HEAD` lists only `tasks.md`, and
+its diff is one added line, the round 15 line. So the tail passes from
+`bad7c88`. My round-14 scenario was two lines both starting at `A`, one ending
+at `C` and one at `D`. The sentence "however many lines start there … extends
+the chain like any other" now covers it in so many words. The text no longer
+describes a range that cannot be named. Every step I took is stated in
+`RUNNER.md`.
+
+**2. Stated once: clean.** The chain rule appears once, at `RUNNER.md:723-751`.
+The "What you read" row (`:82`) points to it with the new wording ("an end the
+chain reaches … run from that end"). The untick paragraph (`:786-790`) says
+only "add the next round's line" and does not restate how a line starts. The
+brief's
+`git grep -n -F -e "passed over" -e "pass over" -e "followed or" -e "chain's end" -- .claude/agents/`
+prints nothing. A wider search of `.claude/agents/` for `followed`, `gap` and
+`missing range` finds only unrelated uses (numbering gaps at `:696` and `:720`,
+spec gaps in other role files).
+
+**3. Stale terms in the change folder: loose, none boxed.** None of them
+changes what a reader would do under the new rule:
+- `proposal.md:1242`, `:1349` and `:1576` use "the chain's end", and
+  `proposal.md:411-412` defines it as "an end the chain reaches". So they read
+  correctly. `:1243`'s "let it pass over a commit" is ordinary English, not the
+  removed term. In a document that used "passed over" as a term until last
+  round, "let it skip a commit" would avoid the echo. `:1576`'s "a gap repaired
+  by a line of its own" summarises the old repair. It is still true of the new
+  one (a line starting at the failed end), just vaguer.
+- `design.md:1006`, `:1009`, `:1916` and `:1944` use "the chain's end" without
+  the definition `proposal.md` gives. It would matter only if a writer copied
+  the singular back into `RUNNER.md`. The next review would see that, and the
+  term does nothing to a runner reading `RUNNER.md`. A parenthesis on first
+  use, as `proposal.md:412` has, would close it.
+- `design.md:1016`, "or leave the chain broken", is old-model phrasing. Under
+  reaching, the chain is not broken. Instead the tail check fails from every
+  end before the unlisted commit. The consequence is the same (a line is
+  written), so no action changes. Suggested wording: "or the tail check would
+  fail from every end before it".
+
+Stylistic or low, no box:
+- `RUNNER.md:734-740`: the bullet heading makes the condition existential ("an
+  end the chain reaches"). But "If they fail … Write the next line" follows a
+  single run and does not say to try another reached end first. Take a runner
+  holding `A..C` (one lane) and `A..D` (the rest) who runs from `C`. It would
+  write a round `C..HEAD` and re-read `C..D`. `design.md` records that cost as
+  accepted ("changes only how much is read again"), and on a linear row like
+  this one the natural pick is the newest end. Adding "it holds if they pass
+  from any end the chain reaches" before "If they fail" would save the
+  re-read.
+- `RUNNER.md:730-731` says "needs no repair", and `:742-744` then offers a
+  line that routes the chain through such a line. Both are right, since the
+  second is optional. "Needs no repair of its own; the tail check decides"
+  would remove the apparent tension.
+- `RUNNER.md:742-743`: "starts later" needs the runner to judge ancestry
+  between two SHAs. The rest of the check avoids that on purpose. A wrong
+  judgement is safe, because the tail check still decides. The word just asks
+  for a judgement the text elsewhere says the runner cannot make cheaply.
+- Round 14's stylistic notes on `:729-730` ("more characters than a line may
+  carry"), `:748` ("A commit they list", when the diffs list paths) and
+  `:753-756` (the numbers justification sitting after the chain bullet) still
+  stand as written.
