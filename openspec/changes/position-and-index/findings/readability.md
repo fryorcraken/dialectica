@@ -322,3 +322,44 @@ precise enough to verify independently, which is what this review did. The
 `tasks.md` "Re-review of the D6 commit" section is itself clear and correctly
 scoped — it names the one finding it answers and says why only two dimensions
 re-run.
+
+## Re-review of the D6 wording fix
+
+Read issue #166 (`gh issue view 166 --json body,comments`) including the
+owner's decision comment of 2026-09-25
+(https://github.com/fryorcraken/dialectica/issues/166#issuecomment-5832956024),
+which settles item 2 of that issue (a malformed `index` is refused with an
+error naming `index`; leaving the message unspecified is ruled out). That
+decision is not what commit `fd9aa9d` touches — it answers the readability
+finding above about D6's "Two things narrow the gap" miscount — so nothing
+here bears on the decision beyond confirming I read it as instructed.
+
+Checked commit `fd9aa9dfff71c217d4de4181e2b0c670f0dfc993` in isolation
+(`git show fd9aa9d`) against the finding it claims to answer:
+
+- **Does the fix answer the finding?** Yes. `design.md:265` now reads "One
+  thing narrows the gap without closing it," matching the singular subject in
+  `findings/design-review.md:191` ("The shared parser narrows that gap") that
+  the finding cited as the more accurate wording. The change is exactly the
+  one word the finding proposed as the minimal fix ("Two things" → "One
+  thing"), with the verb correctly re-agreed ("narrow" → "narrows").
+- **Does the paragraph now read accurately to someone who never saw the
+  findings files?** Yes, checked by reading `design.md:263-273` cold. The
+  topic sentence claims one mechanism; the sentence that follows it names that
+  mechanism (both fields sharing `parse_index`, D1) and what it catches; the
+  two sentences after that are stated as limits of the same mechanism (a newly
+  refused kind that no `index` test lists; a spec-only `feed-read` change that
+  reaches nothing) rather than framed as a second narrowing. Nothing in the
+  paragraph now promises a count it doesn't deliver.
+- **Did the commit change anything beyond what the finding needed?** No.
+  `git diff fd9aa9d~1 fd9aa9d --stat` shows two files: the one-word edit in
+  `design.md` and the box-tick plus outcome note in `findings/readability.md`
+  (the file the finding itself lives in, which the dev-writer is expected to
+  annotate). No other file, wording, or test changed.
+- **Stale references to the old wording?** `git grep -F "Two things narrow"`
+  finds two remaining hits, both inside this same finding's own text (the
+  finding's problem statement quoting the original wording, and the outcome
+  note's own citation of that grep) — expected, since a finding quotes what it
+  found. `design.md` itself carries no more occurrences.
+
+No new findings. Nothing to tick.
