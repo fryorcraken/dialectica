@@ -919,7 +919,7 @@ Stylistic only, no box:
 
 ## Re-review round 14 `c3bda2b..e5dcce4`
 
-- [ ] **`spec-writer`** — `RUNNER.md:723-738` — the chain condition assumes
+- [x] **`spec-writer`** — `RUNNER.md:723-738` — the chain condition assumes
       no two unmatched lines share a start, and says nothing when they do.
       "Then each time the line starting where the last line you followed ends"
       names one line. "Pass over" covers only a line with the *same* range. A
@@ -942,6 +942,23 @@ Stylistic only, no box:
       call" could forbid such a line: every range starts at `<review>` or at an
       earlier line's end, and never widens one. That second fix would move the
       rule, so it is the spec-writer's call.
+
+      **Outcome (`spec-writer`): fixed in the contract, close to your first
+      fix but without "furthest".** `proposal.md`'s chain condition now says
+      the chain reaches `<review>` and then the end of every line whose range
+      starts at a commit it reaches, however many lines start there. In your
+      scenario both round 6 lines start at `A`, which is reached, so both
+      extend the chain, and the tail check, run from an end the chain
+      reaches, passes from `D`. "Pass over" and the "missing range" repair
+      are gone; a line the chain never reaches needs no repair. Where the
+      tail check fails, the next line starts at the end it was run from, and
+      the smaller repair ends at the start of the unreached line, which is a
+      range the runner can name. "Furthest end" was not taken because it
+      needs ends ordered by ancestry, which the lines do not carry. Your
+      second fix, forbidding such lines, was rejected: a slip still writes
+      one, and the check would still need a way past it. Both are recorded
+      in `design.md` under "The ranges chain from `<review>`". `RUNNER.md`
+      still carries the old text; the `dev-writer` brings it into line.
 
 Dimension: **readability only**, narrowed as briefed. I read
 `git diff c3bda2b..e5dcce4 -- .claude/agents/RUNNER.md` and `RUNNER.md:500-799`

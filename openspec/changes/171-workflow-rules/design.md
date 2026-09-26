@@ -799,14 +799,13 @@ four things hold:
   briefed from it runs again, with forms copied from the repaired line. The
   runner never lowers a number: a lowered line can land on a number another
   line carried, and its forms check then passes on that line's records;
-- **the ranges chain from `<review>`**: from the derived `<review>`, the
-  runner follows the line whose range starts there, then each time the line
-  starting where the last one followed ends, passing over a line that repeats
-  a followed range (a re-run); every line must be followed or passed over, and
-  the nothing-landed check's two `git diff` commands, run from the chain's
-  end, must show tracking only, round lines under the re-review row allowed.
-  Two SHAs match when one is a prefix of the other. The reasoning is under
-  "The ranges chain from `<review>`", below.
+- **the ranges chain from `<review>`**: the chain reaches the derived
+  `<review>` and then the end of every line whose range starts at a commit it
+  reaches, however many start there; the nothing-landed check's two `git diff`
+  commands, run from an end the chain reaches, must show tracking only, round
+  lines under the re-review row allowed. A line the chain never reaches needs
+  no repair. Two SHAs match when one is a prefix of the other. The reasoning
+  is under "The ranges chain from `<review>`", below.
 
 `RUNNER.md` carries the rule once, in the tick paragraph, ahead of the forms
 check, with its row in "What you read". It is taken because a runner that
@@ -935,16 +934,70 @@ the listing the number check already prints, since each round line's fixed
 start carries its range, and adds no command beyond the two the nothing-landed
 check names. `RUNNER.md` gives it as the fourth bullet of the number check.
 
-- **It is a path, not a comparison of each line with the one above.** A
+- **It follows ranges, not a comparison of each line with the one above.** A
   repair line goes below the last line, as every line does ("Lines are only
   ever added below the last"), so it can close a gap above it only if the
-  check follows ranges rather than positions. With the path, a repair line
-  anywhere in the row is followed where its range starts; line by line, it
-  would itself fail the check it was written to satisfy.
-- **A break is repaired by a new line for the missing range, never by editing
-  a line's range**, for the reason a number is never lowered: records were
-  written under the old range, and a forms check copied from an edited line
-  would search for forms no reviewer was given.
+  check follows ranges rather than positions. A repair line anywhere in the
+  row extends the chain where its range starts; line by line, it would itself
+  fail the check it was written to satisfy.
+- **A break is repaired by a new line, never by editing a line's range**, for
+  the reason a number is never lowered: records were written under the old
+  range, and a forms check copied from an edited line would search for forms
+  no reviewer was given.
+- **Adopted: the chain is what it reaches, and the tail check is its only
+  condition** (`findings/correctness.md` and `findings/readability.md`,
+  re-review round 14 `c3bda2b..e5dcce4`, box of each). The first form of this
+  condition followed one line at each step, passed over a line repeating a
+  followed range, and required every line to be followed or passed over. A
+  line sharing a start with a followed line but ending elsewhere, which is
+  what a line templated from the one before with only its end changed looks
+  like, was neither, and so was one starting inside a followed range. No new
+  line could make it either, and the only other move was editing its range,
+  which the rule forbids, so a piece holding one could never tick. Reaching
+  closes that by construction, and it removes mechanism rather than adding
+  it: there is no "passed over", no "neither", and no gap diagnosis that
+  names a range that does not exist.
+  - **Why the tail check alone is sound.** Every end the chain reaches has a
+    run of lines from `<review>` to it, each starting where the one before
+    ends, and consecutive ranges cover everything between their outer ends:
+    a commit reachable from that end but not from `<review>` is either
+    reachable from the first range's end, and so in the first range, or not,
+    and so in what the rest of the run spans; likewise a file differing
+    between `<review>` and that end differs across at least one range. That
+    holds for commit ranges and for the tree diffs the
+    tail commands take, and whether or not each end is an ancestor of the
+    next (`findings/security.md`, re-review round 14 `c3bda2b..e5dcce4`, the
+    chain-check note). The tail check then covers that end to HEAD. So a
+    pass from any reached end means every commit after `<review>` is in a
+    round's range or is tracking.
+  - **Why "every line is followed" is not needed.** A commit left out by a
+    gap lies after every end reached before the gap, so the tail check from
+    any of those ends lists its changes whenever they merge. The condition
+    caught nothing the tail check misses; what it added was the dead end.
+  - **Why any reached end, and either repair, will do.** The choice of end
+    and of repair changes only how much is read again, never whether a
+    commit is read: a round from a reached end to HEAD always makes the tail
+    pass from its own end, so the check always terminates. The smaller
+    repair for an off-by-one, a line ending at the start of a line the chain
+    does not reach, is the gap bullet's old one, now bounded: its end is that
+    line's start, which answers where a gap ends
+    (`findings/correctness.md`, re-review round 14, first low note).
+  - **What it costs.** A round 1 whose start is earlier than the derived
+    `<review>`, or a line starting inside another's range, is not reached,
+    and the commits after it are read again rather than accepted as covered.
+    Accepting "this line's range contains the missing one" would need an
+    ancestry check the runner cannot make without a new command, and a
+    covering claim nothing checks is how a gate fails open.
+  - **Rejected: forbidding such lines in "Record the call"**, every range
+    starting at `<review>` or an earlier line's end and never widening one
+    (`findings/readability.md`'s second fix). It is a rule a slip breaks, and
+    the check would still need a repair for the line the slip wrote, which is
+    the dead end this closes.
+  - **Rejected: a covering line counts as passed over, and the chain goes on
+    from the furthest end** (`findings/correctness.md`'s first fix).
+    "Furthest" needs ends ordered by ancestry, which the round lines do not
+    carry; reaching needs no order, since the tail check is run from an end
+    rather than from the last one.
 - **The tail check replaces "the last line ends at HEAD".** A round's own line
   and its reviewers' records land after the range it names, so the chain can
   never end at HEAD once a round is recorded. At `ab53b41c`, HEAD was six
@@ -968,8 +1021,8 @@ check names. `RUNNER.md` gives it as the fourth bullet of the number check.
 Measured on this tree, re-run at `5203661b`:
 
 - the derivation's last line is `f94f7b8d c222c37b`, and the thirteen round
-  lines at `tasks.md:25-37` chain from `c222c37` to `c3bda2b`: 1, 2, 3, 5, 6,
-  7, 9, 10, 11, 12, 13 followed, 4 and 8 passed over as repeats of 3 and 7;
+  lines at `tasks.md:25-37` chain from `c222c37` to `c3bda2b` through every
+  line, 4 and 8 reaching the same ends as 3 and 7, which they repeat;
 - `git diff --no-renames --name-only c3bda2b ab53b41c` lists the five findings
   files and `tasks.md`, and the `tasks.md` diff over the same range is the
   round 13 line added, so at `ab53b41c` the tail was tracking only; at
@@ -980,14 +1033,25 @@ Measured on this tree, re-run at `5203661b`:
   `--no-index`, with round 2 written ``round 2 `1f62afd4..34fd428` ``, where
   `1f62afd4` is the first commit in round 2's range that is not tracking: the
   listing prints the two rows and thirteen round lines between them, numbered
-  1 to 13 once each, so the first three conditions pass; the chain stops at
-  `9dc235c`, round 1's end, where no line starts, and rounds 2 to 13 are
-  neither followed nor passed over. `git diff --no-renames --name-only 9dc235c
-  1f62afd4` lists `proposal.md`, so the slip would have merged a `spec-writer`
+  1 to 13 once each, so the first three conditions pass; the chain reaches no
+  further than `9dc235c`, round 1's end, where no line starts, and
+  `git diff --no-renames --name-only 9dc235c 1f62afd4` lists `proposal.md`, so
+  the tail fails from there, and the slip would have merged a `spec-writer`
   commit no round read. With ``round 14 `9dc235c..1f62afd4` `` added below
   round 13, the listing still passes the first three conditions and the chain
-  runs 1, 14, 2, 3 and on to `c3bda2b`, with 4 and 8 passed over. The
-  `spec-writer` measured the same at `ab53b41c`.
+  runs 1, 14, 2, 3 and on to `c3bda2b`. The `spec-writer` measured the same at
+  `ab53b41c`;
+- checked by hand at `bb6ed4e2` by the `spec-writer`, fourteen round lines at
+  `tasks.md:25-38`: the chain reaches `e5dcce4` through rounds 1 to 14, and
+  `git diff --no-renames --name-only e5dcce4 bb6ed4e2` lists the five round-14
+  findings files and `tasks.md`, whose diff is the round 14 line added, so the
+  tail is tracking only. The two copies `findings/correctness.md`'s round-14
+  box measured come out as follows under reaching: round 14 written
+  ``round 14 `1380d50..e5dcce4` `` starts at `1380d50`, which round 12's end
+  reaches, so the chain reaches `e5dcce4` and the tail passes from there;
+  round 9 written ``round 9 `0fbebed..c4b1df5` `` leaves the chain at
+  `d1d2165`, the tail fails from there, and either ``round 15
+  `d1d2165..0fbebed` `` or a round from `d1d2165` to HEAD makes it pass.
 
 **Rejected:**
 
@@ -1044,9 +1108,10 @@ round 9 `d1d2165..c4b1df5`, the low note on a re-run given no line).
 
 Two more break a stated rule, and each lists clean. **A round line removed from
 under the row, when it repeated a range.** Any other removed line breaks the
-chain, the number check's fourth condition: the line after it starts where no
-followed line ends, or, if it was the last, its commits lie between the
-chain's end and HEAD, and the tail check lists them. A removed re-run line
+chain, the number check's fourth condition, unless another line the chain
+reaches spans its commits: the chain no longer reaches past the removed line's
+start, so its commits lie after every end reached before it, and the tail
+check lists them. A removed re-run line
 leaves no such trace: the forms check runs only for the lines there, and a gap
 in the numbers is harmless, so the earlier round's check covers the re-run's
 lanes and passes on the rejected run's record whenever that run left one. It

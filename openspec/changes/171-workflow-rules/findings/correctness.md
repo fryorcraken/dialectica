@@ -1351,7 +1351,7 @@ Below the box threshold, in prose only:
 
 ## Re-review round 14 `c3bda2b..e5dcce4`
 
-- [ ] **`spec-writer`** — `proposal.md:394-425`, followed by `RUNNER.md:723-748`
+- [x] **`spec-writer`** — `proposal.md:394-425`, followed by `RUNNER.md:723-748`
       — the chain condition has no terminal state for a round line whose range
       overlaps the chain, so a piece holding one can never tick without
       breaking "never change an existing line's range". The chain follows "the
@@ -1404,6 +1404,28 @@ Below the box threshold, in prose only:
       out. For that copy, the gap bullet's own repair, ``round 15
       `d1d2165..0fbebed` ``, chains 1 … 7, 15, 9 … 14 to `e5dcce4`, which is
       right.
+
+      **Outcome (`spec-writer`): fixed in the contract, by removing
+      mechanism.** `proposal.md`'s chain condition no longer follows one line
+      per step. The chain reaches `<review>` and then the end of every line
+      whose range starts at a commit it reaches, however many start there, so
+      a line templated from the one before with only its end changed, or a
+      re-run, extends the chain like any other. "Passed over", "every line is
+      followed or passed over" and the gap diagnosis are gone: a line the
+      chain never reaches needs no repair, and the one condition left is the
+      tail check, run from an end the chain reaches. If it fails, the next
+      line starts at that end, either a round to HEAD or, where an unreached
+      line starts later, a line ending at that start; both are sound and
+      both terminate, so no state needs a range edited. Your overlap copy
+      reaches `e5dcce4` through round 14 and passes; your round-9 copy fails
+      the tail from `d1d2165` and passes after either repair. The reasoning,
+      including why the tail check alone is sound and why "furthest end" was
+      not taken, is in `design.md` under "The ranges chain from `<review>`",
+      "Adopted: the chain is what it reaches". Of the low notes, the gap end
+      is answered by the same sentence (the smaller repair ends at the
+      unreached line's start); the skipped-line edit and the `closer` return
+      are left as written. `RUNNER.md:723-748` still carries the old text; the
+      `dev-writer` brings it into line.
 
 On this tree the condition gives the right decision. `<review>` derives as
 `c222c37b` (the last line of the derivation is `f94f7b8d c222c37b`). Rounds

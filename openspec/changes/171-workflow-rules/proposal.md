@@ -394,40 +394,43 @@ another file.
     - **The ranges chain from `<review>` to HEAD.** The listing already
       carries each round line's range in its fixed start, so this reads the
       same output and adds no command beyond the two the range rule names.
-      Starting at `<review>`, read from the repository as the range rule
-      says, follow the lines: first the one whose range starts at
-      `<review>`, then each time the one starting where the last line
-      followed ends. A line carrying the same range as a line already
-      followed is a lane run again, and is passed over. Two SHAs name the
-      same commit when one is a prefix of the other: the derivation prints
-      `c222c37b` where this piece's round 1 line has `c222c37`.
-      - **Every round line is followed or passed over.** A line that is
-        neither means some commits lie in no round's range: a gap between
-        rounds, or before the first. The ordinary slip is an off-by-one: a
-        round over the commits `f1` to `f2` written ``round 2 `f1..f2` ``,
-        which leaves `f1` out, since a two-dot range excludes its start. The
-        runner writes a line for the missing range, below the last with the
-        next number as every line is, sized as step 3 says or skipped with
-        its reason, and follows again. It never changes an existing line's
-        range, for the reason it never lowers a number: records were written
-        under it.
-      - **Nothing but tracking lies between the chain's end and HEAD.** The
-        end is never HEAD itself: the round line's own commit, and the
-        round's records, land after the range it names. The range rule's two
-        commands, run from the chain's end in place of `<review>`, must pass
-        as they do there, except that the `tasks.md` diff may also show
-        round lines under the re-review row, which are the runner's own
-        tracking. If they fail, a commit that needs review landed after the
-        last round: the runner records the next round, starting at the
-        chain's end. A commit that needs no review but that the first
-        command lists, such as a clean merge of `main` or the archive
-        commit, gets a line of its own marked skipped with that reason, and
-        the chain runs past it.
+      The chain reaches `<review>`, read from the repository as the range
+      rule says, and then the end of every line whose range starts at a
+      commit the chain reaches, however many lines start there: a lane run
+      again over the same range, or a line templated from the one before
+      with only its end changed, extends the chain like any other. Two SHAs
+      name the same commit when one is a prefix of the other: the
+      derivation prints `c222c37b` where this piece's round 1 line has
+      `c222c37`. A line whose start the chain never reaches is not part of
+      the chain and needs no repair. The runner never changes an existing
+      line's range, for the reason it never lowers a number: records were
+      written under it.
+      - **Nothing but tracking lies between an end the chain reaches and
+        HEAD.** The end is never HEAD itself: the round line's own commit,
+        and the round's records, land after the range it names. The range
+        rule's two commands, run from an end the chain reaches (what "the
+        chain's end" means wherever this text names it) in place of
+        `<review>`, must pass as they do there, except that the `tasks.md`
+        diff may also show round lines under the re-review row, which are
+        the runner's own tracking. If they fail, a commit that needs review
+        lies after that end, and the runner writes the next line, below the
+        last with the next number as every line is, starting at that end: a
+        round over the commits from there to its HEAD, sized as step 3 says,
+        or, where a line the chain does not reach starts later, a line
+        ending at that start, sized the same way or skipped with its reason,
+        so that the chain goes on through that line. The ordinary case for
+        the second is an off-by-one: a round over the commits `f1` to `f2`
+        written ``round <n> `f1..f2` ``, which leaves `f1` out, since a
+        two-dot range excludes its start. Either line is sound; the choice
+        changes only how much is read again. A commit that needs no review
+        but that the first command lists, such as a clean merge of `main`
+        or the archive commit, gets a line of its own marked skipped with
+        that reason, and the chain runs past it.
 
       Measured on this tree at `ab53b41c`: the derivation's last line is
       `f94f7b8d c222c37b`; the thirteen round lines at `tasks.md:25-37`
-      chain from `c222c37` to `c3bda2b`, rounds 4 and 8 passed over as
-      repeats of 3 and 7. HEAD is six commits past `c3bda2b`, the round 13
+      chain from `c222c37` to `c3bda2b`, rounds 4 and 8 reaching the same
+      ends as 3 and 7, which they repeat. HEAD is six commits past `c3bda2b`, the round 13
       record and the five re-reviewers' commits, so "the last line ends at
       HEAD" could never hold after a round is recorded;
       `git diff --no-renames --name-only c3bda2b HEAD` lists the five
@@ -436,15 +439,26 @@ another file.
       with round 2 written ``round 2 `1f62afd4..34fd428` ``, starting at the
       first commit that landed after round 1: the number check lists the
       two rows and thirteen round lines between them, numbered 1 to 13 once
-      each, so its first three conditions pass; the chain stops at
-      `9dc235c`, round 1's end, where no line starts, and rounds 2 to 13 are
-      neither followed nor passed over. `git diff --no-renames --name-only
-      9dc235c 1f62afd4` lists `proposal.md`, so that slip would have merged
+      each, so its first three conditions pass; the chain reaches no
+      further than `9dc235c`, round 1's end, where no line starts, and
+      `git diff --no-renames --name-only 9dc235c 1f62afd4` lists
+      `proposal.md`, so the tail fails from there, and that slip would have merged
       a `spec-writer` commit no round read (`findings/security.md`,
       re-review round 13 `1380d50..c3bda2b`, second box). With
       ``round 14 `9dc235c..1f62afd4` `` added below round 13, the number
       check still passes and the chain runs 1, 14, 2, 3 and on to
-      `c3bda2b`.
+      `c3bda2b`. Checked by hand at `bb6ed4e2`, fourteen lines at
+      `tasks.md:25-38`: the chain reaches `e5dcce4` through rounds 1 to
+      14, and `git diff --no-renames --name-only e5dcce4 bb6ed4e2` lists
+      the five round-14 findings files and `tasks.md`, whose diff is the
+      round 14 line added, so the tail is tracking only. With round 14
+      written ``round 14 `1380d50..e5dcce4` ``, templated from round 13
+      with only its end changed, the lines starting at `1380d50` reach both
+      `c3bda2b` and `e5dcce4`, and the tail from `e5dcce4` passes the same
+      way; the text this replaced left that line neither followed nor
+      passed over, with no repair that did not change a range
+      (`findings/correctness.md` and `findings/readability.md`, re-review
+      round 14 `c3bda2b..e5dcce4`, box of each).
 
     The number check is what sees a re-run's line templated from the
     previous one with its number left unchanged. The copy rule below carries that number into
@@ -562,9 +576,10 @@ another file.
       note on a re-run given no line). **Nor does either check see a round
       line removed from under the row, when it repeated a range.** Any
       other removed line breaks the chain, the number check's fourth
-      condition: the line after it starts where no followed line ends, or,
-      if it was the last, its commits lie between the chain's end and HEAD.
-      A removed re-run line leaves no such trace. The forms check runs only
+      condition, unless another line the chain reaches spans its commits:
+      the chain no longer reaches past the removed line's start, so its
+      commits lie after every end reached before it, and the tail check
+      lists them. A removed re-run line leaves no such trace. The forms check runs only
       for the lines there, and since a gap in the numbers is harmless, the
       number check's other conditions show nothing wrong, so the earlier
       round's check covers the re-run's lanes and passes on the rejected
