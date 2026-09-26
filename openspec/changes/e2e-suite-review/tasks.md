@@ -5,7 +5,7 @@
 - [ ] ~~spec — `spec-writer`~~ — no spec delta: a test-only piece, `skip_specs: true` in `.openspec.yaml` says why; `proposal.md` is written
 - [x] design + code — `dev-writer` — design.md written; CLAUDE.md line; both proofs red then green in CI (Implementation 2 and 3)
 - [ ] tests — `tester`
-- [ ] review: correctness — `code-reviewer`
+- [x] review: correctness — `code-reviewer` — findings/correctness.md: two findings for `dev-writer` (adjudicate-ui-run.sh's missing-report cause, and its uncaught no-steps crash), rest checked clean
 - [x] review: security — `code-reviewer` — findings/security.md: one low-severity finding (unquoted `${{ matrix.spec }}` in ui-tests.yml run: bodies); rest clean
 - [x] review: readability — `code-reviewer`
 - [x] review: architecture — `code-reviewer`
