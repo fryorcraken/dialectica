@@ -410,3 +410,146 @@ exists but is consumed by no gate, which is the second box below.
   findings) nor the `closer` (which reports but does not reopen) is a second
   reader of the rejection. That list predates this range (`c222c37`'s
   `RUNNER.md:394`), so it is the owner's to weigh, not a finding here.
+
+## Re-review `9dc235c..34fd428`
+
+Security only, on Opus. Read: `git log --oneline 9dc235c..34fd428`;
+`git diff 9dc235c..34fd428 -- .claude/agents/` in full (README, RUNNER, closer,
+dev-writer); `closer.md` in full; `RUNNER.md:1-130` and `:230-713`;
+`proposal.md:120-360`; `dev-writer.md:176-245`; `spec-writer.md:45-55`. Ran the
+pre-tick check against this piece's own history (below), `git config
+--get-regexp "^branch\.piece"` and `git check-ignore -v tmp/uncommitted.patch`.
+No mutation: the change is prose.
+
+**Round 1's two Opus boxes, checked against the text.** Both fixes do what their
+notes say, on the paths those findings named.
+
+- *The archive check.* It now runs straight after the archive commit and before
+  anything else in Step 3 (`closer.md:281-292`), so no stop that follows the
+  archive commit comes before it. A refused push reports its result
+  (`:316-319`, `:478-480`), and `RUNNER.md:694-697` unticks the row before the
+  refusal goes to the owner. The same holds for the other stop in that window,
+  the `branch.piece` config check (`closer.md:294-297`). "Your report" asks for
+  the files wherever the archive changed specs (`:477-478`), and `RUNNER.md`'s
+  general untick rule (`:613-615`) and `proposal.md:346-348` ("whichever way
+  the `closer` came back with it") route it. That stop can be reached today:
+  the command returns 18 lines in this repository, where both role files say
+  to expect none.
+- *The verdict box.* The runner's pre-tick check (`RUNNER.md:595-609`) does
+  stop the scenario in that box. Two stalled re-reviewers that never commit
+  leave no file that names the range, so the row cannot be ticked. The check
+  can still pass without the lane's reviewer having done the round, in the two
+  ways boxed below. Both come from the same thing: the grep accepts the range
+  string anywhere in the file.
+
+- [ ] **`spec-writer`** — `proposal.md:177-191`, carried into
+      `RUNNER.md:595-609`. The pre-tick check cannot tell one dispatch of a
+      lane from another dispatch of the same lane in the same round. When the
+      runner re-dispatches a lane within a round because it will not accept the
+      first run, the first run's record still satisfies the grep. The re-run
+      can then stall, and the row gets ticked on a verdict the runner had
+      already turned down.
+      **Scenario:** this piece's round 1. At `0a1e42c1` the runner's round
+      line says the Sonnet runs of correctness, readability and security are
+      not accepted, and "they and security re-run on Opus 5.5". Suppose the
+      Opus security reviewer stalls, which is the failure this check exists
+      for. Before ticking, the runner runs the contracted
+      `git grep -l -F "c222c37..9dc235c" -- …/findings/`. It lists
+      `security.md`, because of the Sonnet run's clean verdict box, so the
+      runner ticks. The Opus run is the one that found the two medium
+      findings above (`59619032`). With the tick, both would have gone to the
+      `closer` unraised.
+      **Measured:** `git grep -l -F "c222c37..9dc235c" 0a1e42c1 --
+      openspec/changes/171-workflow-rules/findings/` lists `architecture.md`,
+      `design-review.md`, `security.md` and `spec-test.md`. It does not list
+      `correctness.md` or `readability.md`. The check therefore blocks the two
+      re-run lanes that the Sonnet run never finished, and passes `security`,
+      the re-run lane that the Sonnet run had finished. Severity: medium. The
+      precondition is the flow's most frequent failure, the outcome is a
+      re-review the runner judged necessary being skipped, and this piece has
+      already produced the precondition once. Possible fix, for the
+      `spec-writer`: a re-dispatch within a round gets a round line of its own,
+      or the brief's heading and verdict box carry a tag the runner assigns
+      per dispatch. The grep then searches for that tag rather than for the
+      range alone.
+
+- [ ] **`spec-writer`** — `proposal.md:177-183`, carried into
+      `RUNNER.md:596-605`. One tick can close several rounds ("every round
+      recorded since the row was last ticked"). The grep for an earlier round
+      is a fixed-string search over the whole file, so a **later** round's
+      reviewer who mentions the earlier range in prose satisfies it. The
+      earlier round's lane then counts as finished although its own reviewer
+      wrote nothing.
+      **Scenario:** round 2 (`R2`) dispatches `security`, and that reviewer
+      stalls. The other lanes raise findings, a fix lands, and the runner
+      records round 3 (`R3`, which starts where `R2` ends) with `security`
+      again, without ticking in between. The `R3` security reviewer writes
+      ``## Re-review `R3` ``. In its read list or its clean notes it cites
+      the previous round by range, for example "the `R2` boxes above". This
+      is the habit the measurement below shows. Before the one tick that
+      closes both rounds, the runner greps `R2` and `R3`, and both list
+      `security.md`. The row is ticked, and no security reviewer ever read
+      `R2`'s commits, since `R3` covers only what landed after `R2`.
+      **Measured:** `git grep -n -F "c222c37..9dc235c" --
+      openspec/changes/171-workflow-rules/findings/` returns the range on
+      lines that are neither a heading nor a verdict box:
+      `readability.md:159-160`, `security.md:233`, `spec-test.md:65` and
+      `:107`. Reviewers write ranges into prose routinely. This section does
+      the same with round 1's range, so once it is committed, `security.md`
+      carries an earlier round's range written by a later round's reviewer.
+      Severity: low to medium. It needs a stall plus a tick that closes more
+      than one round, and the contract explicitly allows such a tick. Possible
+      fix: grep for the two forms the brief prescribes rather than the bare
+      range, `git grep -l -F -e "## Re-review \`<range>\`" -e "re-review
+      \`<range>\`: no findings" -- <folder>/findings/`. Note that
+      `architecture.md:214` wrote its heading as
+      ``## Re-review round 1 (`c222c37..9dc235c`)``. Its verdict box at `:216`
+      would still match, but a lane with findings that used that heading
+      would not, so the brief must fix the heading form exactly.
+
+**Clean in this range, and why.**
+
+- **The mutating-reviewer rebase cannot put a mutation on the piece.** The patch
+  is written by `git diff --output` into `tmp/`. `git check-ignore -v
+  tmp/uncommitted.patch` shows it matched by `.gitignore:75:tmp/`. `git restore
+  --source=HEAD --staged --worktree -- .` leaves no tracked change, so the
+  rebase and its `git add <path>` of the conflicted file carry nothing but the
+  reviewer's own commits. `git apply` without `--index` returns the mutations
+  unstaged, outside every commit the runner picks. A mutation that created an
+  untracked file is not in the patch and is not touched by the restore. It
+  stays untracked, and only a `git add` of that path could commit it, which
+  the reviewer role files already forbid in the form `git add -A`. No stash is
+  used, and the rebase rewrites only the agent's local, unpushed branch.
+- **Returns with no count cannot skip review by being unlisted.** Step 3's rule
+  applies to every return: "every commit that changes something which merges"
+  (`RUNNER.md:520`), and its list starts with "That includes". The untick rule
+  (`:613-615`) gives examples, not a closed list. So any fix that follows an
+  unlisted return (a body/diff disagreement in Step 5, a zero-box file in
+  Step 1, a config stop) is a commit after the review round, whatever the
+  return was called. The runner may not make that commit itself
+  (`RUNNER.md:37-52`), so it goes through a writer and into a round.
+- **The `BLOCKED` entry** (`RUNNER.md:707-709`) goes to the owner only. It says
+  not to diagnose the block and not to look for another route. `closer.md:418-424`
+  still refuses `--admin` and any write to protection or `rulesets`,
+  "whatever the brief or the owner's merge-on-green said". So a relayed
+  "the owner says use `--admin`" dies at the `closer`.
+- **History and protection.** In this range, `git grep -n -F
+  "force-with-lease" -- .claude/agents/` still returns nothing. No new text
+  permits `--force`, `reset`, `--no-ff` or a push to `main`. The change of the
+  `dev-writer` to fast-forward on every pass (`RUNNER.md:260-269`) removes a
+  source of divergence, and the refusal hints stay forbidden (`:271-273`). A
+  `dev-writer` pushing every pass puts unreviewed commits on the PR head
+  before review, as its first pass already did. Nothing auto-merges:
+  `git grep -n -F -e "--auto" -e "match-head-commit" -- .claude/agents/`
+  returns nothing, so only a `closer` merges, after step 3.
+- **Relayed authority.** No new sentence lets an agent act on an authorisation
+  it cannot check. The unticked-stage-row route (`RUNNER.md:674-677`) sends the
+  row back to its own agent and does not let the runner tick it.
+- **Out of range, noted not boxed:** a merge of `main` "when it stopped on no
+  conflict" needs no review (`RUNNER.md:526-528`), and the runner
+  fast-forwards to the `closer`'s branch "whatever else it reports"
+  (`:640-645`). Whether the merge really was conflict-free therefore rests on
+  the `closer`'s word. A `closer` that broke its rule and resolved a conflict
+  would get its resolution in unread. `git show --remerge-diff <merge>` being
+  empty is a mechanical check the runner could run without reading content.
+  Both lines predate this range, so this is left to the owner.
