@@ -999,6 +999,105 @@ Below medium, so in prose rather than boxed:
   way" carry the link, but a reader scanning the bullet heads for fail-open
   cases will not find `<review>` there. Low.
 
+## Re-review round 13 `1380d50..c3bda2b`
+
+- [ ] **`spec-writer`** — `proposal.md:242-246`, the premise under the
+      derived `<review>`. The derivation takes the parent of the oldest
+      commit that adds a findings file. It justifies that with "The reviewers'
+      commits are the first to land after the review round is dispatched:
+      the runner commits nothing between". That reason does not cover the
+      case. By the contract's own definition, `:848-852`, bringing an agent's
+      commits onto `piece/<name>` "adds no content of the runner's". So a
+      runner that commits nothing can still land commits between dispatch
+      and the first reviewer pick. Nothing in the proposal forbids that.
+      Every `dev-writer` pass is pushed and then fast-forwarded to
+      (`:707-714`), and step 3 lists a red-CI fix as post-review work
+      (`:105-108`).
+      **Scenario:** the runner dispatches the six reviewers from `X`. CI goes
+      red on the PR, and a fixer's commit `F` is fast-forwarded onto the
+      piece before any reviewer's commit is brought on. The reviewers read
+      `X`, not `F`. The oldest findings add is then a child of `F`, so the
+      derived `<review>` is `F`, and the range `F..HEAD` leaves `F` out. The
+      runner later loses its report, which is the case this round's change
+      was written for (`:264-268`, `:348-352`). The row's lines are gone, so
+      "the check decides". `git diff --no-renames --name-only F HEAD` lists
+      only findings and `tasks.md`, and the check passes. Round 1 is written
+      as skipped because nothing landed. The forms check skips that line,
+      and the number check lists one line. The row is ticked, and `F`
+      merges unreviewed. The `closer`-side second reader in "Out of scope"
+      (`:1261-1268`) derives the same `F` with the same command, so its
+      "range starts late" comparison cannot see this either. My round 12
+      prose note said the gap between these two values "runs in the safe
+      direction". That held while `<review>` was the dispatch HEAD. Now that
+      `<review>` is defined as the parent of the first findings commit, the
+      gap runs the other way: the derived value is later than the commit
+      the review round read.
+      **Measured:** on this tree the derivation gives `c222c37b`, as
+      `:269-272` states. This piece had no mid-round landing. The scenario
+      above is reasoned from the text, not run.
+      **Needed:** one of the following. Make the premise a rule: nothing is
+      brought onto the runner's HEAD between dispatching the review round
+      and bringing on its first reviewer commit, so a mid-round fix waits.
+      Or add the mid-round landing to "What it still cannot see" and to the
+      standing-test entry's runner-input paragraph (`:1221-1229`), beside a
+      runner that reads the first line. Severity: medium. It fails open in
+      the lost-report repair, which is the one use the derivation was added
+      for, and the second reader offered for it shares the blind spot.
+
+Read: `git diff 1380d50..c3bda2b -- openspec/changes/171-workflow-rules/proposal.md`
+in full. `proposal.md` at HEAD in full. `tasks.md`, `.openspec.yaml` and my
+round 12 section of this file. `git diff 1380d50..c3bda2b --stat`, stat only:
+`RUNNER.md` is the only `.claude/` path in the range, so no `settings.json`
+and no hooks. I read nothing under `.claude/agents/`, no `design.md` and no
+other findings file. I re-ran three of the contract's measurements, all of
+which print file names or commit subjects only. `git log --diff-filter=A
+--format="%h %p %s" -- openspec/changes/171-workflow-rules/findings/` lists
+three commits, the last `f94f7b8d c222c37b`, as `:269-272` says.
+`git diff --no-renames --name-only dd4fe18 1380d50 --
+openspec/changes/171-workflow-rules` lists eight paths, none of them
+`RUNNER.md`. `git diff dd4fe18 1380d50 --
+openspec/changes/171-workflow-rule/tasks.md` prints nothing.
+
+**Round 12's box is fixed.** The fail-open list says "Seven" and has seven
+bullets. The last four (`:1166-1192`) all belong to the nothing-landed check,
+as the lead-in says: the pathspec-narrowed first command, `--no-renames`
+dropped, the second command with a mistyped folder, and the derivation over
+the archived folder. The command list (`:1103-1108`) names the derivation and
+the `--no-renames` form. The mistyped derivation is filed as fail-closed
+(`:1129-1131`), which agrees with the range rule's empty-listing bullet
+(`:257-259`). Two of my three round 12 lows are also resolved. The second
+reader now runs both commands (`:511-512`, `:1263`), and `<review>` is no
+longer compared with a remembered value.
+
+**The rest of `a0ce38f` is consistent.** "Three rules" (`:221`) matches the
+three bullets under it: the range, the derivation, and the check. The repair
+bullet (`:348-352`) runs the check from the derived `<review>`. "What it
+still cannot see" (`:507-516`), the runner-input paragraph (`:1221-1229`),
+the `closer`-side follow-up (`:1257-1269`) and Impact (`:1457-1461`) all
+describe the same derivation and the same two commands.
+
+Below medium, so in prose rather than boxed:
+
+- **The reason for "the last line, not the first" (`:254-256`) is not what
+  happens.** It says "every later round's findings files are adds too", but
+  a re-reviewer appends to its existing file, which is a modification. On
+  this tree the two later adds are first-round lanes' files that landed late
+  (`c43c7a71` and `2259e7ff`). The rule itself is right. Low.
+- **After the archive, the check can never pass.** With `--no-renames`, the
+  archive commit lists every pre-archive file as deleted and every archived
+  file as added. So a lost line repaired after an archive always gets a
+  sized round, even when nothing unreviewed landed. That fails closed. Low.
+- **The fail-open lead-in (`:1141-1142`) says each of the four ends "over a
+  range holding unreviewed work".** For the seventh case the range misses
+  that work instead: it starts at the archive commit, after the work.
+  `:1224-1227` words the same case correctly. Low.
+- **"The range from it" in the `closer`-side follow-up (`:1263-1264`)** does
+  not say whether the range ends at the line's recorded end or at the
+  current HEAD. On a re-dispatched `closer`, a range running to the current
+  HEAD would take in the archive commit, and the previous note applies.
+  This is follow-up text, and "For the issue to settle" already names the
+  archive boundary. Low.
+
 ## Areas checked clean
 
 - **Issue coverage.** Every "Done when" / proposed-change bullet in #171,
