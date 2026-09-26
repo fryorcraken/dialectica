@@ -4,7 +4,7 @@
 
 - [x] spec — `spec-writer`
 - [x] design + code — `dev-writer`
-- [ ] tests — `tester`
+- [x] tests — `tester`
 - [ ] review: correctness — `code-reviewer`
 - [ ] review: security — `code-reviewer`
 - [ ] review: readability — `code-reviewer`
@@ -56,13 +56,19 @@ refactor that makes room for one.
   `a_position_is_the_same_whatever_page_size_the_read_used`. Verified red under
   the per-page index. It is green under the constant and the per-author value
   by design, as noted in the test and in `design.md` D2.
-- [ ] 3.4 *The item at a place carries that place's position in every read*
+- [x] 3.4 *The item at a place carries that place's position in every read*
   (the `tester`'s, per `design.md` D5): a wire test that hides a reply with
   another reply after it, then reads the thread across every page with
   `includeHidden` true and without. It asserts that the items at each place both
   reads fill carry the same position, and that the following reply carries a
   different position in each read. Verified red with the position set to the
-  item's op id in `thread_page_json`, and under a constant position.
+  item's op id in `thread_page_json`, and under a constant position. The fixture
+  gives each reply an explicit ascending `OpClock` counter rather than
+  `clock: None`, because `arrival::cmp_ops` ties `clock: None` ops on ascending
+  `OpId` — an unpredictable hash — and the scenario needs one specific reply
+  adjacent to the hidden one; the first version of this fixture (append order,
+  no explicit counters) failed against the correct implementation for exactly
+  that reason.
 
 ## 4. Gates
 

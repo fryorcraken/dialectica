@@ -9195,13 +9195,23 @@ mod tests {
     /// Read the thread page by page at `per_page`, returning `(id, author,
     /// position)` for every item in the order the pages returned them.
     ///
+    /// `include_hidden` is threaded through explicitly (test-only refactor, no
+    /// behaviour change) so that task 3.4's test can compare a read that includes
+    /// hidden content against one that does not, using this same walker.
+    ///
     /// Reads until `hasMore` is false, with a bound so that a handler reporting
     /// `hasMore: true` forever fails instead of hanging.
-    fn thread_positions_at(log: &MemoryOpLog, per_page: usize) -> Vec<(String, String, String)> {
+    fn thread_positions_at(
+        log: &MemoryOpLog,
+        per_page: usize,
+        include_hidden: bool,
+    ) -> Vec<(String, String, String)> {
         let mut seen = Vec::new();
         for page in 0..=16 {
             let out = read_thread(
-                &thread_request(&format!(r#""page":{page},"perPage":{per_page}"#)),
+                &thread_request(&format!(
+                    r#""page":{page},"perPage":{per_page},"includeHidden":{include_hidden}"#
+                )),
                 log,
                 &feed_genesis(),
                 A_TIME,
@@ -9233,7 +9243,7 @@ mod tests {
         // pages rather than inside one. The fixture's shared authors are what
         // make this discriminate between a position and a per-author value.
         let (log, len) = a_thread_log_with_shared_authors();
-        let items = thread_positions_at(&log, 2);
+        let items = thread_positions_at(&log, 2, false);
 
         // The read reached every item exactly once, or distinct positions over a
         // truncated or duplicated read would prove nothing.
@@ -9283,19 +9293,153 @@ mod tests {
                     .map(|(id, _, position)| (id, position))
                     .collect()
             };
-        let whole = by_id(thread_positions_at(&log, crate::thread::MAX_PER_PAGE));
+        let whole = by_id(thread_positions_at(&log, crate::thread::MAX_PER_PAGE, false));
         assert_eq!(
             whole.len(),
             len,
             "one page holds the whole thread: {whole:?}"
         );
         for per_page in [1, 2, 3] {
-            let paged = by_id(thread_positions_at(&log, per_page));
+            let paged = by_id(thread_positions_at(&log, per_page, false));
             assert_eq!(
                 paged, whole,
                 "at perPage {per_page}, an item's position differs from the one-page read"
             );
         }
+    }
+
+    /// A thread with one reply a moderator hides, and another reply that follows
+    /// it in the returned sequence: root, then `to_hide`, then `after`, then a
+    /// `filler` reply.
+    ///
+    /// **Each reply carries an explicit, ascending [`crate::op::OpClock`]
+    /// counter** rather than `clock: None`. `arrival::cmp_ops` places a
+    /// counter-carrying op strictly before every op with none, and orders two
+    /// counter-carrying ops by descending counter; `thread::read_thread` walks
+    /// that sequence in reverse, so ascending counters land in append order —
+    /// `to_hide` immediately before `after`. Two counter-LESS ops instead tie-break
+    /// on ascending `OpId`, an unpredictable hash, which is why
+    /// `a_thread_log_with_shared_authors` (whose ops all carry `clock: None`)
+    /// only asserts SET properties and never relies on one reply sitting next to
+    /// another — this fixture needs exactly that adjacency, so it cannot reuse
+    /// that shape.
+    ///
+    /// Returns the log and `after`'s op id: the item whose place moves once
+    /// `to_hide` is dropped from the sequence, which is what task 3.4's scenario
+    /// needs to see carry two different positions.
+    fn a_thread_log_with_a_hidden_reply_and_a_reply_after_it() -> (MemoryOpLog, crate::op::OpId) {
+        let root = a_thread_root();
+        let under_root_at = |seed: u8, body: &str, counter: u64| {
+            let key = feed_key(seed);
+            Op {
+                stoa: feed_genesis().address().unwrap(),
+                author: key.public_key(),
+                clock: Some(crate::op::OpClock {
+                    counter,
+                    asserted_ms: A_TIME,
+                }),
+                kind: OpKind::Post {
+                    thread: Some(root.op.id()),
+                    parent: Some(root.op.id()),
+                    body: body.to_string(),
+                    attachments: vec![],
+                },
+            }
+            .sign(&key)
+        };
+        let to_hide = under_root_at(3, "will be hidden", 1);
+        let after = under_root_at(4, "comes after the hidden one", 2);
+        let filler = under_root_at(5, "a filler reply", 3);
+
+        let moderator = feed_key(1);
+        let hide = Op {
+            stoa: feed_genesis().address().unwrap(),
+            author: moderator.public_key(),
+            clock: None,
+            kind: OpKind::Moderate {
+                target: to_hide.op.id(),
+                action: crate::op::ModerationAction::Hide,
+            },
+        }
+        .sign(&moderator);
+
+        let mut log = MemoryOpLog::new();
+        for op in [root, to_hide, after.clone(), filler, hide] {
+            log.append(op, Arrival::unordered()).unwrap();
+        }
+        (log, after.op.id())
+    }
+
+    #[test]
+    fn the_item_at_a_place_carries_that_places_position_in_every_read() {
+        // `thread-read`, *The item at a place carries that place's position in
+        // every read*. `design.md` D5: the position is determined by the place
+        // alone, not by anything about the item occupying it — so where two
+        // reads of one thread return different items at the same place, those
+        // two items carry the same position, and the SAME item carries a
+        // DIFFERENT position where the two reads' sequences disagree about its
+        // place.
+        //
+        // Neither `no_two_items_of_a_thread_share_a_position_even_when_they_share_an_author`
+        // nor `a_position_is_the_same_whatever_page_size_the_read_used` can see
+        // this: a position taken from the item itself (its op id, its author) is
+        // unique within one read and the same at every page size, so both pass
+        // it. This test is what `design.md` D2 points to for that gap.
+        let (log, after_id) = a_thread_log_with_a_hidden_reply_and_a_reply_after_it();
+        let after_id = after_id.to_hex();
+
+        let including = thread_positions_at(&log, 2, true);
+        let excluding = thread_positions_at(&log, 2, false);
+
+        // The fixture actually exercises more than one page on both reads, or a
+        // "read across every page" claim would be untested.
+        assert!(
+            including.len() > 2 && excluding.len() > 2,
+            "the fixture must force more than one page at perPage 2: \
+             including {including:?}, excluding {excluding:?}"
+        );
+        // And the two reads really do disagree about which item sits at a place
+        // past the hidden reply — the fixture's whole point.
+        assert_ne!(
+            including.len(),
+            excluding.len(),
+            "the hidden reply must be present in one read and absent from the \
+             other: including {including:?}, excluding {excluding:?}"
+        );
+
+        // Clause 1: at every place BOTH reads fill, the two items — which may be
+        // different items — carry the same position.
+        let shared_places = including.len().min(excluding.len());
+        for place in 0..shared_places {
+            let (id_in, _, pos_in) = &including[place];
+            let (id_ex, _, pos_ex) = &excluding[place];
+            assert_eq!(
+                pos_in, pos_ex,
+                "place {place}: including-read item {id_in} and excluding-read \
+                 item {id_ex} sit at the same place but carry different \
+                 positions ({pos_in:?} vs {pos_ex:?}): including {including:?}, \
+                 excluding {excluding:?}"
+            );
+        }
+
+        // Clause 2: the reply that follows the hidden reply in the including
+        // read carries a DIFFERENT position in each read, because the hidden
+        // reply's absence moves its place in the excluding read.
+        let position_of = |items: &[(String, String, String)], id: &str| -> String {
+            items
+                .iter()
+                .find(|(item_id, _, _)| item_id == id)
+                .unwrap_or_else(|| panic!("{id} must be read: {items:?}"))
+                .2
+                .clone()
+        };
+        let after_in = position_of(&including, &after_id);
+        let after_ex = position_of(&excluding, &after_id);
+        assert_ne!(
+            after_in, after_ex,
+            "the reply following the hidden one must carry different positions \
+             in the two reads: including {after_in:?}, excluding {after_ex:?}"
+        );
     }
 
     #[test]
