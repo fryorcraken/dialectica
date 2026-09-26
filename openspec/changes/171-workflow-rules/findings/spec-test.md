@@ -665,6 +665,107 @@ Below medium, so in prose rather than boxed:
   written" (`:182-183`) coincide only if lines are appended.** Nothing states
   that lines are appended, though "under it" implies it. Low.
 
+## Re-review round 10 `c4b1df5..842758b`
+
+- [ ] **`spec-writer`** — `proposal.md:215-218` (the number check) versus
+      `proposal.md:181` (the line rule). The number check needs a round line
+      to be indented by six spaces or more, but no rule requires that.
+      `:218` says "The six spaces are a round line's indent under the row" as
+      though it were a fact. The line rule says only "one indented line under
+      it". `git grep -n -i -F "indent"` over `proposal.md` returns `:181`,
+      `:218` and `:928`, and none of them fixes the width. The `-F` pattern
+      has no anchor, so it matches any line holding six spaces followed by
+      `round `. A line with fewer spaces, or with a tab, is not listed.
+      **Scenario:** the runner writes a line by hand rather than copying the
+      one above, types the number from memory, and uses a four-space indent:
+      `    round 2 <same range>` for a re-run of round 2's lane. The listing
+      leaves that line out, and the lines it does print carry 1, 2, …
+      consecutively, so the number check passes. The line numbers it prints
+      are contiguous, so nothing in the output shows that the line under
+      them was skipped. The forms check copies ``round 2 `<range>` `` from
+      the unlisted line. It passes on the rejected run's record, and the
+      runner ticks before the re-run has written anything. That is the case
+      the number check was added to catch (`:231-235`), and here it fails
+      open. The case the contract measures, a line templated from the one
+      above, keeps the indent and is caught. This is the other route to a
+      wrong number that the contract names: typed rather than copied.
+      **Measured:** in a scratch copy under `./tmp/` (since deleted), I made a
+      stage row followed by `      round 1 …`, `      round 2 …` and
+      `    round 2 …` (four spaces), and ran
+      `git grep --no-index -n -F "      round " -- tmp/<copy>`. It printed
+      lines 2 and 3, carrying 1 and 2, and did not print line 4. The
+      standing-test entry (`:928-930`) files only the opposite direction,
+      the command's indent being too long, which fails closed. It does not
+      say what happens when the data's indent is too short.
+      **Needed:** either fix the indent in the line rule (six spaces, as
+      every line in `tasks.md:25-34` has), or have the number check require
+      the runner to confirm that every line between the row and the next row
+      appears in the listing. Severity: medium. The check fails open without
+      any error, for a line format the contract does not forbid, and the fix
+      is one sentence.
+
+Read: `git diff c4b1df5..842758b -- openspec/changes/171-workflow-rules/proposal.md`
+in full; `proposal.md` at HEAD at `:150-380`, `:880-1030` and `:1185-1209`;
+`tasks.md`, `.openspec.yaml` and this file in full; and
+`git diff c4b1df5..842758b --stat`, stat only. The brief narrowed this round
+to internal consistency, so I did not re-read the issues. I read no file
+under `.claude/agents/`, no `design.md` and no other findings file.
+
+**The contract is consistent across the four sites `328c192` touched.** The
+number check comes first, at `:211-242`, and the forms check follows at
+`:243`. "What it still cannot see" (`:295-328`) splits the residuals into
+three cases:
+
+- a wrong line, which needs a second reader;
+- a wrong number, which the number check sees;
+- a re-run given no line of its own, which neither check sees.
+
+The standing-test entry (`:962-982`) makes the same split, and the
+`closer`-side follow-up (`:990-1015`) repeats it. Both send only "skips
+either check" and "forms copied from the wrong line" to the second reader.
+That is correct, because a `closer` running the same two checks would not
+see a re-run given no line either. Impact (`:1198-1201`) names both checks
+and their "What you read" rows.
+
+The number check's command is in the standing-test list (`:911-912`), in the
+same form as at `:215` and `:997`. Its fail-closed case is under "Fail
+closed" (`:928-930`), not under fail open. No fail-open case for the command
+itself is missing: a command mistyped with fewer spaces lists extra lines,
+and `:229-231` has the runner filter those by line number.
+
+**Measured:**
+
+- The command at `94840b52` printed `tasks.md:25-33`, carrying 1 to 9 once
+  each and nothing else, which matches `:236-237`.
+- At HEAD it prints `:25-34`, carrying 1 to 10.
+- With a seven-space indent it prints nothing, which matches `:928`.
+- With a one-space pattern, `git grep -c` reports 27 matching lines, so the
+  too-short direction over-lists rather than failing open.
+
+Below medium, so in prose rather than boxed:
+
+- **Renumbering cascades further than the reason given for it.** `:224-227`
+  re-runs every lane briefed from a line whose number changes, because "a
+  record written under a repeated number cannot be told from the earlier
+  run's". Suppose a repeat sits in the middle of the rounds, for example
+  1, 2, 2, 3, 4, which can happen because many rounds can pass under one
+  unticked row (this piece has had ten). Then "in the order they stand" renumbers every
+  later line. Their lanes re-run although their records were never
+  ambiguous. The same is true of a repeated number over a different range.
+  This fails closed and only costs time. Low.
+- **Out of order is required but its consequence is not stated.** `:219-220`
+  requires 1, 2, 3 in the order the lines stand, but `:220-221` says "does
+  not tick" only for a repeat or a skip. Lines numbered 1, 3, 2 contain
+  neither. Low.
+- **Two claims are broader than the command.** "Reads only the line's start"
+  (`:1019`) describes an unanchored substring match. "Whose word is
+  mistyped, lists nothing" (`:929`) is false for a truncated word:
+  `      roun` lists the same lines, which does no harm. Low.
+- **A wrapped round line could be listed as a round.** If a round line is
+  wrapped and a continuation line under the row starts with six spaces and
+  `round `, it is listed as a round line and reads as a bad number. This
+  fails closed. Low.
+
 ## Areas checked clean
 
 - **Issue coverage.** Every "Done when" / proposed-change bullet in #171,
