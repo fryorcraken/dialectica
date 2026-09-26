@@ -308,6 +308,76 @@ addition. The `README.md` passages are called corrections that follow from the
 fast-forward rule, both in the body and in Impact. Nothing in the range reaches
 outside the four issues' scope as stated fresh today.
 
+## Re-review round 3 `34fd428..dc1390a`
+
+- [x] **re-review round 3 `34fd428..dc1390a`: no findings** — read `proposal.md` in full, `tasks.md`, `.openspec.yaml`, the range's stat and issues #171, #170, #169 and #133; clean
+
+In full: `proposal.md` at HEAD. `git diff dc1390a HEAD
+--stat` shows only a one-line `tasks.md` change since `dc1390a`, so HEAD's
+`proposal.md` is `dc1390a`'s. The range diff itself was too long to display
+and went to a file outside this worktree, which was not read. Also read:
+`tasks.md` and `.openspec.yaml` in full; `git diff 34fd428..dc1390a --stat`
+(stat only); issues #171, #170, #169 and #133, read fresh with `gh issue
+view` (all open, no comments, bodies as in round 1). No file under
+`.claude/agents/`, no `design.md`, and no other findings file was read. The
+only findings content touched was `git grep -l` file-name output, used in the
+measurement below.
+
+All three round-2 boxes are fixed in the contract:
+
+- **`dev-writer.md`'s route sentences are contracted.** `proposal.md:536-563`
+  states the criterion once for every file the piece edits. It lists the four
+  sentences that change and the one that stays ("is not something the runner
+  can cherry-pick", with its reason), and records why the earlier reason was
+  dropped. The opening paragraph (`:9-12`), `:714-715`, Out of scope
+  (`:973-974`) and Impact (`:1092-1098`) all say "the stage-row clause and the
+  four route sentences", and nothing else in `dev-writer.md`. The stat shows
+  `dev-writer.md` changed in the range, and `tasks.md` 12.6 records the edit.
+- **The standing-test entry names the patch commands and the fail-open
+  cases.** `:825-829` lists `mkdir -p tmp`,
+  `git diff --binary --output=tmp/uncommitted.patch HEAD`, `git restore
+  --source=HEAD --staged --worktree -- .` and `git apply
+  tmp/uncommitted.patch`. `:858-867` puts the save with `HEAD` dropped among
+  the three fail-open cases. `:839-844` files the dropped `--binary` case
+  under fail closed, with the loss reported but not prevented.
+- **The pre-tick "fails closed" claim is corrected.** "Both fail closed" is
+  gone. `:838-839` keeps only the wrong-character case as fail closed.
+  `:850-857` classifies a pattern cut down to the bare range or to one SHA as
+  fail open, and cites the round-2 measurement. The check itself now searches
+  the round-numbered heading and verdict-box forms (`:203-241`).
+
+Internal consistency after the range. The heading and verdict-box forms at
+`:128-139` are fixed-string substrings of what the pre-tick command at `:209`
+searches, and the backtick after the number keeps `round 1` from matching
+`round 10`. The runner's line format (`:181-183`) supplies the
+``round <n> `<range>` `` both forms copy (`:142`), and `tasks.md:25-27`
+follows it. The re-dispatch line rule (`:186-195`) and the check's exception
+for a lane re-run over the same range (`:213-215`) agree. The transition for
+rounds 1 and 2 (`:242-250`) is consistent with `tasks.md:25`, which records
+round 1's re-runs inside one line because the per-re-run line rule came
+later. The claim at `:245-246` ("Measured at `6f17bebf`: both list all six
+findings files for each round") re-ran for round 2's un-numbered forms:
+`git grep -l -F -e '## Re-review `9dc235c..34fd428`' -e '**re-review
+`9dc235c..34fd428`: no findings**' 6f17bebf -- openspec/changes/171-workflow-rules/findings/`
+listed all six files. The count of four owner-authorised additions still
+matches the markings at `:94`, `:290`, `:318` and `:564`. The #132 overlap
+section's "six files under `.claude/agents/`" matches the Impact list. The
+range's stat touches only `RUNNER.md`, `closer.md` and `dev-writer.md` under
+`.claude/`: no `settings.json` and no hooks. Nothing in the range reaches
+outside the four issues' scope as stated today.
+
+Below medium, so in prose rather than boxed:
+
+- `tasks.md` 4.1's Verify ("`dev-writer.md` is untouched") and 10.6's
+  ("shows that clause and nothing else") are false after 12.6. Section 12
+  names only 10.3 and 10.4 as superseded. These are historical task records,
+  and 12.6 states the current edit, so nothing acts on the stale lines. Low.
+- The opening paragraph (`:9-12`) describes the `README.md` passages as
+  naming the cherry-pick as the route "for the `dev-writer`'s commits". The
+  body's criterion (`:537-540`) and `:513-516` say "the `dev-writer`'s
+  commits, or every agent's", and the `README.md` passages are about any
+  agent's commits. The body is the operative text. Low.
+
 ## Areas checked clean
 
 - **Issue coverage.** Every "Done when" / proposed-change bullet in #171,
