@@ -96,3 +96,85 @@ only in `design.md` or the issue thread.
       reasoning was only in `tasks.md` 3.4 and a test doc comment, and without
       the clocks the test's adjacency depends on hash order. No test covers this
       outcome, because it changes prose only.
+
+## Re-review of the findings-round commits
+
+Read the owner's decision comment
+(https://github.com/fryorcraken/dialectica/issues/166#issuecomment-5832956024,
+2026-09-25) again before this round. It settles item 2 and is unchanged by
+anything reviewed here.
+
+Scope: `git diff 19667a04...HEAD` — `b55d164`, `70bef05`, `9e550eb2`,
+`4e2b8c0f`, per `tasks.md`'s "Re-review of the findings-round commits" list.
+
+Checked and confirmed against the code and tests as they now stand:
+
+- **D1** (`9e550eb2`): both `parse_index` message arms still format `{field}`
+  (`wire.rs:1780-1831`). Dropping it from the wrong-type arm turns
+  `each_malformed_kind_of_index_is_refused_by_name` red on `"two"`/`[]`/`true`
+  and `malformed_pagination_fields_are_refused_by_name` red, matching the
+  text. `MALFORMED_INDEXES`'s first entry is `("negative", "-1")`, matching
+  the claim that dropping `{field}` from the non-negative-integer arm turns
+  the by-name test red "first on `-1`". `1889eaf` is a real commit and its
+  message matches D5's citation of it.
+- **D2/D5**: `no_two_items_of_a_thread_share_a_position_even_when_they_share_an_author`,
+  `a_position_is_the_same_whatever_page_size_the_read_used` and
+  `the_item_at_a_place_carries_that_places_position_in_every_read` all exist
+  with the behaviour D2/D5 describe. D5's new paragraph on explicit ascending
+  clocks matches `arrival::cmp_ops` exactly: `(None, None) => a.id.cmp(b.id)`
+  ties two clockless ops on op id, an unpredictable hash — so the claim that a
+  clockless version of the fixture "failed against the correct implementation"
+  is architecturally sound, not asserted.
+- **`70bef05`'s fixture refactor**: `a_thread_post_with_clock` is the sole
+  place a fixture post's `Op` literal is built; `a_thread_post` delegates to
+  it with `clock: None`; the hidden-reply fixture's `under_root_at` calls it
+  with an explicit `OpClock`. Test-only, as claimed — no production file
+  changed in this commit.
+- **`proposal.md`'s new note and the live `identity-onboarding` Purpose
+  edit** (`b55d164`): agree with each other and with `design.md`. The Purpose
+  paragraph names `feed-read`, states the parallel (same kinds of malformed
+  value, neither restates the other), and doesn't touch `feed-read`'s own
+  Purpose — confirmed unchanged by `git diff` against
+  `openspec/specs/feed-read/spec.md`. The precedent cited (`d8a56272`, #160,
+  "align two Purposes with 0.0.1") is a real commit doing the same kind of
+  direct Purpose edit. The `op-ordering`/`op-format` boundary-note pattern
+  cited as the shape for a one-directional pointer is real
+  (`openspec/specs/op-ordering/spec.md:7,99`).
+- `thread-read` delta's MUST→SHALL: both instances changed, matches
+  `readability.md`'s outcome, and `git grep -F` finds no other place quoting
+  the old wording.
+
+## One gap: the asymmetric-Purpose-edit reasoning is recorded where it will be deleted
+
+- [ ] **`dev-writer`** — `design.md` has no Decisions entry for "edit
+      `identity-onboarding`'s Purpose directly rather than through a delta,
+      and only in one direction." This is exactly the shape of the other five
+      entries — a real alternative existed (a fourth boundary name in the
+      existing list; a reverse pointer added to `feed-read`'s own Purpose),
+      each was ruled out with a reason, and it costs something (the boundary
+      is now asymmetric: `index`'s list of kinds points at `feed-read`, and
+      `feed-read` gets no pointer back). The reasoning for all of this exists,
+      but only in `findings/architecture.md`'s "Outcome (`spec-writer`):
+      fixed" text — and `.claude/agents/README.md` ("Two files carry the
+      state of a change") says plainly: **"The `closer` deletes the directory
+      before merge, once no box is empty."** `findings/` does not survive to
+      `openspec/changes/archive/`; `proposal.md`, `design.md` and `tasks.md`
+      do (`docs/OPENSPEC-ARCHIVE.md`). `proposal.md`'s note captures what was
+      chosen and the constraint (a delta can't touch a Purpose) but not why
+      the fix is one-directional — that reasoning ("Listing every other
+      capability that refuses a field by name would be an open-ended list
+      that goes stale when a sixth one appears") lives only in the file that
+      is about to be deleted. `b55d164`'s own commit message says as much:
+      "feed-read's Purpose gets no reverse pointer, and the finding's outcome
+      gives the reason" — naming the findings file as the reason's only home.
+      This is the "reasoning migrates" trap from the opposite direction: not
+      an issue closed without writing up its reasoning, but a review finding
+      answered with real reasoning that is scoped to die with the findings
+      file. Move the "why one-directional" sentence into `design.md` (a new
+      Decision, or a line added to D1 given both concern `parse_index`'s
+      shared-refusal boundary) or into `proposal.md`'s existing note, before
+      the `closer` deletes `findings/`.
+
+No other findings from this round. The rest of the re-reviewed material —
+D1/D2/D5's rewritten prose, the fixture refactor, the spec MUST→SHALL edit,
+and `proposal.md`'s note — matches the code, the tests, and each other.
