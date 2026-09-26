@@ -9,10 +9,12 @@
       `spec-writer`'s work here is `proposal.md` and this block.
 - [x] design + code — `dev-writer`
 - [ ] ~~tests — `tester`~~ — prose-only change to agent instructions. No CI
-      job, script or test reads `.claude/agents/`, so there is no executable
-      behaviour to assert. A test pinning the new wording would fail when the
-      wording changed, not when the rule was wrong. The check that can see
-      this change is the six reviewers reading the prose.
+      job, script or test reads `.claude/agents/`, and a test pinning the new
+      wording would fail when the wording changed, not when the rule was
+      wrong. The git commands the role files name are executable, and each
+      was measured when it was written; a standing test for them is a
+      follow-up (`proposal.md`, "Out of scope"). The check that can see this
+      change is the six reviewers reading the prose.
 - [x] review: correctness — `code-reviewer`
 - [x] review: security — `code-reviewer`
 - [x] review: readability — `code-reviewer`

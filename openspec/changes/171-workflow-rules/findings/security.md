@@ -244,7 +244,7 @@ never forces, and a writer's resolution reaches step 3. The archive half is
 closed on every path except the one in the first box below. Box 2's mechanism
 exists but is consumed by no gate, which is the second box below.
 
-- [ ] **`spec-writer`** — `proposal.md:304-317`, carried into `closer.md:290-315`
+- [x] **`spec-writer`** — `proposal.md:304-317`, carried into `closer.md:290-315`
       and `:229-237` — the archive commit's `openspec/specs/` check runs
       **after** Step 3's push, and a refused push ends the `closer`'s turn
       before it (`closer.md:297-298`). A re-dispatched `closer` then skips the
@@ -282,7 +282,26 @@ exists but is consumed by no gate, which is the second box below.
       known, measured failure, and the outcome is exactly the unreviewed
       live-contract change box 1 was taken to close.
 
-- [ ] **`spec-writer`** — `proposal.md:133-137` and `:203-207`, carried into
+      **Fixed** (`spec-writer`, this commit), with both of the finding's
+      suggestions. In `proposal.md`'s entry "An archive commit that changes
+      the live contract is reviewed", the `closer` now runs
+      `git diff --name-only HEAD^ HEAD -- openspec/specs/` straight after the
+      archive commit and **before** the push. Then it pushes. A refused push
+      stops it, and it reports the refusal **and the check's result**, and
+      `closer.md`'s "Your report" asks for both. An accepted push with files
+      listed stops before Step 4, as before. On the runner's side, the
+      refused-push return in "The `closer`, and what comes back" now says
+      that when the report lists files from the check, the runner first
+      unticks the re-review row and records a round for the archive commit,
+      as for a spec-changing archive. The round is then owed whatever the
+      owner does about the push, so a later re-dispatched `closer`, which
+      still skips the check by rule, meets an unticked row in Step 1.
+      Implementation is the `dev-writer`'s: `closer.md` Step 3 and "Your
+      report", `RUNNER.md`'s refused-push return, and `design.md`'s "The
+      archive check applies only to an archive commit the `closer` made in
+      the same run".
+
+- [x] **`spec-writer`** — `proposal.md:133-137` and `:203-207`, carried into
       `closer.md:88-91` and `RUNNER.md:560-567` — the re-review verdict box is
       produced but no gate reads it, so a re-review round's completion is
       still attested by nothing but the runner's tick. The proposal's stated
@@ -319,6 +338,35 @@ exists but is consumed by no gate, which is the second box below.
       error, but a stalled agent that looks finished is this flow's most
       frequent failure, and the verdict box was adopted precisely so this
       attestation would stop resting on the runner alone.
+
+      **Fixed** on the runner's side, with the `closer`-side check
+      **deferred** (`spec-writer`, this commit). The finding offers either
+      party. `proposal.md` now contracts the runner's check:
+      - **The re-review brief.** A re-reviewer with findings appends them
+        under a heading naming the range, such as
+        ``## Re-review `a1b2c3d..e4f5a6b` ``. A clean one appends the verdict
+        box, as before. Either way its file names the range.
+      - **The runner, before it ticks the re-review row.** For every
+        unskipped round recorded since the row was last ticked, it runs
+        `git grep -l -F "<range>" -- <change folder>/findings/` on its HEAD,
+        and the output must list the file of every lane the round
+        dispatched. A lane whose file is not listed has not finished,
+        however finished its agent looks. The runner continues that reviewer
+        or dispatches a fresh one, and does not tick.
+
+      In your scenario, two stalled re-reviewers write nothing, so the grep
+      does not list their files and the row cannot be ticked. The
+      proposal's overclaim is corrected too. It no longer says the box
+      answers "nothing checks against a reviewer's output". It says the box
+      and heading are what the runner checks, and that no other gate reads
+      them. The residual is a runner that skips the check. An independent
+      `closer`-side check is in "Out of scope" as a design question for the
+      owner. It is not a one-line addition, because the `closer` deletes
+      `findings/` when it archives, so after an archive it could match only
+      the rounds recorded since then, and it would need a fixed round-line
+      format to tell them apart. Implementation is the `dev-writer`'s:
+      `RUNNER.md` step 3's brief bullet and tick rule, and a `design.md`
+      Decisions entry.
 
 **Clean in this range, and why.**
 

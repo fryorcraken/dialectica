@@ -4,9 +4,10 @@ Closes #171, #170, #169 and #133. All four are `workflow` issues, and all four
 edit files under `.claude/agents/`. The owner authorised those edits for this
 piece, limited to what the four issues ask for and to four additions the owner
 authorised in session, each marked **owner-authorised** below. One sentence in
-`spec-writer.md` is corrected as well: it is measured false, and left alone it
-would contradict a rule this piece adds under an owner ruling. The entry for
-it says why that is inside the authorisation.
+`spec-writer.md`, and one clause in `dev-writer.md` stating the same premise,
+are corrected as well: both are measured false, and left alone either would
+contradict a rule this piece adds under an owner ruling. The entries for them
+say why that is inside the authorisation.
 
 ## Why
 
@@ -121,20 +122,23 @@ another file.
   - **A re-review brief carries four things:** the commit range to read (for
     `spec-test-reviewer`, only the spec and test files in it); that the
     reviewer's stage row is already ticked and stays ticked; that new
-    findings are appended as boxes to that reviewer's existing findings file;
-    and that **a re-review which finds nothing appends one ticked verdict box
-    instead**, naming the commit range it read and saying it found nothing,
-    for example:
+    findings are appended as boxes to that reviewer's existing findings file,
+    **under a heading naming the commit range**, such as
+    ``## Re-review `a1b2c3d..e4f5a6b` ``; and that **a re-review which finds
+    nothing appends one ticked verdict box instead**, naming the commit range
+    it read and saying it found nothing, for example:
 
     ```markdown
     - [x] **re-review `a1b2c3d..e4f5a6b`: no findings** — read <what>; clean
     ```
 
+    Either way, the reviewer's file names the range once the round is done.
     The reviewer writes and commits that box itself, as it would a finding.
     It is the reviewer's own record that the round ran: a re-reviewer's stage
     row is already ticked, so without the box a clean round leaves nothing
-    but the runner's line under the re-review row, which nothing checks
-    against a reviewer's output. The box is ticked, so the `closer`'s
+    but the runner's line under the re-review row. The box and the heading
+    are what the runner checks before it ticks the row (the check under the
+    re-review row below); no other gate reads them. The box is ticked, so the `closer`'s
     `grep -rn "^- \[ \]"` passes it, and it is a box, so `grep -rc "^- \["`
     counts it. Clean *areas* stay in prose, as the reviewer role files say;
     the verdict box is one line for the round, not a box per area.
@@ -168,6 +172,21 @@ another file.
     red-CI fix, a writer's conflict resolution, an archive commit that
     changed `openspec/specs/`, or any other commit step 3 lists. This is the
     only row in the stage block that ever goes from `[x]` back to `[ ]`.
+  - **Before it ticks the row, the runner checks that every lane of every
+    round the tick closes left its own record.** A round the tick closes is
+    one recorded since the row was last ticked and not marked skipped. For
+    each, run on the runner's HEAD once the round's commits are on it,
+    `git grep -l -F "<range>" -- <change folder>/findings/` must list the
+    findings file of every lane the round dispatched (the file names in
+    `RUNNER.md`'s "How many at once"). The command prints file names, not
+    findings, so it stays within what the runner reads. A lane whose file is
+    not listed has not finished the round, however finished its agent looks
+    or whatever its hand-back said: the runner continues that reviewer, or
+    dispatches a fresh one for the lane, and does not tick. The row is the
+    one stage row not ticked by the agent that did the work, so this check
+    is what makes its tick rest on the re-reviewers' own records rather than
+    on the runner's reading of whether an agent has finished; a stalled
+    agent looks exactly like a finished one.
   - **The runner commits the record lines, the tick and any untick itself**, in
     its own tree on `piece/<name>`, before the next dispatch forks from it.
     They are the only content the runner commits: see "What the runner
@@ -302,14 +321,26 @@ another file.
     read it with `git show --remerge-diff <sha>`, which shows only what the
     resolution changed from git's own merge.
   - **An archive commit that changes the live contract is reviewed** (the
-    owner chose to stop when specs change). After
-    Step 3's push, if `git diff --name-only HEAD^ HEAD -- openspec/specs/`
-    lists any file, the `closer` stops before Step 4: it reports the archive
-    commit and returns. An archive commit that changes nothing under
-    `openspec/specs/` carries on to Step 4. A change with `skip_specs: true`
-    is always that case, since archiving it only moves the change folder and
-    commits the `findings/` deletion. The runner sizes a round for the archive
-    commit like any other, then re-dispatches the `closer`. That `closer`
+    owner chose to stop when specs change). **Straight after Step 3's
+    archive commit, before its push**, the `closer` runs
+    `git diff --name-only HEAD^ HEAD -- openspec/specs/`. The check reads
+    the local commit and the push does not move HEAD, so running it first
+    measures the same thing; run after the push, it would never run when the
+    push is refused, since a refused push ends the turn, and a re-dispatched
+    `closer` skips it (below), so a spec-changing archive would reach `main`
+    with no round ever sized for it. Then the `closer` pushes:
+    - **Push refused:** it stops and reports the refusal **and the check's
+      result**, the files it listed or that it listed none. `closer.md`'s
+      "Your report" asks for both.
+    - **Push accepted, and the check listed any file:** it stops before
+      Step 4, reports the archive commit and the files, and returns.
+    - **Push accepted, and the check listed nothing:** it carries on.
+
+    A change with `skip_specs: true` always lists nothing, since archiving it
+    only moves the change folder and commits the `findings/` deletion. For an
+    archive that listed files, the runner sizes a round for the archive
+    commit like any other, whichever way the `closer` came back with it, then
+    re-dispatches the `closer`. That `closer`
     finds the change archived and does not archive again, by the Step 1 and
     Step 3 rules for a re-dispatch above. **The check applies only to an
     archive commit the `closer` made in the same run.** A re-dispatched
@@ -331,8 +362,13 @@ another file.
     `main`. A conflict resolver's branch is brought on the same way, since
     `git cherry-pick` cannot carry a merge commit's second parent.
     **So is any agent's branch whose commits are already on the remote piece
-    ref**, which in the current flow is the `dev-writer`'s first pass: it
-    pushes its tip to `refs/heads/piece/<name>` before handing back. A
+    ref**, which in the current flow is every `dev-writer` pass, not only
+    the first: `dev-writer.md` has it push its tip to
+    `refs/heads/piece/<name>` before handing back on the first pass, and
+    "On the findings pass it always does", which covers a writer answering
+    findings, a red-CI fixer and a pass after a `spec-writer` callback. So
+    `RUNNER.md` names the case by its condition, and gives the
+    `dev-writer` as the instance, not its first pass. A
     cherry-pick that is not a fast-forward copies those commits to new
     SHAs, so the runner's `piece/<name>` no longer descends from the remote
     ref, and every later push of a HEAD forked from it, the `closer`'s
@@ -356,18 +392,37 @@ another file.
     that changes `openspec/specs/`. Its list of what needs none gains a merge
     of `main` with no conflict, the `closer`'s deletion of `findings/`, and an
     archive commit that changes nothing under `openspec/specs/`.
-  - **Step 4, "The `closer`, and what comes back", lists every return:** a
-    red run, an unticked box, a conflict, an archive commit that changed
-    `openspec/specs/`, and a refused push. A conflict and a spec-changing
-    archive go back through step 3, as a red-CI fix does. **A refused push
-    goes to the owner:** the remote piece ref holds a commit the runner's
-    HEAD lacks, which the fast-forward rule above exists to prevent, and the
-    runner cannot reconcile the two without a reset, a force-push or a merge
-    of its own, all of which it never does. It reports the output of
-    `git log --oneline --left-right --cherry-mark HEAD...origin/piece/<name>`
-    and waits. "A stale branch does not come back" now holds only for a
-    merge of `main` with no conflict. `closer.md` Step 6's `BLOCKED` stop is
-    unchanged and reported as before.
+  - **Step 4, "The `closer`, and what comes back", gives the `closer`'s
+    returns as examples, with no count.** `closer.md` has more stops than
+    this piece routes: a findings file with zero boxes, more than one change
+    folder or none, a PR body that disagrees with the diff, isolation that
+    did not take. A count reads as the complete list and is checkably false.
+    The section routes six returns, and says a return it does not name is
+    reported to the runner with its evidence, which the runner routes by
+    what it is:
+    - **A red run**, **a conflict** and **an archive commit that changed
+      `openspec/specs/`** go back through step 3.
+    - **An unticked box** is either a finding never answered, which routes
+      to whoever the finding names, or a stage row. Another agent's row goes
+      back to that agent, continued to tick it, or to a fresh agent for the
+      stage. The re-review row means a round is owed: step 3.
+    - **A refused push goes to the owner:** the remote piece ref holds a
+      commit the runner's HEAD lacks, which the fast-forward rule above
+      exists to prevent, and the runner cannot reconcile the two without a
+      reset, a force-push or a merge of its own, all of which it never does.
+      It reports the output of
+      `git log --oneline --left-right --cherry-mark HEAD...origin/piece/<name>`
+      and waits. **If the `closer`'s report also lists files from the
+      archive check**, the runner first unticks the re-review row and records
+      a round for the archive commit, as for a spec-changing archive, so the
+      round is owed whatever the owner does about the push.
+    - **A PR that stays `BLOCKED` with every required check green goes to
+      the owner** (#170), with the `gh pr view` output the `closer` reported.
+      The runner does not look for another route to the merge either, and
+      does not diagnose the block (see "Out of scope").
+
+    "A stale branch does not come back" now holds only for a merge of `main`
+    with no conflict.
   - **`README.md`'s branch section says how work reaches `piece/<name>`.** Its
     table's `piece/<name>` row says the runner cherry-picks every agent's
     commits, and the section says "Cherry-pick rather than merge". Both gain
@@ -429,6 +484,36 @@ another file.
     never pushed, so the rebase rewrites nothing anyone else holds. If the
     agent cannot be continued, the runner dispatches a fresh agent for the
     stage.
+  - **An agent whose tree holds uncommitted changes is told how to rebase
+    without losing them.** A mutating reviewer's tree does: `code-reviewer.md`
+    and `spec-test-reviewer.md` tell it to leave its mutations uncommitted,
+    as evidence only the runner may decide to discard, and `git rebase`
+    refuses a dirty tree (`error: cannot rebase: You have unstaged changes.`,
+    measured by the correctness re-reviewer). The runner's continuation
+    message carries the steps, as a re-review brief carries what differs
+    from a first-round review, and `RUNNER.md` states them by that condition,
+    not by role:
+    1. save the uncommitted changes as a patch file under the tree's own
+       `tmp/`, which is gitignored, written by a git command rather than a
+       shell redirect;
+    2. restore the tree to its last commit, index included;
+    3. rebase onto `piece/<name>` and resolve the conflict;
+    4. re-apply the patch, and report whether it applied.
+
+    The mutated state survives, in the tree and in the patch file. Not
+    chosen: committing the mutations, which would put them on the piece;
+    discarding them, which destroys the evidence the reviewer's findings
+    cite; and `git rebase --autostash`, which got past the refusal in the
+    correctness re-reviewer's scratch run but whose restore is unmeasured,
+    and which stores its stash in the stash list, shared with every worktree
+    (the reason `CLAUDE.md` bans a bare `git stash`), when it cannot
+    re-apply it. The `dev-writer` measures the sequence in a scratch
+    repository before writing its commands into `RUNNER.md`, as it has every
+    other command in this piece. `RUNNER.md` names no signing flag: while
+    signing is off the runner's message adds `--no-gpg-sign` to the rebase,
+    as every brief does, since the correctness re-reviewer's
+    `git rebase --continue` hung on the signing prompt. The durable home for
+    these steps is the reviewer role files: see "Out of scope".
   - **The review round meets that conflict every time, and `RUNNER.md` says
     so** where it sets out the per-agent sequence, so the runner expects it
     rather than reading it as a fault. The six reviewers fork from one HEAD,
@@ -461,6 +546,17 @@ another file.
     authorisation because it follows from a ruling the owner took into this
     piece: it corrects the ruling's premise in the file that stated it, and
     adds no rule.
+  - **`dev-writer.md` states the same premise, and its clause is corrected
+    too.** Its "`tasks.md`, and where your work lands" says the `dev-writer`
+    ticks exactly one stage row, its own, "never adding a row, so concurrent
+    agents' cherry-picks do not conflict". That reason is false by the same
+    measurement, and it contradicts `RUNNER.md` in this piece exactly as
+    `spec-writer.md`'s sentence did, so the same reasoning puts it inside the
+    authorisation. Only the clause after "never adding a row" changes: it
+    becomes a pointer to `spec-writer.md`'s stage-block paragraph, which says
+    when ticks conflict and points on to `RUNNER.md`, so the account stays in
+    one place. The rule itself (tick exactly one row, your own, and add none)
+    is unchanged, and no other `dev-writer.md` text is edited.
   - **"You do not write the work — not even one small edit while an agent is
     being prepared" stays, and gains no exception.**
 - **This piece's own history predates the ruling, and is not redone.** Four
@@ -522,6 +618,9 @@ another file.
       `grep -c "^## Stages"`, and the paragraph on where the block is once
       the change is archived. Also `RUNNER.md` step 3, whose re-review row
       carries the runner's record lines, tick and untick.
+    - Every role file that tells its agent to tick its own row:
+      `dev-writer.md`'s "`tasks.md`, and where your work lands", `tester.md`,
+      `code-reviewer.md`, `spec-test-reviewer.md` and `design-reviewer.md`.
   - **For the issue to settle:** how a struck row and its reason are written
     when a row is a file; whether `openspec archive`, which reads `tasks.md`,
     still warns about an incomplete stage; and what the check for "an
@@ -557,6 +656,62 @@ another file.
   re-review round, not from a role-file change.
 - **Why #165 was `BLOCKED`** (#170's closing paragraph). This piece only stops
   a closer from going around a block. It does not diagnose one.
+- **A standing test for the git commands the role files name.** Several are
+  deterministic, and each was measured once, when it was written (`tasks.md`'s
+  Verify lines, `design.md`): `closer.md` Step 1's `git ls-files` pathspec
+  and Step 3's `git diff --name-only HEAD^ HEAD -- openspec/specs/`;
+  `RUNNER.md` step 1's `git diff --name-only -G "NO SPEC:" origin/main...HEAD`,
+  the pre-tick `git grep -l -F "<range>"`, `git merge --ff-only` keeping a
+  pushed SHA or refusing, `git show --remerge-diff <sha>` for a resolution,
+  and `git log --oneline --left-right --cherry-mark HEAD...origin/piece/<name>`
+  on a refused push. Nothing re-runs them, so a later edit that mistypes one
+  is caught only when a real piece meets it. They do not fail alike. A
+  mistyped pathspec returns no path or several, and the `closer` stops; a
+  mistyped pre-tick grep lists nothing, and the runner cannot tick. Both fail
+  closed. A mistyped `openspec/specs/` path lists nothing and the `closer`
+  carries on, so an unreviewed spec change would merge: that one fails open,
+  and is the first a test should cover. The `--ff-only`, `--remerge-diff` and
+  `--cherry-mark` claims describe git's own behaviour, and a test of them
+  would mostly re-test git. Not added here: this change adds no tests or CI
+  (Impact), and a test holding its own copy of a command would not fail when
+  a role file's copy changed. The useful test extracts each command from the
+  role file and runs it against fixtures from the `lint` job, which is a
+  piece of its own. It is a follow-up for the project manager to file, in
+  place of the pathspec-only follow-up PR #174 lists, and the struck tester
+  row in `tasks.md` says so.
+- **An independent check of the re-review row by the `closer`.** The
+  runner's check before it ticks (above) makes the tick rest on the
+  re-reviewers' own records, but the runner is still the only party that
+  runs it, so a runner that skips it goes unnoticed. A `closer`-side check
+  would match each round line against `findings/`, and it is not a one-line
+  addition. The `closer` deletes `findings/` when it archives, so after an
+  archive only the rounds recorded since then have files to match, and the
+  `closer` would need a fixed round-line format and a way to tell those
+  rounds from the ones before. That is a design question for the owner.
+- **The reviewer role files on rebasing with mutations in the tree.**
+  `code-reviewer.md` and `spec-test-reviewer.md` tell a reviewer to leave its
+  mutations uncommitted, and say nothing about being continued to rebase. In
+  this piece the runner's continuation message carries the steps (above).
+  Their durable home is those two role files, which are outside this piece's
+  authorisation, so that edit is a follow-up for the owner.
+- **A second reader for a rejected finding.** A writer can close a finding
+  as **rejected** in a commit that touches only `findings/`. Step 3 counts
+  that as tracking, so no reviewer reads the rejection, and the `closer`
+  reports a rejection it finds unconvincing but does not judge it. This is
+  not #171's gap. #171 asks that every change on the branch be reviewed, and
+  a rejection changes nothing that merges: the defect it declines to fix was
+  read by the reviewer who raised it, and the rejection's argument lives in
+  `findings/`, which the `closer` deletes. The gap also predates this piece.
+  It is a follow-up for the owner, with three options:
+  - (a) step 3 counts a commit recording a **rejected** outcome as needing
+    review by the lane that raised the finding, which confirms the rejection
+    or re-opens the box;
+  - (b) the `closer` lists every rejected outcome in its report, and the
+    runner relays them to the owner;
+  - (c) leave it.
+
+  Recommended: (a). It reuses the re-review round, and it puts the
+  rejection in front of the one reader who measured the defect.
 - **A semantic clash between the piece and a clean merge of `main`**, such as
   a function `main` renamed that the piece still calls. The merge needs no
   review, as above; CI is what sees such a clash, and a red run comes back
@@ -566,13 +721,15 @@ another file.
   after that round is left to the runner's judgement.
 - **Anything else under `.claude/`.** That means `settings.json`, hooks, and
   rewording in any role file beyond what these four issues, the
-  owner-authorised additions and the `spec-writer.md` correction above ask
-  for. The writer and reviewer role files
+  owner-authorised additions and the `spec-writer.md` and `dev-writer.md`
+  corrections above ask for. The writer and reviewer role files
   are not edited for the `closer`'s commits: a conflict resolver and a
   re-reviewer of an archive commit get what differs in the runner's brief, as
-  every re-reviewer does. `dev-writer.md`'s "The runner cherry-picks your
-  commits onto its own local `piece/<name>` afterwards" is not edited either:
-  bringing its first pass on by fast-forward is the runner's step, stated in
+  every re-reviewer does. Nor are they edited for a mutating reviewer's
+  rebase, whose steps the runner's continuation message carries. In
+  `dev-writer.md`, only the one clause above changes. Its "The runner cherry-picks your
+  commits onto its own local `piece/<name>` afterwards" is not edited:
+  bringing its passes on by fast-forward is the runner's step, stated in
   `RUNNER.md`, and changes nothing the `dev-writer` does. No role file is edited for signing, as the entry
   on `closer.md`'s signing text above says. `CLAUDE.md` is not edited
   either.
@@ -620,8 +777,12 @@ None. This change edits agent instructions and no system behaviour, so
 
 - `.claude/agents/RUNNER.md`: the hand-back sequence (#169, #171; step 1's
   diff-scoped marker command and its request for product decisions; step 3's
-  re-review brief, including the clean re-reviewer's verdict box), "The
-  `closer`, and what comes back" (#171; its four returns, owner-authorised),
+  re-review brief, including the clean re-reviewer's verdict box and the
+  heading naming the range; the runner's check before it ticks the
+  re-review row), "The `closer`, and what comes back" (#171; its returns
+  given as examples with no count, including a `BLOCKED` PR and an unticked
+  stage row, and a refused push that also reports a spec-changing archive;
+  owner-authorised),
   "What a runner does" (the re-review row, #171; owner-authorised and
   owner-ruled: the runner's own content is that row alone, it always
   delegates, agents tick their own rows, an uncommitted output file goes back
@@ -630,7 +791,9 @@ None. This change edits agent instructions and no system behaviour, so
   "Dispatching" (cherry-pick, or fast-forward for the `closer`, a conflict
   resolver and an agent whose commits are already on the remote piece ref;
   a refused fast-forward stops the runner; a cherry-pick that conflicts goes back to its agent, and the
-  review round's ticks are expected to conflict; owner-authorised), the "One
+  review round's ticks are expected to conflict; an agent whose tree holds
+  uncommitted changes saves and re-applies them around its rebase;
+  owner-authorised), the "One
   piece is one PR" bullet that said the runner cherry-picks the
   `dev-writer`'s pushed commits (owner-authorised, with the fast-forward
   rule), and where "What you read" and "Rebuild the state" find
@@ -638,6 +801,9 @@ None. This change edits agent instructions and no system behaviour, so
 - `.claude/agents/spec-writer.md`: the stage-block template (#171); and the
   one sentence above it claiming ticks on neighbouring rows cannot conflict,
   corrected (following from the owner's ruling "Agents tick their own").
+- `.claude/agents/dev-writer.md`: one clause, "so concurrent agents'
+  cherry-picks do not conflict", replaced by a pointer to `spec-writer.md`
+  (following from the same ruling). Nothing else in the file.
 - `.claude/agents/closer.md`: Step 6 and "What you never do" (#170); Step 1,
   for where a re-dispatched `closer` reads the stage block after the archive
   (#171); Step 3, which a re-dispatched `closer` does not re-archive in
@@ -645,10 +811,12 @@ None. This change edits agent instructions and no system behaviour, so
   `RUNNER.md`'s re-review step rather than restating it (#171). Owner-authorised
   as well: the order list, Step 1 and Step 3 (the `findings/` deletion moves
   from Step 1 to the start of Step 3, as part of the Step 2 rewrite), Step 2
-  (merge `main`, stop on a conflict or a refused push), Step 3 (stop after an
-  archive that changes `openspec/specs/`, stop on a refused push, and push
-  HEAD on a re-dispatch), Step 4's pointer to Step 2, "What you never do" (no
-  force-push, no conflict resolution), "Your report", and the closing
+  (merge `main`, stop on a conflict or a refused push), Step 3 (the
+  `openspec/specs/` check run before the push, a stop after an archive that
+  changes `openspec/specs/`, a stop on a refused push reporting the check's
+  result, and push HEAD on a re-dispatch), Step 4's pointer to Step 2, "What
+  you never do" (no force-push, no conflict resolution), "Your report"
+  (including the check's result on a refused push), and the closing
   paragraph's list of what ends a turn. Not edited: the signing text in
   Step 2 and Step 6, except where Step 2's paragraph names the operation
   (see "Out of scope").

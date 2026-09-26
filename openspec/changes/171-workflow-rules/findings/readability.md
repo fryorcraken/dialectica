@@ -188,7 +188,7 @@ sweep. Every command quoted was run in this tree.
       or add a `BLOCKED` entry and widen the unticked-box entry to stage rows.
       Severity: moderate. This is the one return #170 is about.
 
-- [ ] **`spec-writer`** — `openspec/changes/171-workflow-rules/proposal.md:359`,
+- [x] **`spec-writer`** — `openspec/changes/171-workflow-rules/proposal.md:359`,
       `:369` and `:624` — the contract gives three different accounts of what
       comes back from the `closer`.
       **Scenario:** a `dev-writer` fixing the box above goes to the contract
@@ -204,6 +204,30 @@ sweep. Every command quoted was run in this tree.
       `tasks.md:224` says "five returns", but the proposal was never brought
       into line. Severity: low. The fix is wording, but it decides the fix for
       the box above.
+
+      **Fixed** (`spec-writer`, this commit). The contract now gives one
+      account. Its entry on Step 4, "The `closer`, and what comes back", says
+      the section gives returns **as examples, with no count**, since
+      `closer.md` has more stops than this piece routes (a zero-box findings
+      file, more than one change folder or none, a PR body that disagrees
+      with the diff, isolation that did not take). A return the section does
+      not name is reported with its evidence and routed by what it is. It
+      routes six:
+      - a red run, a conflict and a spec-changing archive, which go back
+        through step 3;
+      - an unticked box, widened to cover a stage row as well as a finding.
+        Another agent's row goes back to that agent, or to a fresh one for
+        the stage. The re-review row means a round is owed;
+      - a refused push, which goes to the owner, and which also owes a round
+        when the `closer`'s report lists files from the archive check;
+      - a PR that stays `BLOCKED` with every required check green, which goes
+        to the owner with the `closer`'s `gh pr view` output (#170).
+
+      "Reported as before" is gone, and Impact's "its four returns" now reads
+      "its returns given as examples with no count". For the `dev-writer`'s
+      box above, that means both of its suggestions: drop "Five things come
+      back", add the `BLOCKED` entry, and widen the unticked-box entry to
+      stage rows.
 
 - [ ] **`dev-writer`** — `.claude/agents/RUNNER.md:164` and `:182` — two
       sentences in "One piece is one PR" still give cherry-pick as the route
@@ -225,7 +249,7 @@ sweep. Every command quoted was run in this tree.
       this section's "you cherry-pick", so the section is in scope, and these
       two were missed. Severity: low.
 
-- [ ] **`spec-writer`** — `.claude/agents/dev-writer.md:131` — the premise this
+- [x] **`spec-writer`** — `.claude/agents/dev-writer.md:131` — the premise this
       piece corrected in `spec-writer.md` survives in a second role file, and
       `proposal.md` does not account for it.
       **Scenario:** `dev-writer.md:131` says each agent ticks only its own row
@@ -246,6 +270,24 @@ sweep. Every command quoted was run in this tree.
       file mentions it. Severity: low. The dev-writer is never one of the
       concurrent agents itself, but the sentence is the premise the owner's
       "Agents tick their own" ruling overturned.
+
+      **Fixed** (`spec-writer`, this commit), by contracting the correction
+      rather than recording it as an owner call. It is the same case as the
+      `spec-writer.md` sentence. It states the same premise, which is false
+      by the same measurement. It contradicts `RUNNER.md` in this piece in
+      the same way. And the `spec-writer.md` correction is inside the
+      authorisation because it follows from the owner's "Agents tick their
+      own" ruling, a reason that covers every file stating that ruling's
+      premise, not only the one holding the template. `proposal.md` gains an entry
+      "`dev-writer.md` states the same premise, and its clause is corrected
+      too". Only the clause "so concurrent agents' cherry-picks do not
+      conflict" changes. It becomes a pointer to `spec-writer.md`'s
+      stage-block paragraph, and the tick-one-row rule itself is unchanged.
+      The introduction, "Anything else under `.claude/`" and Impact now name
+      it. "Who reads the stage block, and would change" in the one-file-per-row
+      follow-up now lists every role file that tells its agent to tick its
+      own row, `dev-writer.md` included. The edit itself is the
+      `dev-writer`'s.
 
 **Clean in this range.** The four cross-file pointers the range added resolve
 to headings that exist and say what they claim. From `closer.md` they are

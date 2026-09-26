@@ -64,7 +64,7 @@ findings file and no diff body was read, per the brief's restriction.
 
 Scope actually reviewed: `git diff c222c37..9dc235c -- openspec/changes/171-workflow-rules/proposal.md` (full diff read); `tasks.md` and `.openspec.yaml` in full; `git diff c222c37..9dc235c --stat` (stat only); issues #171, #170, #169, #133 (already read in round 1, re-checked for coverage against the new text). No file under `.claude/agents/`, no `design.md`, and no other findings file was read.
 
-- [ ] **`spec-writer`** — round 1's pathspec-test finding is deferred, but the
+- [x] **`spec-writer`** — round 1's pathspec-test finding is deferred, but the
       deferral is invisible in the contract
       **Scenario:** `proposal.md`'s "Out of scope" section is where this
       contract records every other deferred item, each with its own reasoning
@@ -88,7 +88,19 @@ Scope actually reviewed: `git diff c222c37..9dc235c -- openspec/changes/171-work
       surfaced where the contract's own convention says a deferred gap
       belongs.
 
-- [ ] **`spec-writer`** — new deterministic-command claims added in this range
+      **Fixed** (`spec-writer`, this commit). `proposal.md`'s "Out of scope"
+      gains "A standing test for the git commands the role files name", which
+      carries the pathspec together with the commands the next box names, says
+      what was measured and where, why no test is added in this piece, and that
+      it is a follow-up for the project manager in place of the pathspec-only
+      one PR #174 lists. The struck tester row in `tasks.md` no longer says
+      there is no executable behaviour: it says the role files' git commands
+      are executable, were measured once, and points to that entry. Left for
+      the `dev-writer`: `design.md`'s Risks entry "The `closer`'s Step 1
+      pathspec has no standing test" widened to match, and PR #174's
+      follow-up list updated.
+
+- [x] **`spec-writer`** — new deterministic-command claims added in this range
       get no equivalent deferral
       **Scenario:** this range adds several brand-new prose claims about the
       exact output of a git command the `closer`/runner runs, each entirely
@@ -119,6 +131,18 @@ Scope actually reviewed: `git diff c222c37..9dc235c -- openspec/changes/171-work
       correct, but no gate would catch a future edit that got one wrong, and
       that gap is currently untracked for these four while it is tracked for
       the pathspec.
+
+      **Fixed** (`spec-writer`, this commit), in the same "Out of scope"
+      entry as the box above. It names all four, plus step 1's
+      `git diff --name-only -G "NO SPEC:"` and the runner's new pre-tick
+      `git grep -l -F "<range>"`, and it says which fail open and which fail
+      closed. A mistyped `openspec/specs/` path in the archive check lists
+      nothing and lets the `closer` carry on, so an unreviewed spec change
+      would merge. That makes it the first command a test should cover. A
+      mistyped pathspec or pre-tick grep stops the agent instead. The
+      `--ff-only`, `--remerge-diff` and `--cherry-mark` claims describe git's
+      own behaviour, and the entry says a test of them would mostly re-test
+      git. No test is added in this piece, for the reasons the entry gives.
 
 ## Areas checked clean
 
