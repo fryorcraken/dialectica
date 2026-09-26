@@ -629,3 +629,46 @@ deleted, before the claim was written.
 - [x] 20.7 `findings/readability.md`'s `dev-writer` box for the twelfth
       re-review flipped with its outcome.
 - [x] 20.8 `openspec validate 171-workflow-rules --strict` passes.
+
+### 21. After the `spec-writer`'s review-round rule and range chain (`5203661`)
+
+Follows `proposal.md` as `5203661` left it, and the list for the `dev-writer`
+in the runner's brief. The chain and the tail diff were re-run on this tree,
+and the off-by-one case on a copy of the stage block under `./tmp/` (since
+deleted), before any claim was written.
+
+- [x] 21.1 `RUNNER.md` step 2: nothing lands on the piece while the review
+      is out (bring nothing else on, commit nothing, dispatch no writer; a
+      writer needed meanwhile waits), stated once, with its reason. Verify:
+      `git grep -n -i -F "nothing lands" -- .claude/agents` returns step 2
+      and the pointer in "Record the call" only.
+- [x] 21.2 `RUNNER.md` "Record the call": after the derivation command, the
+      last line's parent is the dispatch HEAD because of step 2's rule, with
+      no restatement of it.
+- [x] 21.3 `RUNNER.md` number check: "all four hold", and a fourth bullet for
+      the chain (followed or passed over, repair by a new line and never by
+      editing a range, the tail check from the chain's end with round lines
+      allowed, a skipped line for a clean merge of `main` or a spec-free
+      archive, prefix-matching SHAs). No new command; the "What you read"
+      number-check row names what it now confirms. Verify: the listing on
+      this tree chains from `c222c37` to `c3bda2b`, 4 and 8 passed over.
+- [x] 21.4 `design.md` "Why the derived commit is the dispatch HEAD" rests on
+      step 2's rule, with the round-13 failure and security's scratch
+      measurement, why the writer is held back (the refused fast-forward,
+      measured in `./tmp/`), and two rejected alternatives.
+- [x] 21.5 `design.md`: the nothing-landed range bullet points at the chain
+      condition instead of asserting that later rounds chain on.
+- [x] 21.6 `design.md` number-check Decision: the fourth condition and its
+      own entry (why a path, the tail check in place of "ends at HEAD", round
+      lines allowed in the tail, the measurements, two rejected
+      alternatives, what breaks without it).
+- [x] 21.7 `design.md` "What it still cannot see" and Risks follow
+      `proposal.md`: a removed line is seen unless it repeated a range; the
+      broken review-round rule and a commit after the tick with no untick
+      are residuals; the fail-open lead-in covers the tail; the `closer`-side
+      Risk chains to its own HEAD.
+- [x] 21.8 PR #174's body: step 2's rule, step 3's chain condition, the
+      `design.md` summary and the `closer`-side follow-up.
+- [x] 21.9 `findings/design-review.md`'s round 13 `dev-writer` box flipped
+      with its outcome.
+- [x] 21.10 `openspec validate 171-workflow-rules --strict` passes.

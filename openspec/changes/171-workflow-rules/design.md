@@ -87,7 +87,10 @@ Step 2 points to "How many at once" for the round's size and states no count
 of its own. A count there would go stale the moment #132 tiers the round, and
 it sits far from every hunk #132 touches, so reconciling the two PRs would not
 surface it (`findings/architecture.md`). Step 3's sizing guidance says "the
-full set" for the same reason.
+full set" for the same reason. Step 2 also carries the rule that nothing lands
+on the piece while the review round is out, where the round is dispatched; its
+reasoning is under "Why the derived commit is the dispatch HEAD", in the
+nothing-landed entry below.
 
 ### The re-review is one runner-owned row, and the runner unticks it when a later commit lands
 
@@ -306,8 +309,9 @@ claim a reader can check:
   dispatched the review round from, which is where any round 1 starts: this
   piece's round 1 is `c222c37..9dc235c`. The range holds the review round's
   own commits and every commit since, so `git diff` over it shows what the
-  claim covers, and later rounds chain on from its end as every other round
-  chains from where review last ended.
+  claim covers. That later rounds start where it ends is the number check's
+  fourth condition, the chain ("The ranges chain from `<review>`", below), not
+  a property of the flow.
 - **The runner reads `<review>` from the repository, never from memory**,
   including when its report still holds it. It is the parent of the oldest
   commit that added a file under the change's pre-archive `findings/`, the
@@ -359,12 +363,80 @@ exists to remove, reached by following the text rather than breaking it.
 Deriving the value always, not only after a lost report, leaves one procedure
 with no memory in it.
 
-**Why the derived commit is the dispatch HEAD.** The reviewers' commits are
-the first to land after the review round is dispatched: the runner commits
-nothing between, and a reviewer commits only its findings file and its own
-stage row. So the oldest commit adding a findings file sits on the dispatch
-HEAD, or on a reviewer's tick, which is tracking; a range starting there
-misses nothing that needs review.
+**Why the derived commit is the dispatch HEAD: a rule in step 2, not a habit
+of the flow.** `RUNNER.md` step 2 says that from dispatching the review round
+until every one of its reviewers' commits is on the runner's HEAD, the runner
+brings no other commit onto `piece/<name>`, commits nothing, and dispatches no
+writer; a writer needed meanwhile, for a red CI run or an owner instruction, is
+dispatched once they are all on. With that rule the reviewers' commits are the
+first to land after the dispatch, and a reviewer commits only its findings file
+and its own stage row, so the oldest commit adding a findings file sits on the
+dispatch HEAD, or on a reviewer's tick, which is tracking; a range starting
+there misses nothing that needs review. "Record the call" says this once,
+after the derivation command, and points at step 2 rather than restating the
+rule.
+
+This entry first rested on "the runner commits nothing between", which
+describes how this piece happened to go and is narrower than the premise
+needs. Bringing an agent's commits on adds no content of the runner's ("What
+the runner commits: its re-review row and nothing else", below), so a
+fast-forward onto a writer's push is not a runner commit, and nothing forbade
+one (`findings/design-review.md`, `findings/security.md` and
+`findings/spec-test.md`, re-review round 13 `1380d50..c3bda2b`, first box of
+each). **What breaks without the rule:** reviewers are cherry-picked, so the
+oldest findings add's parent is the runner's HEAD at the first pick, not at the
+dispatch. A commit brought on before the first reviewer's pick, say a red-CI
+fix `F`, becomes the derived `<review>` itself. It lies before the range
+`F..HEAD`, `git diff --no-renames --name-only F HEAD` lists only `findings/` and
+`tasks.md`, round 1 is written skipped, and `F` merges unread; a second reader
+deriving `<review>` by the same command gets `F` too. That is the lost-report
+case the derivation exists for, since a runner that remembered the fix would
+not write a nothing-landed line. Security measured it with git 2.55.0 in a
+scratch repository (`tmp/r13sec/`, since deleted): a base holding `src/lib.rs`,
+a review commit adding `findings/security.md` made on the base, and a branch
+from the base with an edit to `src/lib.rs`, `1b07a72`, and the review commit
+cherry-picked onto it. The derivation printed `3d1458b 1b07a72 review`, so
+`<review>` was `1b07a72`, and the path diff from it listed
+`findings/security.md` and `tasks.md` alone. With the review commit directly on
+the base, the derivation gave the base, as on this tree (`f94f7b8d c222c37b`).
+
+**Why the writer is held back, not only its commits.** The `dev-writer` pushes
+its tip to the remote piece ref on every pass, before it hands back
+("The runner fast-forwards to the `closer`, a conflict resolver and an
+already-pushed branch", below). A writer running mid-round has moved the
+remote piece whatever the runner brings on, and the runner, which must
+fast-forward to that push to keep descending from the remote ref, then either
+brings it on before the reviewers' picks, which is the failure above, or picks
+the reviewers first, after which the fast-forward to the writer's push is
+refused, since the reviewers' picks are not in the pushed history. Measured
+with git 2.55.0 in a scratch repository under `./tmp/` (since deleted): from a
+base `X`, a writer's commit on one branch and a reviewer's on another; with
+the reviewer's cherry-picked onto `X`, `git merge --ff-only` to the writer's
+branch exited 128 with `fatal: Not possible to fast-forward, aborting.` Neither
+order works once the writer has run, so the rule stops it running. It is
+`README.md`'s "One writer at a time", that the contract does not move while
+reviewers read it, applied to the piece branch.
+
+**Rejected:**
+
+- **Recording the premise only as a residual**, in "What it still cannot see"
+  and the standing-test Risk, the other fix both round-13 boxes offered. The
+  failure needs no mistake from the runner beyond following the flow: a red
+  CI run during a review round is ordinary, and "How many at once" limits
+  writers to one in total but says nothing of a writer beside reviewers. A
+  residual would leave a gap the text walks the runner into. The rule costs
+  only a wait: the writer runs once the round's commits are on, and its work
+  goes through step 3 as it would have. A runner breaking the rule is still a
+  residual ("What it still cannot see", under the number check, and Risks,
+  the standing-test entry).
+- **A rule only up to the first findings commit**, which is all the
+  derivation needs and what `findings/security.md`'s round 13 first box
+  proposed. It still lets a writer run mid-round, and the writer's push then
+  meets the ordering problem above; and it lets the contract move under the
+  reviewers still reading, which "One writer at a time" already forbids.
+  Holding to every reviewer's commit makes the rule one boundary the runner
+  can see, the round's commits all on HEAD, instead of one it has to watch
+  for.
 
 **Why the pre-archive pathspec, and the last line.** The `closer` deletes
 `findings/` before `openspec archive`, and a re-reviewer after the archive
@@ -701,7 +773,7 @@ check.** Before it ticks, the runner runs
 `git grep -n -F -e "] re-review: every commit" -e "      round " -e "] findings all ticked" -- <change folder>/tasks.md`
 on its HEAD. It prints the re-review row, the round lines and the `closer`'s
 first row, each with its line number, and the runner does not tick unless
-three things hold:
+four things hold:
 
 - **every line between the two rows is listed**, with no gap in the line
   numbers; a line the listing leaves out is put into the round-line form and
@@ -726,7 +798,15 @@ three things hold:
   giving it one more than the highest number under the row, and a lane
   briefed from it runs again, with forms copied from the repaired line. The
   runner never lowers a number: a lowered line can land on a number another
-  line carried, and its forms check then passes on that line's records.
+  line carried, and its forms check then passes on that line's records;
+- **the ranges chain from `<review>`**: from the derived `<review>`, the
+  runner follows the line whose range starts there, then each time the line
+  starting where the last one followed ends, passing over a line that repeats
+  a followed range (a re-run); every line must be followed or passed over, and
+  the nothing-landed check's two `git diff` commands, run from the chain's
+  end, must show tracking only, round lines under the re-review row allowed.
+  Two SHAs match when one is a prefix of the other. The reasoning is under
+  "The ranges chain from `<review>`", below.
 
 `RUNNER.md` carries the rule once, in the tick paragraph, ahead of the forms
 check, with its row in "What you read". It is taken because a runner that
@@ -839,6 +919,94 @@ concrete range, round 9's forms list nothing and round 8's list
   box). The `closer`-side number criterion stays in the owner's follow-up, as
   a second reader for a runner that skipped the number check.
 
+**The ranges chain from `<review>`: the fourth condition**
+(`findings/security.md`, re-review round 13 `1380d50..c3bda2b`, second box).
+The derivation fixes where round 1 starts, but until this condition nothing
+said the rounds together cover everything after it. Round 2 onward, and an
+ordinary round 1, take their ranges from the runner, and a gap between one
+round's end and the next one's start, or after the last, puts a commit that
+merges in no round's range while the other three conditions and the forms
+check all pass. The ordinary slip is an off-by-one: a round over commits `f1`
+to `f2`, written ``round <n> `f1..f2` ``, leaves `f1` out, since a two-dot
+range excludes its start, and "the commit range to read" invites exactly that
+reading. This entry once said later rounds "chain on" from round 1's end as a
+fact; it held on this piece by the runner's habit alone. The condition reads
+the listing the number check already prints, since each round line's fixed
+start carries its range, and adds no command beyond the two the nothing-landed
+check names. `RUNNER.md` gives it as the fourth bullet of the number check.
+
+- **It is a path, not a comparison of each line with the one above.** A
+  repair line goes below the last line, as every line does ("Lines are only
+  ever added below the last"), so it can close a gap above it only if the
+  check follows ranges rather than positions. With the path, a repair line
+  anywhere in the row is followed where its range starts; line by line, it
+  would itself fail the check it was written to satisfy.
+- **A break is repaired by a new line for the missing range, never by editing
+  a line's range**, for the reason a number is never lowered: records were
+  written under the old range, and a forms check copied from an edited line
+  would search for forms no reviewer was given.
+- **The tail check replaces "the last line ends at HEAD".** A round's own line
+  and its reviewers' records land after the range it names, so the chain can
+  never end at HEAD once a round is recorded. At `ab53b41c`, HEAD was six
+  commits past round 13's end `c3bda2b`: the round 13 record `ad5c8733` and the
+  five re-reviewers' commits. So the check runs the nothing-landed check's two
+  commands from the chain's end and asks what those commands already ask,
+  whether anything but tracking landed.
+- **Round lines are allowed in the tail's `tasks.md` diff**, because the
+  round's own record line is one of the commits after the chain's end, and the
+  runner's record lines are tracking ("Every commit that merges", above).
+  Without the allowance the check could never pass after a round is recorded.
+- **A commit that needs no review but that the first command lists**, a clean
+  merge of `main` or an archive commit that changed nothing under
+  `openspec/specs/`, gets a skipped line of its own, so the chain runs past it
+  and the next round starts after it. Without the line, every later round
+  would have to include it in its range or leave the chain broken.
+- **Two SHAs match when one is a prefix of the other**, because the
+  derivation's `%h` prints `c222c37b` where this piece's round 1 line has
+  `c222c37`.
+
+Measured on this tree, re-run at `5203661b`:
+
+- the derivation's last line is `f94f7b8d c222c37b`, and the thirteen round
+  lines at `tasks.md:25-37` chain from `c222c37` to `c3bda2b`: 1, 2, 3, 5, 6,
+  7, 9, 10, 11, 12, 13 followed, 4 and 8 passed over as repeats of 3 and 7;
+- `git diff --no-renames --name-only c3bda2b ab53b41c` lists the five findings
+  files and `tasks.md`, and the `tasks.md` diff over the same range is the
+  round 13 line added, so at `ab53b41c` the tail was tracking only; at
+  `5203661b`, the `spec-writer` commit that added this condition, the same
+  command also lists `proposal.md`, so the tail fails and round 14 is owed,
+  starting at `c3bda2b`;
+- on a copy of the stage block under `./tmp/` (since deleted), searched with
+  `--no-index`, with round 2 written ``round 2 `1f62afd4..34fd428` ``, where
+  `1f62afd4` is the first commit in round 2's range that is not tracking: the
+  listing prints the two rows and thirteen round lines between them, numbered
+  1 to 13 once each, so the first three conditions pass; the chain stops at
+  `9dc235c`, round 1's end, where no line starts, and rounds 2 to 13 are
+  neither followed nor passed over. `git diff --no-renames --name-only 9dc235c
+  1f62afd4` lists `proposal.md`, so the slip would have merged a `spec-writer`
+  commit no round read. With ``round 14 `9dc235c..1f62afd4` `` added below
+  round 13, the listing still passes the first three conditions and the chain
+  runs 1, 14, 2, 3 and on to `c3bda2b`, with 4 and 8 passed over. The
+  `spec-writer` measured the same at `ab53b41c`.
+
+**Rejected:**
+
+- **Each line starts where the line above ends, or repeats a range above it**,
+  the check `findings/security.md`'s round 13 second box proposed. It fails
+  on the repair line, which stands below the last line, not below the gap it
+  closes; the round 14 repair above starts at `9dc235c` where the line above
+  it ends at `c3bda2b`. Allowing edits in place to make it pass would break
+  "lines are only ever added below the last".
+- **The last line's range ends at HEAD.** Measured above: it cannot hold once
+  a round is recorded, since the record and the round's findings commits land
+  after the range, and a condition that can never pass is one a runner learns
+  to skip.
+
+**What breaks without it:** an off-by-one or unrecorded range puts a commit in
+no round's range with every other condition green, and the only reader of the
+row is the runner that wrote it. Removing the fourth bullet from `RUNNER.md`
+turns the `./tmp/` copy above from a failing listing into a passing one.
+
 **What it still cannot see.** A later reviewer who quotes an earlier round's
 heading or verdict box whole, in prose, satisfies that round's forms check.
 The forms are chosen to make that unlikely, not impossible: a finding that
@@ -875,8 +1043,13 @@ call" outright, as skipping a check does (`findings/security.md`, re-review
 round 9 `d1d2165..c4b1df5`, the low note on a re-run given no line).
 
 Two more break a stated rule, and each lists clean. **A round line removed from
-under the row**: the forms check runs only for the lines there, and a gap in
-the numbers is harmless, so the removed round's lanes are never checked. It
+under the row, when it repeated a range.** Any other removed line breaks the
+chain, the number check's fourth condition: the line after it starts where no
+followed line ends, or, if it was the last, its commits lie between the
+chain's end and HEAD, and the tail check lists them. A removed re-run line
+leaves no such trace: the forms check runs only for the lines there, and a gap
+in the numbers is harmless, so the earlier round's check covers the re-run's
+lanes and passes on the rejected run's record whenever that run left one. It
 breaks the rule that lines are only ever added. The number check once read a
 gap as a lost line, but it could not tell a lost line from a number typed one
 too high, and the repair it gave for the second is the lowering that fails
@@ -884,6 +1057,16 @@ open. **A number lowered anyway**, against the number check's rule: a line
 lowered onto a number no other line now carries lists once, and its forms
 check passes on any record left under that number over the same range.
 Reaching either takes a runner breaking a rule, not following one.
+
+**Nor does either check see the review-round rule broken.** A commit brought
+onto the piece while the review round is out, before its first findings
+commit, becomes the derived `<review>` ("Why the derived commit is the
+dispatch HEAD", above); the chain starts after it, and a second reader
+deriving `<review>` by the same command gets the same commit. Reaching this
+also takes a runner breaking a stated rule, step 2's. **Nor does either check
+see a commit that lands after the tick** when the runner forgets to untick,
+since both run before the tick. The `closer`-side check's chain to its own
+HEAD would, and nothing else does.
 
 **Nor does either check see a nothing-landed round 1 written without its own
 check** over a range holding a commit that needs review: the number check
@@ -1664,7 +1847,8 @@ no role file.
   call"'s check before a nothing-landed round 1: the derivation of `<review>`,
   `git log --diff-filter=A --format="%h %p %s" -- openspec/changes/<name>/findings/`,
   and the two commands run from it, `git diff --no-renames --name-only
-  <review> HEAD` and `git diff <review> HEAD -- <change folder>/tasks.md`; and
+  <review> HEAD` and `git diff <review> HEAD -- <change folder>/tasks.md`,
+  which the number check's chain condition also runs from the chain's end; and
   "Dispatching"'s `mkdir -p tmp`, `git diff --binary
   --output=tmp/uncommitted.patch HEAD`, `git restore --source=HEAD --staged
   --worktree -- .` and `git apply tmp/uncommitted.patch`. Each was measured
@@ -1691,7 +1875,9 @@ no role file.
     and each ends in a round 1 written as skipped over a range holding
     unreviewed work: the number check lists that one line, the forms check
     skips a round marked skipped, the row is ticked, and the commit merges,
-    as in the first. A mistyped
+    as in the first. The chain condition runs the same two commands from the
+    chain's end, so the three that mistype them, the fourth to sixth below,
+    also let it pass over a commit landed after the last round. A mistyped
     `openspec/specs/` path lists nothing, and an unreviewed spec change would
     merge; a pre-tick search cut down to the bare range matches it in prose,
     and one cut to a single SHA also matches the previous round's records,
@@ -1743,9 +1929,12 @@ no role file.
   as one indented by four spaces, shows as a gap between the two rows it
   lists, and the runner does not tick either. What is left for a second
   reader is a runner copying the forms from the wrong line, and a runner
-  that skips either check: the next Risk. A runner that removes a round line
-  or lowers a number breaks a stated rule that neither check, nor that
-  second reader, can see (Decisions, "What it still cannot see").
+  that skips either check: the next Risk. A runner that removes a re-run's
+  line, lowers a number, or brings a commit onto the piece while the review
+  round is out breaks a stated rule that neither check, nor that second
+  reader, can see (Decisions, "What it still cannot see"). A range typed off
+  by one, or a round never recorded, is runner input the number check's
+  chain condition sees (Decisions, "The ranges chain from `<review>`").
 
   The nothing-landed check's `<review>` is read from the repository by a
   command `RUNNER.md` carries, so a mistyped copy of that command is a
@@ -1776,9 +1965,14 @@ no role file.
   Deferred to the owner as a design question (`proposal.md`, "Out of scope",
   "An independent check of the re-review row by the `closer`"). That check
   would run both again as a second reader. Its number criterion, that every
-  line under the row is a round line and no number repeats, is a second
-  reader for a runner that skipped the number check: matching alone derives
-  each round's forms from that round's line, so a line repeating an earlier
+  line under the row is a round line, that no number repeats, and that the
+  ranges chain from a `<review>` it derives itself to its own HEAD, is a
+  second reader for a runner that skipped the number check; the chain to its
+  own HEAD also sees a commit that landed after the runner's tick with no
+  untick, which neither of the runner's checks can, since both run before the
+  tick (`findings/security.md`, re-review round 13 `1380d50..c3bda2b`, second
+  box). Matching the forms alone cannot stand in for the number
+  criterion: it derives each round's forms from that round's line, so a line repeating an earlier
   number yields forms the earlier run's record satisfies. For a round 1
   marked skipped because nothing landed, it would derive `<review>` again by
   the runner's `git log` command, check that the line's range starts at it,

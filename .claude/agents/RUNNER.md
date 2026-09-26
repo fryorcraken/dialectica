@@ -79,7 +79,7 @@ You read exactly enough to decide the next dispatch:
 | `ls openspec/changes/<name>/findings/` — **the filenames** (once the `closer` has archived: `openspec/changes/archive/<date>-<name>/`, see "Rebuild the state") | whether a reviewer has reported, and which dimension |
 | `grep -rn "^- \[ \]"` over `findings/` | whether anything is unanswered, as a count |
 | `git log --diff-filter=A --format="%h %p %s"` over the pre-archive `findings/` — **hashes and subjects only** — then `git diff --no-renames --name-only <review> HEAD` — **file names only** — and `git diff <review> HEAD --` over `tasks.md` | before you write a round 1 skipped because nothing landed: which commit the review round read, and whether anything but `findings/` and flipped boxes changed since (step 3 of "From the `dev-writer`'s hand-back to the merge") |
-| `git grep -n -F -e "] re-review: every commit" -e "      round " -e "] findings all ticked"` over `tasks.md` — **the re-review row, its round lines and the next row** | whether every line between the re-review row and the next row is a round line, and whether any round number repeats (step 3 of "From the `dev-writer`'s hand-back to the merge") |
+| `git grep -n -F -e "] re-review: every commit" -e "      round " -e "] findings all ticked"` over `tasks.md` — **the re-review row, its round lines and the next row** | whether every line between the re-review row and the next row is a round line, whether any round number repeats, and whether the round ranges chain from `<review>` with only tracking after the chain's end, by the two `git diff` commands above run from that end (step 3 of "From the `dev-writer`'s hand-back to the merge") |
 | ``git grep -l -F -e '## Re-review round <n> `<range>`' -e '**re-review round <n> `<range>`: no findings**'`` over `findings/` — **file names only** | whether each lane of a re-review round left its record (step 3 of "From the `dev-writer`'s hand-back to the merge") |
 | the `closer`'s report | whether the piece closed, or what stopped it |
 
@@ -516,6 +516,20 @@ No marker and no reported decision: the `tester` is next.
 **2. The `tester`, then the review round**, sized as "How many at once" sets
 out.
 
+**Nothing lands on the piece while the review round is out.** From dispatching
+the review round until every one of its reviewers' commits is on your HEAD:
+
+- bring no other commit onto `piece/<name>`;
+- commit nothing;
+- dispatch no writer. A writer needed meanwhile — for a red CI run, or on an
+  owner instruction — is dispatched once they are all on.
+
+The reviewers read the HEAD you dispatched them from, and "Record the call"
+(step 3) reads that commit back as the parent of their first findings commit.
+A commit landed before that findings commit would be read back in its place,
+and would lie before every round's range. Holding the writer back, not only its commits, matters because a
+`dev-writer` pushes to the remote piece ref on every pass.
+
 **3. Every commit made after the review round is reviewed before the `closer`
 runs.** That includes:
 
@@ -619,9 +633,11 @@ report still holds it: it is the second field of the last line this prints.
 git log --diff-filter=A --format="%h %p %s" -- openspec/changes/<name>/findings/
 ```
 
-Keep that pathspec even once the change is archived: under the archived folder
-the oldest add is a re-reviewer's file written after the archive, whose parent
-is the archive commit. Read the last line, not the first: the log prints newest
+That line's parent is the HEAD you dispatched the review round from because of
+step 2's rule that nothing lands while the round is out. Keep that pathspec
+even once the change is archived: under the archived folder the oldest add is a
+re-reviewer's file written after the archive, whose parent is the archive
+commit. Read the last line, not the first: the log prints newest
 first, and every later round's findings files are adds too. A listing that
 prints nothing means the review round's findings are not on your HEAD, or the
 name is mistyped; you have no `<review>`, and write no round 1 from it.
@@ -674,7 +690,7 @@ git grep -n -F -e "] re-review: every commit" -e "      round " -e "] findings a
 ```
 
 It prints each with its line number: the re-review row, the round lines, and
-the `closer`'s first row. Do not tick unless all three hold:
+the `closer`'s first row. Do not tick unless all four hold:
 
 - **Every line between the two rows is listed**: the round lines' line numbers
   run without a gap from the one after the re-review row to the one before the
@@ -704,11 +720,37 @@ the `closer`'s first row. Do not tick unless all three hold:
   to close a gap or to repair a repeat: a lowered line can land on a number
   another line carried, and its forms check then passes on that line's
   records.
+- **The ranges chain from `<review>`.** Read `<review>` as "Record the call"
+  says, and follow the round lines by the range in each one's fixed start:
+  first the line whose range starts at `<review>`, then each time the line
+  starting where the last line you followed ends. A line carrying the same
+  range as a line already followed is a lane run again: pass over it. Two SHAs
+  name the same commit when one is a prefix of the other, since the derivation
+  prints more characters than a line may carry.
+  - **Every round line is followed or passed over.** A line that is neither
+    means some commits lie in no round's range: a gap between rounds, or before
+    the first. The ordinary slip is an off-by-one: a round over the commits
+    `f1` to `f2` written ``round <n> `f1..f2` ``, which leaves `f1` out, since a
+    two-dot range excludes its start. Write a line for the missing range, below
+    the last with the next number as every line is, sized as above or skipped
+    with its reason, and follow again. **Never change an existing line's
+    range**, for the reason you never lower a number: records were written
+    under it.
+  - **Nothing but tracking lies between the chain's end and HEAD.** Run "Record
+    the call"'s two `git diff` commands from the chain's end in place of
+    `<review>`. They must pass as they do there, except that the `tasks.md`
+    diff may also show round lines under the re-review row: a round's own line
+    and records land after the range it names, so the chain never ends at HEAD
+    itself. If they fail, a commit that needs review landed after the last
+    round: record the next round, starting at the chain's end. A commit they
+    list that needs no review, such as a clean merge of `main` or an archive
+    commit that changed nothing under `openspec/specs/`, gets a line of its own
+    marked skipped with that reason, and the chain runs past it.
 
 A re-run's line templated from the previous one with its number unchanged is
-why this check exists: the copy rule below carries that number into the brief
-and the forms check, so all three agree and only this listing shows the number
-twice.
+why this check reads the numbers: the copy rule below carries that number into
+the brief and the forms check, so all three agree and only this listing shows
+the number twice.
 
 **Then the forms check**: every lane of every round the tick closes left its
 own record. A round the tick closes is one recorded since the row was last

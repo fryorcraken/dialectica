@@ -709,7 +709,7 @@ Below medium, in prose:
 
 ## Re-review round 13 `1380d50..c3bda2b`
 
-- [ ] **`dev-writer`** — `design.md` "Why the derived commit is the dispatch
+- [x] **`dev-writer`** — `design.md` "Why the derived commit is the dispatch
       HEAD" (and `proposal.md`'s matching paragraph under the `<review>` rule)
       rests on a premise that `RUNNER.md` never states, and the derivation
       fails open where the premise does not hold. The inference is "the runner
@@ -739,6 +739,27 @@ Below medium, in prose:
       input beside "supplies a value of its own" and "reads the first line". As
       written, the inference sounds like a property of the flow when it is a
       property of one ordering.
+      **Fixed**, by the rule, following the `spec-writer`'s ruling in
+      `5203661` (`proposal.md`, the "Nothing lands on the piece while the
+      review round is out" bullet). `RUNNER.md` step 2 now states it once:
+      from dispatching the review round until every one of its reviewers'
+      commits is on your HEAD, bring no other commit onto `piece/<name>`,
+      commit nothing, and dispatch no writer; a writer needed meanwhile, for
+      a red CI run or an owner instruction, is dispatched once they are all
+      on. "Record the call" says, after the derivation command, that the last
+      line's parent is the dispatch HEAD because of that rule, and points to
+      step 2. `design.md`'s "Why the derived commit is the dispatch HEAD: a
+      rule in step 2, not a habit of the flow" rests on the rule instead of
+      "the runner commits nothing between", and records what breaks without
+      it (the fix you describe becoming `<review>` and lying before the range,
+      with security's scratch-repository measurement), why the writer is held
+      back and not only its commits (a `dev-writer` pushes on every pass, and
+      a fast-forward to that push after the reviewers' picks is refused,
+      measured in `./tmp/`), and two rejected alternatives: the residual you
+      offered as the other option, and a rule only up to the first findings
+      commit. A runner breaking the rule is recorded as a residual in "What it
+      still cannot see" and the standing-test Risk. No test can show this: it
+      is prose in a role file, and the check is a reviewer reading step 2.
 
 Below medium, in prose:
 
