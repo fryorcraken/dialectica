@@ -208,3 +208,10 @@ stands today, and the one check it depends on (`is_valid_revision`'s
 authorship comparison) is exercised by seven existing tests that fail the
 moment it is bypassed. Nothing in this diff weakens, reorders, or bypasses
 that check.
+
+## Gate record
+
+- [x] **none** — no security findings in either round (initial:
+      `origin/main...HEAD` and `2eada33..c1f1a8f`; re-review: `439c192..HEAD`).
+      Recorded as a box so the closer's gate can see this file; nothing to
+      act on.
