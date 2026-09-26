@@ -289,7 +289,7 @@ Keep what it lists; what you do with it depends on the push below. Any file
 listed means the archive merged the change's spec delta into `openspec/specs/`:
 content on the piece that no reviewer has read in that form. It runs before the
 push because a refused push ends your turn, and a re-dispatched `closer` skips
-it, so run after the push it would never run for this archive at all.
+it, so a check run after the push would never run for this archive at all.
 
 **Then push it** — check `git config --get-regexp "^branch\.piece"` first and
 expect **nothing** back, because the branch is created with `git worktree add
@@ -479,10 +479,12 @@ files the check listed; where a push was refused, the refusal git printed and,
 if this run made an archive commit, the check's result — the files it listed,
 or that it listed none.
 
-**Then return. Do not wait for what you reported to be fixed.** A red run, an
-unticked box, a conflict, an archive commit that changed `openspec/specs/`, or a
-refused push ends your turn: what follows is a dispatch or a review you do not make, and it
-lands on the branch as commits you would have to re-check from Step 1 anyway. A
+**Then return. Do not wait for what you reported to be fixed.** Every stop
+this file names ends your turn — a red run, an unticked box, a conflict, an
+archive commit that changed `openspec/specs/`, a refused push and a PR that
+stays `BLOCKED` among them, and anything else you stopped to report: what
+follows is a dispatch or a review you do not make, and it lands on the branch as
+commits you would have to re-check from Step 1 anyway. A
 closer that reports and then keeps waiting is a stalled agent that looks like a
 working one — it holds a row in `ListAgents`, which is the runner's evidence
 that the piece is being worked, so the piece stops rather than moving on. The

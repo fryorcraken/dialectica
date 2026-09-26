@@ -442,7 +442,7 @@ Confirmed real, and already disclosed in `proposal.md`'s "Overlap with open PR
       line a fixed start, ``round <n> `<range>` `` (the security findings), so
       the entry says that much of the format is fixed and the rest is prose.
 
-- [ ] **`dev-writer`** — `.claude/agents/closer.md:482-484` — this range
+- [x] **`dev-writer`** — `.claude/agents/closer.md:482-484` — this range
       decided, in `RUNNER.md` and `design.md` ("The `closer`'s returns are given
       as examples, with no count"), that a list of the closer's returns must not
       read as complete. `closer.md` keeps an enumeration of exactly that shape
@@ -465,6 +465,14 @@ Confirmed real, and already disclosed in `proposal.md`'s "Overlap with open PR
       .claude/agents/closer.md` finds lines 426 and 467, and neither is in
       that list. Severity: low. The fix is the same as `RUNNER.md`'s: say the
       list is examples, and that anything reported ends the turn.
+
+      **Fixed** (this commit), as suggested. The closing paragraph now opens
+      "Every stop this file names ends your turn — a red run, an unticked box,
+      a conflict, an archive commit that changed `openspec/specs/`, a refused
+      push and a PR that stays `BLOCKED` among them, and anything else you
+      stopped to report". The list is examples ("among them"), names #170's
+      `BLOCKED` case, and has no count. `git grep -n -F "BLOCKED" --
+      .claude/agents/closer.md` now also returns the closing paragraph.
 
 **Clean in this range, in prose.** The pieces sit in the right files.
 `closer.md` Step 3 holds the spec check before the push. `RUNNER.md` holds the

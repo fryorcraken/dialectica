@@ -78,7 +78,7 @@ You read exactly enough to decide the next dispatch:
 | `openspec/changes/<name>/tasks.md` — the `## Stages` block (once the `closer` has archived: `openspec/changes/archive/<date>-<name>/`, see "Rebuild the state") | which stage is next, and whether anyone is on it |
 | `ls openspec/changes/<name>/findings/` — **the filenames** (once the `closer` has archived: `openspec/changes/archive/<date>-<name>/`, see "Rebuild the state") | whether a reviewer has reported, and which dimension |
 | `grep -rn "^- \[ \]"` over `findings/` | whether anything is unanswered, as a count |
-| `git grep -l -F "<range>"` over `findings/` — **file names only** | whether each lane of a re-review round left its record (step 3 of "From the `dev-writer`'s hand-back to the merge") |
+| ``git grep -l -F -e '## Re-review round <n> `<range>`' -e '**re-review round <n> `<range>`: no findings**'`` over `findings/` — **file names only** | whether each lane of a re-review round left its record (step 3 of "From the `dev-writer`'s hand-back to the merge") |
 | the `closer`'s report | whether the piece closed, or what stopped it |
 
 **You do not read the findings themselves, and never quote one into a brief.**
@@ -279,6 +279,15 @@ conflict there, and reports back. Then pick again. Its branch is local and never
 pushed, so the rebase rewrites nothing anyone else holds. If the agent cannot be
 continued, dispatch a fresh agent for the stage.
 
+**The review round meets that conflict every time, so expect it rather than
+reading it as a fault.** The reviewers fork from one HEAD, each ticks its own
+row, and their rows are adjacent. Git conflicts on neighbouring changed lines as
+well as on the same line, so a review tick picked after the tick on the row next
+to it stops with `CONFLICT (content): Merge conflict in tasks.md`; one unchanged
+row between them and it applies cleanly. Picked in template order, each landing
+before the next, every review pick after the first stops. Sequential stages
+never meet it, since each forks after the previous tick is on your HEAD.
+
 **An agent whose tree holds uncommitted changes cannot rebase as it stands** —
 a mutating reviewer's does, since its role file has it leave mutations
 uncommitted as evidence only you may discard, and `git rebase` refuses a dirty
@@ -306,17 +315,15 @@ steps, in the agent's own tree:
    git apply tmp/uncommitted.patch
    ```
 
-The changes come back unstaged whether or not they were staged before, and the
-patch file stays in `tmp/` either way.
-
-**The review round meets that conflict every time, so expect it rather than
-reading it as a fault.** The reviewers fork from one HEAD, each ticks its own
-row, and their rows are adjacent. Git conflicts on neighbouring changed lines as
-well as on the same line, so a review tick picked after the tick on the row next
-to it stops with `CONFLICT (content): Merge conflict in tasks.md`; one unchanged
-row between them and it applies cleanly. Picked in template order, each landing
-before the next, every review pick after the first stops. Sequential stages never meet it, since each forks
-after the previous tick is on your HEAD.
+The changes come back unstaged whether or not they were staged before — a
+staged new file comes back untracked — and the patch file stays in `tmp/` either
+way. An untracked file is in none of this: `git diff` does not see it, the
+restore leaves it, and it does not stop the rebase unless an incoming commit adds
+a file at its path, so it stays in the tree throughout. A tree holding nothing
+else saves an empty patch, which `git apply` refuses with `error: No valid
+patches in input`. That refusal means there was nothing tracked to re-apply,
+not that evidence was lost; carry this sentence in the message too, so the
+agent reports it as such.
 
 **A dispatched agent cannot be put inside a pre-existing worktree.** Not "usually
 fails" — two probes measured both routes and both fail, the second one *silently*
@@ -547,24 +554,33 @@ what lands after review ranges from one line to a rewrite:
 - **Model.** The Agent tool's `model` override sets it per dispatch. A narrow
   confirmation can run on a smaller model; a rewrite or a security-relevant
   change gets the strongest one.
-- **The brief** names the commit range to read — for `spec-test-reviewer`, only
-  the spec and test files in it, since it stays blind to the implementation —
-  and says the reviewer's stage row is already ticked and stays so, and that
-  new findings are appended as boxes to its existing findings file, under a
-  heading naming the range, such as ``## Re-review `a1b2c3d..e4f5a6b` ``. **A
-  re-reviewer that finds nothing appends one ticked verdict box instead**,
-  naming the range it read, and commits it as it would a finding:
+- **The brief** names the round and the commit range to read — for
+  `spec-test-reviewer`, only the spec and test files in it, since it stays
+  blind to the implementation — and says the reviewer's stage row is already
+  ticked and stays so, and that new findings are appended as boxes to its
+  existing findings file, under a heading in exactly this form:
 
   ```markdown
-  - [x] **re-review `a1b2c3d..e4f5a6b`: no findings** — read <what>; clean
+  ## Re-review round <n> `<range>`
   ```
 
+  **A re-reviewer that finds nothing appends one ticked verdict box instead**,
+  in exactly this form, and commits it as it would a finding:
+
+  ```markdown
+  - [x] **re-review round <n> `<range>`: no findings** — read <what>; clean
+  ```
+
+  ``round <n> `<range>` `` in both is copied from your own line for the round
+  under the re-review row (below). Give both forms whole, never "such as": the
+  check before you tick (below) is a fixed-string search for them, and a
+  heading written loosely, such as ``## Re-review round <n> (`<range>`)``,
+  matches neither.
+
   Its stage row was ticked in the first round, so the heading or the box is the
-  reviewer's own record that this round ran, and what you check before you tick
-  the re-review row (below) — so both name the range exactly as the brief gives
-  it. Being ticked, the box passes the `closer`'s unticked-box gate; being a
-  box, it counts toward every file being non-zero. Clean areas stay in prose —
-  the box is one line for the round. If the
+  reviewer's own record that this round ran. Being ticked, the box passes the
+  `closer`'s unticked-box gate; being a box, it counts toward every file being
+  non-zero. Clean areas stay in prose — the box is one line for the round. If the
   `closer` has already deleted `findings/` — it does so just before archiving,
   so a red-CI fix meets this — the brief says to write that file afresh, under
   the same name, in the archived change folder named below, holding the
@@ -581,32 +597,45 @@ the next round. Each round covers only what landed since the last, so rounds
 shrink.
 
 **Record the call**, in your report and in the stage block's re-review row. One
-indented line per round under that row: the commit range, what landed, the
-lanes and model each ran on, and why that size. A round you decide to skip gets
-a line too, with its reason — a skip is a decision, and an unrecorded one looks
-exactly like a forgotten one:
+indented line per round under that row, starting ``round <n> `<range>` ``,
+numbered from 1 in the order you write the lines: then what landed, the lanes
+and model each ran on, and why that size. A round you decide to skip gets a
+line too, with its reason — a skip is a decision, and an unrecorded one looks
+exactly like a forgotten one. **A lane you dispatch again over a range it
+already had gets a line of its own** — the next number, the same range, the
+lanes it re-runs, and why: a run you did not accept, or an agent replaced after
+a stall. Continuing the same agent with `SendMessage` is not a new dispatch and
+gets no line. The number is what tells two runs of one lane over one range
+apart, which the range alone cannot:
 
 ```markdown
 - [ ] re-review: every commit after the review round — runner
-      round 1 `a1b2c3d..e4f5a6b` findings pass — correctness, spec-test (role default models): two handlers and their tests changed
-      round 2 `e4f5a6b..0c9d8e7` red-CI fix — skipped: `cargo fmt` whitespace only, no token changed
+      round 1 `a1b2c3d..e4f5a6b` findings pass — correctness, security, spec-test (role default models): two handlers and their tests changed
+      round 2 `a1b2c3d..e4f5a6b` re-run of security on the strongest model — the round 1 run was not accepted: it did not read the handler diff
+      round 3 `e4f5a6b..0c9d8e7` red-CI fix — skipped: `cargo fmt` whitespace only, no token changed
 ```
 
 **Tick the row when no commit that merges is unreviewed** — and before you
 tick it, check that every lane of every round the tick closes left its own
 record. A round the tick closes is one recorded since the row was last ticked
-and not marked skipped. For each, once the round's commits are on your HEAD:
+and not marked skipped. For each, once every lane's findings commit is on your
+HEAD, run, in single quotes because both patterns hold backticks, which a shell
+expands inside double quotes:
 
 ```
-git grep -l -F "<range>" -- <change folder>/findings/
+git grep -l -F -e '## Re-review round <n> `<range>`' -e '**re-review round <n> `<range>`: no findings**' -- <change folder>/findings/
 ```
 
-must list the findings file of every lane the round dispatched (the names are
-in "How many at once"). It prints file names, not findings. A lane whose file is
-not listed has not finished the round, however finished its agent looks and
-whatever its hand-back said: continue that reviewer, or dispatch a fresh one for
-the lane, and do not tick. This row is the one stage row not ticked by the agent
-that did the work, and a stalled agent looks exactly like a finished one.
+It must list the findings file of every lane the round dispatched (the names
+are in "How many at once"), except a lane a later round dispatched again over
+the same range: that round's own check covers it. It prints file names, not
+findings, and it searches the two exact forms rather than the bare range,
+because reviewers cite ranges in prose, earlier rounds' included. A lane whose
+file is not listed has not finished the round, however finished its agent looks
+and whatever its hand-back said: continue that reviewer, or dispatch a fresh one
+for the lane — which gets its own line — and do not tick. This row is the one
+stage row not ticked by the agent that did the work, and a stalled agent looks
+exactly like a finished one.
 
 The record, the tick and the untick are commits you make in your own tree, on
 `piece/<name>`, before the next dispatch forks from it — and the only content you commit, as

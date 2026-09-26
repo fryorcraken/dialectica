@@ -319,3 +319,56 @@ take, and adds no rule.
 - [x] 11.3 `design.md`: the Goals line on `README.md` and the fast-forward
       entry name these passages.
 - [x] 11.4 `openspec validate 171-workflow-rules --strict` passes.
+
+### 12. After the `spec-writer`'s callback on re-review `9dc235c..34fd428` (`23aaac3`)
+
+Supersedes 10.3 and 10.4's bare-range heading and check. Every command whose
+output a file now describes was run on this tree or in a scratch repository
+under `./tmp/` (git 2.55.0), since deleted, before the claim was written.
+
+- [x] 12.1 `RUNNER.md` step 3's brief: the heading and the verdict box are
+      given whole, as ``## Re-review round <n> `<range>` `` and
+      ``- [x] **re-review round <n> `<range>`: no findings** — read <what>; clean``,
+      with ``round <n> `<range>` `` copied from the runner's line. Verify:
+      `git grep -n -F "a1b2c3d" -- .claude/agents/RUNNER.md` returns only the
+      two sample round lines, not a heading or box example.
+- [x] 12.2 `RUNNER.md` "Record the call": each line starts
+      ``round <n> `<range>` ``, numbered in the order written; a lane
+      dispatched again over the same range gets its own line, a `SendMessage`
+      continuation none; the sample block shows a re-run line.
+- [x] 12.3 `RUNNER.md` step 3's tick paragraph and "What you read": the
+      two-pattern command in single quotes; the earlier round's check skips
+      lanes a later round re-ran over the same range; a fresh dispatch for a
+      missing lane gets its own line; run once every lane's findings commit
+      is on HEAD. Verify: on this tree the un-numbered forms list all six
+      files for rounds 1 and 2, the numbered forms for round 2 list nothing,
+      and the numbered forms with placeholders list `security.md`.
+- [x] 12.4 `RUNNER.md` "Dispatching": the review-round conflict paragraph
+      moved above the dirty-tree procedure; the procedure closes with what
+      untracked files and an empty patch mean. Verify: `git apply` on an
+      empty patch exited 128 with `error: No valid patches in input` in the
+      scratch repository.
+- [x] 12.5 `closer.md`: Step 3's "a check run after the push"; the closing
+      paragraph says every stop ends the turn, with its list as examples
+      including `BLOCKED`.
+- [x] 12.6 `dev-writer.md`: the stage-row pointer reworded; the four route
+      sentences say "brings … onto" or "bringing … onto". Verify:
+      `git grep -n -i "cherry-pick" -- .claude/agents/dev-writer.md` returns
+      line 158 only.
+- [x] 12.7 `design.md`: the heading-and-check Decision rewritten for the
+      round-numbered forms (why not the bare range, why the number, rejected
+      alternatives, the residual, the transition for rounds 1 and 2, the
+      measurements); the route criterion and the rejected earlier reason in
+      the fast-forward entry; `README.md`'s kept stage-block sentences; the
+      untracked-file case; the `NO SPEC:` entry's route words; the
+      standing-test Risk reclassified; the #132 Risk pointing at the
+      proposal's overlap section.
+- [x] 12.8 PR #174's body: the follow-ups match the standing-test entry and
+      the two self-contained owner follow-ups.
+- [x] 12.9 The nine `dev-writer` boxes of re-review `9dc235c..34fd428`
+      flipped with outcomes. Verify:
+      `grep -rc "^- \[ \]" openspec/changes/171-workflow-rules/findings/`
+      is zero for every file.
+- [x] 12.10 Trial merge against `origin/piece/review-tiering` re-run after
+      the `dev-writer.md` edits.
+- [x] 12.11 `openspec validate 171-workflow-rules --strict` passes.

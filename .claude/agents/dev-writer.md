@@ -128,8 +128,8 @@ is information worth reporting; quietly doing something else is not.
 
 `spec-writer` opens `tasks.md` with a **stage block** it owns. You write the
 implementation checklist below it, and you tick exactly one stage row — your
-own — never adding a row. When ticks conflict all the same, and who resolves
-that, is [`spec-writer.md`](spec-writer.md)'s stage-block paragraph.
+own — never adding a row. [`spec-writer.md`](spec-writer.md)'s stage-block
+paragraph says when ticks conflict anyway, and where to find who resolves them.
 
 **Do not tick a row for work a test cannot show.** When a requirement holds
 because nothing can reach the code that would break it, label it
@@ -170,7 +170,7 @@ are in, `pwd` before you trust a green build.** And never report a build you did
 not run.
 
 **Commit to your own branch**, the `worktree-agent-<id>` you are on. The runner
-cherry-picks it onto `piece/<name>` once you hand back, so **report the branch
+brings it onto `piece/<name>` once you hand back, so **report the branch
 name** — the runner cannot guess a name the harness chose.
 
 Never `git add -A`; commit named paths, because a worktree collects build output
@@ -184,8 +184,8 @@ rule; `README.md` and `RUNNER.md` point here rather than restating it.
 
 **The ordering matters, because you do not wait for the runner.** Your commits
 are on a harness-named `worktree-agent-<id>`, and a PR must be opened against
-`piece/<name>` — but you do not need the runner's cherry-pick to get there. A
-push does not require a checkout: name the refspec in full and push **your tip
+`piece/<name>` — but you do not need the runner bringing them onto it to get
+there. A push does not require a checkout: name the refspec in full and push **your tip
 to the remote piece ref**, which never touches the local `piece/<name>` and so
 never trips the checkout refusal described below. So the sequence, in order, is:
 
@@ -200,7 +200,7 @@ gh pr create --head piece/<name> --base main
 The first line is the upstream check and **expects no output**; the paragraph
 after this section says why, and why `git branch -vv` is not it.
 
-Then report your branch name and hand back. The runner cherry-picks your commits
+Then report your branch name and hand back. The runner brings your commits
 onto its own local `piece/<name>` afterwards — that is for *its* HEAD, the fork
 point for the next agent, and it is not what puts your work on the remote.
 
@@ -211,7 +211,8 @@ distinguishes the two: push the piece ref, never your own.
 **You cannot check out `piece/<name>`, and must not try.** It is checked out in
 the runner's worktree, and git refuses a branch checked out elsewhere (`fatal:
 'piece/<name>' is already used by worktree at …`). That is why the sequence above
-pushes a refspec. A local cherry-pick is the runner's.
+pushes a refspec. Bringing your commits onto the local `piece/<name>` is the
+runner's.
 
 Two reasons this cannot wait for review time:
 

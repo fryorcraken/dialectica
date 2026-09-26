@@ -180,7 +180,7 @@ patch-around-rebase steps, with `--autostash`, commit and discard rejected
 "brought onto" passages. Three findings, all on the reasoning about which
 statements of the old cherry-pick route were corrected and which kept.
 
-- [ ] **`dev-writer`** — `design.md:447-452` — a Decision still names the
+- [x] **`dev-writer`** — `design.md:447-452` — a Decision still names the
       cherry-pick as the `dev-writer`'s route, which a later entry in this
       same range says it never is.
       **Scenario:** the "`NO SPEC:` routing" entry argues "The `dev-writer`'s
@@ -194,7 +194,12 @@ statements of the old cherry-pick route were corrected and which kept.
       **Measured:** `git grep -n -F "reached the piece by cherry-pick" --
       openspec/changes/171-workflow-rules/design.md` returns line 449.
 
-- [ ] **`dev-writer`** — `design.md:826-828` — the justification for leaving
+      **Fixed** (this commit), as suggested: the entry now says the
+      `dev-writer`'s commits "were brought onto the runner's branch
+      afterwards, and never onto that agent's `worktree-agent-<id>` branch".
+      The argument is unchanged. The same search now returns nothing.
+
+- [x] **`dev-writer`** — `design.md:826-828` — the justification for leaving
       `dev-writer.md`'s "The runner cherry-picks your commits" is weak: it
       would equally have left the passages this piece did correct, and the
       runner is pointed at that sentence.
@@ -217,7 +222,22 @@ statements of the old cherry-pick route were corrected and which kept.
       **Measured:** `git grep -n -i "cherry-pick" -- .claude/agents/dev-writer.md`
       returns lines 158, 173, 187, 203 and 214; 173 and 203 state the route.
 
-- [ ] **`dev-writer`** — `design.md:1046-1055` — the entry correcting
+      **Fixed** (this commit), by the first option: the sentences are
+      corrected. The `spec-writer`'s callback (`23aaac3`) contracted the
+      correction under the `README.md` criterion, after `findings/spec-test.md`
+      raised the same point. `dev-writer.md`'s four route sentences (at 173,
+      187, 203 and 214) now say "brings … onto" or "bringing … onto", each
+      changed only in the words naming the route; 158's "is not something the
+      runner can cherry-pick", about commits made on the wrong branch, stays,
+      since it holds of either route. `git grep -n -i "cherry-pick" --
+      .claude/agents/dev-writer.md` now returns line 158 only. In `design.md`
+      the fast-forward entry now states the criterion once for every file the
+      piece edits, lists the four sentences, and records the old reason as
+      rejected because it did not separate `dev-writer.md` from the `README.md`
+      passages and because `RUNNER.md` sends the runner to `dev-writer.md` for
+      this sequence.
+
+- [x] **`dev-writer`** — `design.md:1046-1055` — the entry correcting
       `dev-writer.md`'s false-premise clause does not record why `README.md`'s
       stage-block section, which states the neighbouring premise, is kept.
       **Scenario:** `README.md:238-242` says one row per agent avoids "the
@@ -236,6 +256,19 @@ statements of the old cherry-pick route were corrected and which kept.
       openspec/changes/171-workflow-rules/design.md` returns nothing;
       the same search over `proposal.md` returns line 659, and
       `"literally true"` returns `proposal.md:475`.
+
+      **Fixed** (this commit). The `spec-writer.md` correction entry in
+      `design.md` gains a paragraph on `README.md`'s stage-block section,
+      quoting both sentences, and says why they stay: each is literally true
+      (a tick changes its own line and no other), neither says the picks are
+      clean, which is what `spec-writer.md` and `dev-writer.md` claimed; the
+      criterion is the one the route sentences follow (a false sentence
+      changes, a true one stays); "Each agent flips its own row" stands by the
+      owner's ruling; and whether that section should say neighbouring ticks
+      conflict is the one-file-per-stage-row follow-up's, whose entry lists
+      the section. `git grep -n -F "never touch the same line" --
+      openspec/changes/171-workflow-rules/design.md` now returns that
+      paragraph.
 
 Nothing else is stale: every Risk that has been fixed says so with its
 mitigation, no Decision is superseded by a later callback, and every

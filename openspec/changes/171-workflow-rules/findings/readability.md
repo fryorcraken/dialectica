@@ -350,7 +350,7 @@ Dimension: **readability only**. Read: `git log --oneline 9dc235c..34fd428`;
 `design.md:958-1014`; `tasks.md:180-289`. Every command quoted was run in this
 tree.
 
-- [ ] **`dev-writer`** — `.claude/agents/RUNNER.md:598` — "once the round's
+- [x] **`dev-writer`** — `.claude/agents/RUNNER.md:598` — "once the round's
       commits are on your HEAD" names the wrong commits by its most natural
       reading. The pre-tick grep needs the **re-reviewers' findings commits**
       on HEAD. But the round line template three lines up (`:591`) ties a
@@ -374,7 +374,13 @@ tree.
       HEAD". Severity: low to moderate. The check is new in this range, and
       this is the one clause that says when to run it.
 
-- [ ] **`dev-writer`** — `.claude/agents/closer.md:291-292` — "so run after
+      **Fixed** (this commit), as suggested: step 3 now runs the check "once
+      every lane's findings commit is on your HEAD". The same edit replaces
+      the bare-range command with the spec-writer's two exact forms, so
+      `git grep -n -F "the round's commits" -- .claude/agents/` now prints
+      nothing.
+
+- [x] **`dev-writer`** — `.claude/agents/closer.md:291-292` — "so run after
       the push it would never run for this archive at all" garden-paths into
       the opposite instruction. With no commas around "run after the push",
       the reader parses "so run after the push" as an imperative: *run it
@@ -393,7 +399,11 @@ tree.
       run after the push would never run for this archive at all." Severity:
       low.
 
-- [ ] **`dev-writer`** — `.claude/agents/dev-writer.md:131-132` — the one
+      **Fixed** (this commit), with the suggested wording: "…and a
+      re-dispatched `closer` skips it, so a check run after the push would
+      never run for this archive at all."
+
+- [x] **`dev-writer`** — `.claude/agents/dev-writer.md:131-132` — the one
       sentence this piece is authorised to write in `dev-writer.md`
       garden-paths, and it says more about its target than the target holds.
       "When ticks conflict all the same, and who resolves that, is
@@ -417,7 +427,12 @@ tree.
       ticks conflict anyway, and where to find who resolves them." Severity:
       low.
 
-- [ ] **`dev-writer`** — `.claude/agents/RUNNER.md:282-319` — the new
+      **Fixed** (this commit), with the suggested wording: "never adding a
+      row. [`spec-writer.md`](spec-writer.md)'s stage-block paragraph says
+      when ticks conflict anyway, and where to find who resolves them." It no
+      longer claims the target says who resolves them.
+
+- [x] **`dev-writer`** — `.claude/agents/RUNNER.md:282-319` — the new
       dirty-tree procedure comes before the paragraph that says when it is
       needed. So it opens on "a mutating reviewer's does" before the reader
       has learned that reviewers are the agents whose picks conflict.
@@ -441,6 +456,14 @@ tree.
       procedure follows the paragraph that explains when it is needed. No
       wording changes. Severity: low. This is an ordering fix, not a missing
       rule.
+
+      **Fixed** (this commit), as suggested. "The review round meets that
+      conflict every time" now follows the conflicting-cherry-pick paragraph
+      directly, and the dirty-tree procedure comes after it, so "that
+      conflict" points at the paragraph just above it. The moved paragraph's
+      wording is unchanged; one over-long line was rewrapped. The procedure
+      also gained a closing note on untracked files and an empty patch
+      (`findings/correctness.md`'s box in this round).
 
 **The four round-1 fixes hold.** `git grep -n -i -e "things come back" -e "four
 things" -e "five things" -e "four returns" -e "five returns" -- .claude/agents/`

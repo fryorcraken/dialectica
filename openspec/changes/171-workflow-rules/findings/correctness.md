@@ -362,7 +362,7 @@ comes back" in full, taking each as its agent would. I ran commands against
 this tree and against a scratch repository under `./tmp/r2/` (git 2.55.0,
 `commit.gpgsign false` set in that repository only, since deleted).
 
-- [ ] **`dev-writer`** — `.claude/agents/RUNNER.md:282-310` — the four steps
+- [x] **`dev-writer`** — `.claude/agents/RUNNER.md:282-310` — the four steps
       are sent to "an agent whose tree holds uncommitted changes", but an
       untracked-only change is uncommitted and never blocks a rebase. On such
       a tree, step 4 fails and reports that the patch did not apply. Neither
@@ -392,6 +392,25 @@ this tree and against a scratch repository under `./tmp/r2/` (git 2.55.0,
       `error: No valid patches in input (allow with "--allow-empty")`, exit
       128. The first run below shows an untracked file does not stop
       `git rebase`.
+
+      **Fixed** (this commit), by the second reading. After the four steps,
+      `RUNNER.md` now says an untracked file is in none of them (`git diff`
+      does not see it, the restore leaves it, and it does not stop the rebase
+      unless an incoming commit adds a file at its path), that a staged new
+      file comes back untracked (your note), and that a tree holding nothing
+      else saves an empty patch which `git apply` refuses with `error: No
+      valid patches in input`, meaning nothing tracked was saved, not that
+      evidence was lost. The runner carries that sentence in its message, so
+      the agent reports it as such. Re-measured in a scratch repository under
+      `./tmp/` (git 2.55.0, since deleted): one untracked file only, the save
+      exited 0, the restore left `?? probe.txt`, and `git apply` exited 128
+      with that error; a staged new file saved, restored and re-applied came
+      back as `?? staged-new.txt`. Not chosen: tying the steps to the
+      rebase's own refusal, which would reorder the four steps the proposal
+      sets out; and `git apply --allow-empty`, since the proposal quotes step
+      4 as a plain `git apply` in the steps and in the standing-test
+      inventory. `design.md`'s entry on the patch around the rebase records
+      both, with a third, a precondition check before step 1.
 
 The brief's known gap, the untracked mutation: it **does not break the
 rebase, and the evidence stays behind in place**, measured. The scratch tree
