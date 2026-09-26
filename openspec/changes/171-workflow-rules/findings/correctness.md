@@ -1469,3 +1469,120 @@ Below the box threshold, in prose only:
   commits. After a `closer` return that holds a merge of `main`, a findings
   deletion and an archive, the rule does not say whether that is one skipped
   line or one per commit. Either chains. Low.
+
+## Re-review round 15 `e5dcce4..bad7c88`
+
+- [x] **re-review round 15 `e5dcce4..bad7c88`: no findings** — read
+      `git diff e5dcce4 bad7c88` over `RUNNER.md`, `proposal.md` and
+      `design.md`, `RUNNER.md:82` and `:683-756` and `proposal.md:394-461` at
+      HEAD, walked the chain on this tree and three scratch copies, and compared
+      PR #174's last two body revisions; clean
+
+Correctness only, narrowed as briefed.
+
+**Q1, this tree.** The derivation's last line is `f94f7b8d c222c37b`, so
+`<review>` is `c222c37b`. The listing prints `tasks.md:24`, rounds 1 to 15 at
+`:25-39` with no gap and no repeated number, and `:40`. The chain reaches
+`c222c37`, then `9dc235c` (1), `34fd428` (2), `dc1390a` (3 and 4), `d1c8726`
+(5), `6d43cda` (6), `d1d2165` (7 and 8), `c4b1df5` (9), `842758b` (10),
+`dd4fe18` (11), `1380d50` (12), `c3bda2b` (13), `e5dcce4` (14) and `bad7c88`
+(15). From `bad7c88`, `git diff --no-renames --name-only bad7c88 HEAD` lists
+only `tasks.md`, and its diff is the round 15 line added, so the tail is
+tracking only. All four number-check conditions hold. `git grep -l -F -i -e
+"re-review round 15"` over `findings/` lists nothing, so the forms check fails
+for round 15. The runner should not tick yet. It waits for the five lanes'
+records.
+
+**Q1, scratch copies.** I ran all three copies through the listing with
+`git grep --no-index`. Each passes the first three conditions.
+
+- **Templated line.** Rounds 14 and 15 both carry start `1380d50`, written
+  ``round 14 `1380d50..e5dcce4` `` and ``round 15 `1380d50..bad7c88` ``. Round
+  12 reaches `1380d50`, and three lines start there, so the chain reaches
+  `c3bda2b`, `e5dcce4` and `bad7c88`. The tail from `bad7c88` passes, as above.
+  The rule terminates with the right answer, where the round-14 text stalled.
+- **Mid-chain off-by-one.** Round 9 is written ``round 9 `0fbebed..c4b1df5` ``.
+  The chain reaches only as far as `d1d2165`. The tail from there lists
+  `RUNNER.md`, `design.md` and `proposal.md`, so it fails. The rule then
+  offers ``round 16 `d1d2165..0fbebed` ``. `git diff --no-renames --name-only
+  d1d2165 0fbebed` lists `proposal.md`, so that line must be sized. With it,
+  the chain goes on through 0fbebed, then 9 to 15, to `bad7c88`, and the tail
+  passes, with rounds 15 and 16 admitted as round lines. The other repair, a
+  round from `d1d2165` to HEAD, also terminates.
+- **Early start (my choice).** Round 1 is written ``round 1 `374a0e9..9dc235c` ``,
+  where `374a0e9` is `<review>`'s parent. The chain reaches only `c222c37`, and
+  the tail fails there. Round 2's start `9dc235c` lies later, so the rule
+  offers a line `c222c37..9dc235c`. With it, the chain reaches `bad7c88`. The
+  design's "What it costs" says a correct runner re-reads round 1's range
+  here, and that is what happens.
+
+**Q1, soundness.** For each commit `c` reachable from an end `Y` but not from
+`<review>`, walk the run back: it is either in the first range or in one of
+the later ones, and ancestry between the ends makes no difference. The same
+argument holds for the tree diffs. So no unreviewed commit that needs review
+reaches a tick while every reached line was reviewed or rightly skipped. The
+only way in is a skipped line with a false reason. That exposure is not new:
+every skipped line already had it.
+
+**Q2.** The chain and tail bullets in `RUNNER.md:723-751` say the same as
+`proposal.md:394-428` on every point a runner acts on:
+
+- what the chain reaches, prefix matching, and unreached lines needing no
+  repair;
+- never editing a range;
+- the tail commands and the round-line allowance;
+- both repairs, the off-by-one example, and "either is sound";
+- the skipped line for a clean merge.
+
+The differences a runner would not act on:
+
+- The heading drops "to HEAD".
+- `RUNNER.md` does not carry the parenthetical defining "the chain's end".
+  `RUNNER.md` no longer uses that phrase anywhere, which `git grep -n -i`
+  over `.claude/` confirms.
+- "sized as above" stands for "sized as step 3 says".
+- "an archive commit that changed nothing under `openspec/specs/`" stands for
+  `proposal.md`'s "the archive commit". That difference predates this round
+  and `RUNNER.md` has the stricter reading.
+
+`RUNNER.md:82` matches.
+
+**Q3.** The first node was edited at 17:45:33Z, 13 s after `bad7c88`'s commit
+time of 17:45:20Z. I compared it paragraph by paragraph against the 17:27:36Z
+node. The changes are confined to the four passages the dev-writer named:
+
+- step 3's chain sentences;
+- the `design.md` fourth-condition bullet, whose measured claims, the
+  six-commit HEAD note and the rejected list are all kept or extended;
+- the standing-test follow-up: "the chain's end" becomes "an end the chain
+  reaches" twice, and "breaks the chain" becomes "leaves commits after every
+  end the chain reaches, the tail check lists them";
+- the owner follow-up: one "the chain's end" becomes "an end the chain
+  reaches".
+
+No sentence was lost, no claim changed outside these passages, and no
+follow-up was dropped. `Closes #171`, `Closes #170`, `Closes #169` and
+`Closes #133` stand on four separate lines in both revisions.
+
+Below the box threshold, in prose only:
+
+- **Nothing says which reached end to run the tail from.** The text says "an
+  end the chain reaches", and `<review>` is itself reached. Suppose a runner
+  on this tree picks `e5dcce4`. The tail fails, and the text sends it to
+  write ``round 16 `e5dcce4..<HEAD>` ``, which re-reads round 15. The result is
+  sound, since `design.md` says the choice changes only how much is read
+  again, but "the end the last reached line reaches" would save a round. Low.
+- **"skipped with its reason" on the repair line now admits a covering claim.**
+  In the early-start copy, "skipped: covered by round 1" is true and sound. In
+  the off-by-one copy, a runner who reads two-dot ranges as inclusive would
+  skip the `9dc235c..1f62afd4` line, or the `d1d2165..0fbebed` line, the same
+  way. That is the very slip that caused the off-by-one, and it would tick
+  over an unread `proposal.md` commit. The text's "which leaves `f1` out"
+  guards against it. `design.md` "What it costs" rejects unchecked covering
+  claims, but the rule's skip reason is unrestricted. The exposure predates
+  this round: the old gap line had the same "or skipped with its reason".
+  Low.
+- **`tasks.md:650-656`** (21.3, ticked) still describes the chain as
+  "followed or passed over" with "4 and 8 passed over". This round added no
+  task for the rewrite. That is the historical record of a pass and does not
+  steer a runner. Low.
