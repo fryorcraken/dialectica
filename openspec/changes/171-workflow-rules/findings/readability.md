@@ -1087,3 +1087,80 @@ Stylistic or low, no box:
   carry"), `:748` ("A commit they list", when the diffs list paths) and
   `:753-756` (the numbers justification sitting after the chain bullet) still
   stand as written.
+
+## Re-review round 16 `bad7c88..b5ceed2`
+
+- [x] **re-review round 16 `bad7c88..b5ceed2`: no findings** — read
+      `git diff bad7c88 b5ceed2` over `RUNNER.md`, `proposal.md`, `design.md`
+      and `tasks.md`, `RUNNER.md:560-800` cold, `design.md:795-810`,
+      `:930-1070` and `:1955-2000`, every `skipped` hit in `.claude/agents/`,
+      and applied the tail bullet to a mid-chain off-by-one on a `./tmp/` copy
+      of the stage block; clean
+
+Dimension: **readability only**, narrowed as briefed.
+
+**1. The tail bullet, cold: it can be followed.** I copied the stage block to
+`./tmp/r16-readability/tasks.md` with round 13 written `a0ce38f..c3bda2b`, one
+commit late: `a0ce38f` is the spec-writer's `proposal.md` commit, and the
+intended start was the one before it. Reading only `RUNNER.md:723-756`: the
+chain reaches `<review>` through round 12's end `1380d50`, and no further,
+since round 13 starts at `a0ce38f` and 14 to 16 hang off it.
+`git diff --no-renames --name-only 1380d50 a0ce38f` lists `proposal.md`, so the
+tail from `1380d50` fails. The bullet then answers all three parts of the
+question in order. What line: the next number, starting at `1380d50`, either to
+HEAD or to the start of a line the chain does not reach. Round 13's start gives
+``round 17 `1380d50..a0ce38f` ``. That it is sized: the bold sentence says so,
+and it runs at least one lane. When a skip is allowed: only for a clean merge of
+`main` or a spec-free archive. With round 17 in place, the chain reaches 13 to 16
+and the tail from `b5ceed2` passes. The number check listing
+(`git grep --no-index` on the copy) prints the row, lines 12 to 17 and the next
+row, with no gap. None of this needed `proposal.md`.
+
+**2. Stated once: no contradiction.** `git grep -n -F -e "skipped" -- .claude/agents/`
+gives eleven hits in `RUNNER.md`, four of them in the tail bullet
+(`:747-755`). Every other one is one of three things: the judgement skip,
+recorded when the round lands (the sample at `:680`, with the rule at
+`:622-623` spelled "skip"); the nothing-landed round 1 (`:625`, `:656`,
+`:707`, `:713`, the "What you read" row at `:81`); or the forms check leaving
+skipped rounds out (`:765`). The closed pair appears once, at
+`:752-756`, and the word "here" scopes it to the tail check. The nothing-landed
+round 1 is a different situation: it has no chain yet and has its own check.
+Nothing else in `README.md`, `closer.md`, `code-reviewer.md`,
+`spec-test-reviewer.md` or `spec-writer.md` concerns round lines. The tasks
+22.1 verify command (`"skipped with its reason"`, `"such as a clean merge"`)
+prints nothing.
+
+**3. `design.md` rewording: reads correctly, no decision changed.** The five
+sites (`:805`, `:1053`, `:1056-1057`, `:1965-1966`, `:1993-1995`) now say "an
+end the chain reaches". Each still makes sense in its sentence and agrees with
+`RUNNER.md:734`. `:1995`'s "miss a commit landed after that end" replaces "pass
+over … after the last round" and fixes the old echo of the removed term.
+`:1063-1065`, "or the tail check from every end the chain reaches before it
+would list it and fail", is the wording my round-15 note suggested, made more
+exact. It describes the same consequence (a line is written) and changes no
+rule. The new entries at `:971-977` and `:991-1031` read as decision records,
+not as a restatement of the rule. `git grep` for "chain's end" and
+"chain broken" in `design.md` finds nothing.
+
+Stylistic or low, no box:
+- `RUNNER.md:748` ("the second line's range is exactly `f1`"), and
+  `proposal.md` and `design.md:995` with it, are exact only when `f1`'s parent
+  is the reached end. On this piece's cadence the reached end is always
+  followed by that round's record and findings commits. On the copy above,
+  `1380d50..a0ce38f` holds seven commits, six of them tracking. The action does
+  not depend on it. "holds no reviewable commit but `f1`" would be exact.
+- `RUNNER.md:752-753`, "Only two commits they list": this means two *kinds* of
+  commit, and "they list" names paths, not commits (round 14's note on the
+  same phrase). Two merges of `main` would make three commits. "Only two kinds
+  of commit" would say it.
+- `RUNNER.md:622-623` allows a judgement skip for any round, and `:680` shows
+  one for a `cargo fmt` fix. The tail bullet forbids skipping that same fix
+  once the tail check meets it. `design.md:1004-1007` gives the reason and
+  accepts the cost. A runner obeying the tail bullet does the right thing,
+  but `RUNNER.md` does not say why the two differ, and nothing stops a
+  runner who fails the tail check from recording the gap as a late
+  judgement skip under "Record the call". One clause at `:622` ("recorded
+  when the round lands; a line written because the tail check failed is
+  never skipped") would close that route in the place a runner looking for
+  permission would read. Low: getting there means ignoring the more specific
+  instruction.
