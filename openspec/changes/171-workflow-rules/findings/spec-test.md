@@ -549,6 +549,63 @@ Below medium, so in prose rather than boxed:
   standing-test entry, not in that list. The operative text is consistent;
   a reader of the check's own bullets alone would not see it. Low.
 
+## Re-review round 7 `6d43cda..d1d2165`
+
+- [x] **re-review round 7 `6d43cda..d1d2165`: no findings** — read `proposal.md`'s range diff and `proposal.md` at HEAD in full, `tasks.md`, `.openspec.yaml`, the range stat, issues #171, #170, #169 and #133; clean
+
+Read: `git diff 6d43cda..d1d2165 -- openspec/changes/171-workflow-rules/proposal.md`
+in full, and `proposal.md` at HEAD in full. `tasks.md` and `.openspec.yaml` in
+full. `git diff 6d43cda..d1d2165 --stat`, stat only. Issues #171, #170, #169
+and #133 read fresh with `gh issue view --json body,comments,state`: all open,
+no comments, bodies unchanged. No file under `.claude/agents/`, no `design.md`,
+and no other findings file was read. The measurements below searched my own
+file only.
+
+**The split is consistent across all six sites.** The copy rule now appears
+in the pre-tick bullet (`:214-216`, "copied from that round's own line under
+the re-review row, not typed"), in its own sub-bullet (`:247-260`), in the
+rounds 1–2 bullet (`:278-280`, whose lines each name their own check, as
+`tasks.md:25-26` do), in the standing-test entry's stale-number paragraph
+(`:917-918`), in the `closer`-side follow-up (`:936-941`) and in Impact
+(`:1121-1122`). They all say the same thing. The standing-test entry's
+fail-open list is back to "Three", and it has three bullets: the
+`openspec/specs/` path, the bare-range or single-SHA truncation, and the save
+step with `HEAD` dropped. The fail-closed sentence keeps "that no committed
+record carries", which leaves out the stale number, and the new paragraph at
+`:906-920` takes that case with its reason: the number is the runner's input
+and not the command's, so no fixture test of the role file's command can see
+it. Nothing contradicts that paragraph. The residual it leaves, forms copied
+from the wrong line, is named in the same terms in three places: "What it
+still cannot see" (`:266-275`), `:918-920` and the follow-up's gap statement
+(`:940-941`). All three send it to the `closer`-side follow-up.
+`git grep -n -i -e 'four fail' -e 'Four,' -e 'three fail'` finds no stale
+count in `proposal.md`. The only hits are `tasks.md` 14.1 and 15.3, which are
+history and verify lines. `tasks.md` 15.1–15.4 match the proposal's wording.
+
+**Round 6's two prose items are answered.** "What it still cannot see" now
+names the wrong-line residual, the previous round's line included, which
+covers the wholly stale line I noted.
+
+**Measured** at `c3d697e9`, on `findings/spec-test.md` only: the round 3 and
+round 5 forms each list it, and the round 4 forms list nothing. That agrees
+with `:255-258` and `:269-271` as far as this one file can show. I did not
+re-run the checks over the other five files.
+
+Below medium, so in prose rather than boxed:
+
+- **"round 5's start" (`:271`) reads two ways.** It means the fixed start of
+  round 5's line, ``round 5 `dc1390a..d1c8726` ``, which is how `:950-951`
+  uses "start". It could also be read as round 5's start SHA, which is a
+  different failure: the single-SHA truncation. Low.
+- **The stale-number paragraph's citation (`:910-911`) covers only half its
+  claim.** It cites my round 5 box for measurements "at `80c1bcc8` and again at
+  `c3d697e9`". That box's Outcome holds only the `80c1bcc8` measurement. The
+  `c3d697e9` one is in the proposal's own bullet at `:255`. Low.
+- **Round 5's item on the `closer`-side follow-up still stands.** `:937-938`
+  quotes the rule as "not tick while the findings file of any lane the round
+  ran is missing" and does not include the exception for a lane a later line
+  ran again. It fails closed. Low.
+
 ## Areas checked clean
 
 - **Issue coverage.** Every "Done when" / proposed-change bullet in #171,
