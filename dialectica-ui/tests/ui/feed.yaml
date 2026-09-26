@@ -87,6 +87,14 @@ steps:
       into: { objectName: "postDraftField" }
       text: "A post published end to end"
 
+  # The submit control appears only once the draft is non-empty, and the byte
+  # count appearing above it moves it down; clicked in the same moment, the
+  # click lands where it was. See the `e2e-created-stoa-flow` change's
+  # design.md D9.
+  - name: the post can be published
+    wait_for:
+      text: { objectName: "postSubmitButton" }
+
   - name: publish it
     click: { objectName: "postSubmitButton" }
 

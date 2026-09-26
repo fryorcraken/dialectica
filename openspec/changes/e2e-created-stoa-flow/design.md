@@ -306,6 +306,43 @@ one in place of a real one". "A thread is opened from a feed row and can be
 left" says the same for the thread and for the return to the feed. The defect
 broke both, and the fix makes the view do what they already say.
 
+### D9 — A control that appears with the draft is waited for before it is clicked
+
+**What went wrong.** On a documentation-only tip, UI tests run 36217960486,
+`thread.yaml` failed on "it was saved on this machine, and the thread now holds
+the root and the reply". "publish it" had passed: sitometres resolved and
+clicked `FlatButton "Publish the reply"`. But the Basecamp log in the failure
+evidence shows `publish_reply` was never called. The click reached no handler.
+
+**Why, measured with a throwaway component probe.** The submit control is
+`visible: submittable`, so it appears in the turn that fills the draft. The
+byte count also appears then, above it, and moves it down. In that same turn
+the reply composer's submit sat at y=140 in the composer. After one layout
+pass it was at y=163, and it is 37px tall. sitometres' `type:` assigns the
+text, and the `click:` came 6ms later. The inspector clicks an item at the
+geometry it holds when the command arrives (`src/inspector/client.ts`,
+`clickRef`, v0.1.2). If no layout pass has run, the click lands at y≈158.5,
+above the button's final top at 163. Whether one has run is timing: `thread`
+passed on eight runs and failed on this one, and `feed`'s post has the same
+shape.
+
+**Chosen:** a `wait_for:` on the submit control between each draft and its
+click, in `feed.yaml` and in `thread.yaml` (post and reply). The step's
+assertion is only that the control is there. Its purpose is the settle floor
+D5 names, which holds the step for at least a second, time for the layout to
+place the button. It takes the steps to 18 and 23.
+
+**Not a view defect.** A person cannot click within a frame of the control
+appearing, and nothing about the composer is wrong once laid out. The
+rejected alternative was to keep the submit control laid out while the draft
+is empty and move it only on visibility. That would change `composer-view`'s
+"no submit affordance for an unsubmittable draft" rendering to suit the
+harness.
+
+**What breaks without it:** the same intermittent miss, on any run where
+the click beats the layout pass. It cannot be forced red on demand, which is
+why the evidence is the failing run's log and the probe rather than a break.
+
 ## Risks / Trade-offs
 
 - **#152's report may have a second cause**, a stored record from before

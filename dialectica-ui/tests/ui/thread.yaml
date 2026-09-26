@@ -63,6 +63,14 @@ steps:
       into: { objectName: "postDraftField" }
       text: "A post whose thread is read end to end"
 
+  # The submit control appears only once the draft is non-empty, and the byte
+  # count appearing above it moves it down; clicked in the same moment, the
+  # click lands where it was. See the `e2e-created-stoa-flow` change's
+  # design.md D9.
+  - name: the post can be published
+    wait_for:
+      text: { objectName: "postSubmitButton" }
+
   - name: publish it
     click: { objectName: "postSubmitButton" }
 
@@ -93,6 +101,12 @@ steps:
     type:
       into: { objectName: "replyDraftField" }
       text: "A reply published end to end"
+
+  # For the reason the post's submit is waited for above. This is the click
+  # that missed in UI tests run 36217960486: `publish_reply` was never called.
+  - name: the reply can be published
+    wait_for:
+      text: { objectName: "replySubmitButton" }
 
   - name: publish it
     click: { objectName: "replySubmitButton" }

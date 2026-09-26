@@ -270,6 +270,28 @@ the next push.
       https://github.com/fryorcraken/dialectica/actions/runs/36217546041 green
       in every job
 
+### 8a. A click that beat the layout (found on the final tip)
+
+- [x] 8a.1 **Observed, on head `80eef16`, a documentation-only commit:** UI
+      tests https://github.com/fryorcraken/dialectica/actions/runs/36217960486
+      red in `sitometres thread spec` only, on "it was saved on this machine,
+      and the thread now holds the root and the reply" (`waitFor never came
+      true`; `threadItemCount === 2` false). "publish it" had passed, clicking
+      `FlatButton_QMLTYPE_136 "Publish the reply"`, but the Basecamp log in
+      its evidence has no `publish_reply` call at all. `create`, `feed`,
+      `moderation` and `join` green. CI
+      https://github.com/fryorcraken/dialectica/actions/runs/36217960370
+      green on the same head
+- [x] 8a.2 Cause, measured with a throwaway component probe (not committed):
+      the reply submit is at y=140 in the turn the draft is set and at y=163
+      after a layout pass, 37px tall, so a click aimed before the pass misses
+      it (design.md D9)
+- [x] 8a.3 A `wait_for:` on the submit control before each click, in
+      `feed.yaml` and `thread.yaml`: steps 18 and 23. Both parse with `yq`
+- [ ] 8a.4 Predicted on the pushed fix: `UI spec validation` printing
+      `feed.yaml: ok (18 steps)` and `thread.yaml: ok (23 steps)`; all five
+      UI jobs green; every CI job green
+
 ### 8. Hand-back
 
 - [x] 8.1 No break in the branch's net diff. `git diff --stat db07bdd HEAD`
