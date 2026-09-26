@@ -3,7 +3,9 @@
 ## Stages
 
 - [x] spec — `spec-writer`
-- [ ] design + code — `dev-writer`
+- [x] design + code — `dev-writer` — design.md D1–D6; `seeded-join.yaml`
+      green in CI and seen red for its reason (Implementation 3–4); the
+      committed reference checked against the core by `seeded_reference.rs`
 - [ ] tests — `tester`
 - [ ] review: correctness — `code-reviewer`
 - [ ] review: security — `code-reviewer`
@@ -121,9 +123,23 @@ out before the next push.
       `tst_stoa_screens.qml` 136 passed and `tst_render_probe.qml` 11 passed
       on CI's Qt 6.8.3. `Lint`, `UI spec validation`, `Rust core tests` and
       `Build LGX` green; `Release` skipped
-- [ ] 4.2 Revert pushed; both workflows green on it
+- [x] 4.2 Revert pushed; both workflows green on it. **Observed, on head
+      `431e722`** (the revert `ba383bc` plus the 4.1 record), as predicted:
+      UI tests https://github.com/fryorcraken/dialectica/actions/runs/36238723726
+      green in all six jobs, `sitometres seeded-join spec` printing `14
+      passed in 9.7s`, `verdict: pass` and `ok: all 14 steps passed`, with
+      the join step again logging `calls: dialectica.join_stoa,
+      dialectica.list_stoas`; CI
+      https://github.com/fryorcraken/dialectica/actions/runs/36238723730
+      green in every job (`Release` skipped), `tst_navigation.qml`'s
+      `test_a_joined_stoa_is_listed_once_the_join_screen_is_left` passing in
+      `QML lint`
 
 ### 5. Hand-back
 
-- [ ] 5.1 No break in the branch's net diff: `Main.qml` unchanged against the
-      fork point, and the tip is the revert or a documentation commit on it
+- [x] 5.1 No break in the branch's net diff: `git diff 8c098d7 HEAD --
+      dialectica-ui/src/qml/Main.qml` is empty, and `Main.qml` is not in the
+      branch's diff against its fork point `b20e8f4`. The tip is a
+      documentation commit on top of the 4.2 revert. Its own CI state is
+      reported in the hand-back and on the PR, because this file cannot name
+      a run of the commit that contains it
