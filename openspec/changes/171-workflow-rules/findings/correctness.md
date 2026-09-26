@@ -1285,3 +1285,66 @@ Below the box threshold, in prose only:
   and the forms check cannot pass on an old record. This fails closed. The
   cost is a full re-review, where the ranges in the findings headings could
   have rebuilt the lost lines. Low.
+
+## Re-review round 13 `1380d50..c3bda2b`
+
+- [x] **re-review round 13 `1380d50..c3bda2b`: no findings** — read `a0ce38f` (`proposal.md`, the new "reads `<review>` from the repository" bullet and the `--no-renames` rationale) and `c3bda2b` (`RUNNER.md` "What you read", "Record the call" and the "at least one round line" bullet; `design.md`'s new entries, Alternatives, Risks and the fail-open list), walked as a runner that has lost its report, and measured the derivation on this tree and in a scratch repository; clean
+
+The round-12 box is fixed, measured. On this tree the derivation
+`git log --diff-filter=A --format="%h %p %s" -- openspec/changes/171-workflow-rules/findings/`
+prints three lines, and the last is `f94f7b8d c222c37b`, so `<review>` is
+`c222c37`. A runner that has lost its report, following "at least one round
+line" into "Record the call", now reads that value instead of the HEAD it can
+see. From it, `git diff --no-renames --name-only c222c37b ae59b43c` lists
+`proposal.md` beside the six findings files and `tasks.md`, so the check fails
+and the runner owes a round and does not tick, which is right. Over
+`c222c37b..e7e2bbdd` the same command lists only the six findings files and
+`tasks.md`, so a skipped round 1 and a tick are right there too. The empty
+`ae59b43c..ae59b43c` range from the round-12 scenario cannot arise from the
+text any more.
+
+The three cases asked about, measured in `tmp/r13c/` with git 2.55.0 (since
+deleted):
+
+- **A file moved into `findings/` from outside it** reads as an add under the
+  pathspec: a pre-review commit that moved `notes.md` into
+  `openspec/changes/x/findings/` was listed as an `A`. This agrees with
+  `design.md`'s scratch measurement. After the review round it is a newer
+  line and does not change the last line.
+- **A findings file added before the review round** becomes the last line, so
+  `<review>` is earlier than the dispatch HEAD (`25c2647`, where the true
+  value was `36cb90c`). The range then holds the pre-review implementation
+  commits, the check fails, and the runner owes a round. That fails closed.
+- **A re-dispatch after the archive.** After a commit deleting `findings/` and
+  moving the change folder, a re-reviewer writing at the pre-archive path
+  added a newer line, `80a2949`, and the last line was unchanged. One writing
+  in the archived folder is outside the pathspec. Either way the derived value
+  stands.
+
+The one way to get a value later than the true one is for the review round's
+first findings commit to be missing from an `A` listing. The flow rules this
+out: every reviewer writes a new file, the runner commits nothing between the
+dispatch and the first pick, and a pick is a cherry-pick or a fast-forward,
+never a merge commit.
+
+Below the box threshold, in prose only:
+
+- **An earlier-than-true `<review>` is not a strict superset.** The check is a
+  tree diff, not a union of commits. If a pre-review findings add makes
+  `<review>` early, a post-review commit that reverts a change made between
+  that add and the true dispatch HEAD cancels out of the early-based diff,
+  while it is a real change against the reviewed tree. This needs a findings
+  file that no role writes before the review round, plus that exact revert.
+  I reasoned it and did not measure it. Low.
+- **After the archive the check always fails.** With `--no-renames` the
+  archive move lists every file of the change folder twice, once deleted and
+  once added, so a nothing-landed round 1 written after an archive (only a
+  lost-line repair reaches this) always costs a full round. It fails closed.
+  Low.
+- **"Every later round's findings files are adds too"** (`RUNNER.md`
+  "Record the call", `proposal.md`, `design.md`) is the stated reason for
+  reading the last line, but later rounds before the archive append to
+  existing files, which is a modification. On this tree the first line,
+  `2259e7ff`, is the spec-test review, which belongs to the review round
+  itself and was picked after a tick. The rule is right and its reason is
+  imprecise. Low, wording only.
