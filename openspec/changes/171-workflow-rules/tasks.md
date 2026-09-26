@@ -17,7 +17,7 @@
 - [x] review: security — `code-reviewer`
 - [x] review: readability — `code-reviewer`
 - [x] review: architecture — `code-reviewer`
-- [ ] review: spec-test — `spec-test-reviewer`
+- [x] review: spec-test — `spec-test-reviewer`
 - [x] review: design — `design-reviewer`
 - [ ] re-review: every commit after the review round — runner
 - [ ] findings all ticked, `findings/` deleted — `closer`
