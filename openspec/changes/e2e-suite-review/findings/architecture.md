@@ -148,3 +148,86 @@ tip (`ee8e145`) before reviewing — a fast-forward merge from a strict ancestor
 not a rewrite, and no push was made. Recorded here in case the runner wants to
 check why `baseRef: "head"` did not land this worktree on the piece's current
 tip.
+
+## Round 2 (HEAD 532794e)
+
+Scope: architecture only, over `git diff ee8e145...HEAD` — the fix pass that
+closed this file's one round-1 box, added `tst_workflow_run_bodies.sh`, moved
+`SPEC`/`REPORT`/`JUNIT`/`LGS_VERSION` to job-level `env:`, reshaped the
+adjudicator's spec-shape guard, added the `view-navigation` spec delta and its
+two `tst_e2e_handles.qml` table tests, and requalified every `design.md D<n>`
+citation in the suite's own files by change name (D10). Read against the whole
+suite, not just the diff, and against this worktree's own worktree state (this
+tree was forked stale, at `8368b2f`, and fast-forwarded to `532794e` before
+anything below was checked — see the note above, which this round reconfirms
+still applies at the new tip).
+
+This worktree was again forked stale (`8368b2f`, this piece's parent commit,
+before `openspec/changes/e2e-suite-review/` existed at all) and was fast-forwarded
+locally to `532794e` with `git merge --ff-only piece/134-e2e-suite-review`
+before any of the below — a second data point, after round 1's own note above,
+that `baseRef: "head"` is not landing dispatched worktrees on this piece's
+current tip.
+
+Ran locally and confirmed passing against the real `yq`/`jq` on this machine:
+`tst_workflow_run_bodies.sh`, `tst_adjudicate_ui_run.sh`, `tst_ui_tool_pins.sh`,
+`tst_scaffold_values_unchanged.sh`, and (via
+`run-qml-tests.sh`) `tst_e2e_handles.qml`, 8/8 including both new table tests.
+`install-yq.sh` cannot run locally (`sudo apt-get` against a runner's sources);
+`sh -n` passes.
+
+**No new findings.** Everything the round-1 box asked for landed as described:
+
+- The apt-install procedure round 1 flagged as duplicated-by-description now
+  has exactly one copy, `dialectica-ui/tests/install-yq.sh [package...]`,
+  called by `ci.yml`'s "Install yq" with no arguments and by `ui-tests.yml`'s
+  install step with the graphics-library list — the two copies can no longer
+  drift, and it lives beside the suite's other shared scripts
+  (`require-jq-yq.sh`, `adjudicate-ui-run.sh`) rather than introducing a second
+  sharing mechanism. `install-yq.sh` also runs `require_jq_yq` itself once
+  installed, tightening the same guard rather than duplicating it.
+- The round-1 box's own note that ci.yml's copy was missing the `tomlq
+  --version` sanity print no longer applies: both call sites now go through
+  the one script, which prints it once.
+- The new `tst_workflow_run_bodies.sh` is a distinct check from
+  `tst_ui_tool_pins.sh`'s existing `literal_problems` (a bare version literal
+  escaping `env:` into a `run:` body) — one guards `${{ … }}` expression
+  splicing in general (an Actions injection concern, D8), the other guards two
+  named tool-version literals specifically. Confirmed by reading both filters:
+  no overlapping case, and `tst_ui_tool_pins.sh` still passes after `$SPEC`/
+  `$REPORT`/`$JUNIT`/`$LGS_VERSION` moved to `env:`, so the new indirection is
+  not mistaken for a literal-in-run-body violation by the older check.
+- The adjudicator's step-count guard (D7) is reshaped rather than patched: the
+  `error()`-inside-`$(…)` call that could abort the script before its own
+  `problem()` collection ran is replaced with a filter that yields `null` for
+  anything uncountable, folded into one more `problem`, keeping the file's one
+  invariant ("every failing condition is reported before exiting") true for
+  this precondition too instead of adding a special-cased early exit next to
+  it — the right shape for a script whose whole point is not exiting early.
+- `SPEC`/`REPORT`/`JUNIT` at job-level `env:` and `"$LGS_VERSION"` in both
+  `cargo install` steps close the `${{ … }}`-in-`run:` gap by the same
+  mechanism the file already used correctly elsewhere (`env:` is the
+  established pattern here, not a new one), and the new check makes the rule
+  total rather than local to the three spots the security review found.
+- The two new `tst_e2e_handles.qml` tests are table-driven over cases, not
+  copy-pasted near-identical functions — the shape CLAUDE.md's "one function,
+  one job" section asks for when a fourth near-duplicate would otherwise
+  appear. `mainAreaScreens` in the same file already lists `feed`, `thread`
+  and `moderation` alongside the two screens that exist today, so the harness's
+  own naming convention does not need to change shape to grow into those.
+- D10's requalification was spot-checked with `git grep -n "design.md D"` over
+  every workflow and `dialectica-ui/tests/*.sh` file this piece's suite owns:
+  every hit in those files is qualified with its change name
+  ("the e2e-ui-suite change's design.md D12", "the e2e-suite-review change's
+  design.md D9", etc.); the unqualified `design.md D<n>` hits that remain are
+  all in QML files outside this suite (`Main.qml`, `FeedScreen.qml`,
+  `DThreadScreen.qml`, …) predating #164, which D10 explicitly leaves alone as
+  out of scope.
+- Growth readiness (round 1's own heading) is unchanged in substance: the
+  matrix and per-spec `REPORT`/`JUNIT` naming still generalise to more specs
+  with no reshaping, and now do so through `env:` rather than a splice, which
+  is the safer direction for the day the matrix stops being a hand-typed
+  single entry (design.md D8's own stated risk window). No mechanism for a
+  second live peer appeared in this round's diff either, which is consistent
+  with the proposal's "Not in this piece" and is not a finding against this
+  round.
