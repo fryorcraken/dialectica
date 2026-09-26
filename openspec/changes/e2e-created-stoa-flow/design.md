@@ -48,9 +48,11 @@ handle a spec reads pinned against a fixture that fails its null
 implementation.
 
 **Non-Goals:** the successful join and its seeder (proposal, "The second
-piece"); any change to core or to the wire contract; any view behaviour a user
-could observe. The view code here adds read-only projections, `objectName`s
-and one reshaping that changes nothing rendered (D3).
+piece"); any change to core or to the wire contract. The view code adds
+read-only projections, `objectName`s and one reshaping that changes nothing
+rendered (D3), plus the fix for one defect the feed spec found (D8). That fix
+brings the view into line with `view-navigation`, and adds no behaviour the
+specs do not already require.
 
 ## Decisions
 
@@ -230,12 +232,89 @@ not a file this repository tracks, for the empty-versus-unreadable rule; it
 now cites the `feed-view` requirement this change adds. `join.yaml`'s "does
 NOT cover" paragraph now names only the successful join.
 
+### D8 — A re-pointed screen's trigger is withheld until the rest of its pair has landed (#152)
+
+**The defect `feed.yaml` found.** UI tests run 36213442819 went red on "the
+feed was read, and holds nothing": a freshly created Stoa's first feed read
+failed, and the read after a post was published succeeded. `FeedScreen`
+reads on `onStoaAddressChanged`. `Main.qml` bound its `stoaAddress` and
+`stoaGenesis` separately from the one `chosen` value, and QML ran the address
+binding first. So the first read of every open carried the PREVIOUS record,
+`""` coming from the list, which the core refuses as "genesis record ended
+mid-field". Any later read carried the right one. That is #152's report
+exactly: the error on entering a Stoa, and "the error is transient", cleared
+by a re-read (its 2026-09-24 evidence). It also hit both returns onto the
+feed, from a thread and from moderation, because each re-points the feed from
+`""`. `DThreadScreen` had the same shape, reading on `threadId` alone, and
+was correct only because QML happened to run that binding after the address
+and the record.
+
+**Why no test saw it.** The route tests asserted what the navigator held
+(`chosen.genesis`) or what the last call carried, against fakes answering
+every read alike. The two explanations, "the read carried the record" and
+"a read was made", gave the same answer. The tests added in
+`tst_navigation.qml` answer a read only when it carries the chosen Stoa's
+record, and check every read rather than the last.
+
+**Chosen: `Main.qml` withholds the trigger.** The feed's address binding reads
+`feed.stoaGenesis === root.chosen.genesis`, and the thread's id binding reads
+the thread's address and record the same way. If the trigger's binding runs
+first, it sees the old record, yields `""` and triggers nothing. When the
+record lands, the trigger re-evaluates, is released, and the one read it
+starts carries the pair. The screens keep one trigger each and are unchanged
+in behaviour when driven directly, as their component tests drive them.
+
+**Rejected alternatives, each measured or read:**
+
+- **Re-read on both halves**, the shape `DJoinScreen` uses for its lookup. It
+  was the first fix tried here. The last read was right, but one transition
+  sent a read carrying `""` for a Stoa whose record the view holds before
+  correcting it. `view-navigation`'s "The view holds no Stoa of its own"
+  says the view "MUST NOT send a placeholder or an empty one in place of a
+  real one", so the fix broke the same sentence the defect did. Measured: the
+  every-read check went red on it ("opened from the list: read 1 of 2 carried
+  the record").
+- **Defer the read with `Qt.callLater`.** It coalesces to one read, but
+  asynchronously. The component suite and `feed.yaml`'s `expect:` steps rely
+  on the read having happened when the transition returns (D5).
+- **Hand each screen one object instead of three properties.** That is the
+  honest data shape, and it would change the interface every standalone
+  screen test uses: `stoaAddress` and `stoaGenesis` appear in 20 test files.
+  It is the right follow-up if a third screen acquires a pair.
+
+**What breaks without it, measured.** With the feed's guard removed, exactly
+one test goes red, `test_the_feed_is_read_with_the_record_on_every_route_onto_it`,
+with the core's refusal of `''`. Each of its three routes is red alone
+against the unfixed code: from the list, back from a thread, back from
+moderation. The thread's guard is invisible in the committed binding order. With
+`threadId` bound above the address and record and no guard, three
+`tst_navigation.qml` tests go red, among them
+`test_the_thread_is_read_with_the_record_when_it_is_opened` ("No thread was
+given to this view."). With the guard, all 568 component tests pass in
+that reversed order and in the committed one.
+
+**What it does not address.** #152's report also allows a pre-#130 profile
+holding a stored record that is empty or short. Nothing here touches stored
+data, so this fix may not be the whole of #152, and the PR does not close it.
+
+**No spec change: the behaviour is already contracted.** `view-navigation`'s
+"The view holds no Stoa of its own, and the feed is reached from the list"
+requires the record to travel with the address and forbids sending "an empty
+one in place of a real one". "A thread is opened from a feed row and can be
+left" says the same for the thread and for the return to the feed. The defect
+broke both, and the fix makes the view do what they already say.
+
 ## Risks / Trade-offs
 
-- **#152 is intermittent, so one green `feed.yaml` does not close it.** →
-  The spec runs on every PR, so the samples accumulate; a red read step with
-  "genesis record ended mid-field" is #152's reproduction, and goes on #152
-  (proposal). The step is not to be weakened.
+- **#152's report may have a second cause**, a stored record from before
+  #130 (D8). → `feed.yaml` opens a freshly created Stoa on every PR, so a
+  regression of the binding race goes red here. A stored-data case needs an
+  old profile, which no run here has.
+- **The trigger guards in `Main.qml` are a rule the next screen must copy.**
+  A screen re-pointed by the navigator that reads on one property of a pair
+  has the defect D8 fixed. → The tests in D8 cover the two screens that read;
+  a third is the point at which the one-object interface stops being a
+  follow-up.
 - **The moderation step's power to fail rests on the settle floor** (D5). →
   sitometres is pinned exactly and `tst_ui_tool_pins.sh` fails on drift; the
   D6 red run is the measurement. A sitometres bump should re-run that break.

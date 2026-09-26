@@ -284,10 +284,17 @@ ScreenFrame {
     // first Stoa opened would be the only one ever read: `reload()` ran at
     // construction, when the address was still empty, and nothing asked again.
     //
-    // It is `stoaAddress` that triggers rather than `stoaGenesis`, and the pair
-    // is not arbitrary — the address is what identifies the Stoa, and the record
-    // travels with it. A genesis arriving separately for the same address is the
-    // same Stoa, so re-reading on it would issue a second identical call.
+    // It is `stoaAddress` that triggers rather than `stoaGenesis`: the address is
+    // what identifies the Stoa, and the record travels with it.
+    //
+    // **So the record must already be here when the address arrives**, and
+    // that is the caller's to guarantee, because two properties set by two
+    // bindings arrive one after the other. `Main.qml` withholds the address
+    // until the record it binds has landed. It did not, and the first read of
+    // every open carried the PREVIOUS record — "" coming from the list — which
+    // the core refused as "genesis record ended mid-field" until something read
+    // again: issue #152, and `feed.yaml`'s red in UI tests run 36213442819 (the
+    // `e2e-created-stoa-flow` change's design.md D8).
     //
     // This is also what re-probes BOTH identity answers on arrival at a feed,
     // which is the rule `reload()` carries: neither is answered from a value

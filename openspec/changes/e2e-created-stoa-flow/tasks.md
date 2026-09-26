@@ -96,6 +96,28 @@ the next push.
       and `feed.yaml` is right to fail on it. CI
       https://github.com/fryorcraken/dialectica/actions/runs/36213442743:
       `Lint`, `QML lint`, `UI spec validation` and `Rust core tests` green
+- [x] 3.2 Runner's routing: fix it in this piece (#152's reproduction). Test
+      first: `tst_navigation.qml`'s
+      `test_the_feed_is_read_with_the_record_on_every_route_onto_it` and
+      `test_the_thread_is_read_with_the_record_when_it_is_opened`, against a
+      fake that answers a read only when it carries the chosen Stoa's record,
+      checking every read. **Red against the unfixed code** on each of the
+      feed's three routes, run one at a time (25 passed, 1 failed each): "opened from the
+      list", "back from a thread" and "back from moderation", each with the
+      fake's refusal of `''`. The thread test passed against the unfixed code
+      only through binding order (design.md D8)
+- [x] 3.3 Fix (design.md D8): `Main.qml` withholds the feed's address until
+      its record has landed, and the thread's id until its address and record
+      have. The first fix tried, re-reading on both halves, was replaced when
+      the every-read check went red on it ("read 1 of 2 carried the
+      record"). Green: 568 component tests with the bindings in the committed
+      order and in reversed order; removing the feed's guard turns exactly the
+      feed test red; the thread's guard, removed with `threadId` bound first,
+      turns three tests red. qmllint and `check_qml_members.sh` clean. No spec
+      change: `view-navigation` already forbids sending an empty record in
+      place of a real one
+- [ ] 3.4 Predicted on the pushed fix: every `ci.yml` job green; all five
+      `ui-tests.yml` jobs green, `feed` with `ok: all 17 steps passed`
 
 ### 4. `create.yaml` goes red when the key block outlives the key
 

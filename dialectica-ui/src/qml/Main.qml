@@ -401,7 +401,23 @@ Item {
                 id: feed
                 objectName: "feed"
                 visible: root.screenShown === "feed"
-                stoaAddress: root.chosen !== null ? root.chosen.stoa : ""
+                // **The address is withheld until the record has landed**, and
+                // that is what makes the pair arrive together. The feed reads on
+                // its address, and the two bindings below update one after the
+                // other when `chosen` changes, in an order QML does not promise.
+                // With the address first, the read went out carrying the
+                // PREVIOUS record ("" from the list), which the core refuses as
+                // "genesis record ended mid-field": issue #152, and the
+                // `e2e-created-stoa-flow` change's design.md D8.
+                //
+                // Reading `feed.stoaGenesis` here makes the address depend on
+                // it: if the address binding runs first it sees the old record,
+                // yields "" and so triggers nothing; when the record lands, the
+                // address is re-evaluated and released, and the one read it
+                // triggers carries the pair. No read ever carries a stale record,
+                // whichever order the bindings run in.
+                stoaAddress: root.chosen !== null && feed.stoaGenesis === root.chosen.genesis
+                    ? root.chosen.stoa : ""
                 stoaTitle: root.chosen !== null ? root.chosen.foundingTitle : ""
                 stoaGenesis: root.chosen !== null ? root.chosen.genesis : ""
                 Layout.alignment: Qt.AlignHCenter
@@ -461,7 +477,14 @@ Item {
                 stoaAddress: root.reading !== null ? root.reading.stoa : ""
                 stoaTitle: root.reading !== null ? root.reading.foundingTitle : ""
                 stoaGenesis: root.reading !== null ? root.reading.genesis : ""
-                threadId: root.reading !== null ? root.reading.rootOp : ""
+                // Withheld until the address and the record have landed, for
+                // the reason the feed's address is: the thread reads on its id,
+                // so the id is what must arrive last. This held before only
+                // because QML happened to run this binding after the other two.
+                threadId: root.reading !== null
+                          && thread.stoaAddress === root.reading.stoa
+                          && thread.stoaGenesis === root.reading.genesis
+                    ? root.reading.rootOp : ""
                 Layout.alignment: Qt.AlignHCenter
                 Layout.preferredWidth: Math.min(DTheme.cardWidth, root.width - 2 * DTheme.cardPaddingX)
 
