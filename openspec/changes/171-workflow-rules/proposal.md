@@ -138,6 +138,8 @@ another file.
     `grep -rn "^- \[ \]"` passes it, and it is a box, so `grep -rc "^- \["`
     counts it. Clean *areas* stay in prose, as the reviewer role files say;
     the verdict box is one line for the round, not a box per area.
+    `RUNNER.md`'s brief bullet gives the runner that reason in two sentences,
+    so a brief it writes does not drop the tick or the box.
   - **If the `closer` has already deleted `findings/`**, which it does before
     archiving, the file is written afresh at the same name in the change's
     folder as it now stands, the archived one, holding the re-reviewer's
@@ -254,7 +256,10 @@ another file.
     commit its branch does not. The `closer` stops and reports. It does not
     force, and it does not fetch and merge the remote piece ref either: what
     the remote holds that the runner's HEAD lacks is not known to be
-    reviewed. `closer.md` states this for both pushes.
+    reviewed. `closer.md` states this for both pushes. Its "Your report"
+    asks for the refusal git printed, and its closing list of what ends a
+    turn names a refused push, since a refused push is a return like the
+    others.
   - **`BEHIND` in Step 4 means merge `main` now, by Step 2's route**,
     conflict rule included, and then Step 4 against the new run. It replaces
     Step 4's "stop and report", which contradicted Step 2's own instruction to
@@ -277,7 +282,9 @@ another file.
     form. This edit is inside the owner-authorised Step 2 rewrite: without it,
     Step 2's merge can fail on the first dispatch whenever the branch is
     stale, since `closer.md` as it stands has Step 1 delete `findings/` on
-    every first dispatch.
+    every first dispatch. `closer.md` Step 1 keeps one sentence of that
+    reason (a staged deletion makes `git merge` refuse), so a later edit does
+    not move the deletion back; the rest is in `design.md`.
   - **A merge of `main` that stops on no conflict needs no review.** It changes
     none of the piece's own lines, and it adds nothing to the squash: what it
     brings in is already on `main`.
@@ -335,7 +342,10 @@ another file.
     then ran `reset` to `d41d0fd`, which `RUNNER.md` now forbids.
     `git merge --ff-only` either keeps the SHAs or refuses; it never
     diverges silently, which `git cherry-pick --ff` does when HEAD is not
-    the commit's parent. If a
+    the commit's parent. `RUNNER.md`'s "One piece is one PR" bullet on
+    bringing the `dev-writer`'s pushed commits onto the runner's HEAD says
+    so too, pointing to "Dispatching": it said "you cherry-pick", which
+    this rule contradicts. If a
     fast-forward refuses, the runner stops and reports, and takes neither of
     the hints git prints with the refusal: `git merge --no-ff` would make a
     merge commit that is the runner's own content, and `git rebase` rewrites
@@ -620,7 +630,10 @@ None. This change edits agent instructions and no system behaviour, so
   "Dispatching" (cherry-pick, or fast-forward for the `closer`, a conflict
   resolver and an agent whose commits are already on the remote piece ref;
   a refused fast-forward stops the runner; a cherry-pick that conflicts goes back to its agent, and the
-  review round's ticks are expected to conflict; owner-authorised), and where "What you read" and "Rebuild the state" find
+  review round's ticks are expected to conflict; owner-authorised), the "One
+  piece is one PR" bullet that said the runner cherry-picks the
+  `dev-writer`'s pushed commits (owner-authorised, with the fast-forward
+  rule), and where "What you read" and "Rebuild the state" find
   the stage block once the change is archived (#171).
 - `.claude/agents/spec-writer.md`: the stage-block template (#171); and the
   one sentence above it claiming ticks on neighbouring rows cannot conflict,
