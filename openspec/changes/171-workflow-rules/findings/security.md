@@ -792,7 +792,7 @@ accepted record; nobody needs to act for the check to be sound.
 
 ## Re-review round 8 `6d43cda..d1d2165`
 
-- [ ] **`spec-writer`** — `proposal.md:906-920` and `:928-962` — the residual
+- [x] **`spec-writer`** — `proposal.md:906-920` and `:928-962` — the residual
       the copy rule leaves is recorded as "a runner copying from the wrong
       line", but a stale number written **on the line itself** is also left,
       and the `closer`-side follow-up it is routed to cannot see it.
@@ -838,6 +838,65 @@ accepted record; nobody needs to act for the check to be sound.
       slip, the proposal says the residual is fully routed when it is not,
       and the check this piece defers to the owner would be designed without
       it.
+
+      **Fixed** (`spec-writer`, this commit), as asked: recorded and routed,
+      with no role-file change. In `proposal.md`:
+      - "What it still cannot see", under the pre-tick check, records a wrong
+        number on the line itself as a residual separate from copying from
+        the wrong line, with this box's scenario and measurement (re-run at
+        `291499c7`: the same five files). It says the copy rule moves the
+        number's source to the line without checking the line, and that only
+        a second reader that checks the numbers can see it.
+      - The standing-test entry's stale-number bullet now names two
+        residuals, the wrong line and a repeated or stale number on the line,
+        both routed to the `closer`-side follow-up, the second only through
+        its number criterion.
+      - The `closer`-side follow-up's "The gap" names a line whose number an
+        earlier line already carries. "What a `closer`-side check would do"
+        now opens with "the round numbers under the re-review row are unique
+        and consecutive, 1, 2, 3 in the order the lines stand", says why
+        matching forms alone cannot see a repeated number, and notes that the
+        number check reads only the line's fixed start. Measured:
+        `git grep -n -F` for the indented round lines in `tasks.md` at
+        `291499c7` returns eight lines numbered 1 to 8, once each.
+
+      **Not chosen: a clause in `RUNNER.md`'s "Record the call"** saying a
+      new line's number is one more than the highest already under the row.
+      The rule there, "numbered from 1 in the order you write the lines",
+      already fixes each line's number: the n-th line carries n. A repeated
+      number already breaks it. So the clause would restate a rule the runner
+      already has, in another form, and it would be enforced by the same
+      runner whose slip it targets. It adds no check. The slip stays in the
+      class this piece already routes to a second reader, "a runner that
+      skips the check". The clause would also reopen a role file to the
+      correctness, security and readability lanes for no gain in what can be
+      detected. The proposal says the existing rule makes a repeated number a
+      breach, so the residual is recorded as a runner breaking a stated rule.
+      It is not a gap in the rule.
+
+      **For the `dev-writer`:** `design.md` only. `RUNNER.md` and every
+      other file under `.claude/` stay unchanged.
+      1. "What it still cannot see" (`:504-515`): add the wrong-number-on-
+         the-line case after the wrong-line case, with the measurement, and
+         make "No test of the role files can see this" cover both.
+      2. The stale-number Risks paragraph (`:1303-1317`): "What that leaves,
+         a runner copying from the wrong line, is the next Risk" becomes two
+         residuals, the wrong line and a repeated or stale number on the
+         line. Both go to the next Risk.
+      3. "[Only the runner runs the pre-tick check.]" (`:1327-1333`): add a
+         line whose number an earlier line already carries to what goes
+         unnoticed. Say the deferred `closer`-side check sees it only by
+         checking that the numbers are unique and consecutive.
+      4. "What else was considered" (`:549`): the residual list there gains
+         the repeated number alongside "copies its forms from the wrong line".
+      5. The copy-rule Decision ("The check's number and range are copied
+         from the round's line, not typed"): add a **Rejected** entry for the
+         `RUNNER.md` "one more than the highest" clause, with the reasoning
+         above. It restates "numbered from 1 in the order you write the
+         lines", it is enforced by the runner whose slip it targets, and it
+         adds no check.
+      6. PR #174's body: the `closer`-side follow-up names the unique-and-
+         consecutive number criterion.
 
 Security only, on Opus, narrowed to `16958b3` and `d1d2165`. I read `git diff
 6d43cda..d1d2165` over `RUNNER.md`, `proposal.md` and `design.md` in full,

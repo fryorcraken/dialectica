@@ -268,11 +268,29 @@ another file.
       previous round's line, it passes on that line's records. At
       `c3d697e9`, round 5's forms list `spec-test.md` and `design-review.md`
       among others, the two lanes round 6 ran, so a round 6 check run with
-      round 5's start would pass whatever round 6 had written. No test of
-      the role files can see this, because the command there carries `<n>`
-      and `<range>` as placeholders; only a second reader of the round lines
-      can ("An independent check of the re-review row by the `closer`", in
-      "Out of scope").
+      round 5's start would pass whatever round 6 had written. **Nor can it
+      see a wrong number on the line itself**, which is a separate residual
+      from copying from the wrong line. A re-run's line written by taking the
+      previous line as a template, with its number left unchanged, repeats
+      that line's number; the brief, the reviewer's heading and the check are
+      all copied from it, so they agree, and the check passes on the earlier
+      run's record over the same range, whenever that run left one for the
+      lane, before the re-run has written anything. The copy rule moves the
+      number's source from the runner's memory to the line; it does not check
+      the line. Measured at `9e6dde2f`, and again at `291499c7`: the forms
+      from a second line starting ``round 3 `34fd428..dc1390a` `` list
+      `architecture.md`, `correctness.md`, `design-review.md`, `security.md`
+      and `spec-test.md`, every one from the first run (`findings/security.md`, re-review round 8
+      `6d43cda..d1d2165`, box). "Numbered from 1 in the order the lines are
+      written" already fixes each line's number, the n-th line carrying n,
+      so a repeated or stale number breaks a stated rule, as skipping the
+      check does. No test of the role files can see either case, because the
+      command there carries `<n>` and `<range>` as placeholders; only a second
+      reader of the round lines can ("An independent check of the re-review
+      row by the `closer`", in "Out of scope"), and the wrong number only by
+      checking that the numbers under the row are unique and consecutive,
+      since forms derived from a line with a repeated number are satisfied by
+      the earlier run's record.
   - **This piece's rounds 1 and 2 predate the round number.** Their briefs
     gave ``## Re-review `<range>` `` and
     ``**re-review `<range>`: no findings**``, so the check for those two
@@ -915,9 +933,16 @@ another file.
     when it runs the check, and a test that runs the role file's command
     against fixtures stays green whatever the runner types. This piece
     answers it in the pre-tick check itself, whose round and range are
-    copied from that round's own line (above). What that leaves, a runner
-    copying from the wrong line, is the same gap as a runner skipping the
-    check, and belongs to the `closer`-side follow-up below.
+    copied from that round's own line (above). That leaves two residuals,
+    each the same gap as a runner skipping the check, and both belong to the
+    `closer`-side follow-up below:
+    - a runner copying from the wrong line;
+    - a line that itself carries a repeated or stale number, such as a
+      re-run's line templated from the previous one with the number left
+      unchanged. The copy rule carries that number into the brief and the
+      check, so all three agree and the check passes on the earlier run's
+      record. The follow-up sees it only by its number criterion, not by
+      matching forms.
 
   Not added here: this change adds no tests or CI (Impact), and a test
   holding its own copy of a command would not fail when a role file's copy
@@ -937,12 +962,21 @@ another file.
     from that round's line, and not tick while the findings file of any
     lane the round ran is missing. That makes the tick rest on the
     re-reviewers' own records, but the runner both runs the check and ticks
-    the row, so a runner that skips the check, or runs it with forms copied
-    from the wrong line, goes unnoticed: `closer.md` Step 1 checks only that
+    the row, so a runner that skips the check, runs it with forms copied
+    from the wrong line, or writes a round line whose number an earlier line
+    already carries, goes unnoticed: `closer.md` Step 1 checks only that
     every row but the `closer`'s own is ticked or struck.
-  - **What a `closer`-side check would do:** in Step 1, match each round
-    line under the re-review row against the findings files, by the same
-    two forms.
+  - **What a `closer`-side check would do:** in Step 1, check that the round
+    numbers under the re-review row are unique and consecutive, 1, 2, 3 in
+    the order the lines stand; and match each round line under the row
+    against the findings files, by the same two forms. Matching alone cannot
+    see a repeated number: it derives each round's forms from that round's
+    line, so a line repeating an earlier number yields forms the earlier
+    run's record satisfies (`findings/security.md`, re-review round 8
+    `6d43cda..d1d2165`, box). The number check reads only the line's start,
+    its one fixed part, so it needs no fixed format for the rest of the
+    line. On this piece's `tasks.md`, at `291499c7`, the eight round lines
+    carry 1 to 8, once each.
   - **Why it is not a one-line addition.** The `closer` deletes `findings/`
     at the start of Step 3, just before `openspec archive`, so a
     re-dispatched `closer` has files only for the rounds recorded since
