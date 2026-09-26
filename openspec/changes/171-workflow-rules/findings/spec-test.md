@@ -378,6 +378,95 @@ Below medium, so in prose rather than boxed:
   commits, or every agent's", and the `README.md` passages are about any
   agent's commits. The body is the operative text. Low.
 
+## Re-review round 5 `dc1390a..d1c8726`
+
+- [ ] **`spec-writer`** — `proposal.md:844-847` (standing-test entry, fail
+      closed) versus `proposal.md:199-203` (the line rule, added in this range)
+      — the entry says "A pre-tick pattern with a wrong character lists
+      nothing, and the runner cannot tick". That is false for one character,
+      the round number, whenever the wrong number is an earlier run's over the
+      same range. In that case the check fails open.
+      **Scenario:** the line rule now gives a same-range re-run its own line
+      whether it is a fresh dispatch or a `SendMessage` continuation, so two
+      numbers over one range is a routine case, not a rare one. This piece
+      has one already: rounds 3 and 4 share `34fd428..dc1390a`
+      (`tasks.md:27-28`). The runner types or copies the number by hand. If it
+      runs the check for the re-run with the earlier line's number, the
+      rejected run's committed record matches, the lane's file is listed, and
+      the runner ticks although the re-run has written nothing. `:199-203`
+      states exactly this mechanism ("the rejected run's record is already
+      committed under the old number, so the check would pass on it before the
+      continuation had done anything"). But the standing-test entry files every
+      wrong-character pattern under fail closed, and lists only the bare-range
+      and single-SHA truncations under fail open (`:858-865`). The entry uses
+      that split to decide which commands a test covers first, so this case
+      sits in the wrong queue. It is the same misclassification as round 2's
+      "Both fail closed" box above, and the fix there ("only a truncation that
+      drops it fails open") left this case out.
+      **Needed:** move the stale-number case to the fail-open list, and narrow
+      the fail-closed sentence to a wrong character that no earlier record
+      over the range carries. Whether the check itself should guard against
+      it, for example by having the runner copy the number from the new line
+      rather than type it, is a design call this finding leaves open.
+      **Measured**, on my own findings file only (it carries round 3's verdict
+      box for `34fd428..dc1390a`; round 4 re-ran another lane over that range):
+      `git grep -l -F -e '## Re-review round 3 `34fd428..dc1390a`' -e '**re-review round 3 `34fd428..dc1390a`: no findings**' -- openspec/changes/171-workflow-rules/findings/spec-test.md`
+      lists `spec-test.md`. The same command with `round 4` lists nothing.
+      So if spec-test had been the lane re-run in round 4, a check typed with
+      round 3's number would have passed before the re-run wrote anything,
+      and the correct one would have held the tick. Severity: medium. It is a
+      fail-open gate classified as fail closed, in the entry written to be
+      lifted into the follow-up issue.
+
+Read: the `proposal.md` range diff in full, and `proposal.md` at HEAD in full
+(`d1c8726`'s proposal is HEAD's; `07f0a5f` changes only `tasks.md`).
+`tasks.md` and `.openspec.yaml` in full. `git diff dc1390a..d1c8726 --stat`,
+stat only. Issues #171, #170, #169 and #133, read fresh with `gh issue view`:
+all open, no comments, bodies unchanged. No file under `.claude/agents/`, no
+`design.md`, and no other findings file was read. The measurement above
+searched my own file only.
+
+**Consistency after `47f6008`.** The line rule (`:186-203`), the pre-tick
+exception (`:220-223`, "a lane that a later line ran again") and Impact
+(`:1074-1076`, "fresh or continued") agree. The one place the pre-tick
+paragraph continues a reviewer, a lane whose file is not listed (`:226-227`),
+is the "finishing a round it has not yet recorded" exception, so it
+correctly gets no line, and the fresh dispatch beside it does. The other
+continuations the proposal names fall inside the exception too: committing
+uncommitted output (`:601-609`, "committing") and rebasing after a
+conflicting cherry-pick (`:616-623`, "rebasing"). `tasks.md` 13.x states it
+supersedes 12.2's "a `SendMessage` continuation none", and 13.2 replaces
+"dispatched" with "ran" as `:220-222` and `:894` now read. The closer-side
+follow-up's gap statement (`:893-894`) was reworded the same way. No
+requirement moved between files in this range.
+
+Below medium, so in prose rather than boxed:
+
+- **The closer-side follow-up omits the re-run exception** (`:887-901`). It
+  quotes the runner's rule as "not tick while the findings file of any lane
+  the round ran is missing", with no "except a lane a later line ran again",
+  and has the `closer` "match each round line ... against the findings
+  files". A check filed from that text as it stands would stop on this
+  piece's own history: round 3's readability run wrote nothing and was
+  re-run as round 4 (`tasks.md:28`). It fails closed, since the `closer`
+  stops and reports, and the entry is a follow-up, not a rule. But it is
+  written "to be lifted into an issue as it stands", so the exception
+  belongs in its "For the issue to settle" or in its gap statement. Low.
+- **The exception's examples mix two cases** (`:191-194`). "Finishing a round
+  it has not yet recorded, such as after a stall, committing, or rebasing"
+  puts rebasing under "not yet recorded", but a rebase after a conflicting
+  cherry-pick happens because the record is already committed. Both cases
+  meet the operative test, "adds no review to a record already committed",
+  so the rule's outcome is right. Only the "such as" grouping reads wrong.
+  Low.
+
+**Standing-test coverage of the rule's checkable claims.** The one checkable
+claim new in this range is `:199-203`'s: a continued re-run sharing the old
+number would pass the check. That is a claim about the pre-tick command,
+which the entry names (`:830-832`), but it is about a failure mode the entry
+misclassifies (the box above). The rest of the line rule is judgement the
+runner exercises, not a command's output.
+
 ## Areas checked clean
 
 - **Issue coverage.** Every "Done when" / proposed-change bullet in #171,
