@@ -500,6 +500,18 @@ paragraph, with the reason in one sentence after the command's description.
   reader of those lines; the second reader is the `closer`-side check
   deferred to the owner ("What else was considered", below, and `proposal.md`,
   "Out of scope").
+- **Rejected: a clause in `RUNNER.md`'s "Record the call"** saying a new
+  line's number is one more than the highest already under the row, against
+  a re-run's line templated from the previous one with its number unchanged
+  (`findings/security.md`, re-review round 8 `6d43cda..d1d2165`, box). The
+  rule there, "numbered from 1 in the order you write the lines", already
+  fixes each line's number: the n-th line carries n, and a repeated number
+  already breaks it. The clause would restate that rule in another form, and
+  it would be applied by the same runner whose slip it targets, so it adds no
+  check. The slip stays in the class this piece already routes to a second
+  reader, a runner that skips the check. It would also reopen a role file to
+  the correctness, security and readability lanes for no gain in what can be
+  detected.
 
 **What it still cannot see.** A later reviewer who quotes an earlier round's
 heading or verdict box whole, in prose, satisfies that round's check. The
@@ -510,9 +522,28 @@ searches whatever forms it is given: copied from the wrong line, such as the
 neighbouring line over the same range or the previous round's line, it passes
 on that line's records. At `c3d697e9`, round 5's forms list `spec-test.md` and
 `design-review.md` among others, the two lanes round 6 ran, so a round 6
-check run with round 5's forms would pass whatever round 6 had written. No
-test of the role files can see this, since the command there carries `<n>` and
-`<range>` as placeholders; it is in Risks, with a runner that skips the check.
+check run with round 5's forms would pass whatever round 6 had written. Nor
+can it see a wrong number on the line itself, which is a separate residual
+from copying from the wrong line. A re-run's line written by taking the
+previous line as a template, with its number left unchanged, repeats that
+line's number; the brief, the reviewer's heading and the check are all copied
+from it, so they agree, and the check passes on the earlier run's record over
+the same range, whenever that run left one for the lane, before the re-run has
+written anything. The copy rule moves the number's source from the runner's
+memory to the line; it does not check the line. Measured at `9e6dde2f`, and
+again at `291499c7`: the forms from a second line starting
+``round 3 `34fd428..dc1390a` `` list `architecture.md`, `correctness.md`,
+`design-review.md`, `security.md` and `spec-test.md`, every one from the first
+run (`findings/security.md`, re-review round 8 `6d43cda..d1d2165`, box).
+"Numbered from 1 in the order you write the lines" already fixes each line's
+number, the n-th line carrying n, so a repeated or stale number breaks a
+stated rule, as skipping the check does. No test of the role files can see
+either case, since the command there carries `<n>` and `<range>` as
+placeholders; both are in Risks, with a runner that skips the check. Only a
+second reader of the round lines can see them, and the wrong number only by
+checking that the numbers under the row are unique and consecutive, since
+forms derived from a line with a repeated number are satisfied by the earlier
+run's record.
 
 **This piece's rounds 1 and 2 predate the number.** Their briefs gave the
 un-numbered forms, so the check for those two rounds searches those forms,
@@ -546,8 +577,8 @@ lines, whose only fixed part is their start. A runner-side check is one
 command against files that already exist. **What breaks without it:** a
 round's completion rests on the runner's reading of whether an agent has
 finished, which is the failure a stalled agent produces; the residual, a
-runner that skips the check or copies its forms from the wrong line, is in
-Risks. **What breaks without the number:**
+runner that skips the check, copies its forms from the wrong line, or writes a
+round line repeating an earlier line's number, is in Risks. **What breaks without the number:**
 a lane run again, fresh or continued, has its check satisfied by the run it
 replaced. **What
 breaks without the exact forms:** a later round's prose satisfies an earlier
@@ -1313,8 +1344,13 @@ no role file.
   green whatever the runner types. It is answered by the copy rule in
   Decisions ("The check's number and range are copied from the round's line,
   not typed"): the check's round and range are copied from that round's own
-  line, as the brief's are. What that leaves, a runner copying from the wrong
-  line, is the next Risk.
+  line, as the brief's are. That leaves two residuals, each the same gap as a
+  runner skipping the check, and both are the next Risk: a runner copying
+  from the wrong line; and a line that itself carries a repeated or stale
+  number, such as a re-run's line templated from the previous one with the
+  number left unchanged. The copy rule carries that number into the brief and
+  the check, so all three agree and the check passes on the earlier run's
+  record (`findings/security.md`, re-review round 8 `6d43cda..d1d2165`, box).
 
   `RUNNER.md`'s `--ff-only`, `--remerge-diff` and `--cherry-mark` claims
   describe git's own behaviour, and a test of them would mostly re-test git.
@@ -1325,12 +1361,17 @@ no role file.
   first. Not added here: this change adds no tests or CI, and a test holding
   its own copy of a command would not fail when a role file's copy changed.
 - **[Only the runner runs the pre-tick check.]** It makes the re-review row's
-  tick rest on the re-reviewers' own records, but a runner that skips it, or
-  runs it with forms copied from the wrong line, goes unnoticed: the `closer`
-  reads neither the heading nor the verdict box, and nothing else reads the
-  round lines against the forms the check used. →
+  tick rest on the re-reviewers' own records, but a runner that skips it,
+  runs it with forms copied from the wrong line, or writes a round line whose
+  number an earlier line already carries, goes unnoticed: the `closer` reads
+  neither the heading nor the verdict box, and nothing else reads the round
+  lines against the forms the check used. →
   Deferred to the owner as a design question (`proposal.md`, "Out of scope",
-  "An independent check of the re-review row by the `closer`").
+  "An independent check of the re-review row by the `closer`"). That check
+  sees the repeated number only by checking that the round numbers under the
+  row are unique and consecutive, 1, 2, 3 in the order the lines stand:
+  matching alone derives each round's forms from that round's line, so a line
+  repeating an earlier number yields forms the earlier run's record satisfies.
 - **[The review round costs at least three `SendMessage` round trips.]** →
   Accepted for this piece. The one-file-per-row follow-up removes it.
 - **[`tester.md` said "Keep the markers and report each one — the spec-writer

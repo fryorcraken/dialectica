@@ -448,3 +448,29 @@ them.
       copied from the wrong line.
 - [x] 15.5 `findings/design-review.md`'s round 6 box flipped with its outcome.
 - [x] 15.6 `openspec validate 171-workflow-rules --strict` passes.
+
+### 16. After the `spec-writer`'s repeated-number residual (`0fbebed`)
+
+Follows `proposal.md`'s pre-tick bullet, standing-test entry and
+`closer`-side follow-up as `0fbebed` left them; `design.md` and the PR body
+only. No `.claude/` file changes, and no findings box is touched.
+
+- [x] 16.1 `design.md`'s "What it still cannot see": the wrong number on the
+      line itself follows the wrong-line case as a separate residual, with its
+      measurement; "No test of the role files can see" covers both cases.
+      Verify, at `291499c7`: the forms from ``round 3 `34fd428..dc1390a` ``
+      list `architecture.md`, `correctness.md`, `design-review.md`,
+      `security.md` and `spec-test.md`; the round lines under the re-review
+      row carry 1 to 8, once each.
+- [x] 16.2 `design.md` Risks: the stale-number paragraph names two residuals,
+      the wrong line and a repeated or stale number on the line, both to the
+      next Risk; "Only the runner runs the pre-tick check" adds a line whose
+      number an earlier line already carries, seen by the deferred
+      `closer`-side check only through unique and consecutive numbers.
+- [x] 16.3 `design.md`'s "What else was considered": the residual list gains
+      the repeated number.
+- [x] 16.4 `design.md`'s copy-rule Decision: a Rejected entry for the
+      `RUNNER.md` "one more than the highest" clause.
+- [x] 16.5 PR #174's body: the `closer`-side follow-up names the
+      unique-and-consecutive number criterion.
+- [x] 16.6 `openspec validate 171-workflow-rules --strict` passes.
