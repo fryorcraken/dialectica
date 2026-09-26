@@ -273,3 +273,27 @@ statements of the old cherry-pick route were corrected and which kept.
 Nothing else is stale: every Risk that has been fixed says so with its
 mitigation, no Decision is superseded by a later callback, and every
 measurement I re-ran holds.
+
+## Re-review round 3 `34fd428..dc1390a`
+
+- [x] **re-review round 3 `34fd428..dc1390a`: no findings** — read `design.md` in full, the range's diff of `RUNNER.md`, `closer.md` and `dev-writer.md`, `RUNNER.md:238-282`, the three round-2 boxes above against HEAD, and #171, #170, #169, #133 fresh; clean
+
+All three round-2 fixes hold at HEAD: `git grep -n -F "reached the piece by
+cherry-pick"` over `design.md` returns nothing; `git grep -n -i "cherry-pick"`
+over `dev-writer.md` returns line 158 only, the one sentence the fast-forward
+entry (`design.md:902-917`) says stays; and `design.md:1179-1192` records why
+`README.md:238-243`'s stage-block sentences are kept.
+
+Each Decision the range changed matches the role-file text it describes. The
+round-numbered forms and pre-tick check (`design.md:382-491`) match
+`RUNNER.md`'s brief bullet, "Record the call" and the tick paragraph, including
+the lane re-run getting its own line, the later-round exception, the single
+quotes, and the "What you read" row. The fast-forward criterion
+(`design.md:852-926`) matches `RUNNER.md:242-269` and the four reworded
+`dev-writer.md` sentences quoted word for word. The `spec-writer.md`
+correction entry's account of `dev-writer.md:131` matches the new pointer
+wording. The untracked-file paragraph (`design.md:1093-1114`) matches the
+moved `RUNNER.md` passage, including the one exception (an incoming commit
+adding a file at the untracked path). The reclassified Risks name commands
+that are in the role files as quoted. `closer.md`'s "Then return" now names
+`BLOCKED` among its stops, which agrees with the "returns as examples" entry.
