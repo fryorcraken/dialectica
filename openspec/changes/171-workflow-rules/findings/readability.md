@@ -587,3 +587,50 @@ Stylistic only, no box:
 - `RUNNER.md:600-601` "numbered from 1 in the order you write the lines: then
   what landed" has a colon followed by "then", which reads as a stutter.
 - `dev-writer.md:188` runs past the file's wrap width after the substitution.
+
+## Re-review round 10 `c4b1df5..842758b`
+
+- [x] **re-review round 10 `c4b1df5..842758b`: no findings** — read `RUNNER.md`'s diff in the range, the tick paragraph whole (`:626-672`), "Record the call" (`:600-624`), step 3's brief bullet (`:558-589`) and the "What you read" table (`:76-84`); clean
+
+**One procedure, in order: clean.** `:626-628` announces two checks before the
+tick, and the bolded **First, the number check** (`:627`) and **Then the forms
+check** (`:650`) put them in the order a runner performs them. Each check has
+its own paragraph, and each ends with its failure action: "you do not tick"
+(`:639`) and "do not tick" (`:670`). The number check paragraph (`:634-648`)
+follows the order a runner needs: what to verify, the false-match caveat, the
+failure and its repair, the empty-listing case, then why. I ran the command as
+written against this piece's `tasks.md`. It printed lines 25-34, consecutive,
+numbered 1-10 with each number once. The six-space indent claim holds for the
+real stage block and for the example at `:621-623`.
+
+**The new "What you read" row: accurate.** `:81` gives the same command as
+`:631`, minus the path. It says what the listing decides ("run 1, 2, 3 … once
+each") and points to step 3, as the forms row below it does. It sits above the
+forms row, which is the order the two checks run in. Neither pattern contains a
+backtick, so the double quotes prompt nothing.
+
+Stylistic only, no box:
+- `RUNNER.md:615` "so the check below would pass on it": the dev-writer is
+  right that this is ambiguous now. Only the forms check passes on the rejected
+  run's record, and the number check would fail on a repeated number. A reader
+  cannot act wrongly on it, because the preceding clause states the action ("A
+  continued run needs the new number"). "so the forms check below would pass on
+  it" removes the second reading.
+- `RUNNER.md:576-577` "the check before you tick (below) is a fixed-string
+  search for them" has the same ambiguity, since two checks now precede the tick
+  and both are `git grep -F`. "for them" points at the forms check, so this is
+  style too. "the forms check before you tick (below)" matches the new names.
+- `RUNNER.md:634-648` is one fifteen-line paragraph. Splitting it before "Put
+  the line right" would separate the check from its repair. It reads correctly
+  as it stands.
+- `RUNNER.md:638` "the line numbers show which lines stand under the row"
+  assumes the reader knows the row's own line number. The listing does not
+  print it, because the row does not match the pattern. The round lines form
+  one consecutive run of line numbers, so a reader can find them anyway.
+
+Not readability, noted for the correctness lane: a duplicate early in the list
+(1, 1, 2, 3) must become 1, 2, 3, 4 under "1, 2, 3 … in the order they stand".
+So every later line's number changes too, and under `:641-642` every lane
+briefed from one of those lines runs again. The text states this, but only by
+applying `:641` to each line in turn. It never says outright that one
+duplicate re-runs every round after it.
