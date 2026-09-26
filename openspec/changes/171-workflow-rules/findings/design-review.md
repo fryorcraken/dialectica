@@ -155,3 +155,88 @@ No findings to report.
       or changed in this range has a matching, word-for-word implementation in
       the role files, including its rejected alternatives; nothing in `design.md`
       is stale against a later ruling in this same range. Clean.
+
+## Re-review `9dc235c..34fd428`
+
+Read `design.md` in full, the range's diff of `.claude/agents/` (`RUNNER.md`,
+`closer.md`, `dev-writer.md`, `README.md`), `spec-writer.md`'s stage-block
+paragraph, `proposal.md`'s Impact and "Out of scope" entries for the role
+files, and #171, #170, #169 and #133 fresh (`gh issue view --json
+body,comments`; none has comments, and none contradicts a decision). Re-ran:
+the pre-tick `git grep -l -F "c222c37..9dc235c"` over `findings/` (all six
+files, as `design.md:401-403` says); the `git ls-files` pathspec for
+`op-clock`, `time-pegged-clock`, `home-screen-key-states` and `clock`
+(matches `design.md:180-187`); and the archive check on `2bda577f` (the two
+specs `design.md:732-734` names).
+
+The new and changed entries are taken as recorded: the archive check before
+the push (`closer.md:281-324`, and the refused-push untick at
+`RUNNER.md:691-697`); the range heading and pre-tick check
+(`RUNNER.md:553-609`, with the "What you read" row at `:81`); returns as
+examples with `BLOCKED` routed (`RUNNER.md:647-709`); the mutating reviewer's
+patch-around-rebase steps, with `--autostash`, commit and discard rejected
+(`RUNNER.md:282-310`); the fast-forward on every `dev-writer` pass
+(`RUNNER.md:242-269`, `:163-174`, `:363`, `:657`); and the README
+"brought onto" passages. Three findings, all on the reasoning about which
+statements of the old cherry-pick route were corrected and which kept.
+
+- [ ] **`dev-writer`** — `design.md:447-452` — a Decision still names the
+      cherry-pick as the `dev-writer`'s route, which a later entry in this
+      same range says it never is.
+      **Scenario:** the "`NO SPEC:` routing" entry argues "The `dev-writer`'s
+      commits reached the piece by cherry-pick afterwards, onto the runner's
+      branch". `design.md:825` now says "a reviewer is still cherry-picked and
+      a `dev-writer` never is", and `RUNNER.md:169-172` has the runner
+      fast-forward to it. The argument (the first `spec-writer`'s branch never
+      receives those commits) survives with "were brought onto the runner's
+      branch"; only the named mechanism is stale, and it is the one
+      mechanism this piece spent a Decision retiring.
+      **Measured:** `git grep -n -F "reached the piece by cherry-pick" --
+      openspec/changes/171-workflow-rules/design.md` returns line 449.
+
+- [ ] **`dev-writer`** — `design.md:826-828` — the justification for leaving
+      `dev-writer.md`'s "The runner cherry-picks your commits" is weak: it
+      would equally have left the passages this piece did correct, and the
+      runner is pointed at that sentence.
+      **Scenario:** the ground given is that fast-forwarding "is the runner's
+      step, stated in `RUNNER.md`, and changes nothing the `dev-writer` does".
+      That is also true of the `dev-writer.md:131` clause and the four
+      `README.md` passages this range corrected, which were corrected because
+      "left as they are, they contradict `RUNNER.md` in this piece, and
+      correcting them adds no rule" (`proposal.md:467-470`). By that test
+      `dev-writer.md:173` ("The runner cherry-picks it onto `piece/<name>`")
+      and `:203-205` ("The runner cherry-picks your commits onto its own local
+      `piece/<name>` afterwards — that is for *its* HEAD") qualify too. And it
+      is not only the `dev-writer` who reads them: `RUNNER.md:165-166` sends
+      the runner to `dev-writer.md` for this very sequence ("states the
+      sequence and owns it"), where it meets the route the reflog incident at
+      `design.md:788-796` shows a runner following. Either correct those
+      sentences under the same authorisation as `:131` (with `proposal.md:779-782`
+      following, which is the `spec-writer`'s), or record in this entry what
+      distinguishes them from the corrected passages.
+      **Measured:** `git grep -n -i "cherry-pick" -- .claude/agents/dev-writer.md`
+      returns lines 158, 173, 187, 203 and 214; 173 and 203 state the route.
+
+- [ ] **`dev-writer`** — `design.md:1046-1055` — the entry correcting
+      `dev-writer.md`'s false-premise clause does not record why `README.md`'s
+      stage-block section, which states the neighbouring premise, is kept.
+      **Scenario:** `README.md:238-242` says one row per agent avoids "the
+      conflict one-row-per-agent exists to prevent" and that "concurrent
+      cherry-picks never touch the same line". Both are literally true and
+      both read as "so the ticks do not conflict", which is the premise this
+      entry calls false. The reason for keeping them ("literally true", the
+      owner's "Each agent flips its own row" standing, left to the
+      one-file-per-row follow-up) is only in `proposal.md:471-476` and
+      `:880-883`; `design.md`'s Goals (`:39-42`) mention only "one row per
+      stage, then three rows". A reader who meets the corrected
+      `dev-writer.md` clause and the uncorrected README sentence has to go to
+      the proposal to learn the asymmetry was chosen. A gap, not a
+      contradiction.
+      **Measured:** `git grep -n -F "never touch the same line" --
+      openspec/changes/171-workflow-rules/design.md` returns nothing;
+      the same search over `proposal.md` returns line 659, and
+      `"literally true"` returns `proposal.md:475`.
+
+Nothing else is stale: every Risk that has been fixed says so with its
+mitigation, no Decision is superseded by a later callback, and every
+measurement I re-ran holds.
