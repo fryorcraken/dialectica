@@ -787,3 +787,68 @@ Below medium, in prose:
   variant that puts the SHA inside the re-review row's own text, which the
   number check would not see. The "one more typed value" reason covers that
   variant too, so this is a gap in completeness rather than in soundness.
+
+## Re-review round 14 `c3bda2b..e5dcce4`
+
+- [x] **re-review round 14 `c3bda2b..e5dcce4`: no findings** — read `git diff c3bda2b..e5dcce4` over `RUNNER.md`, `design.md` and `proposal.md`, RUNNER.md steps 2 and 3 through the number check at `e5dcce4`, and README.md "One writer at a time"; clean
+
+Below medium, in prose:
+
+- **The round-13 box is fixed.** `RUNNER.md:519-531` states the rule once in
+  step 2 with all three clauses (no other commit brought on, nothing
+  committed, no writer dispatched), and `RUNNER.md:636-637` says the
+  derivation's last-line parent is the dispatch HEAD *because of* that rule.
+  `design.md`'s entry now rests on the rule and says why "the runner commits
+  nothing" was narrower than the premise, and `proposal.md` carries the same
+  bullet and the same rewording under the derivation. Nothing in step 2 or
+  elsewhere asks the runner to commit during the round: reviewers tick their
+  own rows, and the round 1 line is written afterwards.
+- **RUNNER.md takes both decisions as `design.md` records them.** The chain
+  bullet matches the entry point by point: follow by range not position, pass
+  over a repeated range, prefix matching of SHAs, repair by a new line and
+  never by editing a range, the tail check from the chain's end with round
+  lines allowed in the `tasks.md` diff, and a skipped line of its own for a
+  clean merge or a spec-free archive commit. "Do not tick unless all four
+  hold" has four bullets, and the "What you read" row names the chain. The
+  `:309-310` pointer now calls the chaining a condition rather than a property
+  of the flow, which is what the new entry argues.
+- **The rejected alternatives are sound.** Line-by-line chaining does fail on
+  a repair line, since lines only ever go below the last, and "ends at HEAD"
+  cannot hold once a round's own line and records land after its range.
+  Recording the step-2 premise only as a residual would leave a failure the
+  flow walks the runner into, and a rule only up to the first findings commit
+  leaves the writer's push facing the ordering the entry measures. The
+  fast-forward refusal is what `--ff-only` must do once the reviewers' picks
+  are not in the pushed history, so "neither order works" holds under the
+  fast-forward rule.
+- **`design.md` and `proposal.md` agree, with two wording differences.**
+  `proposal.md` titles the condition "chain from `<review>` to HEAD", then
+  explains in its own sub-bullet that the end is never HEAD; `design.md` and
+  `RUNNER.md` say "from `<review>`". And `proposal.md`'s skipped-line example
+  says "the archive commit" without `RUNNER.md`'s and `design.md`'s qualifier
+  "that changed nothing under `openspec/specs/`". The rule elsewhere in the
+  proposal supplies the qualifier, so neither misleads a runner reading
+  `RUNNER.md`.
+- **The chain entry records no cost, and it has one: it fails closed on
+  overlapping ranges.** A round whose range starts inside an earlier round's
+  range, or one that re-reads a wider range such as `<review>..X` after
+  `<review>..Y`, is neither followed nor passed over. The runner then writes a
+  repair line over commits already read. That is a wasted round, not a merge,
+  and overlapping ranges are not a shape the flow produces. One clause would
+  complete the entry.
+- **The step-2 rule covers only the first review round, and the justification
+  it borrows from `README.md` reaches further.** The entry is right that only
+  round 1's derivation needs the rule: in a re-review round a writer's push
+  can be fast-forwarded before the re-reviewers' picks, and the chain's tail
+  check then sees the writer's commit. But the entry also argues from
+  "One writer at a time" that the contract must not move while reviewers read
+  it, which applies to every round. As recorded, a reader could take the rule
+  to be that README rule applied in general, when it is scoped to the case
+  the derivation needs. Saying so in one sentence would stop someone widening
+  it on that reading, or wondering why it was not widened.
+- **A reviewer that stalls holds the piece.** The rule lasts "until every one
+  of its reviewers' commits is on your HEAD", so a stalled lane blocks a
+  red-CI fix until that lane is re-dispatched and its commit lands.
+  Re-dispatching is the way out, and the rule does not forbid it. Neither
+  document mentions this cost, and it is plausible here, where agents have
+  stalled for good on a permission prompt.
