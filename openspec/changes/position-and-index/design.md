@@ -79,8 +79,12 @@ callers: a coerced `index` stores an identity nobody chose.
 of `parse_index`'s messages. Drop it from the wrong-type arm (`"must be a
 number"`) and `each_malformed_kind_of_index_is_refused_by_name` goes red on
 `"two"`, `[]` and `true`, as does the feed's
-`malformed_pagination_fields_are_refused_by_name`. I measured the first by
-mutation. The `tester` owns the full proofs.
+`malformed_pagination_fields_are_refused_by_name`. Drop it instead from the arm
+for a number that is not a plain non-negative integer (`"must be a non-negative
+integer …"`) and both go red, first on `-1`, along with
+`the_largest_page_index_is_an_empty_page_and_one_larger_is_refused_by_name`.
+Both arms were measured by mutation, in `1889eaf` and again after the fixture
+refactor. The `try_from` arm is unreachable on a 64-bit target (see Risks).
 
 ### D2. The position tests assert properties at the wire, not values
 
@@ -113,10 +117,10 @@ the current value, where it is an implementation fact rather than a contract.
 **What these two cannot see.** A position taken from the item itself, such as
 its op id, is unique within a read and the same at every page size, so both
 tests pass it. The scenario *The item at a place carries that place's position
-in every read* is what fails it, and D5 is how that is tested. Its test is task
-3.4 in `tasks.md`, which the `tester` writes. While that box is unticked, the
-only thing standing in the way of an op-id position is the core value test,
-which sits one layer below `thread_page_json`, where #166's mutation was made.
+in every read* is what fails it, and D5 is how that is tested. Without D5's
+test, the only thing standing in the way of an op-id position would be the core
+value test, which sits one layer below `thread_page_json`, where #166's mutation
+was made.
 
 ### D3. The thread fixture has two pairs of items sharing an author, and five items
 
@@ -190,10 +194,25 @@ in D2 catches that.
   has thought of.
 - **Pinning literal positions at the wire.** Ruled out for the reason in D2.
 
-**What breaks without it** is for the `tester` to measure, under task 3.4. The
-proposal names the mutation: set the position to the item's op id in
-`thread_page_json`. D2's two tests stay green under that mutation, and this one
-is expected to go red.
+**What breaks without it**, measured: set the position to the item's op id in
+`thread_page_json`, the mutation the proposal names, and
+`the_item_at_a_place_carries_that_places_position_in_every_read` goes red while
+D2's two tests stay green. It also goes red under a constant and under
+`item.author`. It stays green under a per-page index, which it is not designed to
+catch. The `tester` proved it in `1889eaf`, and the proof was re-run after the
+fixture refactor that answered the architecture review.
+
+**The fixture's replies carry explicit ascending clocks, and that is a guard.**
+The test needs `after` to sit directly behind the reply that gets hidden.
+`arrival::cmp_ops` orders two ops without a clock by ascending op id, which is
+a hash, so appending the replies in order does not put them in that order. The
+first version of the fixture had no clocks, and it failed against the correct
+implementation. Take the counters out of
+`a_thread_log_with_a_hidden_reply_and_a_reply_after_it` and the test's
+adjacency depends on hash order. It then fails on correct code, or passes
+without testing the place it names. `a_thread_post_with_clock` is the one
+constructor for fixture posts, so this fixture and `a_thread_post` build the
+`Op` the same way. They differ only in the clock.
 
 ## Risks / Trade-offs
 

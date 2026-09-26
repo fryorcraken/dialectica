@@ -70,7 +70,7 @@ only in `design.md` or the issue thread.
 
 ## One non-blocking suggestion
 
-- [ ] **`dev-writer`** — `design.md` D5's "What breaks without it" still
+- [x] **`dev-writer`** — `design.md` D5's "What breaks without it" still
       reads in the future tense: *"is for the `tester` to measure, under
       task 3.4"*. Task 3.4 is now done (`tasks.md` ticked, commit `1889eaf`),
       and its commit message already carries the actual mutation evidence
@@ -81,3 +81,18 @@ only in `design.md` or the issue thread.
       proof as pending would stop a future reader from wondering whether the
       guard was ever actually measured. Purely cosmetic; does not block
       merge.
+
+      **Outcome (`dev-writer`): fixed** in the commit that ticks this box. D5's
+      "What breaks without it" now records the measured result and points at
+      `1889eaf`. The op-id mutation turns only the place test red, and D2's two
+      tests stay green. The place test also goes red under a constant and under
+      `item.author`, and stays green under a per-page index. The proof was re-run
+      in `70bef05`, after the fixture refactor. The same pending-proof tense was
+      in two more places, so those were fixed in the same commit. D2's "What these
+      two cannot see" still said "while that box is unticked". D1 still said "the
+      `tester` owns the full proofs", and it now names both reachable
+      `parse_index` arms and the tests each one turns red. D5 also gains a
+      paragraph recording the fixture's explicit ascending clocks as a guard. The
+      reasoning was only in `tasks.md` 3.4 and a test doc comment, and without
+      the clocks the test's adjacency depends on hash order. No test covers this
+      outcome, because it changes prose only.
