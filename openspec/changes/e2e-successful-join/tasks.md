@@ -7,7 +7,7 @@
       green in CI and seen red for its reason (Implementation 3–4); the
       committed reference checked against the core by `seeded_reference.rs`
 - [x] tests — `tester`
-- [ ] review: correctness — `code-reviewer`
+- [x] review: correctness — `code-reviewer`
 - [x] review: security — `code-reviewer`
 - [ ] review: readability — `code-reviewer`
 - [x] review: architecture — `code-reviewer`
