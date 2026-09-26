@@ -539,3 +539,59 @@ no check; that holds. Below medium, in prose:
   dropping the sentence would lose nothing.
 - Round 7's note stands unfixed: `proposal.md` still says "run with round 5's
   start would pass" where `design.md` says "round 5's forms".
+
+## Re-review round 10 `c4b1df5..842758b`
+
+- [x] **re-review round 10 `c4b1df5..842758b`: no findings** — read `git diff c4b1df5 842758b` of `RUNNER.md`, `design.md` and `proposal.md`, `design.md:460-640`, `RUNNER.md:590-679`, `findings/security.md`'s round-8 and round-9 boxes, issue #171, and re-ran the number check at `94840b52`, `328c1929` and `842758b`; clean
+
+**RUNNER.md takes the decision as recorded.** The Decision says the rule sits
+once in the tick paragraph, ahead of the forms check, with a row in "What you
+read"; `RUNNER.md:626-648` and `:81` are exactly that, and the row describes
+the check's purpose without restating the rule. Every clause of the Decision
+and its four sub-bullets has its counterpart in the tick paragraph: the
+command, directly-under-the-row, repeat or skip means no tick, put the line
+right, a lane briefed from a renumbered line runs again with forms from the
+corrected line, an empty listing means a mistyped command, and the one-sentence
+reason (the copy rule carries a templated number into brief, heading and forms
+check alike). "Record the call" (`:600-617`) is unchanged, as the round-9 box
+asked. `design.md` and `proposal.md` agree on the rule, the residuals (wrong
+line and a skipped check left for a second reader; a re-run given no line seen
+by neither check) and the `closer`-side follow-up as a second reader. The only
+difference is that `design.md` cites a second measurement commit, `328c1929`,
+which is detail.
+
+**Measurements re-run.** The number check lists nine lines at `94840b52`,
+`328c1929` and `842758b` (`grep -c`), all round lines under the row, carrying 1
+to 9; the seven-space pattern lists nothing at `842758b`. Issue #171 asks the
+runner to record each re-review in the stage block; a check that the record's
+numbers are well-formed is inside that, and nothing in the issue contradicts
+it.
+
+**The rejected alternative is honest.** It describes round 8's answer as it was
+(`findings/security.md:842-875`: recorded as a residual, routed to the
+`closer`-side check, classed with a runner that skips the check), and the
+ground for rejecting it is round 9's scenario, which holds: a runner that
+templates the line and then runs every step skips nothing. The `closer`-side
+criterion is kept, correctly re-described as a second reader for a runner that
+skipped the number check. **The revised "one more than the highest" rejection
+is sound**: every misreading of "the next number", including "next after the
+round being re-run", produces a repeat or a skip, which the number check now
+lists, so a second phrasing adds no detection.
+
+Below medium, in prose:
+
+- "Word for word" (`design.md:507`) overstates: "one more than the highest" and
+  "the next number" are the same rule in different words. "Already says" is
+  what the argument needs.
+- The new Decision has no cost line. The cost is the runner's judgement over
+  the listing: which printed lines stand under the row, and, for a skip,
+  whether a line was lost or mistyped (`RUNNER.md:639-641` gives both remedies
+  and no way to tell them apart). Both fail closed, since no tick happens
+  until the numbers run, so the cost is small; saying so would complete the
+  entry.
+- "It reads only the line's start" (`design.md:535`) is looser than the
+  command: `-F` matches the six spaces and `round ` anywhere in a line, so a
+  more deeply indented line would be listed too. The sub-bullet about lines
+  "elsewhere in the file" covers the effect, and the line numbers settle it.
+- Round 7's and round 9's note on `proposal.md`'s "round 5's start" still
+  stands; this range rewrote the paragraph around it and kept the phrase.
