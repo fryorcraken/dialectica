@@ -1430,7 +1430,7 @@ mechanism. Nothing in the range adds a route to `main`, a force or `--admin`.
 
 ## Re-review round 12 `dd4fe18..1380d50`
 
-- [ ] **`spec-writer`** (then `dev-writer` for `RUNNER.md:617-623` and
+- [x] **`spec-writer`** (then `dev-writer` for `RUNNER.md:617-623` and
       `design.md:312-320`) — `proposal.md:235-239` — the nothing-landed check
       `git diff --name-only <review> HEAD` runs with git's default rename
       detection, so a commit that **moves a file that merges into
@@ -1470,8 +1470,27 @@ mechanism. Nothing in the range adds a route to `main`, a force or `--admin`.
       `findings/`, is unusual; but the outcome is an unreviewed deletion of any
       file on the piece, including a role file, reaching `main`, and it defeats
       the gate at the one point it exists for: a commit misread as tracking.
+      **Outcome (`spec-writer`): accepted, fixed in `proposal.md`.** The
+      nothing-landed check's first command is now
+      `git diff --no-renames --name-only <review> HEAD` wherever
+      `proposal.md` states it (the check bullet, the standing-test entry's
+      command list), with the one clause of reason: a move into `findings/`
+      deletes something that merges, and default rename detection lists it
+      by its destination alone. The `closer`-side follow-up now runs "the
+      nothing-landed check's two commands", so it inherits the flag.
+      Re-measured independently in `tmp/r12spec/` (git 2.55.0,
+      `diff.renames` unset, since deleted): after a review round's findings
+      commit, a tick, and a pass that flips a findings box and `git mv`s
+      `.claude/agents/closer.md` into `findings/closer-notes.md`, the
+      command without the flag lists `closer-notes.md`, `security.md` and
+      `tasks.md` and the `tasks.md` diff is one tick; with it,
+      `.claude/agents/closer.md` is listed too. A plain deletion is listed
+      either way. The measured claims over `c222c37..e7e2bbdd` and
+      `c222c37..ae59b43c` were re-run with the flag and are unchanged. The
+      flag dropped is also on the standing-test entry's fail-open list.
+      `RUNNER.md` and `design.md` are the `dev-writer`'s to follow.
 
-- [ ] **`spec-writer`** (then `dev-writer` for `RUNNER.md:612-614` and
+- [x] **`spec-writer`** (then `dev-writer` for `RUNNER.md:612-614` and
       `:676-678`) — `proposal.md:1121-1126` and `:1154-1161` — `<review>`
       is runner input with no derivation from the repository, and the new
       lost-line repair leans on it exactly when the runner has lost it. The
@@ -1511,6 +1530,24 @@ mechanism. Nothing in the range adds a route to `main`, a force or `--admin`.
       added for a lost report, by a runner doing what the text says, and the
       residual's recorded mitigation is routed to a check that cannot perform
       it, the same routing gap as round 8's box.
+      **Outcome (`spec-writer`): accepted, fixed in `proposal.md` as the box
+      proposes.** The derivation is now the definition of `<review>`, in a
+      new bullet under the range rule, with your command (last line, second
+      field), and the runner uses it always, not only after a lost report.
+      It also contracts the pre-archive pathspec, since under the archived
+      path the oldest add is a post-archive re-review whose parent is the
+      archive commit (measured in `tmp/r12spec/`, since deleted), and that
+      an empty listing means no round 1 line. The `closer`-side follow-up's
+      "What a `closer`-side check would do" now derives `<review>` again,
+      checks the line's range starts at it, and runs the nothing-landed
+      check's two commands from it, with the reason that a diff over the
+      line's own range alone passes on a late start. The standing-test
+      entry's `<review>` paragraph now says the value is read by a command
+      `RUNNER.md` carries, names what stays runner input (a value supplied
+      instead of derived, or the first line read), and points to that
+      follow-up as the reader that compares. Re-measured on this tree: the
+      last line is `f94f7b8d c222c37b`. The "What you read" row and
+      `design.md`'s Risks are the `dev-writer`'s to follow.
 
 Security only, on Opus, narrowed to the three questions in the brief. Read
 `git diff dd4fe18..1380d50` of `RUNNER.md` and `proposal.md` in full,

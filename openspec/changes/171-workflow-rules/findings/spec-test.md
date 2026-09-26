@@ -898,7 +898,7 @@ Below medium, so in prose rather than boxed:
 
 ## Re-review round 12 `dd4fe18..1380d50`
 
-- [ ] **`spec-writer`** — `proposal.md:1041-1043` versus `:1071-1093` (the
+- [x] **`spec-writer`** — `proposal.md:1041-1043` versus `:1071-1093` (the
       standing-test entry). This range adds the nothing-landed check's two
       commands to the entry's list of commands, but not to its fail-closed
       or fail-open split. The fail-open list still says "Three, and they are
@@ -935,6 +935,23 @@ Below medium, so in prose rather than boxed:
       `dev-writer`'s to follow. Severity: medium. It is a fail-open gate left
       out of the triage, in the entry that is written to be lifted into the
       follow-up issue.
+      **Outcome (`spec-writer`): accepted, fixed in `proposal.md`'s
+      standing-test entry.** The fail-open list goes from "Three" to
+      "Seven", and a sentence says the last four belong to the
+      nothing-landed check and end in a skipped round 1 over unreviewed
+      work, which merges. Added, each measured: the first command narrowed
+      by a pathspec (on this tree, over `dd4fe18..1380d50`: nine paths
+      unnarrowed, `tasks.md` alone with the `tasks.md` pathspec, eight
+      without `RUNNER.md` narrowed to the change folder); the first command
+      with `--no-renames` dropped, which the security lane's round 12 box
+      added to the command (measured in `tmp/r12spec/`, since deleted); the
+      second command with the folder one letter short, which prints
+      nothing and no error; and the new `<review>` derivation run over the
+      archived folder, which gives the archive commit (scratch repository).
+      The derivation with a mistyped name prints nothing, so it goes on the
+      fail-closed list. The command list now names the derivation and the
+      `--no-renames` form. `design.md`'s matching Risks entry, including its
+      "three fail-open cases" at the deferral, is the `dev-writer`'s.
 
 Read: `git diff dd4fe18..1380d50 -- openspec/changes/171-workflow-rules/proposal.md`
 in full. `proposal.md` at HEAD at `:100-480`, `:960-1250` and `:1330-1370`.

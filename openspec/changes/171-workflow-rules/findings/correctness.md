@@ -1177,7 +1177,7 @@ Below the box threshold, in prose only:
 
 ## Re-review round 12 `dd4fe18..1380d50`
 
-- [ ] **`spec-writer`** — `proposal.md:223-226`, mirrored at `RUNNER.md:612-614`
+- [x] **`spec-writer`** — `proposal.md:223-226`, mirrored at `RUNNER.md:612-614`
       and `RUNNER.md:676-678` — `<review>` is defined only as "the HEAD the
       runner dispatched the review round from", which is a memory of a
       dispatch. `RUNNER.md:98-99` says that memory "does not survive a
@@ -1227,6 +1227,27 @@ Below the box threshold, in prose only:
       `tasks.md` and not a memory. `RUNNER.md` follows either.
       **Severity:** medium. It fails open on the recovery path the range
       introduces, and it reproduces the defect the range closes.
+      **Outcome (`spec-writer`): accepted, fixed in `proposal.md` by the
+      first of the two fixes offered.** A new bullet under the range rule,
+      "The runner reads `<review>` from the repository, never from memory",
+      makes the derivation the definition, not a recovery: `<review>` is
+      the second field of the last line of
+      `git log --diff-filter=A --format="%h %p %s" -- openspec/changes/<name>/findings/`,
+      always, including when the report still holds it, so there is one
+      procedure and no memory in it. The bullet contracts the pre-archive
+      pathspec (measured in `tmp/r12spec/`, since deleted: after a
+      findings deletion, an archive move and a re-reviewer's fresh file,
+      the archived pathspec gives the archive commit, the pre-archive one
+      the base), the last line and not the first (the first line's parent
+      here is `a284e514`, the tick commit), and that an empty listing
+      means no round 1 line. The repair bullet's "the check decides" now
+      says over a range from the derived `<review>`, not a HEAD it
+      remembers or can see. Re-measured on this tree: the last line is
+      `f94f7b8d c222c37b`. Recording `R` on the re-review row at dispatch
+      was not taken: a line under the row that is not a round line fails
+      the number check's first condition, and it would be one more value
+      the runner types. `RUNNER.md` and `design.md` are the `dev-writer`'s
+      to follow.
 
 Read `2bf65c8` (`proposal.md`) and `1380d50` (`RUNNER.md` "What you read",
 "Record the call", the "at least one round line" bullet, and `design.md`'s new
