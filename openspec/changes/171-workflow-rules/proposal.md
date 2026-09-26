@@ -214,11 +214,45 @@ another file.
     (`findings/security.md`, re-review round 3 `34fd428..dc1390a`, box).
   - **The row is never struck.** A round with nothing to review gets its line
     and then a tick. That includes a piece where nothing that merges lands
-    after the review round at all: the runner still writes round 1, with
-    both ends of its range at its own HEAD when it writes the line,
-    ``round 1 `<sha>..<sha>` ``, marked skipped because nothing landed after
-    the review round, and then ticks. So every tick follows at least one
-    round line, which the number check below relies on.
+    after the review round at all: the runner still writes round 1, marked
+    skipped because nothing landed after the review round, and then ticks.
+    So every tick follows at least one round line, which the number check
+    below relies on. That line is a claim that the branch holds nothing
+    unreviewed, and two rules make it one a reader can check:
+    - **Its range runs from the commit the review round read to the
+      runner's HEAD**, ``round 1 `<review>..<HEAD>` ``. `<review>` is the
+      HEAD the runner dispatched the review round from, which is where any
+      round 1's range starts (this piece's round 1 is `c222c37..9dc235c`,
+      and `c222c37` is the parent of the review round's first findings
+      commit, `f94f7b8d`). `<HEAD>` is the runner's HEAD when it writes the
+      line. So the range holds the review round's own commits and every
+      commit since, and `git diff` over it shows what the claim covers. Both
+      ends at HEAD would hold nothing by construction: the one line that
+      says nothing landed would record no evidence for it, and a commit that
+      merges, misread as tracking, would lie in no round's range, where
+      neither check nor a second reader can see it (`findings/security.md`,
+      re-review round 11 `842758b..dd4fe18`, box).
+    - **The runner checks the claim before it writes the line.**
+      `git diff --name-only <review> HEAD` must list nothing outside the
+      change folder's `findings/` and its `tasks.md`, and
+      `git diff <review> HEAD -- <change folder>/tasks.md` must show only
+      boxes flipped. Those are the tracking commits step 3 needs no review
+      for: the review round's findings and stage-row ticks, and a writer's
+      pass that only flips boxes and writes outcomes into `findings/`. Any
+      other path, `design.md` included, means a commit step 3 says needs
+      review is in the range, and the round is not skipped because nothing
+      landed: it gets a line in the ordinary form, naming what landed, and
+      is sized as step 3 says, like any other round. The first command
+      prints file names only and the second reads the stage block's file,
+      so both stay within what the runner reads, and "What you read" names
+      them. Measured on this piece:
+      over `c222c37..e7e2bbdd`, the review round's five commits,
+      `--name-only` lists the six findings files and `tasks.md`, and the
+      `tasks.md` diff is the six review-row ticks, so the claim holds; over
+      `c222c37..ae59b43c`, which adds a rejection written into `findings/`
+      and the first post-review `proposal.md` commit, it lists `proposal.md`
+      as well, so the claim fails; and `git diff --name-only ae59b43c
+      ae59b43c`, a range with both ends at one commit, lists nothing.
   - **The runner ticks it when no commit that merges is unreviewed**, and
     **unticks it when any commit that needs review lands after the tick**: a
     red-CI fix, a writer's conflict resolution, an archive commit that
@@ -247,9 +281,22 @@ another file.
       implementation checklist, lies outside the two rows and is not a
       round line.
     - **At least one round line stands between them.** The two rows on
-      adjacent line numbers mean no round line has been written yet; every
-      tick follows at least one (the bullet on a row never struck, above),
-      so the runner writes it. A listing that lacks either row means the
+      adjacent line numbers mean no round line is on the runner's HEAD;
+      every tick follows at least one (the bullet on a row never struck,
+      above), so the runner writes what is missing. Each round that ran
+      gets its own line back, with its number, range and lanes as the
+      runner's report recorded the call, and the forms check then covers it
+      like any other round. Only where no round ran is the missing line round 1
+      skipped because nothing landed, and only if that bullet's check
+      passes. Where the runner cannot tell whether a round ran, such as
+      after its report is lost, the check decides: a range it fails gets a
+      round sized as step 3 says, not a skip.
+      **A missing line is never repaired with the nothing-landed form over a
+      range holding a commit that needs review.** Written over a round that
+      ran, that line is false, and since the forms check skips a round
+      marked skipped, the round that ran is never checked and a lane that
+      left no record passes (`findings/readability.md`, re-review round 11
+      `842758b..dd4fe18`, box). A listing that lacks either row means the
       command was mistyped, or was run on a file that holds no stage block.
     - **No number repeats.** Order and gaps do not matter; a repeat does,
       since a record written under a repeated number cannot be told from
@@ -398,7 +445,13 @@ another file.
       under that number over the same range, as in that bullet's example.
       The text no longer gives lowering as a
       repair, so reaching this takes a runner breaking a stated rule, not
-      following one.
+      following one. **Nor does either check see a nothing-landed line
+      written without its own check** over a range holding a commit that
+      needs review: the number check lists one line, and the forms check
+      skips a round marked skipped. What the range rule buys is that the
+      commit is then inside that line's range, so a second reader running
+      the same `git diff --name-only` over it sees the claim fail (the
+      `closer`-side check in "Out of scope").
   - **This piece's rounds 1 and 2 predate the round number.** Their briefs
     gave ``## Re-review `<range>` `` and
     ``**re-review `<range>`: no findings**``, so the check for those two
@@ -984,7 +1037,10 @@ another file.
     and step 3's two pre-tick commands, the number check
     `git grep -n -F -e "] re-review: every commit" -e "      round " -e "] findings all ticked" -- <change folder>/tasks.md`
     and the forms check
-    ``git grep -l -F -e '## Re-review round <n> `<range>`' -e '**re-review round <n> `<range>`: no findings**' -- <change folder>/findings/``;
+    ``git grep -l -F -e '## Re-review round <n> `<range>`' -e '**re-review round <n> `<range>`: no findings**' -- <change folder>/findings/``,
+    and "Record the call"'s check before a nothing-landed round 1,
+    `git diff --name-only <review> HEAD` and
+    `git diff <review> HEAD -- <change folder>/tasks.md`;
   - `RUNNER.md` "Dispatching", the steps for an agent whose tree holds
     uncommitted changes: `mkdir -p tmp`,
     `git diff --binary --output=tmp/uncommitted.patch HEAD`,
@@ -1062,7 +1118,12 @@ another file.
     check. Both belong to the `closer`-side follow-up below, which is a
     second reader for them. A runner that removes a round line or lowers a
     number breaks a stated rule that neither check, nor that follow-up, can
-    see ("What it still cannot see", above).
+    see ("What it still cannot see", above). The nothing-landed check's
+    `<review>` is runner input in the same way: given a commit later than
+    the one the review round read, the range misses the commits before it,
+    and the check can pass over a branch that holds unreviewed work. The
+    line records `<review>`, so a second reader can compare it with the
+    parent of the review round's first findings commit.
 
   Not added here: this change adds no tests or CI (Impact), and a test
   holding its own copy of a command would not fail when a role file's copy
@@ -1092,8 +1153,12 @@ another file.
     only that every row but the `closer`'s own is ticked or struck.
   - **What a `closer`-side check would do:** in Step 1, check that every
     line under the re-review row is a round line and that no number
-    repeats; and match each round line under the row
-    against the findings files, by the same two forms. That is the runner's
+    repeats; match each round line under the row
+    against the findings files, by the same two forms; and, for a round 1
+    marked skipped because nothing landed, run `git diff --name-only`
+    over that line's own range, as the runner did before writing it. The
+    range starts at the commit the review round read, so a commit that
+    merges and was misread as tracking lies inside it. That is the runner's
     two checks run again by a second reader, which is what they add for a
     runner that skipped one; for a line with a repeated number, the runner's
     own number check already sees it when it is run. Matching alone cannot
@@ -1281,7 +1346,10 @@ None. This change edits agent instructions and no system behaviour, so
   indent, each numbered one more than the highest under the row, and a
   line of its own for a lane run again over the same range, fresh or
   continued; a line for a piece where nothing lands after the review
-  round; the
+  round, its range starting at the commit the review round read and
+  written only once `git diff` over that range shows tracking alone, with
+  its row in "What you read", and a missing line put back as the round
+  that ran rather than as that skip; the
   runner's two checks before it ticks the re-review row, one listing the
   row, the round lines and the next row to confirm every line between the
   rows is listed and no number repeats, with a repeat repaired upward and

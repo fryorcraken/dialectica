@@ -1212,7 +1212,7 @@ tick the re-review row that was not there before.
 
 ## Re-review round 11 `842758b..dd4fe18`
 
-- [ ] **`spec-writer`** (then `dev-writer` for `RUNNER.md:609-612` and
+- [x] **`spec-writer`** (then `dev-writer` for `RUNNER.md:609-612` and
       `design.md:106-109`) — `proposal.md:216-221` — the nothing-landed round 1
       is written ``round 1 `<HEAD>..<HEAD>` ``, a range empty by construction,
       so the one line that asserts "nothing landed" records no evidence for it
@@ -1247,6 +1247,137 @@ tick the re-review row that was not there before.
       than a skipped step, but the form chosen removes the one record that
       would expose the misjudgement, on the path this round's brief asks
       about.
+
+      **Fixed** (`spec-writer`, this commit), together with
+      `findings/readability.md`'s round 11 box, which is the same line seen
+      from its remedy. `proposal.md`'s bullet on a row never struck now
+      carries two rules for the nothing-landed round 1:
+      - **Its range runs from the commit the review round read to the
+        runner's HEAD**, ``round 1 `<review>..<HEAD>` ``, `<review>` being
+        the HEAD the review round was dispatched from, where any round 1
+        starts. Your fix, as asked.
+      - **The runner checks the claim before writing the line**:
+        `git diff --name-only <review> HEAD` lists nothing outside the change
+        folder's `findings/` and `tasks.md`, and `git diff <review> HEAD --
+        <change folder>/tasks.md` shows only boxes flipped. Any other path
+        means a commit step 3 says needs review is in the range, and the
+        round is not skipped because nothing landed: it gets an ordinary
+        line, naming what landed, sized as step 3 says. The check is a path
+        diff rather than `git log --oneline`, because the misreading in your
+        scenario is of what a commit contains, and a subject line is where
+        that misreading starts.
+
+      The "at least one round line" bullet under the number check now puts
+      back each round that ran with its own line from the runner's report,
+      and allows the nothing-landed form only where no round ran and the
+      check passes; where the runner cannot tell, a range the check fails
+      gets a round. **A missing line is never repaired with the
+      nothing-landed form over a range holding a commit that needs review.**
+      "What it still cannot see" records the residual that is left, a
+      nothing-landed line written without its check, which neither check
+      sees; the range rule puts the commit inside that line's range, and the
+      `closer`-side follow-up now reruns the diff over it. The standing-test
+      entry lists the two commands and says `<review>` is runner input, like
+      the forms check's round number: a later commit misses the ones before
+      it. Impact names the line's range, check and "What you read" row.
+
+      Not changed: the judgement skip, such as `RUNNER.md`'s sample round 3
+      (a `cargo fmt` fix). #171 has the runner size every round and record
+      any skip, and a judgement skip's line names what landed over a range
+      that holds it, so it stays visible. Only "nothing landed" is a claim of
+      fact that a diff can refute, so only it gets the check.
+
+      Measured on this tree:
+      - `git log --oneline -1 f94f7b8d^` gives `c222c37`, the start of this
+        piece's round 1, so the review round's first findings commit sits
+        directly on the commit the review round read;
+      - `git log --oneline c222c37..e7e2bbdd` lists the review round's five
+        commits, and `git diff --name-only c222c37 e7e2bbdd` lists the six
+        findings files and `tasks.md`, whose diff is the six review-row
+        ticks, so the claim holds there;
+      - `git diff --name-only c222c37 ae59b43c`, which adds the
+        rejection `9c7cf040` and the first post-review `proposal.md` commit,
+        lists `proposal.md` as well, so the claim fails;
+      - `git diff --name-only ae59b43c ae59b43c` lists nothing, which is the
+        `HEAD..HEAD` form hiding `proposal.md`.
+
+      **For the `dev-writer`** (this list also answers
+      `findings/readability.md`'s round 11 box; flip that one when done):
+      1. `RUNNER.md` "Record the call", the "The row is never struck"
+         sentences (`:609-612`): the nothing-landed round 1's range runs from
+         the commit the review round read (the HEAD you dispatched the review
+         round from, where any round 1 starts) to your HEAD,
+         ``round 1 `<review>..<HEAD>` ``. Before writing it, run
+         `git diff --name-only <review> HEAD`, which must list nothing outside
+         the change folder's `findings/` and `tasks.md`, and
+         `git diff <review> HEAD -- <change folder>/tasks.md`, which must
+         show only boxes flipped. Any other path means a commit that needs
+         review is in the range: the round is not skipped because nothing
+         landed, and its line takes the ordinary form, naming what landed,
+         sized as above. One sentence of reason: a range with both ends at
+         HEAD holds nothing, so a commit misread as tracking would lie in no
+         round's range. Sample lines unchanged.
+      2. `RUNNER.md`'s tick paragraph, the "At least one round line" bullet
+         (`:655-658`): the two rows adjacent mean no round line is on your
+         HEAD. Write what is missing: each round that ran gets its line back
+         as your report recorded it; only where no round ran is it the
+         nothing-landed round 1, and only if that check passes; where you
+         cannot tell, a range the check fails gets a round sized as step 3
+         says. In bold: never repair a missing line with the nothing-landed
+         form over a range holding a commit that needs review, since the
+         forms check skips a round marked skipped and the round that ran
+         would never be checked. Keep the "lacks either row" sentence.
+      3. `RUNNER.md` "What you read" (`:76-83`): one row for
+         `git diff --name-only <review> HEAD` (file names only) and the
+         `tasks.md` diff, for whether anything but `findings/` and box flips
+         changed since the review round, before a nothing-landed round 1
+         (step 3).
+      4. `design.md`, the stage-block summary (`:107-109`): the range and
+         the check, in place of "both ends of its range at the runner's
+         HEAD".
+      5. `design.md`, a Decision for the nothing-landed line (beside
+         "Striking the row", `:148-151`, or its own entry): why the range
+         starts at the commit the review round read (the line records
+         evidence for its claim, and a misread commit lands in its range;
+         this box's scenario), why the check is a path diff, the
+         measurements above, and three rejected alternatives: `HEAD..HEAD`
+         (empty by construction; `proposal.md` never gave a reason for it,
+         so no recorded decision is reversed); `git log --oneline` alone
+         (subjects, where the misreading starts); and forbidding judgement
+         skips of round 1 (#171 has the runner size and record every round,
+         and a judgement skip stays visible because it names what landed
+         over a range that holds it).
+      6. `design.md`, the number-check Decision's "at least one" bullet
+         (`:523-525`): the repair above, with its reason from
+         `findings/readability.md`'s round 11 box, including that `842758b`
+         had said "a round whose line was lost gets its line back" and
+         `dd4fe18` dropped it.
+      7. `design.md`, "What it still cannot see" (`:678-687`): a
+         nothing-landed line written without its check, over a range holding
+         a commit that needs review, which neither check sees; the range
+         rule puts the commit in that line's range, so a second reader
+         rerunning the diff sees the claim fail.
+      8. `design.md`, "What else was considered" (`:713-722`): the residual
+         gains a runner that writes a nothing-landed line without its check.
+      9. `design.md` Risks, the standing-test entry (`:1448-1521`): list the
+         two commands; in the stale-number paragraph, add that `<review>` is
+         runner input too, a later commit missing those before it and
+         failing open, and that the line records `<review>` for a second
+         reader to compare with the parent of the review round's first
+         findings commit.
+      10. `design.md` Risks, "[Only the runner runs the pre-tick checks.]"
+          (`:1522-1534`): a runner that writes a nothing-landed line without
+          its check also goes unnoticed, and the `closer`-side check would
+          rerun `git diff --name-only` over that line's range.
+      11. PR #174's body: step 3's "a piece where nothing that merges lands
+          after the review round still gets round 1, marked skipped" gains
+          the range (from the commit the review round read to HEAD), the
+          check, and that a missing round line is put back as the round
+          that ran, never as that skip; the `design.md` summary gains a
+          bullet for the range and the check; the standing-test follow-up
+          lists the two commands and `<review>` as runner input; the
+          owner's `closer`-side follow-up adds rerunning the diff over a
+          nothing-landed round 1's range.
 
 Security only, on Opus, narrowed to the three questions in the brief. No
 mutation: the change is prose. Read `git diff 842758b..dd4fe18` of
