@@ -1588,3 +1588,172 @@ and nothing else under `.claude/`; its hunks are one "What you read" row,
 "Record the call" and the tick paragraph's "at least one round line" bullet,
 all within #171's re-review mechanism. Nothing in the range adds a route to
 `main`, a force or `--admin`.
+
+## Re-review round 13 `1380d50..c3bda2b`
+
+- [ ] **`spec-writer`** (then `dev-writer` for `RUNNER.md:612-627` and
+      `design.md:362-367`) — `proposal.md:242-246` — the derivation of
+      `<review>` is exact only on a premise that no role file states: that
+      nothing lands on the runner's HEAD between dispatching the review round
+      and bringing its first findings commit. Reviewers are cherry-picked
+      (`RUNNER.md:244`), so the oldest findings add's parent is the runner's
+      HEAD **at the first pick**, not at the dispatch. Where a commit lands in
+      between, the derived `<review>` is that commit, the range starts after
+      it, and the rule "never from memory, even when your report still holds
+      it" (`RUNNER.md:615-616`) discards the correct value in its favour.
+      **Scenario:** the runner dispatches the six reviewers from `X`. While
+      they run, the owner asks for a small change and the runner dispatches a
+      writer, which `RUNNER.md` does not forbid ("How many at once" limits
+      writers to one in total, not writers beside reviewers). It hands back
+      first, as a small writer does beside six Opus reviewers, and its commit
+      `Y`, which edits `design.md` or source, is brought onto the HEAD. Then
+      the first reviewer's commit is picked onto `Y`. Later the runner reads
+      the branch as holding tracking only (the misread the check exists for,
+      as in round 11's box) and writes the nothing-landed round 1. The
+      derivation's last line has parent `Y`; `git diff --no-renames
+      --name-only Y HEAD` lists only `findings/` and `tasks.md`; the round is
+      written skipped over `Y..HEAD` and ticked, and `Y` lies in no round's
+      range. The `closer`-side follow-up derives `<review>` by the same
+      command, gets `Y`, and agrees, so it cannot see this either.
+      **Measured** with git 2.55.0 in a scratch repository at
+      `tmp/r13sec/` (since deleted): base `3b96685` holding `src/lib.rs`,
+      `.claude/agents/closer.md` and `tasks.md`; the review commit (adding
+      `findings/security.md` and ticking a row) made on base; a branch from
+      base with `1b07a72`, an edit to `src/lib.rs`, and the review commit
+      cherry-picked onto it. The derivation prints one line,
+      `3d1458b 1b07a72 review`, so `<review>` is `1b07a72`, and
+      `git diff --no-renames --name-only 1b07a72 HEAD` lists
+      `findings/security.md` and `tasks.md` only: the claim holds over a
+      branch whose source change no reviewer read. On the branch where the
+      review commit sits directly on base, the derivation gives `3b96685`,
+      as on this tree (`f94f7b8d c222c37b`).
+      **Why it is not recorded:** `design.md`'s "Why the derived commit is
+      the dispatch HEAD" asserts "the runner commits nothing between" and
+      concludes "a range starting there misses nothing that needs review",
+      but that sentence is not a rule in `RUNNER.md`, so the runner is never
+      told to keep it, and no Risk or "What it still cannot see" entry names
+      it failing.
+      **Fix, for the `spec-writer` to choose:** make the premise a rule where
+      the runner reads it: in "Record the call" or step 2, nothing is brought
+      onto your HEAD between dispatching the review round and bringing its
+      first findings commit, and a writer dispatched meanwhile hands back but
+      is brought on after that pick. That is one sentence in `RUNNER.md`, and
+      it makes the derivation exact. If a rule is not wanted, record the
+      premise and its failure as a residual in both documents'
+      "What it still cannot see" and Risks, and say the `closer`-side
+      follow-up cannot see it either.
+      **Severity:** medium. It needs a writer landing mid-review and the
+      misread the check exists to catch, and the outcome is an unreviewed
+      commit merging. The rule added in this range makes the runner drop the
+      correct value, and the second reader derives the same wrong one.
+
+- [ ] **`spec-writer`** (then `dev-writer` for `RUNNER.md` "Record the call"
+      and the tick paragraph, and `design.md:309-310`) — `proposal.md:218-246`
+      and the `closer`-side follow-up at `:1257-1280` — the derivation fixes
+      where round 1 starts, but no rule and no check says that the round
+      ranges together cover `<review>..HEAD`. Round 2 onward, and an ordinary
+      round 1, take their ranges from the runner. A gap between one round's
+      end and the next round's start, or after the last round's end, puts a
+      merging commit in no round's range. The number check, the forms check
+      and the proposed `closer`-side check all pass.
+      **Scenario:** a findings pass lands as two commits, `f1` (a
+      `spec-writer` edit to `proposal.md`) then `f2`, after round 1 ended at
+      `E`. The runner records round 2 as the commits that landed, first to
+      last, ``round 2 `f1..f2` ``. That is the natural reading of "the commit
+      range to read" (`RUNNER.md:559`), and it is off by one, since `f1..f2`
+      excludes `f1`. The reviewers read `git diff f1..f2`, and each writes
+      ``## Re-review round 2 `f1..f2` `` or its verdict box. Round 2's forms
+      check lists every lane. The number check sees 1 and 2 once each. The row
+      is ticked, and `f1` merges unread. The same happens after the last
+      round, when a commit that needs review lands after a tick and the
+      runner forgets the untick (`RUNNER.md:741-745`). Nothing but that rule
+      stands between the commit and the `closer`.
+      **Measured** on this tree: round 2 is `9dc235c..34fd428`, and its first
+      commit that is not tracking, `1f62afd4` (a `spec-writer` pass;
+      `git diff --no-renames --name-only 1f62afd4~1 1f62afd4` lists
+      `proposal.md`), is excluded by the range `1f62afd4..34fd428`.
+      This piece's 13 lines do chain, each range starting where the line
+      above ends or repeating it for a re-run (rounds 4 and 8), so the
+      property holds today by the runner's habit alone.
+      `git diff --no-renames --name-only c3bda2b ad5c873`, from the last
+      round's end to the round-13 record, lists `tasks.md` alone.
+      `design.md:309-310` states "later rounds chain on from its end as every
+      other round chains from where review last ended" as a fact, and
+      `git grep -n -i -e chain -e contiguous` over the three documents finds
+      no rule behind it.
+      **Fix:** this needs no new command. The number check already prints
+      every round line, and each line's fixed start carries the range. Before
+      ticking, require these:
+      - the first line starts at the derived `<review>`;
+      - each later line starts where the line above it ends, or repeats a
+        range above it (a re-run);
+      - the nothing-landed pair, `git diff --no-renames --name-only <last end>
+        HEAD` and the `tasks.md` diff, shows tracking only from the last
+        line's end to HEAD.
+      Add the same to the `closer`-side follow-up's "What a `closer`-side
+      check would do". Then the ranges tile `<review>..HEAD` by
+      construction, and the nothing-landed round 1 is the case with one line.
+      **Severity:** medium. The outcome and the missing second reader are the
+      same as round 11's box. The slip is an ordinary off-by-one in a two-dot
+      range, and the design asserts the covering property without anything
+      that enforces it.
+
+Security only, on Opus, narrowed to the three questions in the brief. Read
+`git diff 1380d50..c3bda2b` of `RUNNER.md`, `proposal.md` and `design.md` in
+full, `RUNNER.md:240-390` and `:495-760`, `proposal.md:1236-1300`, and this
+file's round-12 section. Ran the rename probe and the late-derivation probe
+in `tmp/r13sec/` (since deleted). On this tree, I ran the derivation, the
+round-line listing and the two path diffs cited above. No mutation: the
+change is prose.
+
+**Round 12's two boxes are closed.**
+
+- *The rename hole.* Re-measured in the scratch repository: base, a review
+  commit, and a writer's pass that flips the findings box and `git mv`s
+  `.claude/agents/closer.md` to `findings/closer-notes.md`. Here
+  `git diff --name-only <base> HEAD` lists `findings/closer-notes.md`,
+  `findings/security.md` and `tasks.md`, and the `tasks.md` diff is one tick.
+  With `--no-renames`, `.claude/agents/closer.md` is listed as well, so the
+  claim fails. The flag is on the command everywhere `RUNNER.md` states it
+  (`:81`, `:631`), with the reason at `:636-639`. It overrides
+  `diff.renames` in config. With renames off, copies are not detected
+  either, so no copy-then-delete split hides a source. A deletion is listed
+  in its own commit.
+- *`<review>` recovery.* `RUNNER.md:615-627` now defines the value by a
+  command, uses it always, keeps the pre-archive pathspec, reads the last line
+  and treats an empty listing as no `<review>`. The repair bullet
+  (`:692-695`) routes a lost report through it. "What you read" (`:81`)
+  carries it. On this tree it prints three lines, the last
+  `f94f7b8d c222c37b`, which is round 1's start. The `closer`-side follow-up
+  now derives it again and compares, so a value the runner **supplied**, or
+  read from the first line, is caught by that second reader. That was the
+  box's scenario. The first box above is the case it still cannot catch: a
+  derived value that is itself late, which both readers compute the same way.
+
+**Question 2, in short.** The nothing-landed check can still pass over a
+merging commit that lies before the first review pick (first box). A merging
+commit can still sit outside every round's range through a gap between
+rounds, or after the last (second box). The rename route is closed.
+
+**Lower notes, not boxed.**
+
+- *After an archive, the nothing-landed check always fails closed.* The
+  archive moves the whole change folder, so
+  `git diff --no-renames --name-only <review> HEAD` lists every file of the
+  change twice, at both paths, and a nothing-landed round 1 can never be
+  written after an archive. That is safe noise. A runner meeting it sizes an
+  ordinary round.
+- *The derivation's ordering.* "Last line is oldest" relies on `git log`'s
+  committer-date order. Cherry-picks restamp the date, and a fast-forward
+  applies only when HEAD has not moved, so the piece's history stays in order.
+  A merge commit is never listed under `--diff-filter=A`, so `%p` never
+  prints two parents. A same-named change in `main`'s history, after the
+  `closer` merges `main`, could only make `<review>` earlier. It then fails
+  closed.
+- *`tasks.md` "only boxes flipped" is still read by eye*, as noted in round
+  12; low.
+
+Scope: `git diff --stat 1380d50..c3bda2b` touches `.claude/agents/RUNNER.md`
+and nothing else under `.claude/`. Its hunks are the "What you read" row,
+"Record the call" and the repair bullet, all within #171's re-review
+mechanism. Nothing in the range adds a route to `main`, a force or `--admin`.
