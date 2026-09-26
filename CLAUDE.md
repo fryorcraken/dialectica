@@ -162,6 +162,10 @@ this project a stalled session.
   extraction, `Glob` for finding files, `grep -c` for counting, and **hand
   arithmetic with the working shown** for anything numeric. Hand working is
   also more reviewable than a one-liner whose output nobody can check.
+  **Read YAML with `yq` and JSON with `jq`, never Python**: every `python3`
+  script that parses one costs the owner an approval click where a `yq` or
+  `jq` call would have done. This repo's `yq` is the jq wrapper, so its
+  filters are jq syntax.
 
   **A loop that builds a corpus file to grep is a `Grep` that was never run.**
   The `Grep` tool searches the whole set in one call; `Glob` finds the files

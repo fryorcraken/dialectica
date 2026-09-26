@@ -1155,30 +1155,17 @@ jobs:
           node dialectica-ui/tests/validate-ui-specs.mjs
 
       # `yq`, the jq wrapper, is the one thing this job needs that the image
-      # does not carry. The three scripts below read YAML with it, and the
+      # does not carry. The four scripts below read YAML with it, and the
       # scaffold.toml steps they extract from ui-tests.yml read TOML with the
       # `tomlq` it ships. The runner's preinstalled `yq` is a different tool,
       # the Go one, with no `tomlq` and not jq's language; this package
       # installs over it at /usr/bin/yq, and each script refuses by name to run
-      # on the wrong one (design.md D12). Same install as ui-tests.yml's, with
-      # its apt-source workaround rather than a bare `apt-get install`:
-      # radicle's identical step once failed `update` on a 403 from a
-      # preconfigured third-party source, so the extra sources are moved aside
-      # first and `install` is the real gate.
+      # on the wrong one (the e2e-ui-suite change's design.md D12). The same
+      # script as ui-tests.yml's install, which moves the runner's third-party
+      # apt sources aside first, so there is one copy of that procedure (the
+      # e2e-suite-review change's design.md D9).
       - name: Install yq
-        run: |
-          set -eu
-          sudo mkdir -p /etc/apt/disabled-sources.d
-          sudo find /etc/apt/sources.list.d -maxdepth 1 \
-            \( -name '*.list' -o -name '*.sources' \) \
-            ! -name 'ubuntu.sources' ! -name 'ubuntu.list' \
-            -exec mv -v -t /etc/apt/disabled-sources.d {} +
-          sudo apt-get update -qq \
-            || echo "::warning::apt-get update reported errors; install is the gate, continuing"
-          sudo apt-get install -y --no-install-recommends yq
-          command -v yq
-          yq --version
-          tomlq --version
+        run: dialectica-ui/tests/install-yq.sh
 
       # The adjudicator decides whether an end-to-end run proved anything, so
       # its own guards are checked here, on every PR, rather than only being
@@ -1190,15 +1177,22 @@ jobs:
 
       # Each workflow keeps its own literal for the tools the two share, where
       # someone reading that job can see it. This step keeps the literals equal
-      # and exact. design.md D8 says why two literals and a check, rather than
-      # one file both workflows load.
+      # and exact. The e2e-ui-suite change's design.md D8 says why two literals
+      # and a check, rather than one file both workflows load.
       - name: The two UI workflows pin the same tool versions
         run: dialectica-ui/tests/tst_ui_tool_pins.sh
+
+      # A `${{ … }}` in a `run:` body is spliced into the script text before
+      # the shell parses it; through `env:` it is one word however it is
+      # spelled. Every workflow file is checked, not only the UI one. The
+      # e2e-suite-review change's design.md D8.
+      - name: No workflow splices an expression into a run body
+        run: dialectica-ui/tests/tst_workflow_run_bodies.sh
 
       # The scaffold-diff guard's own tests, so whether its diff mechanism
       # tells a changed value from lgs's comment-and-reorder rewrite is
       # checked on every PR rather than only when a real run happens to trip
-      # it. design.md D11.
+      # it. The e2e-ui-suite change's design.md D11.
       - name: The scaffold-diff guard tells a changed value from lgs's rewrite
         run: dialectica-ui/tests/tst_scaffold_values_unchanged.sh
 
@@ -1588,7 +1582,7 @@ jobs:
       # exits 101 with "binary `lgs` already exists in destination".
       - name: Install logos-scaffold
         if: steps.lgs-cache.outputs.cache-hit != 'true'
-        run: cargo install logos-scaffold --version ${{ env.LGS_VERSION }} --locked
+        run: cargo install logos-scaffold --version "$LGS_VERSION" --locked
 
       # Artefacts land at deterministic paths, one directory per variant:
       #   .scaffold/basecamp/lgx/<NN>-<module>.lgx        (dev)
