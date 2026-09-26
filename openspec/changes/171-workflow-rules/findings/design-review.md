@@ -595,3 +595,58 @@ Below medium, in prose:
   "elsewhere in the file" covers the effect, and the line numbers settle it.
 - Round 7's and round 9's note on `proposal.md`'s "round 5's start" still
   stands; this range rewrote the paragraph around it and kept the phrase.
+
+## Re-review round 11 `842758b..dd4fe18`
+
+- [x] **re-review round 11 `842758b..dd4fe18`: no findings** — read `RUNNER.md` step 3 ("Record the call", the number check, the forms check) and its "What you read" row, `design.md`'s re-review row Decision, "Findings go under a heading naming the round" through "What it still cannot see", and Risks, and `proposal.md`'s diff over the range; clean
+
+**RUNNER.md takes the decision as recorded.** "One more than the highest already
+under the row, 1 for the first" (`RUNNER.md:604`, `design.md:103-104`,
+`design.md:396-397`, `proposal.md:188-189`); lines only added below, a number
+changed only to repair a repeat; a repeat repaired upward to one more than the
+highest, never lowered (`RUNNER.md:659-665`, `design.md:526-530`); the
+three-condition listing bracketed by the two rows (`RUNNER.md:641-658`,
+`design.md:515-525`); the positional "below, not higher-numbered" exception
+(`RUNNER.md:684-686`, `design.md:423-426`); and round 1 skipped with both ends
+at HEAD for a piece where nothing lands (`RUNNER.md:609-612`, `design.md:107-109`).
+`proposal.md` states each of these the same way, and its Impact and closer-side
+follow-up entries were updated from "unique and consecutive" to "no number
+repeats". No other role file states a numbering rule (`git grep` for
+`round <n>` and `highest` in `spec-writer.md`, `dev-writer.md`, `closer.md` and
+`README.md` returns nothing).
+
+**The reversal is recorded honestly.** `design.md:555-575` says what the rule
+was (number by position, repair to the position's number), gives the failing
+case with concrete numbers (6, 8, 9 lowered to 7, 8 lands the re-run on the
+rejected run's number), cites the finding that found it, and names the earlier
+rejection of this very clause and the ground it was rejected on: as a
+restatement of the rule then in force, which stops being true once numbering by
+position is gone. That is the right reason for the earlier reasoning no longer
+holding. My own round 10 prose called that rejection sound; it was sound only
+against the rule then in force, and this entry says so. What the reversal costs,
+losing a gap as a lost-line signal, is recorded as a residual at
+`design.md:678-687` and in Risks at `design.md:1510-1512`, with the argument that
+the old signal came with a fail-open repair.
+
+**The new rejected alternatives hold.** The indent-only and rows-only
+alternatives each fail on the case the other half covers, and the text says
+which. Routing the repeat to the `closer`-side check stays rejected on the
+ground round 10 accepted.
+
+Below medium, in prose:
+
+- The placeholder alternative (`design.md:621-625`) is rejected thinly. "It
+  still cannot tell a lost line from a mistyped number" is the reason, but the
+  entry does not say why that matters under this alternative: the placeholder
+  repair is safe for a mistyped number and fails open for a lost line, because
+  it records "no round ran" over lanes that did run. One clause would make the
+  rejection self-standing.
+- `proposal.md:1022` still says "consecutive rounds share an endpoint". It
+  means rounds adjacent in time, and the range changed the same phrase to
+  "neighbouring" at `proposal.md:335`; left as is, it now sits beside a rule
+  whose point is that numbers need not be consecutive.
+- Round 10's note on `-F` matching anywhere now bears on `design.md:588`, "it
+  matches only the fixed start": a round line indented by eight spaces contains
+  the six-space pattern and is listed, so the check does not enforce "exactly
+  six". The effect is benign, since a listed line has its number read, but the
+  sentence claims more than the command checks.
