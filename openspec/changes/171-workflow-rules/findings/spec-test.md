@@ -801,6 +801,101 @@ Below medium, so in prose rather than boxed:
   `round `, it is listed as a round line and reads as a bad number. This
   fails closed. Low.
 
+## Re-review round 11 `842758b..dd4fe18`
+
+- [x] **re-review round 11 `842758b..dd4fe18`: no findings** — read `proposal.md`'s range diff in full, `proposal.md` at HEAD `:160-420` and `:970-1140`, `tasks.md`, `.openspec.yaml`, this file and the range stat; clean
+
+Read: `git diff 842758b..dd4fe18 -- openspec/changes/171-workflow-rules/proposal.md`
+in full; `proposal.md` at HEAD at `:160-420` and `:970-1140`, plus Impact
+as the range diff shows it; `tasks.md`, `.openspec.yaml` and this file in
+full; `git diff 842758b..dd4fe18 --stat`, stat only. The brief narrowed this
+round to internal consistency, so I did not re-read the issues. I read no
+file under `.claude/agents/`, no `design.md` and no other findings file. The
+stat shows `RUNNER.md` as the only `.claude/` path in the range: no
+`settings.json`, no hooks.
+
+**Round 10's box is closed in the contract.** It offered two fixes, and both
+landed. First, the line rule (`:181-187`) now fixes the form: a single line,
+indented by exactly six spaces, with nothing but round lines between the row
+and the next row. Second, the number check (`:231-253`) lists both rows, and
+it requires the round lines' line numbers to run without a gap between them.
+My scenario, a four-space `round 2` re-run line, now leaves a gap, and the
+runner does not tick. The stale "the six spaces are a round line's indent"
+sentence is gone. The fail-closed entry (`:1002-1008`) no longer claims that
+a mistyped word lists nothing.
+
+**Measured:**
+
+- On this tree, the number check prints the row at `tasks.md:24`, round lines
+  1 to 11 at `:25-35` with each number once, and the next row at `:36`. It
+  matches no other line in the file.
+- At `5745a7de`, a seven-space round pattern prints only `:24` and `:35`,
+  which matches `:283-286`.
+
+**The numbering rewrite is consistent at every site the brief named:**
+
+- **Numbering bullet (`:188-196`) and number check (`:254-271`).** Both say
+  that numbers must be unique, that a repeat is repaired upward, and that a
+  number is never lowered. "Order and gaps do not matter" (`:254`) agrees
+  with "unique, not consecutive" (`:194`).
+- **Forms-check exception (`:310-315`).** It now reads "a line below it", with
+  the reason that a repaired line keeps its place.
+- **Tick conditions.**
+  - The skipped round-1 line (`:215-221`) is what makes "at least one round
+    line" (`:249-251`) hold on every tick.
+  - The forms check skips a round marked skipped (`:301`), so a skipped line
+    is never searched.
+  - The row patterns start at `] `, so they match a ticked row as well as an
+    unticked one. That covers an untick after a tick.
+- **"What it still cannot see" (`:353-401`).** It adds two runner-breaks-a-rule
+  residuals: a round line that was removed, and a number that was lowered.
+  It also explains why a gap is harmless. That explanation holds, because a
+  line's number only ever moves up and the line it moved from still carries
+  the old number. So every number that has a record under it is still
+  carried by some line, unless a line was removed or a number lowered, and
+  those are exactly the two residuals.
+- **Standing-test entry (`:984-987`, `:1002-1008`, `:1053-1065`).** The number
+  check appears there in the same form as at `:232` and `:1080`. The entry
+  names the gap case, and it sends the remove and lower cases to "What it
+  still cannot see".
+- **`closer`-side follow-up (`:1079-1107`).** It uses the new command and the
+  new conditions, and it says the check matches "the line's fixed start".
+- **Impact (`:1280-1289`).** It names the fixed indent, one more than the
+  highest, the skipped round-1 line, the rows in the listing, and "repaired
+  upward and never by lowering".
+
+Below medium, so in prose rather than boxed:
+
+- **The follow-up drops "at least one".** The gap statement (`:1081-1082`)
+  gives the runner's three conditions. The "What a `closer`-side check would
+  do" bullet (`:1093-1095`) gives only two: every line is a round line, and
+  no number repeats. With no lines under the row, both hold vacuously. So a
+  second reader built from that bullet alone would pass a tick that had no
+  round line at all, which is the one case where a runner that skipped the
+  number check has nothing for the forms check to run over. The bullet
+  calls itself "the runner's two checks run again", so the condition is
+  implied. It is a follow-up, not a rule. Low.
+- **"No number is ever given twice" and "carries a number only one line has
+  carried" (`:191-193`) hold only while the rule is followed.** When a repeat
+  is repaired, the lane that was briefed from the repeated line may already
+  have written under a number that two lines carried. The number-check
+  bullet deals with that case, so this is wording. Low.
+- **"Marked skipped" (`:301`) now matters in a second case, and the phrase
+  still has two readings.** From round 5 on, every round line in this piece
+  that ran lanes also says "Skipped: architecture" (`tasks.md:29-35`). A
+  runner that reads that as the round being marked skipped would not run
+  the forms check for it. The sentence was not changed in this range, and
+  the natural reading is the whole round. Low.
+- **A line with more than six spaces is still listed.** The pattern is an
+  unanchored substring, so a seven-space round line matches, even though the
+  line rule says "exactly six". It is then checked like any other round line,
+  so nothing fails open. Low.
+- **A round line misplaced below the `closer`'s row** is listed, and
+  `:246-248` then tells the runner it "is not a round line". If the runner
+  follows that, the round's lanes are never checked. This is the same
+  runner-breaks-a-rule class as a removed line, and the listing shows the
+  misplaced line. Low.
+
 ## Areas checked clean
 
 - **Issue coverage.** Every "Done when" / proposed-change bullet in #171,
