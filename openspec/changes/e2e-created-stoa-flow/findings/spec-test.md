@@ -52,6 +52,10 @@ just in the wrong file. Not a checkbox — nothing needs to change in the tests
 — but worth fixing in `tasks.md` so a future reader looking for that scenario's
 test doesn't come up empty in the file named.
 
+**Fixed.** `tasks.md`'s tests-row now names both files: four scenarios in
+`tst_feed_states.qml`, the fifth in `tst_e2e_handles.qml`'s
+`test_the_feed_handles_follow_the_feed_screen`.
+
 ## 2. Can each test fail?
 
 Read every test added or changed in `tst_composer.qml`, `tst_e2e_handles.qml`,
@@ -188,7 +192,7 @@ window — arguably closer to what matters than a component test would be. The
 finding is about the strength of the claim recorded in `tasks.md`, not about
 missing coverage.
 
-- [ ] **`tester`** — `tasks.md`'s claim that `readThreadArea`/`moderateArea`
+- [x] **`tester`** — `tasks.md`'s claim that `readThreadArea`/`moderateArea`
       "genuinely have no component-test click" is stated as an impossibility
       but was only checked against `tst_navigation.qml`'s absence of a window,
       not against the `when: windowShown` precedent already in
@@ -205,6 +209,39 @@ missing coverage.
       `mouseClick` and record why it does or doesn't work. Low severity: the
       real click is already proven at the sitometres layer in
       `thread.yaml`/`moderation.yaml`, so nothing is uncovered either way.
+
+      **Fixed.** Attempted the windowed `mouseClick`, and it works — but not
+      with either file's recipe verbatim. New file
+      `dialectica-ui/tests/tst_feed_mouse_clicks.qml` finds `readThreadArea`
+      and `moderateArea` by `objectName` inside a real, shown `Main`, and
+      calls `mouseClick` on each. Both tests were red on first write for an
+      unexpected reason: `tst_screen_frame_geometry.qml`'s recipe (`TestCase`
+      as file root, subject parented directly under it) gets the subject
+      *laid out* but not *clickable* — measured by walking the clicked item's
+      parent chain and printing each ancestor's own `visible`: `TestCase`
+      itself reports `visible: false` even with `when: windowShown` and even
+      shown, and Qt Quick's input delivery gates on effective visibility while
+      layout polish does not. Restructuring to `tst_render_probe.qml`'s shape
+      instead — `Item` file root, `TestCase` a sibling parked clear of the
+      subject, `Main` created into its own cell `Item` — fixed both tests.
+
+      Proved each can fail, on the merged tree, mutated and restored:
+      `FeedScreen.qml:930`'s `onClicked: screen.threadOpened(parent.target)`
+      to `onClicked: {}` reddens only
+      `test_a_real_click_on_readThreadArea_opens_that_rows_thread` (predicted
+      and observed: 3 passed, 1 failed, the other new test unaffected); and
+      `FeedScreen.qml:572`'s `onClicked: screen.moderationRequested()` to
+      `onClicked: {}` reddens only
+      `test_a_real_click_on_moderateArea_opens_the_moderation_screen`
+      (predicted and observed: 3 passed, 1 failed, the other new test
+      unaffected). Both mutations restored; `git diff --stat
+      dialectica-ui/src` is empty. Full QML suite (`run-qml-tests.sh` with no
+      argument): 27 spec files, 0 failed.
+
+      `tasks.md`'s tests-row wording is corrected in the same commit as this
+      fix, rather than merely qualified: it now names the new file and the
+      `TestCase`-visibility measurement instead of asserting the impossibility
+      the reviewer flagged.
 
 ## Clean
 

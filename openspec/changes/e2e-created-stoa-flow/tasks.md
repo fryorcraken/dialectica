@@ -8,10 +8,23 @@
       found by `feed.yaml`, fixed test-first (3.2–3.3, design.md D8)
 - [x] tests — `tester` — verified the dev's named gaps directly: `feedReadState`/
       `threadReadState` fail on a constant-mutation (measured, both); `readThreadArea`/
-      `moderateArea` genuinely have no component-test click (confirmed: component
-      tests invoke the signals directly, and `tst_navigation.qml` has no window
-      for `mouseClick`); the `feed-view` ADDED requirement's five scenarios are
-      pinned in `tst_feed_states.qml`; D8's every-read fix pinned in both binding
+      `moderateArea` ARE clicked for real now, in `tst_feed_mouse_clicks.qml`
+      (spec-test review box 1: the prior "genuinely...no component-test click"
+      overstated what had only been checked against `tst_navigation.qml`'s
+      window-less `TestCase`. The windowed recipe needed a third data point
+      neither `tst_render_probe.qml` nor `tst_screen_frame_geometry.qml` states:
+      `TestCase` itself reports `visible: false` even under `windowShown`, so a
+      subject parented DIRECTLY under it — the geometry file's own recipe — gets
+      laid out but never receives a synthesized click; `Main` has to be a
+      sibling cell instead, as the pixel-probe file already is. Each handler's
+      `onClicked` mutated to a no-op on the merged tree and restored: reddens
+      exactly the test it names and no other); the `feed-view` ADDED
+      requirement's five scenarios are pinned across two files, not one —
+      four in `tst_feed_states.qml`, and the fifth ("A failed read does not
+      leave an earlier read's rows on screen") in `tst_e2e_handles.qml`'s
+      `test_the_feed_handles_follow_the_feed_screen` (spec-test review, §1: the
+      prior wording named only `tst_feed_states.qml` for all five); D8's
+      every-read fix pinned in both binding
       orders (measured: removing the feed's guard reddens exactly one test as
       predicted, and removing the thread's guard with `threadId` bound first
       reddens three, matching design.md/tasks.md word for word); D9's `wait_for`
