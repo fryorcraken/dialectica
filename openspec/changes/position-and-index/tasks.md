@@ -39,8 +39,11 @@ The design re-review raised one finding, answered by `536a03e`, which adds
 `design.md` D6 and changes nothing else but its finding's outcome. Its ground
 is design prose, so only the two dimensions that read design prose re-run.
 
-- [ ] re-review D6: design — `design-reviewer`. The finding was theirs; D6 is a Decisions entry.
-- [ ] re-review D6: readability — `code-reviewer`. New prose with checkable citations.
+- [x] re-review D6: design — `design-reviewer`. The finding was theirs; D6 is a Decisions entry.
+- [x] re-review D6: readability — `code-reviewer`. New prose with checkable citations.
+- [ ] re-review the D6 wording fix: readability — `code-reviewer`. The D6
+  readability finding ("Two things" against one) is answered in `design.md`;
+  only the dimension that raised it re-reads the fix.
 - [ ] ~~re-review D6: correctness, security, architecture, spec-test~~ Not
   re-run: `536a03e` touches no code, test or spec.
 
