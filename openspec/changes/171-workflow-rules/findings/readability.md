@@ -747,3 +747,87 @@ Stylistic only, no box:
   "no line of the file is missing" in bullet 1 would remove the overlap.
 - `RUNNER.md:576-577`: "the check before you tick (below)", noted in round 10,
   still fits either check.
+
+## Re-review round 12 `dd4fe18..1380d50`
+
+- [ ] **`dev-writer`** — `.claude/agents/RUNNER.md:612-614` and `:676-678` —
+      `<review>` is defined only from the runner's memory, "the HEAD you
+      dispatched the review round from". The repair bullet then names the one
+      case where that memory is gone, "such as after your report is lost",
+      and says "the check decides". But the check cannot run without
+      `<review>`, and nothing in `RUNNER.md` says where to read it from.
+      "Rebuild the state" (`:96-129`) says memory "does not survive a
+      compaction" and lists commands that recover the state, and none of
+      them recovers this commit.
+      **Scenario:** after a compaction, a runner finds the re-review row and
+      the `closer`'s row on adjacent line numbers and cannot tell whether a
+      round ran. It needs "the commit the review round read" and has to
+      guess. A natural guess is the HEAD of the `dev-writer`'s hand-back
+      answering the review findings, because that is the last point it
+      remembers the review being "done". If that pass rejected the findings
+      and added a paragraph to `design.md` (the case `design.md:322-334`
+      exists for), the range starts after that commit. `git diff --name-only`
+      lists only `findings/` and `tasks.md`, the check passes, and the runner
+      writes round 1 as skipped. The bold rule at `:678-681` forbids exactly
+      that outcome, but the runner cannot see it has broken the rule,
+      because its wrong `<review>` made the check agree with it.
+      **Measured:** `git grep -n -i -F "review round" --
+      .claude/agents/RUNNER.md` shows no line saying how to find the review
+      round's commit other than `:613`'s "the HEAD you dispatched the review
+      round from". The contract has the way to find it, but only as an
+      example: `proposal.md:225-227` and `design.md:306-308` say `c222c37` is
+      "the parent of the review round's first findings commit". On this tree,
+      `git log --diff-filter=A --format=%h%x20%p%x20%s --
+      openspec/changes/171-workflow-rules/findings/` gives `f94f7b8d` with
+      parent `c222c37b`, the earliest findings commit. So that derivation
+      works, but the earliest commit matters: the latest findings-adding
+      commit, `2259e7ff`, has parent `a284e514`.
+      Suggested fix: add one sentence at `:613-614` saying how to recover
+      `<review>` when the runner's report does not hold it, such as the parent
+      of the earliest commit that added a file under the change folder's
+      `findings/`. Keep "What you read" in step with it. Severity: medium.
+      This is the lost-report case the bullet names itself, and a wrong
+      `<review>` makes the check pass on exactly the false skip it exists to
+      stop.
+
+Dimension: **readability only**, narrowed as briefed. Read: `git diff
+dd4fe18...1380d50 -- .claude/agents/RUNNER.md`; `RUNNER.md:60-129` and
+`:490-729` at HEAD; `proposal.md:210-304`; `design.md:296-365`. Every command
+quoted was run in this tree.
+
+**The round-11 box is fixed.** The "at least one round line" bullet
+(`:671-682`) now opens with "write what is missing". It restores each round
+that ran from the runner's report, and it allows the skip form only where no
+round ran and the check passes. It also forbids, in bold, a nothing-landed
+repair over a range holding a commit that needs review. In my round-11
+scenario, a runner holding its report writes round 1 over
+`a1b2c3d..e4f5a6b` back, and the forms check then covers it.
+`git grep -n -i -F -e "lost" -e "gets its line back"` finds the repair only at
+`:673` and `:677`, plus the unrelated `:327`.
+
+**Stated once, one procedure: clean apart from the box.** The anchor and the
+two commands are stated once, in "Record the call" (`:610-628`). The "What you
+read" row (`:81`) gives the same two commands and points to step 3. The
+repair bullet points to "that paragraph's check" and does not restate it. The
+never-repair rule sits only in the bullet, next to its reason. When a runner
+has `<review>`, the procedure reads in order: the form and the range, then run
+both commands, then what a failure means, which is an ordinary line naming
+what landed. The runner would write ``round 1 `<review>..<HEAD>` `` marked
+skipped correctly. "Where any round 1 starts" agrees with the sample's round
+1, `a1b2c3d..e4f5a6b`.
+
+Stylistic only, no box:
+- `RUNNER.md:628-629`: no blank line separates "…in no round's range." from
+  "**A lane you run again…**". In rendered Markdown, the re-run rule, which
+  applies to every round, therefore closes the nothing-landed check's
+  paragraph. It is bold and reads on its own, so no one would misapply it.
+- `RUNNER.md:678`: "a round sized as above" points about 130 lines back, to
+  "Size the re-review yourself", past "Record the call"'s own "sized as
+  above". `proposal.md:293` says "sized as step 3 says", which is unambiguous.
+- `RUNNER.md:622-625`: an archive commit that leaves `openspec/specs/`
+  unchanged and the `closer`'s merge of `main` both need no review
+  (`:535-539`). The check still fails on either, because both touch paths
+  outside `findings/`. Normally the row is ticked before the `closer` runs, so
+  the check never sees them. Only the lost-line repair after a red-CI round
+  can meet them, and there it fails toward an extra round. That belongs to
+  the correctness lane, not readability.
