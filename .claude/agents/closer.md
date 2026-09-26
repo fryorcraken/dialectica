@@ -233,8 +233,8 @@ re-review's `findings/`, delete it now and commit that deletion with named
 paths. **Then push HEAD as below whether or not you deleted anything**: your tree
 carries every commit the runner brought onto the piece since the last push — a
 fix, a conflict resolution, the runner's record lines and tick — and the run you
-watch in Step 4 must include them. Skip the `openspec/specs/` check at the end
-of this step, since this run made no archive commit, and go on to Step 4.
+watch in Step 4 must include them. Skip the `openspec/specs/` check below,
+since this run made no archive commit, and go on to Step 4.
 
 **Otherwise, start by deleting `openspec/changes/<name>/findings/`**, which
 Step 1 cleared, and only then archive. The deletion is committed with the
@@ -278,6 +278,19 @@ folder is *moved* into `changes/archive/<date>-<name>/`. The findings tracker yo
 deleted at the start of this step is the one real deletion, so say so in the commit message, or
 the diff reads as though it is removing review evidence.
 
+**Straight after the archive commit, before the push, check whether it changed
+the live contract:**
+
+```
+git diff --name-only HEAD^ HEAD -- openspec/specs/
+```
+
+Keep what it lists; what you do with it depends on the push below. Any file
+listed means the archive merged the change's spec delta into `openspec/specs/`:
+content on the piece that no reviewer has read in that form. It runs before the
+push because a refused push ends your turn, and a re-dispatched `closer` skips
+it, so run after the push it would never run for this archive at all.
+
 **Then push it** — check `git config --get-regexp "^branch\.piece"` first and
 expect **nothing** back, because the branch is created with `git worktree add
 --no-track` and has no upstream. `merge refs/heads/main` coming back means it was
@@ -294,25 +307,21 @@ git push origin HEAD:refs/heads/piece/<name>
 does not carry your archive commit — pushing that ref would push a branch without
 the archive on it and report success.
 
-**If this push is refused, stop and report, as Step 2 says for its push**: no
-force, and no fetch and merge of the remote piece ref.
-
 This push must happen before Step 4: CI runs on the
 PR, so the archive has to be on the remote for the run you watch to be the run
 that tests what you are merging.
 
-**After the push, if this run made the archive commit, check whether it changed
-the live contract.** With the archive commit still at HEAD:
+Then, by what the push and the check did:
 
-```
-git diff --name-only HEAD^ HEAD -- openspec/specs/
-```
-
-Any file listed means the archive merged the change's spec delta into
-`openspec/specs/`: content on the piece that no reviewer has read in that form.
-**Stop before Step 4** — report the archive commit and the files listed, and
-return. The runner has it reviewed and dispatches a `closer` again, which finds
-the change archived. Nothing listed: carry on to Step 4.
+- **Push refused:** stop and report, as Step 2 says for its push — no force,
+  and no fetch and merge of the remote piece ref. If this run made the
+  archive commit, report the check's result with the refusal: the files it
+  listed, or that it listed none.
+- **Push accepted, and the check listed any file:** **stop before Step 4** —
+  report the archive commit and the files listed, and return. The runner has
+  it reviewed and dispatches a `closer` again, which finds the change
+  archived.
+- **Push accepted, and the check listed nothing:** carry on to Step 4.
 
 ## Step 4 — watching CI
 
@@ -466,7 +475,9 @@ not paraphrased. A summary of a failure arrives without the evidence that
 backed it, and the runner has to go and read it anyway. Where a merge of `main`
 stopped on a conflict, that is the paths `git diff --name-only --diff-filter=U`
 printed; where the archive changed `openspec/specs/`, the archive commit and the
-files the check listed; where a push was refused, the refusal git printed.
+files the check listed; where a push was refused, the refusal git printed and,
+if this run made an archive commit, the check's result — the files it listed,
+or that it listed none.
 
 **Then return. Do not wait for what you reported to be fixed.** A red run, an
 unticked box, a conflict, an archive commit that changed `openspec/specs/`, or a

@@ -168,8 +168,9 @@ rather than the count. Say in the closing comment where the work went, and keep
 the branch.
 
 **`piece/<name>` is pushed by two agents only, and never by cherry-pick.** The
-`dev-writer` pushes it at the end of its first pass and opens the PR there; the
-`closer` pushes it again after the archive commit. Both push a **refspec to the
+`dev-writer` pushes it at the end of every pass, and opens the PR on its first;
+the `closer` pushes it after merging `main` and in its Step 3, whether or not it
+made an archive commit — [`closer.md`](closer.md) says when. Both push a **refspec to the
 remote piece ref** rather than checking the branch out — it is checked out in the
 runner's worktree, and git refuses a branch checked out elsewhere. **When and how
 the `dev-writer` does it is [`dev-writer.md`](dev-writer.md)'s**, stated once

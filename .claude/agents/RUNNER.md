@@ -78,6 +78,7 @@ You read exactly enough to decide the next dispatch:
 | `openspec/changes/<name>/tasks.md` — the `## Stages` block (once the `closer` has archived: `openspec/changes/archive/<date>-<name>/`, see "Rebuild the state") | which stage is next, and whether anyone is on it |
 | `ls openspec/changes/<name>/findings/` — **the filenames** (once the `closer` has archived: `openspec/changes/archive/<date>-<name>/`, see "Rebuild the state") | whether a reviewer has reported, and which dimension |
 | `grep -rn "^- \[ \]"` over `findings/` | whether anything is unanswered, as a count |
+| `git grep -l -F "<range>"` over `findings/` — **file names only** | whether each lane of a re-review round left its record (step 3 of "From the `dev-writer`'s hand-back to the merge") |
 | the `closer`'s report | whether the piece closed, or what stopped it |
 
 **You do not read the findings themselves, and never quote one into a brief.**
@@ -161,7 +162,7 @@ piece branch that rides the same PR.
   failure happening.
 - **The `dev-writer` opens the PR**, as the last act of its first pass, having
   pushed its own commits straight to the remote `piece/<name>` ref. It does not
-  wait for your cherry-pick — [`dev-writer.md`](dev-writer.md) states the
+  wait for you to bring them on — [`dev-writer.md`](dev-writer.md) states the
   sequence and owns it. **If you are reaching for `gh pr create`, either the
   `dev-writer` has not run yet or the PR already exists**; check with `gh pr list
   --head piece/<name>` rather than creating a second one.
@@ -179,7 +180,8 @@ there is the same failure as a reviewer branch reaching it, renamed. That is a
 rule about the *ref name*, not about who may push: the `dev-writer` and `closer`
 both push their tip **to `refs/heads/piece/<name>`**, which creates no agent
 branch on the remote. Agent branches are named by the harness rather than by you,
-so you learn each one from the agent's report and cherry-pick from it.
+so you learn each one from the agent's report and fast-forward to it, as
+"Dispatching" says.
 
 **Do not rename or re-point a branch with an open PR.** A PR's head ref is
 immutable, and every workaround loses something; open a new PR on the correctly
@@ -198,7 +200,7 @@ tree, forked from your HEAD, with a working directory it does not have to correc
 
 > Act on the findings for `dev-writer` in
 > `openspec/changes/<name>/findings/`. Piece branch `piece/<name>`. Commit to
-> your own branch and report its name, so the work can be cherry-picked.
+> your own branch and report its name, so the work can be brought onto the piece.
 
 **Keep `git -C` and `EnterWorktree` out of your briefs.** An agent already in the
 right place needs neither, and a brief carrying them sends it hunting for a
@@ -216,7 +218,7 @@ carrying none of this repo's traps.
 
 **What you must still ask for is the branch name.** The agent lands on a
 harness-named `worktree-agent-<id>`, not on `piece/<name>`, so its commits need
-cherry-picking onto the piece — and the name is assigned by the harness rather
+bringing onto the piece — and the name is assigned by the harness rather
 than chosen by you. Have the agent report it rather than guessing it.
 
 **The isolation does not always take, and the agent is told to stop when it
@@ -239,8 +241,8 @@ then rewrite, duplicate or contradict work it cannot see, and nothing fails —
 there is no conflict, because the two agents were never in the same tree. The
 sequence per agent is: hand-back → cherry-pick onto `piece/<name>`, or
 `git merge --ff-only <branch>` for the `closer`, a conflict resolver, and an
-agent whose commits are already on the remote piece ref (the `dev-writer`'s
-first pass) → remove the agent's tree → dispatch the next.
+agent whose commits are already on the remote piece ref (every `dev-writer`
+pass) → remove the agent's tree → dispatch the next.
 
 Reviewers are the exception that proves it: six run concurrently precisely
 because they only *read* the code, so forking them all from the same HEAD is
@@ -256,15 +258,15 @@ longer be merged. A fast-forward takes the branch as it is, and it applies
 because the agent forked from your HEAD and nothing has moved your HEAD since.
 
 **An agent whose commits are already on the remote piece ref is fast-forwarded
-to as well** — in this flow, the `dev-writer`'s first pass, which pushes its tip
-to `refs/heads/piece/<name>` before handing back. A cherry-pick copies those
-commits to new SHAs: a plain `git cherry-pick` does so even when your HEAD is
-the first commit's parent, and `--ff` does, with no warning, whenever it is not.
-Your
-`piece/<name>` then no longer descends from the remote ref, and every later push
-of a HEAD forked from it — the `closer`'s included — is refused as
-`non-fast-forward`, since no agent may force. A fast-forward keeps the SHAs or
-refuses; it never diverges silently.
+to as well** — in this flow, the `dev-writer`, which pushes its tip to
+`refs/heads/piece/<name>` before handing back on every pass — a findings pass,
+a red-CI fix or a pass after a `spec-writer` callback as much as its first. A
+cherry-pick copies those commits to new SHAs: a plain `git cherry-pick` does so
+even when your HEAD is the first commit's parent, and `--ff` does, with no
+warning, whenever it is not. Your `piece/<name>` then no longer descends from
+the remote ref, and every later push of a HEAD forked from it — the `closer`'s
+included — is refused as `non-fast-forward`, since no agent may force. A
+fast-forward keeps the SHAs or refuses; it never diverges silently.
 
 **If a fast-forward is refused** (`Not possible to fast-forward`), stop and
 report: take neither of the hints git prints with it, `git merge --no-ff` and
@@ -276,6 +278,36 @@ report: take neither of the hints git prints with it, `git merge --no-ff` and
 conflict there, and reports back. Then pick again. Its branch is local and never
 pushed, so the rebase rewrites nothing anyone else holds. If the agent cannot be
 continued, dispatch a fresh agent for the stage.
+
+**An agent whose tree holds uncommitted changes cannot rebase as it stands** —
+a mutating reviewer's does, since its role file has it leave mutations
+uncommitted as evidence only you may discard, and `git rebase` refuses a dirty
+tree (`error: cannot rebase: You have unstaged changes.`). Committing them would
+put them on the piece, discarding them destroys the evidence, and a stash lands
+on the stack every worktree shares. So your continuation message carries these
+steps, in the agent's own tree:
+
+1. Save the changes as a patch under the tree's own gitignored `tmp/`, written
+   by git rather than a redirect. `git diff` does not create the directory, so
+   make it first:
+   ```
+   mkdir -p tmp
+   git diff --binary --output=tmp/uncommitted.patch HEAD
+   ```
+2. Restore the tree and the index to the last commit; the ignored patch file
+   stays:
+   ```
+   git restore --source=HEAD --staged --worktree -- .
+   ```
+3. Rebase onto `piece/<name>` and resolve the conflict: `git rebase
+   piece/<name>`, fix the file, `git add <path>`, `git rebase --continue`.
+4. Re-apply the patch, and report whether it applied:
+   ```
+   git apply tmp/uncommitted.patch
+   ```
+
+The changes come back unstaged whether or not they were staged before, and the
+patch file stays in `tmp/` either way.
 
 **The review round meets that conflict every time, so expect it rather than
 reading it as a fault.** The reviewers fork from one HEAD, each ticks its own
@@ -328,7 +360,7 @@ not arise on it; and the setting is global, applying to every
 
 | Stage | How many |
 |---|---|
-| `spec-writer` / `dev-writer` / `tester` | **one in total**, not one each — cherry-pick and commit before dispatching the next, or it forks from a HEAD without the previous one's work |
+| `spec-writer` / `dev-writer` / `tester` | **one in total**, not one each — bring its commits onto your HEAD (cherry-pick, or fast-forward where "Dispatching" says) before dispatching the next, or it forks from a HEAD without the previous one's work |
 | reviewers | **six, in parallel** — a tree and a findings file each |
 | `closer` | one, never beside a writer |
 
@@ -518,7 +550,8 @@ what lands after review ranges from one line to a rewrite:
 - **The brief** names the commit range to read — for `spec-test-reviewer`, only
   the spec and test files in it, since it stays blind to the implementation —
   and says the reviewer's stage row is already ticked and stays so, and that
-  new findings are appended as boxes to its existing findings file. **A
+  new findings are appended as boxes to its existing findings file, under a
+  heading naming the range, such as ``## Re-review `a1b2c3d..e4f5a6b` ``. **A
   re-reviewer that finds nothing appends one ticked verdict box instead**,
   naming the range it read, and commits it as it would a finding:
 
@@ -526,10 +559,12 @@ what lands after review ranges from one line to a rewrite:
   - [x] **re-review `a1b2c3d..e4f5a6b`: no findings** — read <what>; clean
   ```
 
-  Its stage row was ticked in the first round, so that box is the reviewer's
-  own record that this round ran. Being ticked, it passes the `closer`'s
-  unticked-box gate; being a box, it counts toward every file being non-zero.
-  Clean areas stay in prose — the box is one line for the round. If the
+  Its stage row was ticked in the first round, so the heading or the box is the
+  reviewer's own record that this round ran, and what you check before you tick
+  the re-review row (below) — so both name the range exactly as the brief gives
+  it. Being ticked, the box passes the `closer`'s unticked-box gate; being a
+  box, it counts toward every file being non-zero. Clean areas stay in prose —
+  the box is one line for the round. If the
   `closer` has already deleted `findings/` — it does so just before archiving,
   so a red-CI fix meets this — the brief says to write that file afresh, under
   the same name, in the archived change folder named below, holding the
@@ -557,9 +592,24 @@ exactly like a forgotten one:
       round 2 `e4f5a6b..0c9d8e7` red-CI fix — skipped: `cargo fmt` whitespace only, no token changed
 ```
 
-**Tick the row when no commit that merges is unreviewed.** The record, the tick
-and the untick are commits you make in your own tree, on `piece/<name>`, before
-the next dispatch forks from it — and the only content you commit, as
+**Tick the row when no commit that merges is unreviewed** — and before you
+tick it, check that every lane of every round the tick closes left its own
+record. A round the tick closes is one recorded since the row was last ticked
+and not marked skipped. For each, once the round's commits are on your HEAD:
+
+```
+git grep -l -F "<range>" -- <change folder>/findings/
+```
+
+must list the findings file of every lane the round dispatched (the names are
+in "How many at once"). It prints file names, not findings. A lane whose file is
+not listed has not finished the round, however finished its agent looks and
+whatever its hand-back said: continue that reviewer, or dispatch a fresh one for
+the lane, and do not tick. This row is the one stage row not ticked by the agent
+that did the work, and a stalled agent looks exactly like a finished one.
+
+The record, the tick and the untick are commits you make in your own tree, on
+`piece/<name>`, before the next dispatch forks from it — and the only content you commit, as
 "What a runner commits" says. **If a commit that needs review lands after it is
 ticked — a red-CI fix, a conflict resolution, an archive commit that changed
 `openspec/specs/` — untick it** and add the next round's line: the `closer`'s
@@ -594,13 +644,17 @@ merge of `main` are on its branch, not on your HEAD. Without them the archived
 `tasks.md` you untick is not in your tree, and the next agent forks from a HEAD
 that lacks both. If the fast-forward is refused, stop and report.
 
-It decides nothing and dispatches nobody. Five things come back:
+It decides nothing and dispatches nobody. The returns below are examples, not
+the whole list: [`closer.md`](closer.md) has more stops than this section
+routes. A return not named here comes with its evidence; route it by what it
+is.
 
 **A red run.** This is the most tempting moment to break the first rule in
 "What a runner does" — the failing lines are in the report and the fix looks
 like one line. The `closer` refused it for the reason you should: it neither
 read nor wrote the change. Dispatch a fixer the ordinary way — `isolation: "worktree"`, its own tree
-forked from your HEAD, its commits cherry-picked back. There is no special
+forked from your HEAD, its commits brought back as "Dispatching" says (a
+`dev-writer` fixer has pushed, so fast-forward to it). There is no special
 dispatch shape for a fixer, and **nothing goes into the piece's own worktree but
 you**: putting a dispatched agent there is the failure the whole "Dispatching"
 section above measures. Who to send:
@@ -617,8 +671,10 @@ the run URL, not your reading of it. Then **the fix goes back through step 3**
 re-dispatch the `closer`**. A piece merges because the fix went through step 3
 and the `closer` saw it green, not because the fix looked right.
 
-**An unticked box**, meaning a finding was never answered: it routes to whoever
-the finding names.
+**An unticked box.** A finding never answered routes to whoever the finding
+names. A stage row: another agent's row goes back to that agent, continued to
+tick it, or to a fresh agent for the stage ("What a runner commits"); the
+re-review row means a round is owed — step 3.
 
 **A conflict merging `main`.** The `closer` does not resolve one: it aborts the
 merge and reports the conflicting paths. Route it by those paths, with the table
@@ -635,7 +691,10 @@ archived and does not archive again.
 **A refused push.** The remote piece ref holds a commit your HEAD lacks — what
 the fast-forward rules in "Dispatching" exist to prevent — and you cannot
 reconcile the two without a reset, a force-push or a merge of your own, none of
-which is yours. Report it to the owner with the output of
+which is yours. If the `closer`'s report also lists files from its archive
+check, first untick the re-review row and record a round for the archive
+commit, as for a spec-changing archive: the round is owed whatever the owner
+does about the push. Then report it to the owner with the output of
 
 ```
 git log --oneline --left-right --cherry-mark HEAD...origin/piece/<name>
@@ -644,6 +703,10 @@ git log --oneline --left-right --cherry-mark HEAD...origin/piece/<name>
 after a `git fetch origin`, and wait. `<` marks a commit only your HEAD holds,
 `>` one only the remote holds, and `=` a pair that are copies of each other. Do
 not reset, force or merge.
+
+**A PR that stays `BLOCKED` with every required check green.** It goes to the
+owner, with the `gh pr view` output the `closer` reported. There is no other
+route: do not look for another way to merge, and do not diagnose the block.
 
 A stale branch that merges `main` with no conflict does *not* come back — the
 `closer` merges it itself, and step 3 needs nothing for it.

@@ -128,7 +128,8 @@ is information worth reporting; quietly doing something else is not.
 
 `spec-writer` opens `tasks.md` with a **stage block** it owns. You write the
 implementation checklist below it, and you tick exactly one stage row — your
-own — never adding a row, so concurrent agents' cherry-picks do not conflict.
+own — never adding a row. When ticks conflict all the same, and who resolves
+that, is [`spec-writer.md`](spec-writer.md)'s stage-block paragraph.
 
 **Do not tick a row for work a test cannot show.** When a requirement holds
 because nothing can reach the code that would break it, label it

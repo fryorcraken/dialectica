@@ -154,7 +154,7 @@ since deleted. Scratch commits used `--no-gpg-sign`: without it, the first
 cherry-pick failed with `gpg: signing failed: Timeout` after pinentry launched
 on `/dev/pts/3`.
 
-- [ ] **`dev-writer`** — `.claude/agents/RUNNER.md:240-243` and `:258-262`
+- [x] **`dev-writer`** — `.claude/agents/RUNNER.md:240-243` and `:258-262`
       — the fast-forward rule names "the `dev-writer`'s first pass" as the
       agent whose commits are already on the remote piece ref. But the
       `dev-writer` pushes on every pass, so a runner following the text
@@ -208,7 +208,23 @@ on `/dev/pts/3`.
       `dev-writer` finding reaches. The owner has to step in, and the runner
       may not repair it.
 
-- [ ] **`dev-writer`** — `.claude/agents/RUNNER.md:273-278` — the
+      **Fixed** (this commit), as the contract now reads: `proposal.md` names
+      every `dev-writer` pass. `RUNNER.md`'s per-agent sequence says "every
+      `dev-writer` pass"; the already-pushed paragraph names the `dev-writer`
+      by condition, pushing "on every pass — a findings pass, a red-CI fix or
+      a pass after a `spec-writer` callback as much as its first"; "How many
+      at once" says to bring commits on by cherry-pick or fast-forward "where
+      'Dispatching' says"; the red-run fixer's commits are "brought back as
+      'Dispatching' says (a `dev-writer` fixer has pushed, so fast-forward to
+      it)"; and "One piece is one PR" no longer says "cherry-pick" for the
+      `dev-writer` or the `closer` (`readability.md`'s re-review third box).
+      `README.md:170-172` is the third box below. `design.md`'s ":741-742 the
+      one instance today" now names every pass and cites this box. Measured
+      after the edit: `git grep -n -e "first pass" -- .claude/agents/RUNNER.md`
+      returns only "opens the PR, as the last act of its first pass", which is
+      true.
+
+- [x] **`dev-writer`** — `.claude/agents/RUNNER.md:273-278` — the
       conflict rule tells the agent to rebase its own branch onto
       `piece/<name>`. `code-reviewer.md:178` tells a mutating reviewer to leave
       its mutations uncommitted in its tree, and `git rebase` refuses to run
@@ -246,7 +262,30 @@ on `/dev/pts/3`.
       reviewer that mutated, and it cannot be fixed in `code-reviewer.md`
       under this piece's authorisation.
 
-- [ ] **`dev-writer`** — `.claude/agents/README.md:170-172` — "the
+      **Fixed** (this commit) on the `RUNNER.md` side, with the role-file
+      home deferred to the owner (`proposal.md`, "Out of scope", "The
+      reviewer role files on rebasing with mutations in the tree", and PR
+      #174's follow-ups). "Dispatching" now has, after the conflict rule, the
+      steps the runner's continuation message carries for an agent whose
+      tree holds uncommitted changes: `mkdir -p tmp` and
+      `git diff --binary --output=tmp/uncommitted.patch HEAD`;
+      `git restore --source=HEAD --staged --worktree -- .`; rebase onto
+      `piece/<name>` and resolve; `git apply tmp/uncommitted.patch`, reporting
+      whether it applied. Measured end to end in a scratch repository under
+      `./tmp/` (git 2.55.0, since deleted), including the `tasks.md` conflict
+      mid-rebase: the dirty rebase refused as you measured; `git diff
+      --output` refused until `tmp/` existed; after the restore only the
+      ignored `tmp/` remained; the rebase stopped on the conflict and
+      continued; the patch re-applied and `git diff HEAD` matched it exactly,
+      both edits now unstaged; the runner's next pick applied cleanly. Your
+      unmeasured `--autostash` restore is recorded as not chosen, with the
+      shared stash list as the reason. The signing hang is answered too, and
+      `RUNNER.md` names no flag: with signing forced on and `gpg.program`
+      pointed at a missing binary, `git rebase --no-gpg-sign` followed by a
+      flagless `git rebase --continue` completed without trying to sign,
+      while a plain `git commit` failed. `design.md` has the entry.
+
+- [x] **`dev-writer`** — `.claude/agents/README.md:170-172` — "the
       `closer` pushes it again after the archive commit" no longer matches
       `closer.md`. The closer now pushes in two more places:
       - Step 2, `:179-183`, after merging `main` and before any archive;
@@ -265,6 +304,16 @@ on `/dev/pts/3`.
       `README.md:172` "`closer` pushes it again after the archive commit"
       alongside `closer.md:182` and `:233`, which are the two other push
       points.
+
+      **Fixed** (this commit). The sentence now reads: the `dev-writer`
+      pushes "at the end of every pass, and opens the PR on its first; the
+      `closer` pushes it after merging `main` and in its Step 3, whether or
+      not it made an archive commit — [`closer.md`](closer.md) says when".
+      That covers both push points you name and the first box's every-pass
+      correction, and points to `closer.md` rather than enumerating in a way
+      that could go stale. Measured after the edit:
+      `git grep -n -F "pushes it again after the archive" -- .claude/agents`
+      returns nothing.
 
 Clean, and checked by running the command where there was one:
 

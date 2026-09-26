@@ -235,3 +235,65 @@ about their output was written.
       "Step 1 deletes" and "raised none" text updated.
       `findings/security.md`'s second box gets its landed outcome.
 - [x] 9.10 `openspec validate 171-workflow-rules --strict` passes.
+
+### 10. After the `spec-writer`'s re-review findings (`1f62afd`)
+
+Supersedes 9.8's "five returns" and 9.7's "the `dev-writer`'s first pass".
+Commands written into a role file were run against this tree or a scratch
+repository under `./tmp/` (git 2.55.0), since deleted, before any claim about
+their output was written.
+
+- [x] 10.1 `closer.md` Step 3: the `openspec/specs/` check runs straight after
+      the archive commit, before the push; then push refused → stop and
+      report the refusal and the check's result; accepted with files → stop
+      before Step 4; accepted with nothing → Step 4. "Your report" asks for
+      the check's result on a refused push. The re-dispatch paragraph's skip
+      is kept, pointing at the check "below". Verify: the check's code block
+      sits above the push's in Step 3.
+- [x] 10.2 `RUNNER.md` "The `closer`, and what comes back": no count; returns
+      are examples and an unnamed one is routed by what it is; a `BLOCKED`
+      entry; "An unticked box" covers stage rows; the refused-push entry
+      unticks and records a round first when the report lists archive-check
+      files. Verify: `git grep -n -e "things come back" -- .claude/agents`
+      returns nothing.
+- [x] 10.3 `RUNNER.md` step 3's brief: findings go under a heading naming the
+      range; both heading and verdict box carry the range exactly as the
+      brief gives it.
+- [x] 10.4 `RUNNER.md` step 3's tick rule: the pre-tick
+      `git grep -l -F "<range>" -- <change folder>/findings/` for every
+      unskipped round the tick closes; a lane not listed is continued or
+      redispatched, and the row stays unticked. "What you read" gains a row
+      for it. Verify: for `c222c37..9dc235c` on this tree the command lists
+      all six findings files; for an absent range it lists nothing.
+- [x] 10.5 `RUNNER.md` "Dispatching": the four steps for an agent whose tree
+      holds uncommitted changes, with no signing flag. Verify: the whole
+      sequence ran in the scratch repository, including a `tasks.md` conflict
+      mid-rebase, and the re-applied patch matched the saved one.
+- [x] 10.6 `dev-writer.md`: "so concurrent agents' cherry-picks do not
+      conflict" replaced by a pointer to `spec-writer.md`'s stage-block
+      paragraph. Verify: `git diff origin/main...HEAD --
+      .claude/agents/dev-writer.md` shows that clause and nothing else.
+- [x] 10.7 Every `dev-writer` pass is fast-forwarded to: `RUNNER.md`'s
+      per-agent sequence, already-pushed paragraph, "How many at once", the
+      red-run fixer, "One piece is one PR" (two sentences) and the sample
+      brief; `README.md`'s branch section says the `dev-writer` pushes on
+      every pass and the `closer` after merging `main` and in Step 3. Verify:
+      `git grep -n -e "first pass" -- .claude/agents/RUNNER.md` returns only
+      the PR-opening sentence.
+- [x] 10.8 `design.md`: the archive-check entry says why the check runs before
+      the push; the verdict-box entry gains the heading and the pre-tick
+      check; new entries for returns without a count and for the mutating
+      reviewer's rebase with its three rejected alternatives; the
+      `spec-writer.md` correction entry covers `dev-writer.md`; "the one
+      instance today" names every pass; Risks' standing-test entry points at
+      the new Out of scope entry, and a new Risk records that only the runner
+      runs the pre-tick check.
+- [x] 10.9 PR #174's body: the follow-ups list the wider standing test, the
+      `closer`-side re-review check, the reviewer role files on rebasing with
+      mutations, and a second reader for rejected findings; the
+      one-file-per-row follow-up lists every role file that ticks a row.
+- [x] 10.10 The five `dev-writer` boxes in `findings/correctness.md` and
+      `findings/readability.md` flipped with outcomes. Verify:
+      `grep -rc "^- \[ \]" openspec/changes/171-workflow-rules/findings/`
+      is zero for every file.
+- [x] 10.11 `openspec validate 171-workflow-rules --strict` passes.

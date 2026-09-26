@@ -163,7 +163,7 @@ Dimension: **readability only**. Read: `git log --oneline c222c37..9dc235c`;
 retraction greps hit; `dev-writer.md:124-218` and `README.md:160-253` for the
 sweep. Every command quoted was run in this tree.
 
-- [ ] **`dev-writer`** — `.claude/agents/RUNNER.md:597` — "Five things come
+- [x] **`dev-writer`** — `.claude/agents/RUNNER.md:597` — "Five things come
       back" reads as the complete list of the `closer`'s returns, and it is
       not: `closer.md:417-424` has the `closer` stop and report a PR that
       stays `BLOCKED` with every required check green, and no entry in "The
@@ -187,6 +187,23 @@ sweep. Every command quoted was run in this tree.
       examples, not a list that reads as complete". Either drop the count,
       or add a `BLOCKED` entry and widen the unticked-box entry to stage rows.
       Severity: moderate. This is the one return #170 is about.
+
+      **Fixed** (this commit), with both suggestions, as the `spec-writer`'s
+      box below set the contract. "Five things come back" is gone: the
+      section now says its returns are examples, that `closer.md` has more
+      stops than it routes, and that a return it does not name comes with
+      its evidence and is routed by what it is. It gains "A PR that stays
+      `BLOCKED` with every required check green": to the owner, with the
+      `gh pr view` output the `closer` reported, no other route and no
+      diagnosis. "An unticked box" now covers a stage row: another agent's
+      row goes back to that agent, continued to tick it, or to a fresh agent
+      for the stage; the re-review row means a round is owed. The refused-push
+      entry gains the untick-and-record step for a report that lists files
+      from the archive check. Measured after the edit:
+      `git grep -n -e "things come back" -- .claude/agents` returns nothing,
+      and `git grep -n -F "BLOCKED" -- .claude/agents/RUNNER.md` returns the
+      new entry. `design.md` has a Decisions entry, "The `closer`'s returns
+      are given as examples, with no count".
 
 - [x] **`spec-writer`** — `openspec/changes/171-workflow-rules/proposal.md:359`,
       `:369` and `:624` — the contract gives three different accounts of what
@@ -229,7 +246,7 @@ sweep. Every command quoted was run in this tree.
       back", add the `BLOCKED` entry, and widen the unticked-box entry to
       stage rows.
 
-- [ ] **`dev-writer`** — `.claude/agents/RUNNER.md:164` and `:182` — two
+- [x] **`dev-writer`** — `.claude/agents/RUNNER.md:164` and `:182` — two
       sentences in "One piece is one PR" still give cherry-pick as the route
       for the branches the new rule fast-forwards.
       **Scenario:** line 164 says the `dev-writer` "does not wait for your
@@ -248,6 +265,19 @@ sweep. Every command quoted was run in this tree.
       default route and are correct. `proposal.md:345-348` records correcting
       this section's "you cherry-pick", so the section is in scope, and these
       two were missed. Severity: low.
+
+      **Fixed** (this commit). Line 164 now says the `dev-writer` "does not
+      wait for you to bring them on", and line 182 says "you learn each one
+      from the agent's report and fast-forward to it, as 'Dispatching'
+      says". The generic sentences stay generic. Two that addressed the
+      `dev-writer` without naming it changed as well: the sample brief in
+      "Dispatching", which is a `dev-writer` findings brief, now says "so the
+      work can be brought onto the piece", and "What you must still ask for
+      is the branch name" says the commits need "bringing onto the piece".
+      Measured after the edit: `git grep -n -F "cherry-pick" --
+      .claude/agents/RUNNER.md` returns no line naming the `dev-writer` or
+      the `closer` as picked, only the generic route, the refusal messages,
+      and the conflict rule.
 
 - [x] **`spec-writer`** — `.claude/agents/dev-writer.md:131` — the premise this
       piece corrected in `spec-writer.md` survives in a second role file, and
