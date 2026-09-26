@@ -60,6 +60,66 @@ findings file and no diff body was read, per the brief's restriction.
       extracts the command from `closer.md` and `RUNNER.md` and runs it
       against fixture names from the `lint` job, which is a piece of its own.
 
+## Re-review `c222c37..9dc235c`
+
+Scope actually reviewed: `git diff c222c37..9dc235c -- openspec/changes/171-workflow-rules/proposal.md` (full diff read); `tasks.md` and `.openspec.yaml` in full; `git diff c222c37..9dc235c --stat` (stat only); issues #171, #170, #169, #133 (already read in round 1, re-checked for coverage against the new text). No file under `.claude/agents/`, no `design.md`, and no other findings file was read.
+
+- [ ] **`spec-writer`** — round 1's pathspec-test finding is deferred, but the
+      deferral is invisible in the contract
+      **Scenario:** `proposal.md`'s "Out of scope" section is where this
+      contract records every other deferred item, each with its own reasoning
+      and a note for the project manager to file ("One file per stage row",
+      "A clean first-round review with no box (#182)", "Why #165 was
+      `BLOCKED`", etc.). Round 1's finding above — that the `closer`'s Step 1
+      pathspec is a deterministic, checkable command with no standing test —
+      was accepted: its own "Deferred" note says it is tracked "to a
+      follow-up issue... and recorded in `design.md`'s Risks". But
+      `proposal.md`, the document this `skip_specs` change designates as the
+      contract, never mentions it: a reader of `proposal.md` alone has no way
+      to learn this gap was found and consciously deferred rather than never
+      noticed. The only trace anywhere outside `design.md` is one unlabelled
+      clause in `tasks.md`'s Implementation notes, which names no follow-up
+      and points only at `design.md`.
+      **Measured:** `git grep -c -F "pathspec" openspec/changes/171-workflow-rules/proposal.md`
+      returns no output (zero matches, over the whole file, not just the
+      diff). `git grep -n -F "clean re-review trace"` matches once, at
+      `tasks.md:174`, and zero times in `proposal.md`. Severity: moderate —
+      matches round 1's own rating; the gap is real and was found, just not
+      surfaced where the contract's own convention says a deferred gap
+      belongs.
+
+- [ ] **`spec-writer`** — new deterministic-command claims added in this range
+      get no equivalent deferral
+      **Scenario:** this range adds several brand-new prose claims about the
+      exact output of a git command the `closer`/runner runs, each entirely
+      new in `c222c37..9dc235c` (none of the four strings below appear in
+      `proposal.md` before `c222c37`): the archive-commit gate
+      `git diff --name-only HEAD^ HEAD -- openspec/specs/`, `git merge
+      --ff-only`'s keep-or-refuse behaviour, `git show --remerge-diff <sha>`
+      for a conflict resolution, and `git log --oneline --left-right
+      --cherry-mark HEAD...origin/piece/<name>`'s output shape. These are the
+      same class of claim round 1 flagged for the Step 1 pathspec — a
+      deterministic shell command's behaviour, asserted in prose, with
+      nothing that can see `.claude/agents/` at all (`tasks.md`: "no test can
+      see any of these tasks"). `tasks.md`'s own verify lines (8.2, 8.4, 9.1,
+      9.3, 9.7, 9.8) show each was checked once against a scratch repository
+      at authoring time — the same one-off verification the pathspec had
+      before round 1's finding was written. Unlike the pathspec and the
+      verdict-box grep behaviour (which at least got the tasks.md mention
+      above), nothing in `proposal.md` or `tasks.md` flags these four as a
+      known, accepted gap; they read as settled rather than as
+      measured-once-and-untested, which is an inconsistency within the
+      contract's own treatment of the same risk.
+      **Measured:** counted occurrences of each string in `proposal.md` at
+      `c222c37` vs `9dc235c` with `git grep -c -F "<string>" <rev> --
+      openspec/changes/171-workflow-rules/proposal.md` (no output means zero):
+      `"openspec/specs/"` 0→8, `"ff-only"` 0→2, `"remerge-diff"` 0→1,
+      `"cherry-mark"` 0→1. Severity: moderate — same reasoning as round 1's
+      pathspec finding; the commands were measured once and are presumed
+      correct, but no gate would catch a future edit that got one wrong, and
+      that gap is currently untracked for these four while it is tracked for
+      the pathspec.
+
 ## Areas checked clean
 
 - **Issue coverage.** Every "Done when" / proposed-change bullet in #171,
