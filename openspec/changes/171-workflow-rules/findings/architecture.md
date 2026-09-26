@@ -505,3 +505,100 @@ with three options and a recommendation. #132 is still `OPEN`, `CONFLICTING`,
 and last updated 2026-09-21T01:23:45Z, and "drops `security` for a prose-only
 change" still matches its tier table. What is inaccurate about the #132
 section is in the three boxes above.
+
+## Re-review round 3 `34fd428..dc1390a`
+
+- [x] **re-review round 3 `34fd428..dc1390a`: no findings** — read the range's diff of `RUNNER.md`, `closer.md` and `dev-writer.md`, `proposal.md`'s #132 overlap section and its three owner follow-ups, `design.md`'s round-number section and standing-test Risks entry, `spec-writer.md`'s template paragraph, and a fresh `git merge-tree` against #132; clean
+
+**The seven round-2 boxes are fixed.** I checked each one against the tree:
+
+- **#132 overlap, re-measured.** After `git fetch origin`, #132 is still at
+  `118b4ecd`. `git merge-tree --write-tree --name-only HEAD origin/piece/review-tiering`
+  (HEAD `3718ed7`) reports `CONFLICT (content)` in `README.md`, `RUNNER.md`,
+  `spec-writer.md` and `CLAUDE.md`. The same command against `origin/main`
+  reports only `README.md` and `CLAUDE.md`. Running
+  `git grep -n -e "^<<<<<<<" -e "^>>>>>>>"` over the merged tree finds five
+  blocks in the three role files. The one `README.md` block at merged
+  line 500 is the pre-existing `PLAN.md` conflict. That leaves exactly the
+  four blocks `proposal.md` lists under "Conflicts this piece adds":
+  - `RUNNER.md` 370-376. This is the table: this piece's writers' row sits
+    beside #132's "three to five" reviewers' row.
+  - `spec-writer.md` 76-86.
+  - `README.md` 324-341. This is the `settings.json` paragraph, with "the
+    **user's** file" against "the owner's".
+  - `README.md` 346-359. Here "bringing onto" sits against "Every agent's
+    commits are cherry-picked".
+
+  `closer.md`, `dev-writer.md` and `tester.md` auto-merge, as the section
+  says. That includes `dev-writer.md` after this range's four route-word
+  edits. The "six files" count and its two commands are right. The section
+  records a measurement at `6f17bebf`. At `3718ed7` the result is the same,
+  so the range added no new block.
+- **`closer.md` entry.** It names the four hunks and makes no rebase claim.
+- **Standing-test inventory.** It now lists "Dispatching"'s four commands
+  and the save with `HEAD` dropped as a fail-open case. `design.md`'s Risks
+  entry (lines 1213-1246) now agrees with it on both the command list and the
+  fail-open/fail-closed split.
+- **The two owner follow-ups can each be lifted into an issue as they
+  stand.** "An independent check of the re-review row by the `closer`" and
+  "The reviewer role files on rebasing with mutations in the tree" follow the
+  one-file-per-row entry's shape: the gap, where the thing lives now, the
+  change, who reads it, and what the issue must settle. Neither contains
+  "(above)". Each names the `RUNNER.md` section and paragraph it depends on,
+  with the commands quoted.
+- **`closer.md` closing paragraph.** "Every stop this file names ends your
+  turn — … among them, and anything else you stopped to report" is now a
+  list of examples and names `BLOCKED`.
+
+**The new mechanisms are in the right files and compose.** The numbered
+round line, the two exact forms and the pre-tick command all live in
+`RUNNER.md`, the file of the only party that writes the line and ticks the
+row. The brief carries the forms to the reviewer, so no reviewer role file
+needed to change. `spec-writer.md`'s template paragraph points to `RUNNER.md`
+and does not restate the format. `dev-writer.md`'s new clause is a pointer to
+`spec-writer.md`, which points on to `RUNNER.md`. Moving the "review round
+meets that conflict every time" paragraph ahead of the mutating-rebase
+paragraph gives "Dispatching" a cause-then-remedy order.
+
+I traced these cases for a runner left with only a forbidden move, and found
+none:
+- **A lane stalls in round N.** The runner continues it, or writes a line for
+  round N+1 over the same range and dispatches a fresh one. Round N's check
+  then skips that lane, and round N+1's check covers it. Nothing needs the
+  runner to edit a findings file.
+- **A run is not accepted.** The same route applies, with no reset or force.
+- **A round is recorded after the archive.** The re-reviewer writes afresh in
+  the archived folder. A missing file makes the check fail closed, and the
+  runner re-dispatches.
+- **This piece's own rounds 1 and 2.** They are handled by the recorded
+  transition (`design.md:456-475`, where the un-numbered forms are searched).
+  The runner is not forced to rewrite their headings.
+- **The runner judges that a run was not accepted.** It does so from the
+  hand-back, the model or the stall, and never from the findings, so "you do
+  not read the findings" still holds.
+
+**Below medium, recorded here and not boxed:**
+- **Two copies of the pre-tick command in `RUNNER.md`.** The two-pattern
+  command appears in both the "What you read" row and step 3. This range kept
+  the copies in sync. A future edit to one would leave the other stale in the
+  same file. A standing test that extracts "each command from the role file"
+  should read both.
+- **The rebase follow-up omits the new sentence.** "The reviewer role files
+  on rebasing with mutations" lists the four commands to move. It does not
+  mention the sentence this range added: the untracked-files note and the
+  empty patch's `error: No valid patches in input`. The runner is told to
+  "carry this sentence in the message too". An implementer moving the steps
+  into the role files could leave that sentence behind in `RUNNER.md`.
+- **The skip rule is keyed on an identical range.** The round-N check skips
+  only "a lane a later round dispatched again over the same range". A runner
+  that re-dispatches a lane over a widened range (rounds N and N+1 together)
+  still cannot tick round N until that lane has a record for round N's exact
+  range. This costs a dispatch; it does not deadlock the runner.
+- **Not picking an unaccepted run is implied, not stated.** Nothing says
+  outright that the runner does not cherry-pick an unaccepted run's findings
+  commit. If both runs were picked, their unticked boxes would stand beside
+  each other, and a late pick could conflict at the end of the file. The
+  meaning of "a run you did not accept" covers this, but no sentence says it.
+
+Outside this piece's authorised scope, a proposal only: nothing else under
+`.claude/` needs to change for these mechanisms to work.
