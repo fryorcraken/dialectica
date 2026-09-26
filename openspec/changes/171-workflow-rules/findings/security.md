@@ -195,3 +195,34 @@ source-code diff exists on this piece.
   session* it must come from. Recorded as an observation, not a finding,
   because I have no scenario showing it produces a wrong merge, only an
   ambiguity adjacent to a spot this diff already edited.
+
+- [x] **re-review `c222c37..9dc235c`: no findings** — read the full diff of
+      `.claude/agents/{README,RUNNER,closer,spec-writer}.md` and
+      `openspec/changes/171-workflow-rules/{proposal,design,tasks}.md` for this
+      range (`tester.md` carries no diff in this range, so it needed no
+      re-read). Verified both boxes above are actually closed by the current
+      text, not just claimed closed: `closer.md` Step 2 now merges
+      `origin/main` with no force and stops on a conflict rather than
+      resolving one (`git grep -n "force-with-lease" .claude/agents` returns
+      nothing; `git grep -n -i -- "--admin" .claude/agents/closer.md` still
+      forbids it including under merge-on-green); the conflict routes through
+      `RUNNER.md`'s hand-back-to-merge step 3 before a `closer` is
+      re-dispatched; the archive-commit spec-diff check
+      (`git diff --name-only HEAD^ HEAD -- openspec/specs/`) is scoped to an
+      archive made in the same run, matching the "Fixed" note; and the clean
+      re-review verdict box (`- [x] **re-review \`range\`: no findings**`) is
+      both ticked (passes `grep -rn "^- \[ \]"`) and a box (counted by
+      `grep -rc "^- \["`), closing the dev-writer finding's "no mechanical
+      trace" gap. Checked the new "What a runner commits" section
+      (`RUNNER.md`) against the threat model: it forbids ticking another
+      agent's row, forbids copying an agent's uncommitted output onto the
+      piece, and turns an owner in-session edit request into a dispatch
+      instruction rather than a runner-made edit — closing the relayed-edit
+      path `d805fe4` used. Found no reading that lets a runner's own commit
+      carry reviewed-as content, no reading that permits `--force`,
+      `--force-with-lease`, `reset`, or a push to `main`, and no new instance
+      of authority relayed through a brief substituting for a stop-and-report.
+      The pre-existing "whose session" ambiguity on merge-on-green authority,
+      noted above as an observation, is untouched by this range and still not
+      a finding. `tasks.md`'s new sections 8 and 9 match what `proposal.md`
+      and `design.md` claim landed. Clean.
