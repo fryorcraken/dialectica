@@ -3,7 +3,9 @@
 ## Stages
 
 - [x] spec — `spec-writer`
-- [ ] design + code — `dev-writer`
+- [x] design + code — `dev-writer` — design.md D1–D8; four specs green in CI
+      and each seen red for its reason (Implementation 3–7); #152's binding race
+      found by `feed.yaml`, fixed test-first (3.2–3.3, design.md D8)
 - [ ] tests — `tester`
 - [ ] review: correctness — `code-reviewer`
 - [ ] review: security — `code-reviewer`
@@ -261,10 +263,22 @@ the next push.
       https://github.com/fryorcraken/dialectica/actions/runs/36217172763 red
       in `QML lint` only, on exactly the one predicted test. `Lint`, `UI spec
       validation`, `Rust core tests` and `Build LGX` green
-- [ ] 7.2 Revert pushed; both workflows green on it
+- [x] 7.2 Revert pushed; both workflows green on it. **Observed, on head
+      `456b95f`** (the revert `4eb514b` plus the 7.1 record): UI tests
+      https://github.com/fryorcraken/dialectica/actions/runs/36217546045 green
+      in all five jobs; CI
+      https://github.com/fryorcraken/dialectica/actions/runs/36217546041 green
+      in every job
 
 ### 8. Hand-back
 
-- [ ] 8.1 No break in the branch's net diff: `git diff --stat` from the piece's
-      base over `DStoaListScreen.qml`, `FeedScreen.qml`, `Main.qml` and
-      `DModerationScreen.qml` shows only sections 1's changes
+- [x] 8.1 No break in the branch's net diff. `git diff --stat db07bdd HEAD`
+      over `DStoaListScreen.qml`, `FeedScreen.qml`, `Main.qml` and
+      `DModerationScreen.qml` lists no `DModerationScreen.qml` change, and
+      `DStoaListScreen.qml`'s five lines are the `openStoaButton` name and its
+      comment. The rest is sections 1 and 3.3. `git grep` for each break's
+      text ("e2e proof break", `id: wayOut`, `refusal: "",`,
+      `genesis: "", rootOp`) finds nothing. The tip is a documentation commit
+      on top of the 7.2 revert. Its own CI state is reported in the hand-back
+      and on the PR, because this file cannot name a run of the commit that
+      contains it
