@@ -110,7 +110,6 @@ ScreenFrame {
         spacing: DTheme.itemGap
 
         FlatButton {
-            id: wayOut
             objectName: "moderationBackButton"
             text: "Back"
             kind: "secondary"
@@ -279,7 +278,6 @@ ScreenFrame {
                     objectName: "markModeratedButton"
                     text: "Mark as moderated"
                     kind: "destructive"
-                    onClicked: wayOut.visible = false
                 }
 
                 FlatButton {
