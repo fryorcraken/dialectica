@@ -86,7 +86,7 @@ out before the next push.
 
 ### 4. `seeded-join.yaml` goes red when the joined Stoa does not reach the list
 
-- [ ] 4.1 Break (design.md D6): `Main.qml`'s `onJoined` without
+- [x] 4.1 Break (design.md D6): `Main.qml`'s `onJoined` without
       `list.reload()`, pushed alone. Predicted: `sitometres seeded-join spec`
       red on step 11, "the joined Stoa is listed without a restart, and can be
       shared", after its 30s, steps 12–14 `inconclusive`, `verdict: fail`;
@@ -96,6 +96,31 @@ out before the next push.
       measured locally over the four files that drive a join (the other
       three, `tst_stoa_screens.qml`, `tst_e2e_handles.qml` and
       `tst_render_probe.qml`, green with the break)
+
+      **Observed, on head `661ac18`, the break pushed alone, as predicted.**
+      UI tests https://github.com/fryorcraken/dialectica/actions/runs/36238223919:
+      `sitometres seeded-join spec` failed on step 11, "the joined Stoa is
+      listed without a restart, and can be shared", after 30.0s, `waitFor
+      never came true within 30000ms` on `sees {"objectName":"shareButton"}`,
+      `root.listedStoas.length === 1` and `root.listedStoas[0] ===
+      'a4b3e43d…'`, each evaluated to false. The step's other two conditions,
+      `screenShown === 'list'` and `listReadState === 'ok'`, were not among
+      them. sitometres printed `10 passed, 1 failed, 3 inconclusive` ("3
+      later step(s) were not attempted"), and the adjudicator printed
+      `verdict: fail`, ten `[pass]`, one `[fail]` and three
+      `[inconclusive]`. Steps 1–10 passed, the join among them. **The call
+      log shows the break itself:** step 9 logged `calls: dialectica.join_stoa`
+      alone, where the green run (3.1) logged `dialectica.join_stoa,
+      dialectica.list_stoas`. `join`, `create`, `feed`, `thread` and
+      `moderation` green. CI
+      https://github.com/fryorcraken/dialectica/actions/runs/36238223969 red
+      in `QML lint` only, on its "QML component tests" step:
+      `tst_navigation.qml` 26 passed, 1 failed, the one predicted
+      (`test_a_joined_stoa_is_listed_once_the_join_screen_is_left`, "the
+      listing is read again once the join has succeeded", line 855);
+      `tst_stoa_screens.qml` 136 passed and `tst_render_probe.qml` 11 passed
+      on CI's Qt 6.8.3. `Lint`, `UI spec validation`, `Rust core tests` and
+      `Build LGX` green; `Release` skipped
 - [ ] 4.2 Revert pushed; both workflows green on it
 
 ### 5. Hand-back
