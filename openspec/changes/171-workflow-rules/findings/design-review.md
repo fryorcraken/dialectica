@@ -706,3 +706,63 @@ Below medium, in prose:
   two commands per nothing-landed piece. One clause under a "Cost" label would
   complete the entry. The cost is visible from the rule, so this is a
   suggestion.
+
+## Re-review round 13 `1380d50..c3bda2b`
+
+- [ ] **`dev-writer`** — `design.md` "Why the derived commit is the dispatch
+      HEAD" (and `proposal.md`'s matching paragraph under the `<review>` rule)
+      rests on a premise that `RUNNER.md` never states, and the derivation
+      fails open where the premise does not hold. The inference is "the runner
+      commits nothing between [dispatching the review round and the first
+      findings commit], and a reviewer commits only its findings file and its
+      own stage row". The second half is true of the reviewer role files. The
+      first is a description of how this piece happened to go, not a rule:
+      `RUNNER.md` "Record the call" gives only the `git log` command and the
+      last-line reading, and `git grep -n -F -e "commits nothing" -e "nothing
+      between"` over `RUNNER.md` at `c3bda2b` finds nothing. Nothing forbids
+      the case #171 names first: the PR is open during review (the
+      `dev-writer` opens it, `RUNNER.md:165`), a red CI run gets a fixer, the
+      fixer pushes straight to `piece/<name>`, and the runner fast-forwards
+      onto it before cherry-picking any reviewer's commit. The oldest findings
+      add then sits on the fix, `<review>` is the fix commit, the fix lies
+      *before* the range, and `git diff --no-renames --name-only <review> HEAD`
+      lists only `findings/` and `tasks.md`: round 1 is written skipped and the
+      fix merges unreviewed. That is the lost-report case the derivation exists
+      for, since a runner that remembered the fix would not write a
+      nothing-landed line. So "a range starting there misses nothing that
+      needs review" holds only if *nothing that merges* lands between dispatch
+      and the first findings commit. That condition is wider than "the runner
+      commits nothing", because a fast-forward onto a writer's push is not a
+      runner commit. Either make it a rule in `RUNNER.md` (bring nothing onto
+      your HEAD between dispatching the review round and bringing on its first
+      findings commit), or name it in the standing-test Risk as a fourth runner
+      input beside "supplies a value of its own" and "reads the first line". As
+      written, the inference sounds like a property of the flow when it is a
+      property of one ordering.
+
+Below medium, in prose:
+
+- **RUNNER.md follows the decision as recorded.** The derivation command, the
+  last-line reading, the pre-archive pathspec kept after the archive, the empty
+  listing meaning no `<review>`, `--no-renames` with its reason, the "What you
+  read" row, and the lost-line repair running from the derived `<review>`
+  rather than a remembered or visible HEAD all match `design.md`'s three rules
+  and `proposal.md`'s sub-bullets. The two documents agree. They differ in one
+  small place: `proposal.md`'s same-commit measurement still reads
+  `git diff --name-only ae59b43c ae59b43c`, while `design.md` records it re-run
+  with `--no-renames`. The result is empty either way.
+- **The fail-open count is consistent.** Three earlier cases plus four for the
+  nothing-landed check make seven in both documents, and the mistyped-name
+  derivation is correctly classed as fail-closed.
+- **The inference fails in the safe direction in one case.** If any commit
+  before the review round added a file under `findings/`, the oldest add is
+  earlier than the dispatch HEAD. The range then holds the writer's code
+  commits, and the check fails closed, costing an ordinary round. No entry
+  says so, but no merge follows from it.
+- **The rejected alternatives hold.** Deriving only on a lost report gives one
+  value two sources. The archived pathspec is measured to give the archive
+  commit. Recording `<review>` on a line under the row is correctly ruled out
+  by the number check's first condition. The entry does not consider the
+  variant that puts the SHA inside the re-review row's own text, which the
+  number check would not see. The "one more typed value" reason covers that
+  variant too, so this is a gap in completeness rather than in soundness.
