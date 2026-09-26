@@ -9310,7 +9310,11 @@ mod tests {
                     .map(|(id, _, position)| (id, position))
                     .collect()
             };
-        let whole = by_id(thread_positions_at(&log, crate::thread::MAX_PER_PAGE, false));
+        let whole = by_id(thread_positions_at(
+            &log,
+            crate::thread::MAX_PER_PAGE,
+            false,
+        ));
         assert_eq!(
             whole.len(),
             len,
