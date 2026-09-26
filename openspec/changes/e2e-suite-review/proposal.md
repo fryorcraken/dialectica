@@ -129,14 +129,32 @@ None.
 
 ### Modified Capabilities
 
-None.
+- `view-navigation`: two requirements added. The view opens on the Stoa list,
+  whatever the core answers. A paste refused as not a Stoa reference leaves the
+  list rendered and does not reach the preview.
 
-This is a test-only piece. It reviews and fixes a test harness, proves two of
-its checks can fail, and adds a working rule to `CLAUDE.md`. None of that
-changes what dialectica does. `.openspec.yaml` declares `skip_specs: true` and
-says why. If a review finding turns out to need a change to contracted
-behaviour, it comes back to `spec-writer` rather than being fixed as a test
-change.
+Most of this piece changes no behaviour. It reviews and fixes a test harness,
+proves two of its checks can fail, and adds a working rule to `CLAUDE.md`.
+
+The spec delta comes from the spec-test review, and it contracts behaviour the
+view already has rather than changing it. The archived `e2e-ui-suite` proposal
+says every behaviour `join.yaml` asserts is already a requirement. That is true
+of every step except two, both in `view-navigation`'s territory:
+
+- "it starts on the Stoa list" asserts the opening screen. No requirement named
+  it. Other requirements only ruled out the feed and the onboarding screen.
+- "it is refused and the list is still up" asserts that a malformed paste does
+  not navigate. `stoa-navigation-view` required the refusal and that no call is
+  made, but no requirement said the list stays up.
+
+The view already does both. `join.yaml` checks both, and the component tests
+check one case of each. With this delta, every behaviour `join.yaml` asserts is
+a requirement, so what the archived proposal said becomes true once this change
+is archived. The archive itself stays unedited, as part 1 says, so the
+correction is recorded in this change's `design.md`.
+
+Any other review finding that turns out to need a change to contracted
+behaviour comes back to `spec-writer` rather than being fixed as a test change.
 
 ## Impact
 
@@ -145,5 +163,9 @@ change.
 - **Pushed and then reverted, net zero:** the two deliberate breaks, one in
   `DStoaListScreen.qml` and one in `scaffold.toml` or `ui-tests.yml`,
   depending on which question the guard's run is meant to answer.
+- **Spec:** `view-navigation` gains two requirements. No existing requirement
+  in `openspec/specs/` changes. The view's code already meets both, so the
+  delta needs no code change. A test that pins each scenario is needed, and
+  where the existing tests do not already pin one, the `tester` adds it.
 - **Not affected:** `dialectica/` core, the Rust tree, the wire contract, and
-  every requirement in `openspec/specs/`.
+  every requirement already in `openspec/specs/`.

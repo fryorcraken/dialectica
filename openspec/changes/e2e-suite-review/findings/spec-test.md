@@ -10,7 +10,7 @@ Read at the piece branch's tip (`piece/134-e2e-suite-review`, `ee8e145`) via
 
 ## Findings
 
-- [ ] **`spec-writer`** — two `screenShown` assertions `join.yaml` makes have
+- [x] **`spec-writer`** — two `screenShown` assertions `join.yaml` makes have
       no backing scenario in `view-navigation` or `stoa-navigation-view`,
       although this change's proposal.md states plainly that "every behaviour
       `join.yaml` asserts is already a requirement."
@@ -42,6 +42,47 @@ Read at the piece branch's tip (`piece/134-e2e-suite-review`, `ee8e145`) via
       not a defect in `join.yaml` — the asserted behaviour is almost
       certainly the intended one, it just is not yet a requirement anyone
       can cite.
+
+      **Outcome (`spec-writer`): fixed.** Both behaviours are now contracted.
+      This change has a delta to `view-navigation`
+      (`specs/view-navigation/spec.md`) that adds two requirements:
+      - "The view opens on the Stoa list". It covers the opening screen, and
+        makes it independent of the core's answers: an empty listing with no
+        key, a failed listing, a failed key query, and no bridge at all. So a
+        splash or interim screen shown in the list's place would now contradict
+        a scenario.
+      - "A paste refused as not a Stoa reference leaves the list rendered". It
+        has two scenarios: plain text that is not a reference, and a JSON
+        object missing its `genesis`. The second closes the navigate-first,
+        discover-the-failure-later shape named above for the typed-half check
+        as well as the JSON parse.
+
+      They go in `view-navigation`, not `stoa-navigation-view`, because
+      `view-navigation`'s Purpose gives it the transitions and gives the list
+      screen's contents to `stoa-navigation-view`. Both requirements say which
+      `stoa-navigation-view` requirement owns the refusal itself.
+
+      The view already behaves this way (`Main.qml`'s `screenShown`, and
+      `DStoaListScreen.preview()` returning before `previewRequested` on a
+      failed parse), so no code changes. Existing component tests pin the
+      plain-text paste (`tst_e2e_handles.qml`,
+      `test_the_paste_failure_is_the_list_screens_own`). They also pin the
+      opening screen for an empty listing with a failed key query
+      (`tst_stoa_screens.qml`,
+      `test_the_view_supplies_no_stoa_of_its_own_before_one_is_chosen`, whose
+      fake bridge answers `get_master_key` with the error shape). The `tester`
+      needs to cover the rest: the opening screen for an empty listing with no
+      key held, for a failed listing, and with no bridge, and the
+      missing-`genesis` paste.
+
+      One correction to the finding: the "already a requirement" sentence is
+      not in this change's `proposal.md`. It is in the archived
+      `e2e-ui-suite/proposal.md` (line 132), in its `.openspec.yaml`, and in
+      `join.yaml`'s header. This `proposal.md` now says the claim held for
+      every step but these two, and that the delta makes it true.
+      `.openspec.yaml` no longer declares `skip_specs`, and the stage block's
+      spec row is restored. `openspec validate e2e-suite-review --strict`
+      passes.
 
 ## Checked and clean
 

@@ -1,16 +1,20 @@
-# `schema` is REQUIRED for this file to be valid change metadata, and without it
-# `skip_specs` is silently NOT HONOURED.
 schema: spec-driven
 created: 2026-09-25
 
-# No spec delta. This piece reviews the end-to-end harness #164 merged, and
-# fixes what the review finds in it. It shows two of that harness's checks
-# failing in CI and adds a working rule to CLAUDE.md. None of that changes what
-# dialectica does.
+# One spec delta, to `view-navigation`. Most of this piece changes no
+# behaviour: it reviews the end-to-end harness #164 merged and fixes what the
+# review finds in it, shows two of that harness's checks failing in CI, and adds
+# a working rule to CLAUDE.md.
 #
-# The harness's own obligations are deliberately not a capability: the
-# three adjudication conditions, the missing-report behaviour and the pins.
-# The archived `e2e-ui-suite` change's `.openspec.yaml` says why, and its
-# design.md records them. A review finding whose fix would change contracted
-# behaviour goes back to `spec-writer` instead of being fixed here.
-skip_specs: true
+# The delta comes from the spec-test review (findings/spec-test.md). `join.yaml`
+# asserts two screen selections that no requirement stated, although the
+# archived `e2e-ui-suite` change said every one of its assertions was already
+# contracted: that the view opens on the Stoa list, and that a paste refused as
+# not a Stoa reference leaves the list up. The view already behaves that way, and
+# component tests and `join.yaml` already check it. The delta adds the two
+# requirements so the tests have a contract to cite.
+#
+# The harness's own obligations are still deliberately not a capability: the
+# three adjudication conditions, the missing-report behaviour and the pins. The
+# archived `e2e-ui-suite` change's `.openspec.yaml` says why, and its design.md
+# records them.

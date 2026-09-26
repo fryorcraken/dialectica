@@ -2,7 +2,7 @@
 
 ## Stages
 
-- [ ] ~~spec — `spec-writer`~~ — no spec delta: a test-only piece, `skip_specs: true` in `.openspec.yaml` says why; `proposal.md` is written
+- [x] spec — `spec-writer` — `proposal.md`; one delta, `specs/view-navigation/spec.md` (two requirements added, from findings/spec-test.md); `skip_specs` dropped
 - [x] design + code — `dev-writer` — design.md written; CLAUDE.md line; both proofs red then green in CI (Implementation 2 and 3)
 - [ ] tests — `tester`
 - [x] review: correctness — `code-reviewer` — findings/correctness.md: two findings for `dev-writer` (adjudicate-ui-run.sh's missing-report cause, and its uncaught no-steps crash), rest checked clean
