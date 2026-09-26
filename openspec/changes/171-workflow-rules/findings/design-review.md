@@ -344,3 +344,93 @@ Below medium, unboxed:
 - `proposal.md` says "a later line ran again" where `RUNNER.md` and
   `design.md` say "a later round ran again". Pre-existing wording, same
   meaning.
+
+## Re-review round 6 `d1c8726..6d43cda`
+
+- [ ] **`dev-writer`** — `design.md:1261-1270` and `:1276-1283`: the Risk's
+      remedy cannot reach the case this range added to it, and the open design
+      call behind that case is not recorded. The standing-test follow-up is
+      "a script … that extracts each command from the role file and runs it
+      against fixtures, the four fail-open cases first". Three of the four are
+      defects in a role file's copy of a command: a mistyped
+      `openspec/specs/` path, a pattern cut to the bare range or one SHA, and
+      the save with `HEAD` dropped. A test that runs the role file's copy
+      turns red on each. The stale-number case is not one. `RUNNER.md:633`'s
+      command carries `<n>` as a placeholder, so the role file cannot hold a
+      wrong number. The number is the runner's own input at the moment it
+      runs the check, and a fixture test of the role file's text stays green
+      whatever the runner types. So the `→` line calls it deferred to a test
+      that structurally cannot see it, and it is listed first in that test's
+      queue. `findings/spec-test.md`'s round 5 box left one mitigation open,
+      the runner copying the number from the new line rather than typing it,
+      and its outcome says that call "is `design.md`'s". The 14.1 pass did
+      not take it, reject it, or defer it, so `design.md` records no
+      alternative. `RUNNER.md:574` already tells the runner to copy the
+      number from its line for the *brief*. `:625-634` does not say where the
+      check's number comes from.
+      **Why medium:** it is the one fail-open case that the flow's own rule
+      makes routine (two numbers over one range, `tasks.md` rounds 3 and 4).
+      The only record of it points at a remedy that cannot fire, so a reader
+      would believe it handled once the follow-up lands.
+      **Needed:** in this Risk, split the stale-number case from the three
+      role-file cases. Say that it is a runtime input no standing test of the
+      role files covers. Record the design call either way: take it (a
+      `RUNNER.md` clause saying the check's ``round <n> `<range>` `` is
+      copied from that round's own line), or defer it to the owner with what
+      rules the alternative out. `proposal.md:853-854` ("Four, and they are
+      the ones a test covers first") carries the same framing. If the split
+      lands, the `spec-writer` should follow it there.
+      **Verified:** `RUNNER.md:633` holds `<n>`, not a value. At `80c1bcc8`
+      the round 3 forms over `34fd428..dc1390a` list five files and the
+      round 4 forms list `readability.md` alone, which matches the Risk's
+      measurement.
+
+Read: `git diff d1c8726...6d43cda` in full. `design.md:370-530` (the pre-tick
+decision, "What it still cannot see", the rounds 1 and 2 measurements and
+"What breaks without the number"). `design.md:1232-1320` (Risks).
+`RUNNER.md:565-650`. `findings/spec-test.md:265-295` and its section
+headings, and `findings/architecture.md`'s section headings. Issues #171,
+#170, #169 and #133, read fresh: all open, no comments, nothing on round
+numbering.
+
+**The edited Risk matches `proposal.md`'s standing-test entry.** The
+fail-closed sentence is identical ("a wrong character that no committed
+record carries"). The fail-open list has the same four cases in the same
+order. The stale-number text agrees, including the refinement: round 4 would
+have failed closed because the round 3 readability run wrote nothing. The
+count "four" in `design.md:1281` matches `proposal.md:853`'s "Four".
+
+**Citations are accurate.** The separate citation splits the old joint
+attribution. The truncation cases now cite `findings/spec-test.md` alone.
+Its `9dc235c..34fd428` section (`:147`) holds that measurement at `:275-282`,
+and `findings/architecture.md`'s section of that round has no truncation
+measurement. The `HEAD`-dropped case keeps both files:
+`architecture.md:357` and `spec-test.md:218` are each inside their file's
+`9dc235c..34fd428` section. The stale-number citation (`spec-test.md` round 5
+box, `:381` on) holds the `80c1bcc8` re-measurement, and I re-ran both
+commands at `80c1bcc8` with the same result.
+
+**The two passages left alone were right to be left.** `design.md:493-494`
+says the numbered forms for round 2 list nothing, so a check with the wrong
+form fails closed. That is a wrong form that no committed record carries,
+which is exactly the narrowed fail-closed case. It is still true at HEAD: the
+numbered round 2 check lists nothing. "What breaks without the number"
+(`:513-515`) describes the decision's absence, not a mistyped value, and
+stays true.
+
+Below medium, in prose:
+
+- "What it still cannot see" (`:475-479`) names only an earlier round's form
+  quoted whole. The stale number is now a second thing the check cannot see,
+  and `:438-440` ("the rejected run's record satisfies nothing the re-run
+  must") holds only when the runner uses the new line's number. The
+  skipped-check residual gets a pointer to Risks from `:512`. This one gets
+  none. A one-line pointer would do, and the box's split may be the natural
+  place to add it.
+- In the stale-number case, "as with round 1's Sonnet security box" is an
+  analogy rather than an instance: that record and the Opus one share the
+  un-numbered forms, so no number was involved. The design's own citation
+  for it is `:437`. The wording reads as an illustration, so this is minor.
+- `proposal.md:848` ("dropped writes `Binary files a/<f> and b/<f> differ`
+  for a binary change, and `git apply` then refuses it") was not rewrapped
+  after the edit and runs past the file's width. Cosmetic.
