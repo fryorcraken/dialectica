@@ -10,7 +10,10 @@
 - [ ] review: readability — `code-reviewer`
 - [ ] review: architecture — `code-reviewer`
 - [ ] review: spec-test — `spec-test-reviewer`
-- [ ] review: design — `design-reviewer`
+- [x] review: design — `design-reviewer` — decisions match the code; one
+      finding in findings/design-review.md (adjudicator's missing-report
+      diagnosis is wrong when an earlier step stopped the job, per design.md
+      D1's own account)
 - [ ] findings all ticked, `findings/` deleted — `closer`
 - [ ] `openspec validate --strict`, then `archive` — `closer`
 - [ ] CI green, title/body checked, PR merged — `closer`
