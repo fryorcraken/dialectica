@@ -634,3 +634,94 @@ So every later line's number changes too, and under `:641-642` every lane
 briefed from one of those lines runs again. The text states this, but only by
 applying `:641` to each line in turn. It never says outright that one
 duplicate re-runs every round after it.
+
+## Re-review round 11 `842758b..dd4fe18`
+
+- [ ] **`dev-writer`** — `.claude/agents/RUNNER.md:655-658` — the only remedy
+      the number check now gives for a missing round line is the "nothing
+      landed" form, and the sentence asserts that is the case: "The two rows on
+      adjacent line numbers mean the line is not written yet: write it, as
+      'Record the call' says for a piece where nothing landed."
+      **Scenario:** a piece where commits did land. The runner dispatched round 1
+      over `a1b2c3d..e4f5a6b`, but the round line never reached HEAD (written
+      and not committed, or lost resolving a pick). At the tick the listing
+      prints the re-review row and the `closer`'s row on adjacent line numbers.
+      The bullet tells the runner which line is missing and how to write it:
+      the skipped round-1 form, both ends at HEAD, "marked skipped because
+      nothing landed". Written that way, the line is false. Worse, the forms
+      check covers only rounds "not marked skipped" (`:673-674`), so the round
+      that did run is never checked, and a lane that never recorded passes
+      unnoticed. That is the failure the forms check exists to catch.
+      At `842758b` the same paragraph said "a round whose line was lost gets
+      its line back". This range dropped that, so the only cue left for a
+      missing line points at the skip form.
+      **Measured:** `git diff 842758b..dd4fe18 -- .claude/agents/RUNNER.md`
+      removes "a round whose line was lost gets its line back" and adds
+      `:655-658`. `git grep -n -i -F -e "lost" -e "gets its line back" --
+      .claude/agents/RUNNER.md` finds no other statement of the repair.
+      Suggested wording: "write what is missing: a line for each round that
+      ran, as 'Record the call' gives it, or, if nothing landed, the skipped
+      round 1 it describes." Severity: medium. A reader who follows the
+      sentence as written records a false skip and turns off the forms check
+      for a round that ran. It needs a missing line to trigger, which is rare.
+
+Dimension: **readability only**, narrowed as briefed. Read: `git diff
+842758b..dd4fe18 -- .claude/agents/RUNNER.md`; `RUNNER.md:76-84`, `:556-718`
+and `:750-789`; `spec-writer.md:50-90`; `closer.md:78-97`. Every command
+quoted was run in this tree.
+
+**One procedure, in order: clean apart from the box.** "Record the call"
+(`:600-626`) gives the line's form, its number and the re-run rule, and the
+sample follows. The tick paragraph (`:635-670`) comes next. The number check
+states its three conditions as bullets, and each bullet ends with what to do
+when the condition fails. The forms check follows (`:672-696`), and then the
+commit, untick and archive paragraphs. The numbering rule is "one more than the
+highest under the row", which is stated at `:604`, `:614-615` and `:660-661`.
+All three wordings agree, and none of them conflicts with the forms check's
+"below, not higher-numbered" (`:685-686`). I ran the command at `:641` against
+this piece's `tasks.md`. It printed the re-review row at 24, round lines 25-35
+with no gap in the line numbers, and the `closer`'s row at 36. No round number
+repeats. A runner applying the three bullets to that output ticks correctly. No
+line elsewhere in the file matched, so the out-of-rows caveat in bullet 1 was
+not needed here. The `closer`'s row text, "- [ ] findings all ticked,
+`findings/` deleted", is defined at `spec-writer.md:68`, and the pattern
+`] findings all ticked` also matches it once ticked. `closer.md` never strikes
+that row.
+
+**Retired-rule sweep: clean.** `git grep -n -i -F -e consecutive -e "next
+number" -e "1, 2, 3" -e "numbered from" -e "in the order" -e "next round" -e
+"one is skipped" -e "that is skipped" -- .claude/agents/` returns only
+`RUNNER.md:597`, "which need the next round", and `:702`, "add the next round's
+line". Both refer to the next round, not to its number, and both stay true
+under the new rule. `git grep -n -F -e "round <n>" -e "round number" -e "number
+check"` and `-i -F -e "re-review row" -e "under the row"` over `.claude/`
+return nothing that states the old rule. `closer.md:90` says "the runner's
+line under the re-review row", which does not depend on the numbering.
+
+**`spec-writer.md:78` is not misleading enough to box.** "collects one
+indented line per re-review round beneath it" does not give the six-space form.
+The spec-writer writes the row bare, though, and writes no round line. The next
+sentence sends the reader to `RUNNER.md` for "what goes under it", and the
+runner, who does write those lines, gets the exact form at `:601-602` along
+with a check that fails when the form is wrong. "Per re-review round" also
+still fits, since a re-run gets its own number and so its own round. Style: "one
+line per round, in the form `RUNNER.md` gives" would stop a reader treating
+"indented" as any indent.
+
+Stylistic only, no box:
+- `RUNNER.md:81`: the "What you read" row names two of the three conditions,
+  every line between the rows is a round line and no number repeats. It leaves
+  out "at least one round line". It points to step 3, which has all three.
+- `RUNNER.md:613-614`: "**A lane you run" breaks onto a new line in the source
+  after "round line." That is a wrap artefact and does not show in rendered
+  output.
+- `RUNNER.md:667-670`: "is why this check exists" gives the reason for the
+  repeat bullet only. The check now has three conditions, so "why the repeat
+  condition exists" would be more accurate.
+- `RUNNER.md:647` and `:659` both use "gap". The first means gaps in `git
+  grep`'s line numbers, which block the tick. The second means gaps in round
+  numbers, which do not ("Order and gaps do not matter"). Bullet 1 says "line
+  numbers" and bullet 3 says "number", so a careful reader can tell them apart.
+  "no line of the file is missing" in bullet 1 would remove the overlap.
+- `RUNNER.md:576-577`: "the check before you tick (below)", noted in round 10,
+  still fits either check.
