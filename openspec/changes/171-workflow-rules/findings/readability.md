@@ -530,3 +530,60 @@ after the substitution. Several range-added lines run past the file's wrap
 width (`README.md:99`, `:141`, `:173`; `RUNNER.md:612`). `RUNNER.md:675-676`
 "goes back to that agent, continued to tick it" is compressed but parses in
 context.
+
+## Re-review round 4 `34fd428..dc1390a`
+
+- [x] **re-review round 4 `34fd428..dc1390a`: no findings** — read `git log --oneline 34fd428..dc1390a`, `git diff 34fd428..dc1390a` for `RUNNER.md`, `closer.md` and `dev-writer.md`, `RUNNER.md:260-330`, `:465-519` and `:520-659`, `dev-writer.md:150-219`, `spec-writer.md:70-84`, and `tasks.md`'s re-review row; clean
+
+Dimension: **readability only**, narrowed as briefed. Every command below was
+run in this tree.
+
+**The four round-2 fixes hold.** `RUNNER.md:621` now says "once every lane's
+findings commit is on your HEAD", and `git grep -n -F "the round's commits" --
+.claude/agents/` prints nothing. `closer.md:292` reads "so a check run after the
+push would never run for this archive at all", which no longer parses as an
+imperative. `dev-writer.md:131-132` uses the suggested wording and does not
+claim that `spec-writer.md` says who resolves a conflict. In "Dispatching", "The
+review round meets that conflict every time" (`RUNNER.md:282-289`) now comes
+directly after the conflicting-cherry-pick paragraph (`:275-280`) and before the
+dirty-tree procedure (`:291-326`), so "that conflict" points at the paragraph
+above it.
+
+**Stated once: clean.** The round-numbered heading and verdict-box forms are
+defined in one place, step 3's brief bullet (`RUNNER.md:563-572`). The
+fixed-string check that reads them is at `:626`, and "What you read" (`:81`)
+repeats that command with a pointer back to step 3. The numbering rule and the
+re-dispatch line rule live only in "Record the call" (`:599-609`), and the
+exception for a re-run lane is stated once at `:629-631`.
+`spec-writer.md:77-80` only points. `git grep -n -i -F "re-review round" --
+.claude/agents/ CLAUDE.md docs/` returns only those RUNNER.md lines and
+`spec-writer.md:78`. The single-quoted `git grep -n -F 'Re-review `'` and
+`-i -F 're-review `'` over the same paths print nothing, so no un-numbered form
+survives. I also ran the documented check itself for round 3 (single-quoted,
+as `:622-623` instructs). It listed `architecture`, `correctness`,
+`design-review`, `security` and `spec-test`, and not `readability`. That matches
+the rule at `:629-631` and the round 4 line in `tasks.md:28`, and the command
+ran without a prompt.
+
+**Pointers: clean.** `:81` "step 3 of 'From the `dev-writer`'s hand-back to the
+merge'" lands on `:517`. `:574` "(below)" lands on "Record the call" at `:599`,
+`:575-576` "the check before you tick (below)" lands on `:618`, and `:629`
+"How many at once" lands on the findings-file table at `:376-380`. The
+`dev-writer.md` route words ("brings", "bringing", at `:173`, `:187`, `:203`,
+`:214`) are neutral between cherry-pick and fast-forward, as the fast-forward
+rule at `RUNNER.md:260-269` needs. The one `cherry-pick` left at
+`dev-writer.md:158` covers commits made on the wrong branch, and
+`findings/spec-test.md:208` and `findings/design-review.md:231` record that it
+is kept on purpose.
+
+Stylistic only, no box:
+- `RUNNER.md:325` "carry this sentence in the message too" refers to itself,
+  and read alone its "That refusal" has no antecedent. The note is only
+  self-contained if the runner carries both sentences, from "A tree holding
+  nothing else" on. "Carry these two sentences" would say so.
+- `RUNNER.md:630-631` "that round's own check covers it": "that round" could be
+  read as the round being checked. "the later round's own check" would remove
+  the second reading.
+- `RUNNER.md:600-601` "numbered from 1 in the order you write the lines: then
+  what landed" has a colon followed by "then", which reads as a stutter.
+- `dev-writer.md:188` runs past the file's wrap width after the substitution.
