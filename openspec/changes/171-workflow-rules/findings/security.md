@@ -1427,3 +1427,127 @@ Scope: `git diff --stat 842758b..dd4fe18` touches `.claude/agents/RUNNER.md`
 and nothing else under `.claude/`, and its hunks are the "What you read" row,
 "Record the call" and the tick paragraph, all within #171's re-review
 mechanism. Nothing in the range adds a route to `main`, a force or `--admin`.
+
+## Re-review round 12 `dd4fe18..1380d50`
+
+- [ ] **`spec-writer`** (then `dev-writer` for `RUNNER.md:617-623` and
+      `design.md:312-320`) — `proposal.md:235-239` — the nothing-landed check
+      `git diff --name-only <review> HEAD` runs with git's default rename
+      detection, so a commit that **moves a file that merges into
+      `findings/`** is listed only by its destination. The check then passes
+      over a commit that deletes a merging file, and the `closer`'s deletion of
+      `findings/` completes the deletion on `main` with no review.
+      **Scenario:** the review round's findings are answered by a writer's pass
+      that ticks the boxes and, as its "outcome", moves `.claude/agents/closer.md`
+      (or `design.md`, or a spec delta) into `findings/` with `git mv`. The
+      runner reads the hand-back as tracking and runs the two contracted
+      commands. The first lists only `findings/` paths; the second is empty.
+      Both pass, so it writes ``round 1 `<review>..<HEAD>` `` skipped because
+      nothing landed, and ticks. The `closer` passes Step 1, deletes
+      `openspec/changes/<name>/findings/` at the start of Step 3 as
+      `closer.md` says, archives, and merges: the role file is gone from
+      `main`, and the one check written to catch a misread commit certified
+      it. The deferred `closer`-side follow-up (`proposal.md:1157-1159`)
+      reruns the same `git diff --name-only`, so it is blind to it too.
+      **Measured** with git 2.55.0 (`diff.renames` unset, so the default) in a
+      scratch repository at `tmp/r12sec/`: base commit holding
+      `.claude/agents/closer.md`, `openspec/changes/x/findings/security.md`
+      and `openspec/changes/x/tasks.md`; second commit `git mv` of
+      `closer.md` to `openspec/changes/x/findings/closer-notes.md` plus a box
+      flipped in `security.md`. `git diff --name-only HEAD~1 HEAD` prints
+      `openspec/changes/x/findings/closer-notes.md` and
+      `openspec/changes/x/findings/security.md` only; the `tasks.md` diff is
+      empty, so both conditions hold. The same command with `--no-renames`
+      also prints `.claude/agents/closer.md`. A deletion without the move is
+      listed and caught; only a rename into `findings/` hides its source.
+      **Fix:** add `--no-renames` to the first command wherever it is stated
+      (`proposal.md`, `RUNNER.md` "Record the call" and "What you read",
+      `design.md`, the standing-test and `closer`-side follow-ups), with one
+      clause of reason: a move into `findings/` is a deletion of what merges,
+      and default rename detection prints only its destination. It still
+      prints file names only, so "What you read" is unchanged in kind.
+      **Severity:** medium. The precondition, a merging file moved into
+      `findings/`, is unusual; but the outcome is an unreviewed deletion of any
+      file on the piece, including a role file, reaching `main`, and it defeats
+      the gate at the one point it exists for: a commit misread as tracking.
+
+- [ ] **`spec-writer`** (then `dev-writer` for `RUNNER.md:612-614` and
+      `:676-678`) — `proposal.md:1121-1126` and `:1154-1161` — `<review>`
+      is runner input with no derivation from the repository, and the new
+      lost-line repair leans on it exactly when the runner has lost it. The
+      residual is recorded as failing open, but its stated mitigation, "a
+      second reader can compare it with the parent of the review round's
+      first findings commit", is in no second reader's spec: the `closer`-side
+      follow-up reruns `git diff --name-only` over "that line's own range",
+      which starts at the same late `<review>` and passes.
+      **Scenario:** the runner's report is lost to a compaction, and the number
+      check lists the re-review row and the next row adjacent. `RUNNER.md:676-678`
+      says "Where you cannot tell whether a round ran, such as after your report
+      is lost, the check decides". The check needs "the HEAD you dispatched the
+      review round from", which lived in the lost report; `RUNNER.md` names no
+      way to recover it. The runner takes the HEAD it remembers or finds at the
+      top of `git log`, say the commit after the writer's pass (which edited
+      `design.md`). `git diff --name-only <that> HEAD` lists tracking only, the
+      check passes, round 1 is written skipped over a range that starts after
+      the unreviewed commit, and the row is ticked. The line does record the
+      late `<review>`, but the follow-up's diff over it passes too, so nothing
+      that is specified ever compares it with the true start.
+      **Measured:** the derivation the proposal names exists and is one plain
+      command: `git log --diff-filter=A --format="%h %p %s" 1380d50 --
+      openspec/changes/171-workflow-rules/findings/` prints three commits,
+      the last `f94f7b8d c222c37b Add design review…`, whose parent `c222c37b`
+      is this piece's `<review>`, the start of its round 1. `git grep -n -F
+      "<review>"` over `RUNNER.md` returns only `:81`, `:614`, `:618` and
+      `:619`, none of which says how to find it.
+      **Fix:** state the derivation where `<review>` is defined: the parent of
+      the earliest commit that adds a file under the change folder's
+      `findings/` (the last line of the command above), with a "What you read"
+      row for it, since it prints hashes and subjects only. Add the same
+      comparison to the `closer`-side follow-up's "What a `closer`-side check
+      would do", so the Risks sentence names a reader that does it. The Risks
+      entries in `proposal.md` and `design.md:1627-1634` then describe a slip
+      against a stated derivation, not an input with no source.
+      **Severity:** medium. The fail-open is reached on the path this range
+      added for a lost report, by a runner doing what the text says, and the
+      residual's recorded mitigation is routed to a check that cannot perform
+      it, the same routing gap as round 8's box.
+
+Security only, on Opus, narrowed to the three questions in the brief. Read
+`git diff dd4fe18..1380d50` of `RUNNER.md` and `proposal.md` in full,
+`RUNNER.md:25-54` and `:505-720`, `design.md:295-383` and `:1600-1660`,
+`proposal.md:1110-1169`, `closer.md` at `1380d50` in full, and issue #171.
+Ran the rename probe above in `tmp/r12sec/` and the `<review>` derivation on
+this tree.
+
+**The round-11 box is closed for its scenario.** The `design.md` commit is now
+inside ``round 1 `<review>..<HEAD>` ``, the pre-write check lists `design.md`,
+and the round becomes ordinary. Later rounds chain from that line's end, so,
+given a correct `<review>` and a check that sees every path, no merging commit
+lies in no round's range. The two boxes above are the two ways that
+qualification fails. The lost-line repair is fail-closed where the runner's
+report survives: rounds that ran get their lines back, and the forms check
+covers them.
+
+**Lower notes, not boxed.**
+
+- *`tasks.md` "only boxes flipped" is read by eye.* A line whose box flips and
+  whose text is reworded in the same hunk reads as a flip at a glance.
+  `tasks.md` merges, but only as the archived tracker; low.
+- *Rejections pass the check by design.* A pass that answers every finding by
+  **rejected**, written into `findings/` alone, is tracking under step 3
+  (`RUNNER.md:532-533`), so the check passes and no reviewer re-reads the
+  rejection. Pre-existing classification, noted in round 1's Opus section; this
+  range now certifies it mechanically rather than creating it.
+- *Stage-row ticks are "boxes flipped".* The `tasks.md` check does not ask
+  whose row was flipped, so a writer ticking another lane's row passes it. That
+  is the "every agent ticks its own" rule, not something merging; low.
+- *Fail-closed noise.* The runner's own record lines are tracking but fail
+  "only boxes flipped", and a merge of `main` in the range lists `main`'s
+  paths. Both fail closed into an ordinary round, costing a re-review, not
+  safety.
+
+Scope: `git diff --stat dd4fe18..1380d50` touches `.claude/agents/RUNNER.md`
+and nothing else under `.claude/`; its hunks are one "What you read" row,
+"Record the call" and the tick paragraph's "at least one round line" bullet,
+all within #171's re-review mechanism. Nothing in the range adds a route to
+`main`, a force or `--admin`.
