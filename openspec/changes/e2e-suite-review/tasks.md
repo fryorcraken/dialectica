@@ -6,7 +6,7 @@
 - [x] design + code — `dev-writer` — design.md written; CLAUDE.md line; both proofs red then green in CI (Implementation 2 and 3)
 - [ ] tests — `tester`
 - [ ] review: correctness — `code-reviewer`
-- [ ] review: security — `code-reviewer`
+- [x] review: security — `code-reviewer` — findings/security.md: one low-severity finding (unquoted `${{ matrix.spec }}` in ui-tests.yml run: bodies); rest clean
 - [ ] review: readability — `code-reviewer`
 - [ ] review: architecture — `code-reviewer`
 - [ ] review: spec-test — `spec-test-reviewer`
