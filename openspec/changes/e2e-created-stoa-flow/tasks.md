@@ -25,7 +25,9 @@
 - [x] review: readability — `code-reviewer`
 - [x] review: architecture — `code-reviewer` — no blocking finding;
       `findings/architecture.md`
-- [ ] review: spec-test — `spec-test-reviewer`
+- [x] review: spec-test — `spec-test-reviewer` — coverage clean, one
+      low-severity finding on the `readThreadArea`/`moderateArea`
+      impossibility claim; `findings/spec-test.md`
 - [x] review: design — `design-reviewer`
 - [ ] findings all ticked, `findings/` deleted — `closer`
 - [ ] `openspec validate --strict`, then `archive` — `closer`
