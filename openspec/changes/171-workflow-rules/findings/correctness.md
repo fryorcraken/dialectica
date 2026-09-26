@@ -142,3 +142,164 @@ gives against this tree.
   "Also check" section do not apply — confirmed `.github/workflows/ci.yml`
   contains no reference to `openspec/` or `.claude/agents/` that this change
   could break.
+
+## Re-review `c222c37..9dc235c`
+
+Correctness only. I read `RUNNER.md`, `closer.md`, `README.md`,
+`spec-writer.md` and `dev-writer.md` (unchanged, but the agent RUNNER.md's
+new fast-forward rule is about) as the agent each addresses, and walked the
+paths in the brief. Commands were run against this tree or a scratch
+repository under `./tmp/p171/` (bare remote, runner clone, agent worktrees),
+since deleted. Scratch commits used `--no-gpg-sign`: without it, the first
+cherry-pick failed with `gpg: signing failed: Timeout` after pinentry launched
+on `/dev/pts/3`.
+
+- [ ] **`dev-writer`** — `.claude/agents/RUNNER.md:240-243` and `:258-262`
+      — the fast-forward rule names "the `dev-writer`'s first pass" as the
+      agent whose commits are already on the remote piece ref. But the
+      `dev-writer` pushes on every pass, so a runner following the text
+      cherry-picks its later passes, and the local and remote piece refs
+      diverge.
+      `dev-writer.md:221-223` has the dev-writer push on its findings pass
+      ("On the findings pass it always does: commit, push, never open a
+      second"). The same sequence runs whenever the dev-writer is dispatched
+      again: after a `spec-writer` callback changes behaviour (RUNNER.md step
+      1, `:452-453`), as a red-CI fixer (`:610`), and as a conflict resolver.
+      Read literally, RUNNER.md gives a cherry-pick for all of them except the
+      conflict resolver. `:258-260` says "in this flow, the `dev-writer`'s
+      first pass", which reads as the complete list. `:331` says "cherry-pick
+      and commit" for the `dev-writer` row. `:602-603` tells the runner to
+      dispatch a red-CI fixer with "its commits cherry-picked back".
+      `README.md:170-172` says the `dev-writer` pushes "at the end of its first
+      pass". The piece's own `design.md` disagrees with itself here. `:716-718`
+      counts "a findings-pass writer's" push among the pushes a copy would
+      break. `:741-742` then calls the first pass "the one instance today".
+      **Scenario:** after the review round, the `dev-writer`'s findings pass
+      forks from the runner's HEAD (reviewer ticks included, not pushed). It
+      pushes `HEAD:refs/heads/piece/<name>`, which fast-forwards the remote,
+      and hands back. The runner is not looking at a first pass, so it
+      cherry-picks and gets a copy with a new SHA. Next the review round runs
+      and the runner records it. Then the `closer`'s Step 3 push, or the
+      Step 2 push after merging `main`, is refused. The `closer` stops and the
+      runner parks the piece on the owner (RUNNER.md `:635-646`). The
+      rule was written to prevent exactly this, but its example sends the
+      runner into it. The same thing happens on the red-CI path through
+      `:602-603`.
+      **Measured:** this piece did it. `git rev-parse
+      origin/piece/171-workflow-rules` → `619e6799…`, which is the
+      `dev-writer`'s findings-pass commit "Add the clean re-review verdict box,
+      move the closer's findings/ deletion to Step 3, and fast-forward to
+      already-pushed branches". `git branch -r --contains 749cb13b` (an earlier
+      findings-pass commit) → `origin/piece/171-workflow-rules`. The reflog
+      shows the runner brought these on with `merge 619e679: Fast-forward`
+      and `cherry-pick: fast-forward`. Those are safe here only because HEAD
+      was the parent, and the text did not tell the runner to do it.
+      Scratch reproduction: the runner made a local-only tick `b594425`. The
+      dev-writer then committed `cd018a4` on it and ran `git push origin
+      HEAD:refs/heads/piece/x` → `b09b282..cd018a4  HEAD -> piece/x`. The
+      runner ran `git cherry-pick --no-gpg-sign dw` → `[piece/x 74c69c4]`.
+      The closer forked, committed, and ran `git push origin
+      HEAD:refs/heads/piece/x` → `! [rejected]        HEAD -> piece/x
+      (non-fast-forward)`. After `git fetch origin`, RUNNER.md's diagnostic
+      `git log --oneline --left-right --cherry-mark HEAD...origin/piece/x`
+      printed `= 74c69c4 dev-writer findings pass` / `= cd018a4 dev-writer
+      findings pass`. The diagnostic itself works as documented.
+      Severity: high on the findings pass, which every piece with a
+      `dev-writer` finding reaches. The owner has to step in, and the runner
+      may not repair it.
+
+- [ ] **`dev-writer`** — `.claude/agents/RUNNER.md:273-278` — the
+      conflict rule tells the agent to rebase its own branch onto
+      `piece/<name>`. `code-reviewer.md:178` tells a mutating reviewer to leave
+      its mutations uncommitted in its tree, and `git rebase` refuses to run
+      in a dirty tree. The brief gives the reviewer no way round this that the
+      rest of the flow allows.
+      **Scenario:** first review round, picked in template order. RUNNER.md
+      `:280-287` says every pick after the first stops. The correctness
+      reviewer left a hand-mutated line in its tree, as its file tells it to,
+      and RUNNER.md `:418` expects that ("recovering a mutation an agent left
+      uncommitted"). The runner aborts the pick of the security reviewer's
+      tick and continues that reviewer with `SendMessage` to rebase. `git
+      rebase piece/<name>` refuses. git's hint says to "commit or stash". Both
+      are ruled out:
+      - a commit would put the mutation on the piece;
+      - `CLAUDE.md:293-295` bans a bare `git stash`;
+      - `git checkout -- .` destroys the evidence `code-reviewer.md` says only
+        the runner may discard.
+
+      The agent is left to invent a route or stop. Every later pick then waits
+      on it.
+      **Measured** (scratch): three reviewers forked from one HEAD and each
+      ticked an adjacent row. `git cherry-pick --no-gpg-sign rev-sec` →
+      `[piece/x 6035cba] tick security`. Then `git cherry-pick --no-gpg-sign
+      rev-read` → `CONFLICT (content): Merge conflict in tasks.md`, which
+      confirms `:283-286`. After `git cherry-pick --abort`, with an
+      uncommitted edit in `code.txt` on the reviewer's branch, `git rebase
+      piece/x` → `error: cannot rebase: You have unstaged changes.` /
+      `error: Please commit or stash them.` `git rebase --autostash piece/x`
+      got past that (`Created autostash: 118f62e`) and stopped at the
+      expected `tasks.md` conflict. I did not finish that round-trip:
+      `--continue` hung on the signing prompt, because the rebase state had
+      recorded `-S` from `commit.gpgsign`. So whether the mutation is
+      restored intact is unmeasured.
+      Severity: medium. It stalls the first review round for any
+      reviewer that mutated, and it cannot be fixed in `code-reviewer.md`
+      under this piece's authorisation.
+
+- [ ] **`dev-writer`** — `.claude/agents/README.md:170-172` — "the
+      `closer` pushes it again after the archive commit" no longer matches
+      `closer.md`. The closer now pushes in two more places:
+      - Step 2, `:179-183`, after merging `main` and before any archive;
+      - Step 3, `:233-235`, on a re-dispatch that makes no archive commit
+        ("push HEAD as below whether or not you deleted anything").
+
+      This piece rewrote line 131 of the same file to cover how commits reach
+      the piece, but left this sentence alone.
+      **Scenario:** after a refused push, the runner uses README's branch
+      section to work out which pushes can have moved the remote ref. It rules
+      out the `closer`'s Step 2 push, because README says the closer pushes
+      only after an archive. Its report to the owner then misattributes the
+      commit the remote holds. Severity: low. This is prose that contradicts
+      the role file, not a wrong command.
+      **Measured:** `git grep -n -F "push" -- .claude/agents/` shows
+      `README.md:172` "`closer` pushes it again after the archive commit"
+      alongside `closer.md:182` and `:233`, which are the two other push
+      points.
+
+Clean, and checked by running the command where there was one:
+
+- `git diff --name-only -G "NO SPEC:" origin/main...HEAD` works as RUNNER.md
+  step 1 says. On this tree it lists eight files, all prose belonging to this
+  piece.
+- Tick conflicts on adjacent rows happen exactly as RUNNER.md `:280-287` and
+  `spec-writer.md:47-53` describe.
+- The refused-push diagnostic prints `=` for a copied pair, as documented.
+- `GIT_EDITOR` resolves to `true` in agent shells (`git var GIT_EDITOR` →
+  `true`), so the closer's bare `git merge origin/main` and a resolver's
+  `rebase --continue` cannot hang on an editor, even though `test -t 0` and
+  `test -t 1` both succeed.
+- git 2.55.0 supports `git show --remerge-diff`.
+
+The closer's paths are consistent with each other and with RUNNER.md:
+
+- the first dispatch through a clean merge of `main`;
+- a merge conflict, meaning abort, report the paths, the runner fast-forwards
+  to an unchanged branch, a writer merges, and the merge is re-reviewed;
+- the `findings/` deletion moved to the start of Step 3;
+- the spec-changing archive check, where HEAD is the archive commit at that
+  point even after a Step 2 merge;
+- the re-dispatch that finds the change archived.
+
+On the red-run path after the archive, the runner fast-forwards to the
+`closer` first, and the untick lands in the archived `tasks.md`. It breaks
+only through the first box above.
+
+The runner's re-review round on this piece used ticked verdict boxes
+(`git log` shows `0f55b92d`, `9bbaf7da`). That matches RUNNER.md `:521-537`
+and passes the `closer`'s two gates as designed.
+
+**Owner, outside the authorised scope:** the second box is best closed in
+`code-reviewer.md`, by saying what a reviewer does with its mutations when it
+is continued to rebase. That file is not this piece's to edit, so the box is
+addressed to the RUNNER.md side. Whether the role file should change is the
+owner's call.
