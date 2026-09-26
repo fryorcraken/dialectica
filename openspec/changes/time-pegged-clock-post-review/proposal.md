@@ -45,7 +45,7 @@ For each capability, the delta restates only the requirements #165 touched. The 
 
 ## Impact
 
-- **Code, wire API, tests: none.** No behaviour changes, so no test should change. A test that has to change is evidence that this change altered behaviour, and that is a defect.
+- **Code: comments only. Wire API and test logic: none.** Six files in `dialectica/rust-lib/dialectica-core/src/` change, and every changed line is a comment. `arrival.rs`, `op.rs` (twice) and `transport.rs` repoint doc comments that cited `op-ordering` for reasoning this change removes from it. `moderation.rs` rewords a doc comment, and `revision.rs` gains a doc-comment section; both come from this change's `design.md`, Decision 11. `authoring.rs` changes a `//` comment inside its `mod tests`, above `a_counter_taken_from_the_clock_leaves_the_wall_clock_at_the_current_time`, and no test code. No behaviour changes, so no test assertion or fixture should change. A test that has to change is evidence that this change altered behaviour, and that is a defect.
 - **`openspec/specs/`**: six files, on archive.
 - **`openspec/changes/archive/2026-09-25-time-pegged-clock/design.md`**: two labelled notes, one under each of archived Decisions 3 and 10, pointing to this change's `design.md`, Decision 11.
 - **`design.md`** (new, the `dev-writer`'s): gets the reasoning listed below.
