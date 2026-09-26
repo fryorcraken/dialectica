@@ -358,6 +358,12 @@ ScreenFrame {
             return
         }
 
+        if (reply.value.items.length === 0) {
+            screen.readState = "failed"
+            screen.failure = "e2e proof break: an empty read rendered as a failed one"
+            return
+        }
+
         screen.rows = reply.value.items
         screen.hasMore = reply.value.hasMore === true
         screen.failure = ""
