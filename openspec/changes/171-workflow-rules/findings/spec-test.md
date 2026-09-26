@@ -606,6 +606,65 @@ Below medium, so in prose rather than boxed:
   ran is missing" and does not include the exception for a lane a later line
   ran again. It fails closed. Low.
 
+## Re-review round 9 `d1d2165..c4b1df5`
+
+- [x] **re-review round 9 `d1d2165..c4b1df5`: no findings** — read `proposal.md`'s range diff and `proposal.md` at HEAD in full, `tasks.md`, `.openspec.yaml`, the range stat; clean
+
+Read: `git diff d1d2165..c4b1df5 -- openspec/changes/171-workflow-rules/proposal.md`
+in full, `proposal.md` at HEAD in full (1216 lines), `tasks.md` and
+`.openspec.yaml` in full, and `git diff d1d2165..c4b1df5 --stat`, stat only.
+The stat touches no file under `.claude/`. No file under `.claude/agents/`, no
+`design.md` and no other findings file was read. The issues were not re-read
+this round. The brief narrowed it to the contract's internal consistency, and
+round 7 read all four fresh.
+
+**The three places agree.** "What it still cannot see" (`:271-293`), the
+standing-test entry's stale-number paragraph (`:936-945`) and the
+`closer`-side follow-up (`:965-979`) all state the residual the same way. It
+is a separate residual from copying from the wrong line. The copy rule carries
+the line's number into the brief, the heading and the check, so all three
+agree. Matching forms cannot see it. Only the follow-up's number criterion
+can. All three route it to the `closer`-side follow-up, and all three call it
+the same gap as skipping the check.
+
+**The numbering rule it cites fixes the number.** The rule is `:181-183`,
+"numbered from 1 in the order the lines are written", plus `:186-187`, "the
+next number" for a re-run. Together they make "unique and consecutive" a
+restatement of an existing rule, not a new one, as `:285-287` says.
+
+**Impact is consistent.** `0fbebed` changes no role file, and the stat
+confirms no `.claude/` path in the range. Impact's `RUNNER.md` entry ("round
+lines numbered") needs no change. The number criterion is in "Out of scope"
+only, and nothing in Impact or "What Changes" claims a `closer.md` edit for it.
+
+**Measured** on this tree (`94f913f6`). I ran
+`git grep -l -F -e '## Re-review round 3 ' -e '**re-review round 3 ' --
+openspec/changes/171-workflow-rules/findings/` (trailing space, no backtick)
+to avoid a quoting prompt. It listed `architecture.md`, `correctness.md`,
+`design-review.md`, `security.md` and `spec-test.md`, which matches `:281-283`.
+One of `spec-test.md`'s matches is my own round 5 prose quoting the round 3
+form whole (`:413` of this file). That is the quoted-heading residual the
+proposal already names at `:263-265`. `tasks.md:25-33` carries the round
+numbers 1 to 9 once each, in order. That extends `:978-979`'s "1 to 8 at
+`291499c7`" and does not contradict it.
+
+Below medium, so in prose rather than boxed:
+
+- **`:942-943` drops the qualifier.** The standing-test bullet says the
+  check "passes on the earlier run's record" without the "whenever that run
+  left one for the lane" that `:277-278` and `:252-253` carry. The round 3
+  readability run shows the qualifier matters. A repeated "round 3" line for
+  round 4's readability re-run would have failed closed, because round 3's
+  readability run wrote nothing. Low.
+- **"A repeated or stale number" is broader than the harm.** A repeated
+  number over a *different* range makes forms no earlier record carries, so
+  the check fails closed and only the numbering rule is broken. The operative
+  sentences tie the harm to the same-range example, so this is a reading
+  risk, not a contradiction. Low.
+- **"In the order the lines stand" (`:970`) and "in the order the lines are
+  written" (`:182-183`) coincide only if lines are appended.** Nothing states
+  that lines are appended, though "under it" implies it. Low.
+
 ## Areas checked clean
 
 - **Issue coverage.** Every "Done when" / proposed-change bullet in #171,
