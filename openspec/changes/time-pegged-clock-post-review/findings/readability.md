@@ -219,3 +219,90 @@ for the same property. Clear, well-scoped, no defect.
 
 No mutations were made to the tree during this re-review pass (read-only +
 test/build runs).
+
+## Re-review of e03230e..HEAD
+
+Read the owner's decision comment on #162 again for this pass; first line:
+"**Decision (owner, 2026-09-25): peg the Lamport counter to wall-clock time,
+as SDS does (LIP-109, `logos-lips/docs/anoncomms/raw/sds.md`, lines 148-155
+and 184-192).**"
+
+Reviewed `git diff e03230e HEAD`: the `ADVANCE_BOUND`-naming rewords in
+`moderation.rs` and `revision.rs`, the rewrap fix in `op.rs:567`, the two new
+`*Added by a later change:*` notes in the archived
+`2026-09-25-time-pegged-clock/design.md`, the rewritten Decision 1 and
+expanded Decision 11 in this change's own `design.md`, and the
+`proposal.md`/`tasks.md` updates recording that the code changes are comments
+only and that the archive gains two forward pointers.
+
+The two rewrap fixes this file flagged last pass (`op.rs:567`,
+`design.md:406`) are confirmed done: `op.rs`'s `asserted_ms` doc now wraps at
+its paragraph's normal width with "is" moved to the trailing line, and
+`design.md`'s Risks bullet (now around line 437) is rewrapped across three
+lines at the bullet's usual width. Not re-opened.
+
+The `revision.rs`/`moderation.rs` rewording is a clean fix for the ambiguity
+noted in the previous pass's prose discussion: "Before the window, ...
+permanently" is replaced in both files with "Under `ADVANCE_BOUND`, which the
+receive window replaced in #165, the lead had no end: an op signed at the
+maximum counter was stored and led the order while the clock stayed below
+it, so ... permanently." This names the old constant instead of the
+ambiguous "the window", removing the reading where "the window" could be
+mistaken for the one-hour interval rather than the pre-#165 mechanism it
+replaced. Both sites now carry identical wording for the identical sentence,
+as `design.md` Decision 11 says was intended. Confirmed by direct read of
+both files (`moderation.rs:434-444`, `revision.rs:291-307`) — clear, no
+ambiguity, no new defect.
+
+`design.md`'s Decision 1 and Decision 11 were substantially rewritten to
+cover why the archived design is now edited (two forward-pointer notes)
+where the previous text said flatly it "is not edited". Read in full: both
+read clearly, argue the exception on its own terms (a labelled pointer,
+distinguished from adding reasoning), and the *Considered*/*Rejected* pairs
+in Decision 11 ("rewriting the two archived Decisions in place", "a sibling
+file", "accepting the gap") are each given a concrete reason. No dangling
+reference, no unclear antecedent.
+
+One new line-wrap defect, the same class as the two fixed last pass:
+
+- [ ] **`dev-writer`** — `openspec/changes/time-pegged-clock-post-review/design.md:378-379`
+      — the new "How to check them" paragraph under Decision 11 wraps an
+      inline code span for a shell command across a line break, splitting it
+      at the worst point: right after the `--` that separates the `git grep`
+      flags from its path argument.
+      **Scenario:** lines 377–380 read: `*How to check them:* no test can see
+      a Markdown file. The pointers are found with` `` `git grep -n -F -e
+      "time-pegged-clock-post-review" --` `` (line 378 ends there) then, on
+      line 379, `` `openspec/changes/archive/2026-09-25-time-pegged-clock`, ``
+      `which returns one line under each of archived Decisions 3 and 10.` A
+      reader of the raw Markdown (not the rendered page — this repo's specs
+      and designs are read as source as often as rendered, per every other
+      citation in this same file) sees a command that appears to end at a
+      bare `--` with its argument stranded on the next line, rather than one
+      continuous shell invocation. Every other command citation in this file
+      keeps the whole inline-code span on one line and wraps the prose
+      around it instead — e.g. the Risks bullet fixed last pass, `` `git
+      ls-files openspec/changes/archive` `` (line ~437), and the tasks.md 1.2
+      citation `` `git diff origin/main... -- openspec/changes/archive/` ``,
+      both kept whole. This paragraph is entirely new in `e03230e..HEAD` (it
+      replaces the old "The archived design is not edited (Decision 1)..."
+      paragraph), so the defect is this diff's own, not inherited.
+      **Severity:** cosmetic — the command is still correct and
+      copy-pasteable once the line break is read as a space (Markdown
+      collapses it), and no normative content changes. But it is a genuine
+      readability defect of the same class as the two this file already
+      flagged and had fixed (`op.rs:567`, old `design.md:406`): a wrap that
+      happened to land inside a code span rather than around it. Fix: move
+      the whole `git grep …` command onto one line (even past 80 columns,
+      matching how every other long command citation in this file is
+      handled), or shorten the prose before it so the command fits without
+      splitting.
+
+### Build/test results (re-review of e03230e..HEAD)
+
+- `cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p dialectica -p dialectica-core`: 1180 passed (dialectica-core) + 30 passed (end_to_end), 0 failed.
+- `nix build ./dialectica#lgx`: succeeded (no output, exit 0).
+
+No mutations were made to the tree during this re-review pass (read-only +
+test/build runs). `git status --short` was clean before committing this
+findings file.
