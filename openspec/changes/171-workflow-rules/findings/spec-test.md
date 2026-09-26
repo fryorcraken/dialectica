@@ -487,6 +487,68 @@ which the entry names (`:830-832`), but it is about a failure mode the entry
 misclassifies (the box above). The rest of the line rule is judgement the
 runner exercises, not a command's output.
 
+## Re-review round 6 `d1c8726..6d43cda`
+
+- [x] **re-review round 6 `d1c8726..6d43cda`: no findings** — read `proposal.md`'s range diff, its standing-test entry (`:823-896`) and the line rule and pre-tick check (`:120-259`) at HEAD, `tasks.md`, `.openspec.yaml`, the range stat, issues #171, #170, #169 and #133; clean
+
+Read: `git diff d1c8726..6d43cda -- openspec/changes/171-workflow-rules/proposal.md`
+in full, which is `e2f2729`'s edit only (`git show --stat e2f2729`: `proposal.md`
+and my own findings file). `proposal.md` at HEAD `:120-259` and `:800-930`.
+`tasks.md` and `.openspec.yaml` in full. `git diff d1c8726..6d43cda --stat`,
+stat only. Issues #171, #170, #169 and #133 read fresh with `gh issue view`:
+all open, no comments; #171's and #169's bodies re-read and unchanged in
+substance. No file under `.claude/agents/`, no `design.md`, and no other
+findings file was read.
+
+**Round 5's box is fixed.** Both halves of its "Needed" landed:
+
+- The fail-closed sentence (`:845-847`) now reads "a pre-tick pattern with a
+  wrong character that no committed record carries lists nothing", which
+  excludes the stale-number case by its own qualifier.
+- The fail-open list gains it (`:866-877`), and the count moves from "Three"
+  to "Four". There are four bullets: the `openspec/specs/` path, the
+  bare-range and single-SHA truncation, the stale number, and the save step
+  with `HEAD` dropped. `git grep -n -i -F 'three fail'` over `proposal.md`
+  and `tasks.md` finds no stale count in `proposal.md`; the one hit is
+  `tasks.md` 14.1 quoting the old `design.md` wording it replaces.
+
+The spec-writer's refinement is right and narrower than my box: the stale
+number fails open only when the earlier run over the range left a record for
+that lane. The bullet says so ("whenever that run left one for the lane"), and
+closes with this piece's counter-example (round 3's readability run wrote
+nothing, so round 4 under round 3's number fails closed). Re-measured on my
+own file only, at `80c1bcc8`: the round 3 forms over `34fd428..dc1390a` list
+`spec-test.md`, and the round 4 forms list nothing. That agrees with the
+bullet's "the round 3 forms list every lane's file but `readability.md`, and
+the round 4 forms list `readability.md` alone". I did not re-run it over the
+other five files.
+
+**Consistency with the rest of `proposal.md`.** The bullet says the same thing
+as the line rule's closing sentence (`:200-203`: "the rejected run's record is
+already committed under the old number, so the check would pass on it before
+the continuation had done anything"), and its "as with round 1's Sonnet
+security box" matches `:196-199` and `tasks.md:25`. "Every command exits 0"
+holds for this case: `git grep -l` exits 0 when it lists a file. The bullet's
+citation points at my round-5 box, whose Outcome paragraph holds the
+`80c1bcc8` measurement. `tasks.md` 14.1 carries the matching `design.md`
+Risk edit to the `dev-writer`, which is outside what I may read. Nothing in
+the range touches `.claude/`, and nothing reaches outside the four issues.
+
+Below medium, so in prose rather than boxed:
+
+- **A wholly stale line also fails open and is not enumerated.** A pre-tick
+  check for round N+1 typed with round N's number *and* range lists every
+  lane round N recorded, and the runner ticks. The fail-closed sentence's
+  qualifier ("that no committed record carries") already excludes it, so it
+  is not misclassified the way round 5's case was, but the fail-open list's
+  "Four" reads as complete and names only the same-range case. A test
+  fixture for the stale-number bullet covers it by the same mechanism (a
+  pattern equal to a committed record's form). Low.
+- **`:247-249`'s "What it still cannot see" names one residual.** The
+  stale-number residual is stated by the line rule (`:200-203`) and the
+  standing-test entry, not in that list. The operative text is consistent;
+  a reader of the check's own bullets alone would not see it. Low.
+
 ## Areas checked clean
 
 - **Issue coverage.** Every "Done when" / proposed-change bullet in #171,
