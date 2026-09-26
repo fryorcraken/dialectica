@@ -2051,3 +2051,116 @@ and nothing else under `.claude/`. Its hunks are the number check's chain and
 tail bullets and the matching "What you read" row, all within #171's
 re-review mechanism. Nothing in the range adds a route to `main`, a force or
 `--admin`.
+
+## Re-review round 16 `bad7c88..b5ceed2`
+
+- [ ] **`spec-writer`** (then `dev-writer` for `RUNNER.md:752-756` and
+      `design.md:1018-1031`) — `proposal.md:433-437` — the surviving skipped
+      line for a clean merge of `main` or a spec-free archive has its start
+      fixed ("starting at that end") but not its end. Nothing says the range
+      ends at that commit. A line that ends past it, at HEAD, covers every
+      commit after it under a reason that is true only of that one commit.
+      The tail check exists to catch a forgotten round, and this lets one
+      through. `design.md`'s "Kept" argument (`:1023-1027`) says a commit
+      that needs review "can sit inside such a line's range only if it landed
+      after the tick and the runner did not untick". That holds for the start
+      side, because the `closer`'s merge and archive are the first commits
+      after a tick. It is false for the end side: in the scenario below the
+      runner did untick.
+      **Scenario:** round 1 ends at `E`. The runner ticks (`T1`). The `closer`
+      merges `main` cleanly (`M1`, where `main` touched `src/a.rs`),
+      archives with no spec change (`A`), and returns red. The runner unticks
+      (`U`) and dispatches a `dev-writer`, whose fix `X` edits `src/a.rs`. The
+      runner does not write `X`'s round, which is the slip the tail check is
+      there to catch. At the re-tick, the tail from `E` lists `main`'s paths
+      and the archive's, and `X` adds no path to that list. The runner writes
+      `round 2 E..M1` skipped as a clean merge of `main`. Then, following the
+      bullet's own "from there to your HEAD" template, it writes
+      `round 3 M1..X` skipped as an archive that changed nothing under
+      `openspec/specs/`. Both reasons are true of the commits they name. The
+      number check passes. The chain reaches `X`. The tail from `X` shows only
+      the tick and the two lines. The forms check skips both lines, the row
+      is ticked, and `X` merges unread.
+      **Fix, for the `spec-writer` to choose:** say that each such line's
+      range ends at that merge or archive commit, never at HEAD or at a
+      later commit. The tail from that commit then lists whatever landed
+      after it. Keep the start at the reached end. Requiring the range to be
+      exactly `<first parent>..<sha>` is not needed. It would force a sized
+      lane over the tick commit, because the tick is not a line's end. The
+      start side is already bounded by "Kept"'s argument. Then make
+      "Kept"'s claim say which side it covers.
+      **Severity:** medium. This is the same class as round 15's box. One
+      slip (a forgotten round for a fix the runner dispatched), plus a range
+      the text allows and whose neighbouring sentence models, merges an
+      unreviewed commit with every gate green. Nothing the runner reads can
+      separate `X` from the archive and merge.
+      **Measured** in `tmp/r16sec/`, branch `piece`: `E` `ab147a1`, `T1`
+      `2ac264d`, `M1` `769d0eb` (`git show --remerge-diff` is empty, so the
+      merge is clean), `A` `07ad57d`, `U` `0cda7ae`, `X` `fd21ddf`, then the
+      two skipped lines and the tick.
+      - `git diff --no-renames --name-only ab147a1 fd21ddf` and the same
+        command against `07ad57d` print the same seven paths, so `X` is
+        invisible in the tail listing.
+      - The number-check listing prints the rows at 1 and 5 and rounds 1-3
+        at 2-4.
+      - `git diff --no-renames --name-only fd21ddf HEAD` lists
+        `archive-c/tasks.md` only. Its diff is the box flip and the two
+        round lines, so the tail passes.
+      - `git diff --stat 769d0eb fd21ddf`, the skipped archive line, holds
+        the move and `src/a.rs`.
+      - With the archive line ending at `07ad57d` instead, the tail from
+        there lists `archive-c/tasks.md` and `src/a.rs`, so it fails and
+        `X` is caught.
+
+Security only, on Opus, narrowed. No mutation: the change is prose. The box
+above is the only item at medium. The rest is prose.
+
+**Question 1: my round-15 box is closed.** No reading of the new text lets
+`f1` reach a tick unread. Both repairs are "sized as above and run at least
+one lane; neither is ever marked skipped". The text names the off-by-one's
+own skip reason ("the round covered `f1`") as the one to refuse. The only
+skip left at the tail check is the closed pair, and `f1`, a `spec-writer`
+commit, is neither. I re-ran the scenario on branch `r15` of `tmp/r16sec/`:
+`E` `ab147a1`, `f1` `1bf1212` (`proposal.md`), `f2` `32c2fb5` (`design.md`),
+then `round 1 R..E`, `round 2 f1..f2`, and `round 3 E..f1` sized with
+security, plus a `findings/security.md` recording rounds 1 and 2.
+- The chain reaches `32c2fb5`, and the tail from there lists `findings/` and
+  `tasks.md` only, so it passes as it did in round 15.
+- The forms check for round 3 now lists nothing, so the tick is refused.
+- Its lane, once run, reads `git diff --name-only ab147a1 1bf1212`, which is
+  `c/proposal.md`.
+
+The one remaining path is a runner that notices the off-by-one before the
+tail check and skips the bridge under "Record the call"'s general "a round
+you decide to skip". That would contradict the bold sentence, whose named
+case this is. Low.
+
+**Question 2: the surviving skip.** On the start side the spec-writer's
+argument is right. The reason is a fact about one commit, not a claim of
+coverage. The `closer`'s merge of `main` (Step 2) and its archive (Step 3)
+are the first commits after a tick, and nothing but tracking can lie
+between the reached end and them. The exception is a commit landed after
+the tick without an untick, which is already disclosed. A start-side-wide
+line, such as `round 2 E..M1` over `T1`, hides nothing the narrow form
+would not. On the end side it is not right, which is the box above. The
+reason is still a fact about one commit, but the line's range is not tied
+to that commit, so the fact vouches for more than it covers. It is the
+round-15 hole reached by a different slip. The fix is one clause and adds
+no branch.
+
+- *"Clean" is still unchecked* (low, unchanged since round 2). A writer's
+  conflict-resolution merge is also "a merge of `main`". The runner routed
+  it knowingly, and `closer.md` aborts rather than resolve, so the
+  `closer`'s own merges are clean by construction. An empty
+  `git show --remerge-diff <sha>`, as measured above, would make the reason
+  checked rather than asserted.
+- *"Changed nothing under `openspec/specs/`" is the wrong fact for "needs no
+  review"* (low). An archive commit that also edited a file outside the
+  moved folder would satisfy the reason as worded. `closer.md:274-279`
+  commits the archive and the findings deletion with named paths and calls
+  the deletion "the one real deletion", so this needs a `closer` breach.
+
+Scope: `git diff --stat bad7c88 b5ceed2` touches `.claude/agents/RUNNER.md`
+and nothing else under `.claude/`. Its one hunk is the tail bullet, which is
+within #171's re-review mechanism. Nothing in the range adds a route to
+`main`, a force or `--admin`. `tmp/r16sec/` is left in place for the runner.
