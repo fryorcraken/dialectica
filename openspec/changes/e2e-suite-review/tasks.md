@@ -9,7 +9,8 @@
 - [x] review: security — `code-reviewer` — findings/security.md: one low-severity finding (unquoted `${{ matrix.spec }}` in ui-tests.yml run: bodies); rest clean
 - [x] review: readability — `code-reviewer`
 - [x] review: architecture — `code-reviewer`
-- [ ] review: spec-test — `spec-test-reviewer`
+- [x] review: spec-test — `spec-test-reviewer` — one finding in
+      findings/spec-test.md
 - [x] review: design — `design-reviewer` — decisions match the code; one
       finding in findings/design-review.md (adjudicator's missing-report
       diagnosis is wrong when an earlier step stopped the job, per design.md
