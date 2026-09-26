@@ -43,7 +43,7 @@ faith — checked against `tasks.md`'s run URLs and the actual scripts:
 One finding, on the one place `design.md` itself names as unresolved rather
 than fixed:
 
-- [ ] **`dev-writer`** — `dialectica-ui/tests/adjudicate-ui-run.sh:47-49`'s
+- [x] **`dev-writer`** — `dialectica-ui/tests/adjudicate-ui-run.sh:47-49`'s
       missing-report diagnosis is wrong whenever an earlier step stops the
       job, and this piece's own `design.md` D1 says so but leaves it
       unfixed ("Reported as a finding... not changed here").
@@ -63,3 +63,12 @@ than fixed:
       spec, the fix is a wording change to the diagnosis (e.g. distinguish
       "no report and the run step itself never started" from "no report and
       the run step started"), not a behaviour change requiring a spec.
+      **Fixed** in the commit that flips this box, by the same change that
+      answers `correctness.md`'s first finding (outcome and measurement
+      there). The script cannot tell the two cases apart, so the message
+      names both and points at the step log that can, rather than
+      distinguishing them. design.md D6 records why neither way of
+      distinguishing them was taken: skipping the step when the run step was
+      skipped makes the gate's running depend on another step's `if:`, and
+      passing the run's outcome in adds an input only to pick a sentence. D1's
+      "reported as a finding, not changed here" now points at D6.

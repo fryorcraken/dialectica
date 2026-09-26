@@ -18,9 +18,13 @@ Two facts about the CI this piece runs in shape everything below:
   run before it.
 
 Part 1 of the proposal, the six reviews of what #164 merged, is the reviewers'
-stage and not this one. This pass writes the CLAUDE.md line (part 3), runs the
-two CI proofs (part 2), and confirms or corrects the archive's claims that
-part 3 leans on.
+stage. D1–D5 cover the CLAUDE.md line (part 3), the two CI proofs (part 2), and
+the archive's claims that part 3 leans on. D6–D10 are the fixes to what the
+reviews found in #164's code.
+
+**Decision numbers here are this change's own.** Code that cites the merged
+suite's decisions names the `e2e-ui-suite` change, because both documents will
+sit under `openspec/changes/archive/` with overlapping numbers (D10).
 
 ## Goals / Non-Goals
 
@@ -98,13 +102,8 @@ exited 1 with its own error (`tasks.md` 3.1). It also showed something the
 prediction missed. The adjudicator step runs on `always()`, found no report
 because sitometres never started, and printed its missing-report diagnosis,
 "sitometres was killed before it could write one (job timeout?)". The step's
-failure is correct, since nothing was proved. Its stated cause is wrong
-whenever an earlier step stopped the job, and archived D1 chose that wording
-because "a missing-file error reads as a bug in the adjudicator". The
-diagnosis now misleads in the other direction, on every run an earlier guard
-stops. That behaviour is the adjudicator's, which the proposal keeps out of
-any capability, so it is a review finding for this piece rather than a change
-made here.
+failure is correct, since nothing was proved. Its stated cause was wrong
+whenever an earlier step stopped the job; D6 corrects it.
 
 ### D2 — The no-key step's break is archived `tasks.md` 5.1, unchanged
 
@@ -203,6 +202,82 @@ Checked here because proposal part 3 rests on them.
   which on Ubuntu is dash. Every green `ui-specs` run since #164 is therefore a
   dash run. This is inferred from the shebang and Ubuntu's default, not printed
   by any log.
+- **Corrected: archived D1's premise for the missing-report message.** It says
+  the report "is missing only when the process never reached its exit: a job
+  timeout or an OOM kill". That holds for sitometres, and not for the step that
+  reads the report, which runs on `always()` and so also runs when an earlier
+  step stopped the job before sitometres started. D6 has the consequence.
+- **Corrected: the archived proposal's coverage claim.** Archived
+  `proposal.md` says every behaviour `join.yaml` asserts is already a
+  requirement, and `join.yaml`'s header and the archived `.openspec.yaml` say
+  the same. Two steps had no requirement behind them: "it starts on the Stoa
+  list" (no requirement named the opening screen; others only ruled out the
+  feed and the onboarding screen) and "it is refused and the list is still up"
+  (`stoa-navigation-view` required the refusal and that no call is made, but
+  nothing said the list stays up). The spec-test review found both. This
+  change's `view-navigation` delta adds the two requirements, "The view opens
+  on the Stoa list" and "A paste refused as not a Stoa reference leaves the
+  list rendered", so the claim holds once this change is archived. The view
+  already behaved that way, so no view code changes. The archive is left as
+  written.
+
+### D6 — A missing report names both causes, and the step stays on `always()`
+
+The adjudicator cannot see why a report is missing, only that it is. On the
+3.1 red run it blamed a job timeout for a run the scaffold guard had stopped
+before sitometres started, and the guard's own error was two steps above.
+**Chosen:** the message names both causes, "never started (an earlier step
+stopped the job: see its error above)" and "killed before it could write one
+(a job timeout, or OOM)", and still says nothing was proved. It remains a
+`NO SPEC:` behaviour (proposal: the adjudicator is in no capability).
+
+**Rejected:**
+
+- **Skipping the step when sitometres never started**
+  (`if: always() && steps.<run>.outcome != 'skipped'`). Today a skipped run
+  step implies an earlier failure, so the job would still be red. But this
+  step is the gate that says nothing was proved, and the condition makes
+  whether the gate runs depend on another step's `if:`. If the run step ever
+  gains a condition of its own, such as a per-spec one, a skipped run and a
+  skipped gate make a green job that proved nothing. `always()` fails closed;
+  the cost is a second red annotation on a run that is already red.
+- **Passing the run step's outcome into the script** so it can name the one
+  cause. That would add an input to the script, which the workflow has to
+  supply correctly, only to choose between two sentences. The step log already
+  says which step stopped the job, so the message points there.
+
+**What breaks without it:** `tst_adjudicate_ui_run.sh`'s "names a run that
+never started" goes red, and nothing else. Measured by running the suite
+before the wording changed.
+
+### D7 — A spec with no `steps:` list is a reported problem, not a jq abort
+
+The step-count condition compares against the length of the spec's `steps:`
+list, so a spec without one has to be refused rather than counted. `null`'s
+length is 0, which an empty run matches, and a number's is its absolute value,
+which would count `steps: 2` as two. #164 refused it by calling jq's `error()`
+inside `expected=$(…)`. Under `set -eu` that ended the script with jq's exit
+code 5 and a bare `jq: error`, with no `::error::` and none of the other
+conditions checked. That broke the script's rule that every failing condition
+is reported before exiting.
+
+**Chosen:** the filter yields `null` for anything that is not a list, a yq
+failure (a spec that does not parse) also becomes `null`, and `null` is one
+more `problem`. The count comparison runs only when there is a count to compare
+against. It keeps its "equal, or else a problem" form, which fails closed on a
+non-integer (archived D1).
+
+**What breaks without each part, measured:**
+
+- With the type check replaced by a bare `length`, 4 checks go red: all three
+  of "a steps: value that is not a list", where `steps: 2` then prints
+  `ok: all 2 steps passed` and exits 0, and "names the cause" in the no-steps
+  case, which then reports only `spec has 0`.
+- With the `if ! expected=$(…)` guard removed, 2 checks go red: the
+  unparseable-spec case's "names the cause" and "still reports the verdict".
+  yq exits 1 there, so that case's exit check cannot tell the two apart.
+- Before this change, 7 checks were red across the new cases and the
+  missing-report case (D6 has one of them).
 
 ## Risks / Trade-offs
 

@@ -40,25 +40,19 @@ fi
 report=$1
 spec=$2
 
-# sitometres writes the report from a `finally`, so it is missing only when the
-# process never reached its exit at all: killed by a job timeout, or OOM. Say
-# THAT, rather than passing on jq's error about a missing file. "Nothing was
-# proved" is a diagnosis; "a file is absent" is a puzzle.
+# sitometres writes the report from a `finally`, so it is missing when the
+# process never reached its exit (killed by a job timeout, or OOM) AND when it
+# never started: ui-tests.yml runs this on `always()`, so an earlier step that
+# stopped the job lands here too. This script cannot tell the two apart, so it
+# names both rather than guessing, and points at the step log that can. Either
+# way it says so rather than passing on jq's error about a missing file:
+# "nothing was proved" is a diagnosis; "a file is absent" is a puzzle.
 if [ ! -e "$report" ]; then
-    echo "::error::no JSON report — sitometres was killed before it could write one (job timeout?), so nothing was proved"
+    echo "::error::no JSON report, so nothing was proved — sitometres either never started (an earlier step stopped the job: see its error above) or was killed before it could write one (a job timeout, or OOM)"
     exit 1
 fi
 
 require_jq_yq || exit 1
-
-# A spec with no `steps:` list is refused rather than counted: jq's
-# `null | length` is 0, which an empty run would match.
-expected=$(yq '.steps | if type == "array" then length else error("the spec has no steps: list") end' "$spec")
-count=$(jq '.steps // [] | length' "$report")
-
-echo "verdict: $(jq -r '.verdict' "$report")"
-jq -r '(.steps // [])[] | (.verdict | tostring) as $v
-       | "  [\((" " * (12 - ($v | length))) // "")\($v)] \(.name)"' "$report"
 
 problems=""
 problem() {
@@ -66,16 +60,35 @@ problem() {
 "
 }
 
+# A spec whose `steps:` is absent or not a list is refused rather than counted:
+# jq's `null | length` is 0, which an empty run would match, and a number's
+# `length` is its absolute value. A spec yq cannot parse is refused the same
+# way, with yq's own error left on stderr above. All three are a problem like
+# any other, so the conditions below are still checked and reported; under
+# `set -e` a bare `expected=$(…)` would end the script on yq's exit code instead.
+if ! expected=$(yq '.steps | if type == "array" then length else null end' "$spec"); then
+    expected=null
+fi
+count=$(jq '.steps // [] | length' "$report")
+
+echo "verdict: $(jq -r '.verdict' "$report")"
+jq -r '(.steps // [])[] | (.verdict | tostring) as $v
+       | "  [\((" " * (12 - ($v | length))) // "")\($v)] \(.name)"' "$report"
+
 if [ "$(jq '.verdict == "pass"' "$report")" != true ]; then
     problem "verdict is '$(jq -r '.verdict' "$report")', expected 'pass'"
 fi
-# Written as "equal, or else a problem" so that it fails CLOSED: `[` returns 2,
-# not 1, when either side is not an integer, and `-ne` in an `if` would read
-# that error as "not unequal" and pass the run. Measured, with the yq guard
-# above disabled and a YAML-answering yq on PATH: `-ne` printed `ok: all 2
-# steps passed`.
-[ "$count" -eq "$expected" ] ||
-    problem "report has $count steps, spec has $expected — the run did not execute the whole spec"
+if [ "$expected" = null ]; then
+    problem "$spec has no steps: list that yq could read, so the report cannot be counted against it"
+else
+    # Written as "equal, or else a problem" so that it fails CLOSED: `[`
+    # returns 2, not 1, when either side is not an integer, and `-ne` in an
+    # `if` would read that error as "not unequal" and pass the run. Measured,
+    # with the yq guard above disabled and a YAML-answering yq on PATH: `-ne`
+    # printed `ok: all 2 steps passed`.
+    [ "$count" -eq "$expected" ] ||
+        problem "report has $count steps, spec has $expected — the run did not execute the whole spec"
+fi
 failed=$(jq -r '[(.steps // [])[] | select(.verdict != "pass") | .name | tojson] | join(", ")' "$report")
 if [ -n "$failed" ]; then
     problem "steps that did not pass: $failed"

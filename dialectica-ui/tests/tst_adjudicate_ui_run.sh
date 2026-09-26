@@ -25,10 +25,17 @@ bad() {
     failures=$((failures + 1))
 }
 
-# write_spec <n>: a spec with n steps. Written as real YAML rather than a
-# count, so the number the adjudicator reads is the length of a document that
-# actually parses.
+# write_spec <n | yaml>: a spec with n steps, or, when the argument is not a
+# number, that text verbatim. Written as real YAML rather than a count, so the
+# number the adjudicator reads is the length of a document that actually
+# parses.
 write_spec() {
+    case $1 in
+        '' | *[!0-9]*)
+            printf '%s\n' "$1" > "$work/spec.yaml"
+            return
+            ;;
+    esac
     printf 'steps:\n' > "$work/spec.yaml"
     i=0
     while [ "$i" -lt "$1" ]; do
@@ -37,8 +44,8 @@ write_spec() {
     done
 }
 
-# adjudicate <report-json | none> <spec-steps> [PATH]: runs the adjudicator and
-# sets $code and $out. `none` writes no report at all.
+# adjudicate <report-json | none> <spec-steps | spec-yaml> [PATH]: runs the
+# adjudicator and sets $code and $out. `none` writes no report at all.
 adjudicate() {
     write_spec "$2"
     rm -f "$work/report.json"
@@ -109,13 +116,43 @@ expect_says "reports the step" "steps that did not pass"
 
 # NO SPEC: none of the three adjudication conditions covers a report that does
 # not exist. This pins the chosen behaviour: exit 1 with a message saying
-# nothing was proved, rather than jq's own missing-file error. The reason is in
-# design.md D1.
+# nothing was proved, rather than jq's own missing-file error, and naming BOTH
+# ways a report goes missing rather than guessing one. ui-tests.yml runs this
+# step on `always()`, so it also runs when an earlier step stopped the job and
+# sitometres never started. The e2e-ui-suite change's design.md D1 chose the
+# message; the e2e-suite-review change's design.md D6 corrected its cause.
 echo "a missing report says nothing was proved, not that a file is absent"
 adjudicate none 2
 expect_exit 1
 expect_says "names the real cause" "nothing was proved"
 expect_not_says "is not jq's missing-file error" "Could not open"
+expect_says "names a run that never started" "never started"
+expect_says "names a run that was killed" "was killed"
+
+# NO SPEC: the three conditions presume the spec has a steps: list to count
+# the report against. A spec without one is a problem reported alongside the
+# others, not an abort on jq's own error and exit code. The e2e-suite-review
+# change's design.md D7.
+echo "a spec with no steps: list is reported, alongside every other problem"
+adjudicate '{"verdict":"fail","steps":[{"name":"a","verdict":"fail"}]}' 'app: dialectica_ui'
+expect_exit 1
+expect_says "names the cause" "no steps: list"
+expect_says "still reports the verdict" "expected 'pass'"
+expect_says "still reports the step" "steps that did not pass"
+
+echo "a steps: value that is not a list is refused, not counted"
+# jq's `length` of a number is its absolute value, so without the type check
+# `steps: 2` would be counted as two and match this two-step green report.
+adjudicate '{"verdict":"pass","steps":[{"name":"a","verdict":"pass"},{"name":"b","verdict":"pass"}]}' 'steps: 2'
+expect_exit 1
+expect_says "names the cause" "no steps: list"
+expect_not_says "does not pass" "steps passed"
+
+echo "a spec that does not parse is reported, alongside every other problem"
+adjudicate '{"verdict":"fail","steps":[{"name":"a","verdict":"fail"}]}' 'steps: ['
+expect_exit 1
+expect_says "names the cause" "no steps: list"
+expect_says "still reports the verdict" "expected 'pass'"
 
 # The other half of this pair is the first case above, which runs the real
 # `yq` and passes. Here a `yq` that answers in YAML, as the Go yq on GitHub's

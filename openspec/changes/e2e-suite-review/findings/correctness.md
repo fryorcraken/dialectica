@@ -7,7 +7,7 @@ only — no code). Correctness dimension only.
 
 ## Findings
 
-- [ ] **`dev-writer`** — `dialectica-ui/tests/adjudicate-ui-run.sh:48` — the
+- [x] **`dev-writer`** — `dialectica-ui/tests/adjudicate-ui-run.sh:48` — the
       missing-report diagnosis names a specific cause that is wrong whenever an
       earlier step stopped the job, which is the common case in `ui-tests.yml`.
       **Scenario:** the script always prints exactly
@@ -39,8 +39,19 @@ only — no code). Correctness dimension only.
       A person debugging a red `ui-tests.yml` run from this message alone is
       pointed at "job timeout?" when the real cause is a step log two entries
       above.
+      **Fixed** in the commit that flips this box (the same fix answers
+      `design-review.md`'s finding, ticked in the same commit). The message
+      now names both causes, "never started (an earlier step stopped the job:
+      see its error above)" and "killed before it could write one (a job
+      timeout, or OOM)", and still says nothing was proved and exits 1. The
+      step stays on `always()`; design.md D6 says why gating it on the run
+      step was rejected. Test: `tst_adjudicate_ui_run.sh`'s missing-report
+      case gains "names a run that never started" and "names a run that was
+      killed". **Predicted** before the wording change: "never started" red,
+      "was killed" green. **Observed:** the same, 1 of the 7 red checks in
+      that run.
 
-- [ ] **`dev-writer`** — `dialectica-ui/tests/adjudicate-ui-run.sh:56` — a spec
+- [x] **`dev-writer`** — `dialectica-ui/tests/adjudicate-ui-run.sh:56` — a spec
       with no (or a non-array) `steps:` key crashes with jq's own raw error and
       a non-standard exit code, bypassing the script's own `::error::`
       convention that every other failure path in this file follows.
@@ -65,6 +76,24 @@ only — no code). Correctness dimension only.
       precondition, and a future spec author's typo (`stpes:` for `steps:`)
       would get a jq stack trace instead of the clear message every other
       branch of this script gives.
+      **Fixed** in the commit that flips this box. The filter yields `null`
+      for a `steps:` that is absent or not a list, a yq failure on a spec that
+      does not parse becomes `null` too, and `null` is one more `problem()`,
+      so every other condition is still checked and reported and the exit is
+      1 with an `::error::` line. The count comparison runs only when there
+      is a count, and keeps its fail-closed form (design.md D7). Tests, each
+      marked `NO SPEC:`, in `tst_adjudicate_ui_run.sh`: a spec with no
+      `steps:` (paired with a failing report, so "still reports the verdict"
+      and "still reports the step" show nothing was cut short), `steps: 2`
+      against a green two-step report, and `steps: [`. **Predicted** before
+      the fix: 3 red in the no-steps case (exit 5, verdict, step; "names the
+      cause" green, since jq's own error carries the phrase), 1 in the
+      `steps: 2` case (exit 5), and 2–3 in the unparseable case depending on
+      yq's exit code. **Observed:** 3, 1 and 2 (yq exits 1 on a parse error,
+      so that case's exit check passed). Mutations after the fix, each
+      restored: the type check replaced by a bare `length` turns 4 red, and
+      `steps: 2` then prints `ok: all 2 steps passed` and exits 0 (predicted
+      4); the `if ! expected=$(…)` guard removed turns 2 red (predicted 2).
 
 ## Checked and clean (no finding filed)
 
