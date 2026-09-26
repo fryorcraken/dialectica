@@ -2,11 +2,10 @@
 # Tests for ui-tests.yml's "lgs left scaffold.toml's values alone" guard.
 #
 # The e2e-ui-suite change's design.md D4 records that both `lgs basecamp setup`
-# and `lgs basecamp install`
-# rewrite `scaffold.toml` (CLAUDE.md), and that the guard exists because a
-# changed VALUE, as opposed to a stripped comment, would mean the run exercises
-# a Basecamp or module set the repository does not declare. A check nobody has
-# watched go red is not yet known to be able to.
+# and `lgs basecamp install` rewrite `scaffold.toml` (CLAUDE.md), and that the
+# guard exists because a changed VALUE, as opposed to a stripped comment, would
+# mean the run exercises a Basecamp or module set the repository does not
+# declare. A check nobody has watched go red is not yet known to be able to.
 #
 # WHAT THIS FILE CAN AND CANNOT CLOSE. Whether `lgs basecamp setup`/`install`
 # themselves ever rewrite a VALUE is a fact about `lgs`, observable only by

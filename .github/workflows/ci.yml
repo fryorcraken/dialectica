@@ -1178,8 +1178,7 @@ jobs:
       # Each workflow keeps its own literal for the tools the two share, where
       # someone reading that job can see it. This step keeps the literals equal
       # and exact. The e2e-ui-suite change's design.md D8 says why two literals
-      # and a check, rather than
-      # one file both workflows load.
+      # and a check, rather than one file both workflows load.
       - name: The two UI workflows pin the same tool versions
         run: dialectica-ui/tests/tst_ui_tool_pins.sh
 

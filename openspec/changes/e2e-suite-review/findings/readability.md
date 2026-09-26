@@ -140,7 +140,7 @@ suite's files (`adjudicate-ui-run.sh`, `tst_adjudicate_ui_run.sh`,
 `design.md`'s own `grep -n "^### D" design.md` returns D1 through D10 in
 order, matching the text.
 
-- [ ] **`dev-writer`** — `.github/workflows/ci.yml:1179-1182`,
+- [x] **`dev-writer`** — `.github/workflows/ci.yml:1179-1182`,
       `dialectica-ui/tests/require-jq-yq.sh:25-27`,
       `dialectica-ui/tests/tst_scaffold_values_unchanged.sh:4-6`,
       `dialectica-ui/tests/tst_ui_tool_pins.sh:12-14` — the D10 fix (naming
@@ -172,6 +172,18 @@ order, matching the text.
       pulling the qualifier back apart from the decision letter it names.
       Fix is mechanical: rewrap each of the four comment blocks to the
       surrounding file's normal column width.
+
+      **Fixed** in the commit that flips this box: each of the four named
+      paragraphs is reflowed to its file's ~79-column wrap, and nothing else
+      moved. `git diff -w --word-diff` over the commit shows only `#` markers
+      relocating — no word added, removed or reordered, and no non-comment
+      line touched. No test can see this (it is comment layout); what was run
+      is the three suites that read these files, since two of them extract
+      `ci.yml` steps by name: `tst_ui_tool_pins.sh`,
+      `tst_scaffold_values_unchanged.sh` and `tst_workflow_run_bodies.sh`, all
+      green. Not touched, because the finding does not name it:
+      `tst_scaffold_values_unchanged.sh:14-16`, whose "design.md Risks)." is
+      the same kind of short line left by the same qualifying pass.
 
 Everything else in this diff — `design.md` D6–D10's own prose, the
 `view-navigation` spec delta, `proposal.md` and `.openspec.yaml`'s rewrites,
