@@ -11,7 +11,7 @@ verbatim.
 
 ## Findings
 
-- [ ] **`dev-writer`** — `.claude/agents/RUNNER.md:443-444` (echoed in
+- [x] **`dev-writer`** — `.claude/agents/RUNNER.md:443-444` (echoed in
       `openspec/changes/171-workflow-rules/design.md:91`) — the claim that
       "the `closer`'s Step 1 refuses to run while a row other than its own is
       unticked" is stronger than what `closer.md`'s Step 1 actually says.
@@ -41,6 +41,19 @@ verbatim.
       the RUNNER.md/design.md wording to match what `closer.md` actually
       says), so it does not require the closer.md Step 1 edit that would be
       out of this piece's authorised scope.
+
+      **Fixed** (this commit and the one before it), as suggested, by
+      softening the claim to what `closer.md` Step 1 literally says.
+      `RUNNER.md` step 3 now reads "the `closer`'s Step 1 checks that every
+      row but its own is ticked or struck, and that check is the only thing
+      that lets it see the commit was never read". `design.md`'s Context
+      bullet and "What the row buys" say "checks", not "refuses", and "What
+      the row buys" now records that Step 1 is worded as a requirement rather
+      than an explicit stop, and that saying "stop" there was outside this
+      piece's authorisation. The PR body's matching sentence is updated too.
+      Measured after the edit: `git grep -n -e "refuses to run" -e "refuses
+      to merge" -- .claude/agents openspec/changes/171-workflow-rules/design.md`
+      returns nothing.
 
 - [x] **`dev-writer`** — `.claude/agents/closer.md:84` — the cross-reference
       "Step 3 of [`RUNNER.md`](RUNNER.md)'s 'From the `dev-writer`'s hand-back

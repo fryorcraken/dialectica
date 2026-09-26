@@ -268,8 +268,8 @@ reading it as a fault.** The reviewers fork from one HEAD, each ticks its own
 row, and their rows are adjacent. Git conflicts on neighbouring changed lines as
 well as on the same line, so a review tick picked after the tick on the row next
 to it stops with `CONFLICT (content): Merge conflict in tasks.md`; one unchanged
-row between them and it applies cleanly. Picked in template order, every review
-pick after the first stops. Sequential stages never meet it, since each forks
+row between them and it applies cleanly. Picked in template order, each landing
+before the next, every review pick after the first stops. Sequential stages never meet it, since each forks
 after the previous tick is on your HEAD.
 
 **A dispatched agent cannot be put inside a pre-existing worktree.** Not "usually
@@ -529,9 +529,9 @@ exactly like a forgotten one:
 
 **Tick the row when no commit that merges is unreviewed.** The record, the tick
 and the untick are commits you make in your own tree, on `piece/<name>`, before
-the next dispatch forks from it — and the only content you commit ("What a
-runner commits"). **If a commit that needs review lands after it is ticked — a
-red-CI fix, a conflict resolution, an archive commit that changed
+the next dispatch forks from it — and the only content you commit, as
+"What a runner commits" says. **If a commit that needs review lands after it is
+ticked — a red-CI fix, a conflict resolution, an archive commit that changed
 `openspec/specs/` — untick it** and add the next round's line: the `closer`'s
 Step 1 checks that every row but its own is ticked or struck, and that check is
 the only thing that lets it see the commit was never read.

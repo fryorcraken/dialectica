@@ -61,7 +61,7 @@ source-code diff exists on this piece.
         command lists `feed-view/spec.md` and `stoa-navigation-view/spec.md`;
         on this tree's HEAD it lists nothing.
 
-- [ ] **`dev-writer`** — `.claude/agents/RUNNER.md`, "From the `dev-writer`'s
+- [x] **`dev-writer`** — `.claude/agents/RUNNER.md`, "From the `dev-writer`'s
       hand-back to the merge", step 3, bullet under "The brief" — "A clean
       re-review writes no file" removes the one mechanical trip-wire the rest
       of the flow relies on to catch a false "nothing to see" claim, so a
@@ -97,6 +97,21 @@ source-code diff exists on this piece.
       addressing this specific gap, so it stands as a residual weakening
       of the merge gate's ability to distinguish "reviewed, found nothing"
       from "not reviewed."
+
+      **Deferred** — to the `spec-writer`, and recorded in `design.md`'s Risks
+      ("A clean re-review leaves no reviewer-authored trace"). The gap is
+      real, and it is sharper since the owner ruled "Agents tick their own":
+      a first-round reviewer's own tick attests its review, and a clean
+      re-reviewer leaves no commit at all. But the no-file behaviour is not
+      the `dev-writer`'s to change: `proposal.md` specifies it ("A clean
+      re-review adds no box either way… after it it writes no file"), so the
+      fix is a contract change. `design.md` records the candidate that closes
+      the gap without tripping the `closer`'s every-file-non-zero check: a
+      clean re-reviewer writes one **ticked** box naming the range it read,
+      which `grep -rn "^- \[ \]"` ignores and `grep -rc "^- \["` counts. The
+      hand-back to the runner names this for a `spec-writer` dispatch; if the
+      spec-writer takes it, the `RUNNER.md` brief bullet changes in this
+      piece, and this box's outcome stands as the record of why.
 
 ## Areas checked and clean
 

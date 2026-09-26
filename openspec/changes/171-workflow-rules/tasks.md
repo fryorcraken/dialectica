@@ -124,3 +124,60 @@ named on each task is that reading.
       `closer.md` and `RUNNER.md`. The `findings/` bullet points at
       `RUNNER.md` step 3.
 - [x] 7.5 `openspec validate 171-workflow-rules --strict` passes.
+
+### 8. The `closer`'s own commits, what the runner commits, and the review round's findings
+
+The owner took `findings/security.md`'s and `findings/architecture.md`'s owner
+findings into this piece and ruled on them; `proposal.md` records the rulings.
+Commands written into a role file were run in a scratch repository under
+`./tmp/` (git 2.55.0) before any claim about their output was written.
+
+- [x] 8.1 `RUNNER.md` "What a runner does": "You do not rebase" becomes "never
+      rebase, reset or force-push `piece/<name>`, and do not merge `main`";
+      "What a runner commits" states the owner's rulings once. Verify:
+      `git grep -n -F "What a runner commits" -- .claude/agents` returns the
+      heading and step 3's pointer, both in `RUNNER.md`, and the red-run text
+      points to "What a runner does".
+- [x] 8.2 `RUNNER.md` "Dispatching": the per-agent sequence names the
+      fast-forward for the `closer` and a conflict resolver; a conflicting
+      cherry-pick goes back to its agent; the review round's tick conflict is
+      expected. "Removing each agent's worktree" matches. Verify: the
+      messages quoted (`is a merge but no -m option was given`,
+      `Not possible to fast-forward`, `CONFLICT (content): Merge conflict in
+      tasks.md`) are the ones the scratch repository printed.
+- [x] 8.3 `RUNNER.md` step 3 lists the `closer`'s commits by whether they need
+      review, and the brief for a resolution names
+      `git show --remerge-diff <sha>`. Step 4 lists all four returns, the
+      fast-forward comes first, and "a stale branch does not come back" holds
+      only for a clean merge of `main`. Verify:
+      `git grep -n -i "rebase" -- .claude/agents` returns only the runner's
+      prohibition, the refused fast-forward's hint, the agent rebasing its own
+      local branch, and the writer's "not to rebase".
+- [x] 8.4 `closer.md`: the order list, Step 2 (merge `origin/main`, no force,
+      stop on a conflict), Step 3 (the archive check, only for an archive made
+      in this run; push HEAD on a re-dispatch), Step 4's `BEHIND` pointer,
+      "What you never do", "Your report" and the closing paragraph. Signing
+      text unchanged except the operation it names. Verify:
+      `git grep -n -e "force-with-lease" -- .claude/agents` returns nothing,
+      and `git diff --name-only HEAD^ HEAD -- openspec/specs/` lists two files
+      on `2bda577f` and none on this tree.
+- [x] 8.5 `README.md`'s branch section and `spec-writer.md`'s stage-block
+      sentence point to `RUNNER.md`'s "Dispatching". Verify:
+      `git diff origin/main...HEAD -- .claude/agents/spec-writer.md` shows the
+      one sentence, the re-review row and its paragraph, and no other template
+      row.
+- [x] 8.6 Findings addressed to the `dev-writer`: `RUNNER.md` step 2 states no
+      count; step 1's `NO SPEC:` command is scoped to the piece's diff and the
+      brief asks the `spec-writer` to name product decisions; `RUNNER.md` and
+      `design.md` say only what `closer.md` Step 1 says; `closer.md` names
+      `RUNNER.md`'s section before its item number. The clean re-review trace
+      and the pathspec test are deferred, with where each now lives. Verify:
+      `grep -rc "^- \[ \]" openspec/changes/171-workflow-rules/findings/`
+      is zero for every file.
+- [x] 8.7 `design.md`: Decisions for merge-not-rebase, stop-on-conflict, the
+      archive check, the fast-forward, what the runner commits, the
+      conflicting cherry-pick, the `spec-writer.md` correction, the signing
+      text, the scoped `NO SPEC:` command and the product-decision request;
+      the stale Context line and the stale Risks entry on the `closer`'s
+      rebase are replaced.
+- [x] 8.8 `openspec validate 171-workflow-rules --strict` passes.

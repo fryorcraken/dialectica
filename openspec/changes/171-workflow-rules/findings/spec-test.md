@@ -5,7 +5,7 @@ Scope actually reviewed: `proposal.md`, `tasks.md`, `.openspec.yaml`, issues
 --stat` (stat only). No file under `.claude/agents/`, no `design.md`, no other
 findings file and no diff body was read, per the brief's restriction.
 
-- [ ] **`dev-writer`** — `openspec/changes/171-workflow-rules/tasks.md:11-15`
+- [x] **`dev-writer`** — `openspec/changes/171-workflow-rules/tasks.md:11-15`
       (the struck tester row) versus `proposal.md:132-139` and `tasks.md:110-114`
       (task 7.1, the `closer.md` Step 1 pathspec) — the tester row is struck on
       "no CI job, script or test reads `.claude/agents/` ... there is no
@@ -46,6 +46,19 @@ findings file and no diff body was read, per the brief's restriction.
       to strike the whole tester row is broader than the file actually is, and
       this one command is exactly the "pathspec's behaviour" example my brief
       names.
+
+      **Deferred** — to a follow-up issue, listed in PR #174's follow-ups for
+      the project manager to file, and recorded in `design.md`'s Risks ("The
+      `closer`'s Step 1 pathspec has no standing test"). The finding is right
+      that the command is executable and that the struck row's "no executable
+      behaviour" is broader than the file. It is not added in this piece for
+      two reasons. `proposal.md`'s
+      Impact says this change adds no tests or CI, and the stage block's
+      struck tester row is the `spec-writer`'s. And a test holding its own
+      copy of the command would not fail when a role file's copy changed,
+      which is the regression the scenario describes; the useful test
+      extracts the command from `closer.md` and `RUNNER.md` and runs it
+      against fixture names from the `lint` job, which is a piece of its own.
 
 ## Areas checked clean
 
