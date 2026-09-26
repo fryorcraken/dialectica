@@ -589,3 +589,42 @@ any claim about their output was written.
 - [x] 19.6 `findings/readability.md`'s `dev-writer` box for the eleventh
       re-review flipped with its outcome.
 - [x] 19.7 `openspec validate 171-workflow-rules --strict` passes.
+
+### 20. After the `spec-writer`'s derived `<review>` and `--no-renames` (`a0ce38f`)
+
+Follows `proposal.md` as `a0ce38f` left it, and the list for the `dev-writer`
+in the runner's brief. Every command whose output a file now describes was run
+on this tree or in a scratch repository under `./tmp/` (git 2.55.0), since
+deleted, before the claim was written.
+
+- [x] 20.1 `RUNNER.md` "Record the call": `<review>` is read from the
+      repository, never from memory, by the `git log` command in a code
+      block, the second field of its last line; the pre-archive pathspec,
+      the last line and an empty listing each with its reason; the first
+      check command carries `--no-renames`, with one clause of reason.
+      Verify: on this tree the command's last line is `f94f7b8d c222c37b`.
+- [x] 20.2 `RUNNER.md` "What you read": the check's row names the `git log`
+      command (hashes and subjects only) and the `--no-renames` form, and
+      still points to step 3.
+- [x] 20.3 `RUNNER.md`'s "at least one" bullet: where a runner cannot tell
+      whether a review ran, the check runs from the `<review>` read as
+      "Record the call" says, not a HEAD remembered or seen.
+- [x] 20.4 `design.md`'s nothing-landed Decision: three rules; why the
+      value is derived every time, why it is the dispatch HEAD, why the
+      pre-archive pathspec and the last line, why `--no-renames`; the
+      measurements with `--no-renames` and the scratch repository's; three
+      new rejected alternatives; "What breaks without each rule". Verify: in
+      the scratch repository, dropping `--no-renames` takes
+      `.claude/agents/closer.md` out of the listing, and the archived
+      pathspec gives the archive commit.
+- [x] 20.5 `design.md` Risks: the standing-test entry's command list, the
+      mistyped derivation as fail-closed, seven fail-open cases, the
+      `<review>` paragraph rewritten; the `closer`-side Risk and "What it
+      still cannot see" derive `<review>` again and run both commands.
+      Verify: `git grep -n -F "three fail" --
+      openspec/changes/171-workflow-rules/design.md` returns nothing.
+- [x] 20.6 PR #174's body: step 3, the `design.md` bullet, the standing-test
+      follow-up and the `closer`-side follow-up.
+- [x] 20.7 `findings/readability.md`'s `dev-writer` box for the twelfth
+      re-review flipped with its outcome.
+- [x] 20.8 `openspec validate 171-workflow-rules --strict` passes.

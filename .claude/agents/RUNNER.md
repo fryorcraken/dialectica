@@ -78,7 +78,7 @@ You read exactly enough to decide the next dispatch:
 | `openspec/changes/<name>/tasks.md` — the `## Stages` block (once the `closer` has archived: `openspec/changes/archive/<date>-<name>/`, see "Rebuild the state") | which stage is next, and whether anyone is on it |
 | `ls openspec/changes/<name>/findings/` — **the filenames** (once the `closer` has archived: `openspec/changes/archive/<date>-<name>/`, see "Rebuild the state") | whether a reviewer has reported, and which dimension |
 | `grep -rn "^- \[ \]"` over `findings/` | whether anything is unanswered, as a count |
-| `git diff --name-only <review> HEAD` — **file names only** — and `git diff <review> HEAD --` over `tasks.md` | before you write a round 1 skipped because nothing landed: whether anything but `findings/` and flipped boxes changed since the review round (step 3 of "From the `dev-writer`'s hand-back to the merge") |
+| `git log --diff-filter=A --format="%h %p %s"` over the pre-archive `findings/` — **hashes and subjects only** — then `git diff --no-renames --name-only <review> HEAD` — **file names only** — and `git diff <review> HEAD --` over `tasks.md` | before you write a round 1 skipped because nothing landed: which commit the review round read, and whether anything but `findings/` and flipped boxes changed since (step 3 of "From the `dev-writer`'s hand-back to the merge") |
 | `git grep -n -F -e "] re-review: every commit" -e "      round " -e "] findings all ticked"` over `tasks.md` — **the re-review row, its round lines and the next row** | whether every line between the re-review row and the next row is a round line, and whether any round number repeats (step 3 of "From the `dev-writer`'s hand-back to the merge") |
 | ``git grep -l -F -e '## Re-review round <n> `<range>`' -e '**re-review round <n> `<range>`: no findings**'`` over `findings/` — **file names only** | whether each lane of a re-review round left its record (step 3 of "From the `dev-writer`'s hand-back to the merge") |
 | the `closer`'s report | whether the piece closed, or what stopped it |
@@ -612,18 +612,34 @@ round at all, it still gets round 1, marked skipped because nothing landed, and
 then the tick: every tick follows at least one round line. Its range runs from
 the commit the review round read — the HEAD you dispatched the review round
 from, where any round 1 starts — to your HEAD: ``round 1 `<review>..<HEAD>` ``.
-Before you write it, run each of these:
+**Read `<review>` from the repository, never from memory**, even when your
+report still holds it: it is the second field of the last line this prints.
 
 ```
-git diff --name-only <review> HEAD
+git log --diff-filter=A --format="%h %p %s" -- openspec/changes/<name>/findings/
+```
+
+Keep that pathspec even once the change is archived: under the archived folder
+the oldest add is a re-reviewer's file written after the archive, whose parent
+is the archive commit. Read the last line, not the first: the log prints newest
+first, and every later round's findings files are adds too. A listing that
+prints nothing means the review round's findings are not on your HEAD, or the
+name is mistyped; you have no `<review>`, and write no round 1 from it.
+Before you write the line, run each of these:
+
+```
+git diff --no-renames --name-only <review> HEAD
 git diff <review> HEAD -- <change folder>/tasks.md
 ```
 
 The first must list nothing outside the change folder's `findings/` and
-`tasks.md`, and the second must show only boxes flipped. Any other path, or any
-other change to `tasks.md`, means a commit that needs review is in the range:
-the round is not skipped because nothing landed, and its line takes the
-ordinary form, naming what landed, sized as above. A range with both ends at
+`tasks.md`, and the second must show only boxes flipped. The first carries
+`--no-renames` because a file moved into `findings/` deletes something that
+merges, and git's default rename detection lists the move by its destination
+alone. Any other path, or any other change to `tasks.md`, means a commit that
+needs review is in the range: the round is not skipped because nothing landed,
+and its line takes the ordinary form, naming what landed, sized as above. A
+range with both ends at
 your HEAD would hold nothing, so a commit misread as tracking would lie in no
 round's range.
 **A lane you run
@@ -674,8 +690,9 @@ the `closer`'s first row. Do not tick unless all three hold:
   report recorded, and the forms check then covers it like any other round.
   Only where no round ran is it the skipped round 1 of "Record the call", and
   only if that paragraph's check passes. Where you cannot tell whether a round
-  ran, such as after your report is lost, the check decides: a range it fails
-  gets a round sized as above. **Never repair a missing line with the
+  ran, such as after your report is lost, the check decides, over a range from
+  the `<review>` you read as "Record the call" says, not from a HEAD you
+  remember or can see: a range it fails gets a round sized as above. **Never repair a missing line with the
   nothing-landed form over a range holding a commit that needs review**: the
   forms check skips a round marked skipped, so the round that ran would never
   be checked. A listing that lacks either row means the command was mistyped,

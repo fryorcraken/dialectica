@@ -298,20 +298,30 @@ a round is owed at all.
 When nothing that merges lands after the review round, the runner still writes
 round 1, marked skipped, and ticks: the row is never struck ("Striking the
 row", above). Every other round line records a decision. This one asserts a
-fact, that the branch holds nothing unreviewed, and two rules make it a claim
-a reader can check:
+fact, that the branch holds nothing unreviewed, and three rules make it a
+claim a reader can check:
 
 - **Its range runs from the commit the review round read to the runner's
   HEAD**, ``round 1 `<review>..<HEAD>` ``. `<review>` is the HEAD the runner
   dispatched the review round from, which is where any round 1 starts: this
-  piece's round 1 is `c222c37..9dc235c`, and `c222c37` is the parent of the
-  review round's first findings commit, `f94f7b8d`. The range holds the review
-  round's own commits and every commit since, so `git diff` over it shows what
-  the claim covers, and later rounds chain on from its end as every other
-  round chains from where review last ended.
+  piece's round 1 is `c222c37..9dc235c`. The range holds the review round's
+  own commits and every commit since, so `git diff` over it shows what the
+  claim covers, and later rounds chain on from its end as every other round
+  chains from where review last ended.
+- **The runner reads `<review>` from the repository, never from memory**,
+  including when its report still holds it. It is the parent of the oldest
+  commit that added a file under the change's pre-archive `findings/`, the
+  second field of the last line of
+
+  ```
+  git log --diff-filter=A --format="%h %p %s" -- openspec/changes/<name>/findings/
+  ```
+
+  and an empty listing means there is no `<review>` and no round 1 line from
+  it.
 - **The runner checks the claim before writing the line.**
-  `git diff --name-only <review> HEAD` must list nothing outside the change
-  folder's `findings/` and `tasks.md`, and
+  `git diff --no-renames --name-only <review> HEAD` must list nothing outside
+  the change folder's `findings/` and `tasks.md`, and
   `git diff <review> HEAD -- <change folder>/tasks.md` must show only boxes
   flipped. Those are the tracking commits the entry above needs no review for:
   the review round's findings and stage-row ticks, and a writer's pass that
@@ -333,27 +343,94 @@ starting at `<review>`, the same misjudgement puts `design.md` in the diff the
 runner runs before writing the line, and in the range any later reader can
 diff again.
 
+**Why `<review>` is derived, and derived every time**
+(`findings/correctness.md`, `findings/security.md`'s second box and
+`findings/readability.md`, re-review round 12 `dd4fe18..1380d50`). The range
+rule defined `<review>` as the HEAD the runner dispatched the review round
+from, which is a memory of a dispatch. `RUNNER.md`'s "Rebuild the state" says
+that memory does not survive a compaction, and nothing in `tasks.md` records
+the commit until a round line is written. The lost-line repair sends a runner
+whose report is lost to the check, whose one input is the value the lost
+report took with it. A runner supplying its own takes the ready answer, a HEAD
+it can see: the `<HEAD>` in the same range, when "the HEAD you dispatched
+from" reads as a HEAD too. Both ends at one commit give an empty diff, the
+check passes, and round 1 is written skipped over the empty range this entry
+exists to remove, reached by following the text rather than breaking it.
+Deriving the value always, not only after a lost report, leaves one procedure
+with no memory in it.
+
+**Why the derived commit is the dispatch HEAD.** The reviewers' commits are
+the first to land after the review round is dispatched: the runner commits
+nothing between, and a reviewer commits only its findings file and its own
+stage row. So the oldest commit adding a findings file sits on the dispatch
+HEAD, or on a reviewer's tick, which is tracking; a range starting there
+misses nothing that needs review.
+
+**Why the pre-archive pathspec, and the last line.** The `closer` deletes
+`findings/` before `openspec archive`, and a re-reviewer after the archive
+writes its file afresh in the archived folder, so under the archived path the
+oldest add is that re-review, whose parent is the archive commit, later than
+the review round. The history under the pre-archive path is unchanged by the
+archive. The log prints newest first, and every later round's findings files
+are adds too, so the first line's parent is later than the review round: on
+this tree it is `a284e514`, the round's tick commit.
+
+**Why `--no-renames`** (`findings/security.md`, re-review round 12
+`dd4fe18..1380d50`, first box). The `closer` deletes `findings/` before the
+merge, so a file moved into `findings/` is a deletion of something that
+merges. Git's default rename detection lists the move by its destination
+alone, which is inside `findings/`, so the check passes over a commit that
+deletes a role file from what merges. With rename detection off the source
+path is listed and the check fails. A deletion that is not a move is listed
+either way.
+
 **Why a path diff, not `git log --oneline`.** The misreading is of what a
 commit contains, and a subject line is where it starts: "answer the findings"
 reads as tracking whether or not the pass also edited `design.md`. The path
-list is what the commits did. Both commands stay inside what the runner reads,
-since the first prints file names only and the second reads the stage block's
-own file, and "What you read" has a row for them.
+list is what the commits did. All three commands stay inside what the runner
+reads: the derivation prints hashes and subjects only, the first diff prints
+file names only, and the second reads the stage block's own file. "What you
+read" has a row for them.
 
-Measured on this tree when the entry was written:
+Measured on this tree when the entry was written, and the `git diff` results
+re-run with `--no-renames` at `a0ce38f1`, unchanged:
 
+- `git log --diff-filter=A --format="%h %p %s" --
+  openspec/changes/171-workflow-rules/findings/` lists three commits; the
+  last is `f94f7b8d c222c37b`, the design review, and the first
+  `2259e7ff a284e514`;
 - `git log --oneline -1 f94f7b8d~1` gives `c222c37b`, so the review round's
   first findings commit sits directly on the commit the review round read;
 - `git log --oneline c222c37..e7e2bbdd` lists the review round's five commits;
-  `git diff --name-only c222c37 e7e2bbdd` lists the six findings files and
-  `tasks.md`, and `git diff c222c37 e7e2bbdd --
+  `git diff --no-renames --name-only c222c37 e7e2bbdd` lists the six findings
+  files and `tasks.md`, and `git diff c222c37 e7e2bbdd --
   openspec/changes/171-workflow-rules/tasks.md` is the six review-row ticks,
   so the claim holds there;
-- `git diff --name-only c222c37 ae59b43c`, which adds the rejection
-  `9c7cf040` and the first post-review `proposal.md` commit, `ae59b43c`, lists
-  `proposal.md` as well, so the claim fails;
-- `git diff --name-only ae59b43c ae59b43c`, a range with both ends at one
-  commit, lists nothing: the earlier form hiding `proposal.md`.
+- `git diff --no-renames --name-only c222c37 ae59b43c`, which adds the
+  rejection `9c7cf040` and the first post-review `proposal.md` commit,
+  `ae59b43c`, lists `proposal.md` as well, so the claim fails;
+- `git diff --no-renames --name-only ae59b43c ae59b43c`, a range with both
+  ends at one commit, lists nothing: the earlier form hiding `proposal.md`,
+  and what a runner supplying the HEAD it can see would get.
+
+Measured in a scratch repository under `./tmp/` (git 2.55.0, `diff.renames`
+unset, since deleted), with a base commit `B` holding
+`.claude/agents/closer.md` and `openspec/changes/x/tasks.md`, then a review
+commit adding `findings/security.md`, a tick, and a writer's pass that flips
+the findings box and runs `git mv .claude/agents/closer.md
+openspec/changes/x/findings/closer-notes.md`:
+
+- the derivation lists two commits, the writer's pass (a move from outside
+  the pathspec reads as an add) and the review commit, last, whose parent is
+  `B`;
+- `git diff --name-only B HEAD` lists `findings/closer-notes.md`,
+  `findings/security.md` and `tasks.md`, and the `tasks.md` diff is one tick,
+  so the claim would hold; with `--no-renames`, `.claude/agents/closer.md` is
+  listed as well, so it fails;
+- after a commit deleting `findings/`, one moving the change folder to
+  `openspec/changes/archive/2026-09-27-x/`, and a re-reviewer's fresh file
+  there, the pre-archive pathspec still gives `B`, and the archived pathspec
+  lists only the re-reviewer's commit, whose parent is the archive commit.
 
 **Alternatives considered:**
 
@@ -371,15 +448,34 @@ Measured on this tree when the entry was written:
   `cargo fmt` fix), names what landed over a range that holds it, so it stays
   visible. Only "nothing landed" is a claim of fact that a diff can refute, so
   only it gets the check.
+- **Recording `<review>` on the re-review row when the review round is
+  dispatched**, the other fix `findings/correctness.md`'s round 12 box
+  offered. A line under the row that is not a round line fails the number
+  check's first condition, that every line between the rows is a round line,
+  and it would be one more value the runner types, which is where the defect
+  came from.
+- **Deriving `<review>` only to recover a lost report**, and using the
+  remembered value otherwise. One value would then have two sources, and a
+  runner that remembers the wrong one is never sent to the other.
+- **The archived folder's `findings/` as the pathspec once the change is
+  archived.** Measured in the scratch repository above to give the archive
+  commit, so the range would miss every commit before the archive.
 
 **What breaks without each rule.** Without the range rule the line is back to
 an empty range in which no check and no reader can ever find a commit. Without
-the check, the range holds the misread commit but nothing reads it before the
-tick; only a second reader diffing the line's range again would, and that
-reader is deferred (Risks, "Only the runner runs the pre-tick checks"). A line
-written without its check is a residual neither pre-tick check sees ("What it
-still cannot see", under the number check), and `<review>` is runner input
-(Risks, the standing-test entry).
+the derivation, the check has no input once a report is lost, and the value a
+runner supplies in its place, the HEAD it can see, empties the range again.
+Without the check, the range holds the misread commit but nothing reads it
+before the tick; only a second reader diffing the range again would, and that
+reader is deferred (Risks, "Only the runner runs the pre-tick checks").
+Without `--no-renames`, the check passes over a merging file moved into
+`findings/`: in the scratch repository above, dropping the flag takes
+`.claude/agents/closer.md` out of the listing. A line written without its
+check is a residual neither pre-tick check sees ("What it still cannot see",
+under the number check). `<review>` is read by a command `RUNNER.md` carries,
+so a mistyped copy of it is a command defect; what stays runner input is a
+runner that supplies a value of its own or reads the first line of the
+listing (Risks, the standing-test entry).
 
 ### The re-review brief carries what differs from a first-round review
 
@@ -616,8 +712,9 @@ three things hold:
   missing: each round that ran gets its line back, with the number, range and
   lanes its report recorded, and the forms check covers it like any other;
   only where no round ran is it the nothing-landed round 1, and only if that
-  line's check passes; where the runner cannot tell whether a round ran, a
-  range the check fails gets a round. **A missing line is never repaired with
+  line's check passes; where the runner cannot tell whether a round ran, the
+  check runs from the `<review>` it derives, not a HEAD it remembers or can
+  see, and a range it fails gets a round. **A missing line is never repaired with
   the nothing-landed form over a range holding a commit that needs review.**
   Written over a round that ran, that line is false, and since the forms check
   skips a round marked skipped, the round that ran is never checked and a lane
@@ -792,9 +889,10 @@ Reaching either takes a runner breaking a rule, not following one.
 check** over a range holding a commit that needs review: the number check
 lists one round line, and the forms check skips a round marked skipped. What
 the range rule buys ("The nothing-landed round 1 records its evidence") is
-that the commit is then inside that line's range, so a second reader running
-the same `git diff --name-only` over it sees the claim fail. That reader is
-the deferred `closer`-side check.
+that the commit is then inside that line's range, so a second reader that
+derives `<review>` again, checks the line's range starts there, and runs the
+check's two commands from it sees the claim fail. That reader is the deferred
+`closer`-side check.
 
 **This piece's rounds 1 and 2 predate the number.** Their briefs gave the
 un-numbered forms, so the check for those two rounds searches those forms,
@@ -1563,7 +1661,9 @@ no role file.
   `git grep -n -F -e "] re-review: every commit" -e "      round " -e "] findings all ticked" -- <change folder>/tasks.md`
   and the forms
   check `git grep -l -F -e … -e …` for the two exact forms; "Record the
-  call"'s check before a nothing-landed round 1, `git diff --name-only
+  call"'s check before a nothing-landed round 1: the derivation of `<review>`,
+  `git log --diff-filter=A --format="%h %p %s" -- openspec/changes/<name>/findings/`,
+  and the two commands run from it, `git diff --no-renames --name-only
   <review> HEAD` and `git diff <review> HEAD -- <change folder>/tasks.md`; and
   "Dispatching"'s `mkdir -p tmp`, `git diff --binary
   --output=tmp/uncommitted.patch HEAD`, `git restore --source=HEAD --staged
@@ -1580,20 +1680,43 @@ no role file.
     `57f4f763`); a row pattern that matches nothing leaves that row out, which the
     runner reads as a mistyped command; a round pattern too short, or cut to
     part of its word, lists more lines, not fewer, and a listed line outside
-    the two rows is not a round line; the save with `--binary` dropped
+    the two rows is not a round line; a `<review>` derivation with a mistyped
+    change name prints nothing, and the runner has no `<review>` to write a
+    round 1 from; the save with `--binary` dropped
     writes `Binary files … differ` for a binary change, `git apply` refuses
     it, and the reviewer reports it — but step 2 has already discarded that
     change, so the loss is reported, not prevented;
-  - **fail open**, every command exits 0 and the flow carries on: a mistyped
+  - **fail open**, every command exits 0 and the flow carries on. Seven. The
+    last four belong to the nothing-landed check, its derivation included,
+    and each ends in a round 1 written as skipped over a range holding
+    unreviewed work: the number check lists that one line, the forms check
+    skips a round marked skipped, the row is ticked, and the commit merges,
+    as in the first. A mistyped
     `openspec/specs/` path lists nothing, and an unreviewed spec change would
     merge; a pre-tick search cut down to the bare range matches it in prose,
     and one cut to a single SHA also matches the previous round's records,
     so the runner ticks over lanes that never ran (`findings/spec-test.md`,
-    re-review `9dc235c..34fd428`, measured); and the save with `HEAD`
+    re-review `9dc235c..34fd428`, measured); the save with `HEAD`
     dropped writes only the unstaged changes, step 2 discards the staged
     ones, and step 4 applies cleanly with the staged mutation gone
     (`findings/architecture.md` and `findings/spec-test.md`, re-review
-    `9dc235c..34fd428`, both measured).
+    `9dc235c..34fd428`, both measured); the nothing-landed check's first
+    command narrowed by a pathspec, such as the second command's
+    `-- <change folder>/tasks.md` copied onto it, lists only what the
+    pathspec matches, so a red-CI fix to a role file or to source is never
+    listed (over `dd4fe18..1380d50` on this tree: nine paths unnarrowed,
+    `tasks.md` alone with that pathspec, and every path but `RUNNER.md`
+    narrowed to the change folder; `findings/spec-test.md`, re-review round
+    12, box); the same command with `--no-renames` dropped lists a merging
+    file moved into `findings/` by its destination alone (measured in the
+    scratch repository of "The nothing-landed round 1 records its
+    evidence"); the second command with a mistyped change folder prints
+    nothing and no error, and "only boxes flipped" reads as met (on this
+    tree, `git diff dd4fe18 1380d50 --
+    openspec/changes/171-workflow-rule/tasks.md`); and the derivation run
+    over the archived folder's `findings/` gives the archive commit, so the
+    range misses every commit before the archive (measured in the same
+    scratch repository).
 
   A stale round number also fails open, and it is not a defect in a role
   file's copy of a command. A pre-tick search for a lane run again, typed with
@@ -1624,21 +1747,24 @@ no role file.
   or lowers a number breaks a stated rule that neither check, nor that
   second reader, can see (Decisions, "What it still cannot see").
 
-  The nothing-landed check's `<review>` is runner input in the same way.
-  Given a commit later than the one the review round read, the range misses
-  the commits before it, and the check can pass over a branch that holds
-  unreviewed work: it fails open, and no test of the role file's command can
-  see it, since the command carries `<review>` as a placeholder. The line
-  records `<review>` as its range's start, so a second reader can compare it
-  with the parent of the review round's first findings commit (Decisions,
-  "The nothing-landed round 1 records its evidence").
+  The nothing-landed check's `<review>` is read from the repository by a
+  command `RUNNER.md` carries, so a mistyped copy of that command is a
+  command defect, in the lists above. What stays runner input is a runner
+  that supplies a value of its own instead of deriving it, or reads the first
+  line of the listing instead of the last. Either gives a commit later than
+  the one the review round read, the range misses the commits before it, and
+  the check can pass over a branch that holds unreviewed work: it fails open,
+  and no test of the role file's command can see it. The line records
+  `<review>` as its range's start, and the deferred `closer`-side check in
+  the next Risk derives it again and compares (Decisions, "The nothing-landed
+  round 1 records its evidence").
 
   `RUNNER.md`'s `--ff-only`, `--remerge-diff` and `--cherry-mark` claims
   describe git's own behaviour, and a test of them would mostly re-test git.
   → Deferred to the standing-test follow-up in `proposal.md`'s "Out of
   scope", listed in PR #174's follow-ups in place of the earlier
   pathspec-only one: a script under the `lint` job that extracts each command
-  from the role file and runs it against fixtures, the three fail-open cases
+  from the role file and runs it against fixtures, the seven fail-open cases
   first. Not added here: this change adds no tests or CI, and a test holding
   its own copy of a command would not fail when a role file's copy changed.
 - **[Only the runner runs the pre-tick checks.]** The number check and the
@@ -1654,10 +1780,14 @@ no role file.
   reader for a runner that skipped the number check: matching alone derives
   each round's forms from that round's line, so a line repeating an earlier
   number yields forms the earlier run's record satisfies. For a round 1
-  marked skipped because nothing landed, it would run
-  `git diff --name-only` over that line's own range, as the runner did before
-  writing it; the range starts at the commit the review round read, so a
-  commit misread as tracking lies inside it.
+  marked skipped because nothing landed, it would derive `<review>` again by
+  the runner's `git log` command, check that the line's range starts at it,
+  and run the nothing-landed check's two commands from it, as the runner did
+  before writing the line. A range starting at the derived commit holds any
+  commit that merges and was misread as tracking; a line whose range starts
+  later is a `<review>` the runner supplied or misread, and a diff over that
+  line's own range alone would pass with it (`findings/security.md`,
+  re-review round 12 `dd4fe18..1380d50`, second box).
 - **[The review round costs at least three `SendMessage` round trips.]** →
   Accepted for this piece. The one-file-per-row follow-up removes it.
 - **[`tester.md` said "Keep the markers and report each one — the spec-writer

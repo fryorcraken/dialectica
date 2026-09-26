@@ -750,7 +750,7 @@ Stylistic only, no box:
 
 ## Re-review round 12 `dd4fe18..1380d50`
 
-- [ ] **`dev-writer`** — `.claude/agents/RUNNER.md:612-614` and `:676-678` —
+- [x] **`dev-writer`** — `.claude/agents/RUNNER.md:612-614` and `:676-678` —
       `<review>` is defined only from the runner's memory, "the HEAD you
       dispatched the review round from". The repair bullet then names the one
       case where that memory is gone, "such as after your report is lost",
@@ -789,6 +789,24 @@ Stylistic only, no box:
       This is the lost-report case the bullet names itself, and a wrong
       `<review>` makes the check pass on exactly the false skip it exists to
       stop.
+      **Fixed** (`dev-writer`, this commit), following the `spec-writer`'s
+      `a0ce38f`, which made the derivation the definition of `<review>`
+      rather than a recovery from a lost report. `RUNNER.md` "Record the
+      call" now says to read `<review>` from the repository, never from
+      memory, even when the report still holds it, and gives
+      `git log --diff-filter=A --format="%h %p %s" -- openspec/changes/<name>/findings/`
+      in a code block: the value is the second field of its last line. It
+      says why the pathspec stays pre-archive, why the last line and not the
+      first (on this tree the first line's parent is `a284e514`, the one
+      your box names), and that an empty listing means no round 1 line. The
+      repair bullet now runs the check "over a range from the `<review>` you
+      read as "Record the call" says, not from a HEAD you remember or can
+      see", pointing there without restating the command. The "What you
+      read" row names the `git log` command (hashes and subjects only) and
+      the `--no-renames` form, and still points to step 3. "Rebuild the
+      state" is unchanged: the derivation is stated once, where `<review>`
+      is defined. Measured on this tree at `a0ce38f1`: the command prints
+      three lines, the last `f94f7b8d c222c37b`.
 
 Dimension: **readability only**, narrowed as briefed. Read: `git diff
 dd4fe18...1380d50 -- .claude/agents/RUNNER.md`; `RUNNER.md:60-129` and
