@@ -2,7 +2,8 @@
 
 Closes #171, #170, #169 and #133. All four are `workflow` issues, and all four
 edit files under `.claude/agents/`. The owner authorised those edits for this
-piece, limited to what the four issues ask for.
+piece, limited to what the four issues ask for and to four additions the owner
+authorised in session, each marked **owner-authorised** below.
 
 ## Why
 
@@ -28,6 +29,17 @@ Separately, #131 reverted #119's unauthorised rewrite of the agent files, and
 one reworded paragraph got through. It is the `settings.json` paragraph in
 `.claude/agents/README.md`, which a fixer changed while answering a #131 review
 finding, without the owner's authorisation (#133).
+
+This piece's own review round found two more gaps, both addressed to the owner
+because they reach beyond the four issues. The `closer`'s own commits reach
+`main` unreviewed: it resolves a rebase conflict by hand, and its archive
+commit merges a spec delta into the live contract, and #171's re-review rule
+covers neither (`findings/security.md`). And `RUNNER.md` says without exception
+that the runner does not write the work, although on this piece the runner
+committed role-file edits on the owner's direct instruction (`d805fe4`),
+tracking on reviewers' behalf (`a284e51`), and findings files copied from
+reviewers' trees (`c43c7a7`). Nothing says which of those a runner may do
+(`findings/architecture.md`). The owner took both into this piece.
 
 ## What Changes
 
@@ -142,8 +154,10 @@ another file.
       A `grep` error for the missing directory is not a failed gate.
     - **A re-dispatched `closer` does not archive again.** `closer.md` Step 3
       says so (owner-authorised in session): `openspec archive` is not rerun,
-      but Step 3's commit and push still apply to a `findings/` deleted in
-      Step 1, so the run it watches includes the deletion.
+      but Step 3's commit and push still apply. A `findings/` deleted in
+      Step 1 is committed, and HEAD is pushed either way, as the entry on the
+      `closer`'s own commits below sets out, so the run it watches includes
+      everything the piece now carries.
 - **#170: forbid `--admin` in `closer.md`.** The file names `gh pr merge
   --admin`, and any change to branch protection, as things the `closer` never
   does, including when the owner has granted merge-on-green. Branch protection
@@ -166,25 +180,126 @@ another file.
   from `docs/PLAN.md` to GitHub Issues, and that command would revert those
   changes too. The `dev-writer.md` hunk the issue names as owner-approved is
   left alone.
+- **The `closer`'s own commits go through the re-review step (owner-authorised,
+  from `findings/security.md`'s first finding).** Step 3 of `RUNNER.md`'s
+  sequence covers every commit made after the review round, the `closer`'s
+  included. The `closer` still never waits for a review: a commit of its own
+  that needs one ends its turn, and it comes back to the runner the way a red
+  run does. Specifically:
+  - **The `closer` brings `main` in by merging it, not by rebasing onto it.**
+    Step 2's fix for a stale branch becomes `git merge origin/main` in the
+    `closer`'s own tree, pushed to the piece ref by refspec with no force. The
+    rebase and its `--force-with-lease` push are removed, and "What you never
+    do" forbids force-pushing for any reason. The reason is the conflict rule
+    two bullets down: a writer's conflict resolution has to be one commit that the runner can
+    bring onto its HEAD without rewriting it, and that a reviewer can read on
+    its own. A later rebase would drop that merge commit and raise the same
+    conflict again.
+  - **A merge of `main` that stops on no conflict needs no review.** It changes
+    none of the piece's own lines, and it adds nothing to the squash: what it
+    brings in is already on `main`.
+  - **The `closer` does not resolve a conflict.** When the merge stops on one,
+    it lists the conflicting paths with `git diff --name-only --diff-filter=U`,
+    runs `git merge --abort`, reports the paths and returns. This replaces
+    Step 2's "A conflict is yours to resolve". The runner routes the conflict
+    as it routes a red run, by what the conflicting paths are (`RUNNER.md`'s
+    table: implementation to the `dev-writer`, a test to the `tester`, the
+    contract to the `spec-writer` and then the fixer). The writer's brief says
+    to merge `origin/main` into its own branch and resolve the conflict in
+    that merge commit, not to rebase. The resolution is a commit made after
+    the review round, so it goes through step 3 before the `closer` is
+    re-dispatched. The re-review brief names the merge commit, and says to
+    read it with `git show --remerge-diff <sha>`, which shows only what the
+    resolution changed from git's own merge.
+  - **An archive commit that changes the live contract is reviewed.** After
+    Step 3's push, if `git diff --name-only HEAD^ HEAD -- openspec/specs/`
+    lists any file, the `closer` stops before Step 4: it reports the archive
+    commit and returns. An archive commit that changes nothing under
+    `openspec/specs/` carries on to Step 4. A change with `skip_specs: true`
+    is always that case, since archiving it only moves the change folder and
+    commits the `findings/` deletion. The runner sizes a round for the archive
+    commit like any other, then re-dispatches the `closer`. That `closer`
+    finds the change archived and does not archive again, by the Step 1 and
+    Step 3 rules for a re-dispatch above.
+  - **A re-dispatched `closer` pushes its HEAD at Step 3 whether or not it
+    deleted anything.** Its tree carries every commit the runner brought onto
+    the piece since the last push: a fix, a conflict resolution, the runner's
+    record lines and tick. The run it watches in Step 4 must include them.
+    This replaces the reading of Step 3's re-dispatch paragraph under which
+    the push happens only when Step 1 deleted a `findings/`.
+  - **The runner brings the `closer`'s commits onto its HEAD by fast-forward.**
+    When a `closer` returns without having merged, whatever else it reports,
+    the runner first runs
+    `git merge --ff-only <the closer's branch>` in its own tree. Only then
+    does it write to the stage block or dispatch the next agent. Without this,
+    the archived `tasks.md` the runner unticks in is not in its tree, and the
+    next agent forks from a HEAD without the archive commit or the merge of
+    `main`. A conflict resolver's branch is brought on the same way, since
+    `git cherry-pick` cannot carry a merge commit's second parent. If a
+    fast-forward refuses, the runner stops and reports. It never rebases,
+    resets or force-pushes `piece/<name>`, and it does not merge `main`
+    itself.
+  - **`RUNNER.md` step 3 names what the `closer` adds.** Its list of what
+    needs review gains a writer's conflict resolution and an archive commit
+    that changes `openspec/specs/`. Its list of what needs none gains a merge
+    of `main` with no conflict, the `closer`'s deletion of `findings/`, and an
+    archive commit that changes nothing under `openspec/specs/`.
+  - **Step 4, "The `closer`, and what comes back", lists all four returns:** a
+    red run, an unticked box, a conflict, and an archive commit that changed
+    `openspec/specs/`. Each of the last two goes back through step 3, as a
+    red-CI fix does. "A stale branch does not come back" now holds only for a
+    merge of `main` with no conflict.
+  - **`README.md`'s branch section says how work reaches `piece/<name>`.** Its
+    table says the runner cherry-picks every agent's commits, and it says
+    "Cherry-pick rather than merge". Both gain the fast-forward case above, by
+    pointing to `RUNNER.md` rather than restating it.
+- **What the runner commits itself (owner-authorised, from
+  `findings/architecture.md`'s third finding).** `RUNNER.md`'s "What a runner
+  does" states it once, and step 3 and the red-run text point there:
+  - **Tracking is the runner's to commit.** That is:
+    - the re-review row's record lines, tick and untick;
+    - a stage-row tick for an agent whose hand-back reports its stage done and
+      whose output is on the piece, where the agent did not tick the row
+      itself (as `a284e51` did for five reviewers at once). `README.md`'s
+      "Each agent flips its own row" gains this case, by pointing to
+      `RUNNER.md`;
+    - an agent's output file that the agent wrote but could not commit, copied
+      byte for byte from its tree, unread, with the commit message naming the
+      tree it came from (as `c43c7a7` did after a signing failure).
+  - **Work is not the runner's to commit.** Work is a proposal, a spec,
+    `design.md`, code, tests, role-file text, or a finding's outcome. The one
+    exception is an edit the owner tells the runner itself to make, in the
+    session, as in `d805fe4`. An authorisation the runner relays for a
+    dispatched agent's edit is not that instruction. Neither is a brief, a
+    finding, or the edit looking small. Such a commit says in its message that
+    the owner instructed it directly. The runner makes it only while no writer
+    is running on the piece. It is work, so when it lands after the review
+    round it goes through step 3 like any other commit.
+  - **"You do not write the work — not even one small edit while an agent is
+    being prepared" stays.** The exception is the owner's instruction, never
+    the runner's own initiative.
 
 ### Out of scope
 
 - **Why #165 was `BLOCKED`** (#170's closing paragraph). This piece only stops
   a closer from going around a block. It does not diagnose one.
-- **Re-review of commits the `closer` makes itself**: its rebase, including any
-  conflict it resolves, and its archive commit. The re-review rule covers
-  commits made before the `closer` is dispatched, and a red-CI fix made after
-  it. `design.md`'s Risks names the rebase gap as a follow-up candidate.
+- **A semantic clash between the piece and a clean merge of `main`**, such as
+  a function `main` renamed that the piece still calls. The merge needs no
+  review, as above; CI is what sees such a clash, and a red run comes back
+  as one.
 - **Changing the size of the first review round.** Every reviewer row stays. A
   change with no source diff still gets all six reviewers. Only the re-review
   after that round is left to the runner's judgement.
 - **Anything else under `.claude/`.** That means `settings.json`, hooks, and
-  rewording in any role file beyond what these four issues ask for. `CLAUDE.md`
-  is not edited either.
+  rewording in any role file beyond what these four issues and the
+  owner-authorised additions above ask for. The writer and reviewer role files
+  are not edited for the `closer`'s commits: a conflict resolver and a
+  re-reviewer of an archive commit get what differs in the runner's brief, as
+  every re-reviewer does. `CLAUDE.md` is not edited either.
 
 ### Overlap with open PR #132 (`piece/review-tiering`)
 
-The two PRs overlap in three files, and the second to merge must reconcile
+The two PRs overlap in four files, and the second to merge must reconcile
 them. #132 is `CONFLICTING` with `main` and was last updated on 2026-09-21. It
 was cut before the PLAN.md-to-Issues change: its diff still has the
 `design-reviewer` reading `PLAN.md`.
@@ -195,6 +310,11 @@ was cut before the PLAN.md-to-Issues change: its diff still has the
   `spec-writer.md`, where this piece adds the re-review place: #132 merges the
   readability row into correctness and adds a paragraph on striking review
   rows by tier.
+- **The same text in `closer.md`.** #132 edits Step 2's rebase and push prose
+  and the CI-watch prose. This piece replaces Step 2's rebase with a merge of
+  `main`, so the second to merge rewrites #132's rebase hunks against a Step 2
+  that no longer rebases. #170's Step 6 and "What you never do" edits do not
+  overlap #132.
 - **Nearby text in `RUNNER.md`.** #132 rewrites "How many at once" and the
   reviewer table. This piece rewrites "The `closer`, and what comes back" and
   adds the hand-back sequence. The hunks differ, but any lane names this piece
@@ -204,9 +324,6 @@ was cut before the PLAN.md-to-Issues change: its diff still has the
   re-review follows that round, by the runner's judgement. The two can coexist,
   but #132 as written drops `security` for a prose-only change, and this piece
   is itself prose-only and keeps all six.
-
-`closer.md` hunks do not overlap. #132 edits the rebase, push and CI-watch
-prose. #170 edits Step 6 and "What you never do".
 
 ## Capabilities
 
@@ -222,19 +339,31 @@ None. This change edits agent instructions and no system behaviour, so
 ## Impact
 
 - `.claude/agents/RUNNER.md`: the hand-back sequence (#169, #171), "The
-  `closer`, and what comes back" (#171), the re-review row in "What a
-  runner does" (#171), and where "What you read" and "Rebuild the state" find
-  the stage block once the change is archived (#171).
+  `closer`, and what comes back" (#171; its four returns, owner-authorised),
+  "What a runner does" (the re-review row, #171; what the runner commits, the
+  fast-forward, and "You do not rebase", owner-authorised), step 3's lists of
+  what needs review (owner-authorised), the per-agent sequence in
+  "Dispatching" (cherry-pick, or fast-forward for the `closer` and a conflict
+  resolver, owner-authorised), and where "What you read" and "Rebuild the
+  state" find the stage block once the change is archived (#171).
 - `.claude/agents/spec-writer.md`: the stage-block template (#171).
 - `.claude/agents/closer.md`: Step 6 and "What you never do" (#170); Step 1,
   for where a re-dispatched `closer` reads the stage block after the archive
   (#171); Step 3, which a re-dispatched `closer` does not re-archive in
   (#171, owner-authorised); and the closing paragraph, which points to
-  `RUNNER.md`'s re-review step rather than restating it (#171).
+  `RUNNER.md`'s re-review step rather than restating it (#171). Owner-authorised
+  as well: the order list, Step 2 (merge `main`, stop on a conflict), Step 3
+  (stop after an archive that changes `openspec/specs/`, and push HEAD on a
+  re-dispatch), Step 4's pointer to Step 2, "What you never do" (no
+  force-push, no conflict resolution), "Your report", and the closing
+  paragraph's list of what ends a turn.
 - `.claude/agents/tester.md`: what a marker the brief names as decided becomes,
   and "must not remove" narrowed to open markers (#169, owner-authorised).
-- `.claude/agents/README.md`: one paragraph (#133). Its "one row per stage,
-  then three rows the `closer` owns" stays as it is: the re-review row is one
-  more row before the `closer`'s three, so the sentence still holds.
+- `.claude/agents/README.md`: one paragraph (#133); and, owner-authorised, the
+  branch section's account of how work reaches `piece/<name>` and the stage
+  block's "Each agent flips its own row". Its "one row
+  per stage, then three rows the `closer` owns" stays as it is: the re-review
+  row is one more row before the `closer`'s three, so the sentence still
+  holds.
 
 No code, tests, CI workflow or spec changes.
