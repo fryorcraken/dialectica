@@ -116,8 +116,19 @@ the next push.
       turns three tests red. qmllint and `check_qml_members.sh` clean. No spec
       change: `view-navigation` already forbids sending an empty record in
       place of a real one
-- [ ] 3.4 Predicted on the pushed fix: every `ci.yml` job green; all five
+- [x] 3.4 Predicted on the pushed fix: every `ci.yml` job green; all five
       `ui-tests.yml` jobs green, `feed` with `ok: all 17 steps passed`
+
+      **Observed, on head `3044b1d`:** UI tests
+      https://github.com/fryorcraken/dialectica/actions/runs/36214314703 green
+      in all five jobs, `feed` printing "the feed was read, and holds nothing"
+      `PASS` in 1.0s, `verdict: pass` and `ok: all 17 steps passed`. CI
+      https://github.com/fryorcraken/dialectica/actions/runs/36214314665
+      green in every job. Before the fix, the record-only push `2caa004` had
+      given a second red sample on the same step, UI tests
+      https://github.com/fryorcraken/dialectica/actions/runs/36213846816
+      (CI https://github.com/fryorcraken/dialectica/actions/runs/36213846682
+      green), so the race was deterministic on this route, not intermittent
 
 ### 4. `create.yaml` goes red when the key block outlives the key
 
