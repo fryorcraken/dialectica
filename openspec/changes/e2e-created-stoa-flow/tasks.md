@@ -141,6 +141,23 @@ the next push.
       `test_a_successful_mint_moves_the_screen_to_the_key_held_state`,
       `test_the_key_block_is_not_instantiated_when_a_key_is_held`,
       `test_the_key_state_is_asked_again_on_each_showing`
+
+      **Observed, on head `c20f577`, the break pushed alone, as predicted.**
+      UI tests https://github.com/fryorcraken/dialectica/actions/runs/36214768812:
+      `sitometres create spec` failed on "the key is held, so a Stoa is
+      offered and a key is not" after its 30s, `waitFor never came true`, with
+      `does not see "{\"objectName\":\"keyBlock\"}" — still visible on
+      QQuickRectangle` and the same for `createKeyButton` on
+      `FlatButton_QMLTYPE_132`. Six steps passed; the adjudicator printed
+      `verdict: fail`, one `[fail]` and five `[inconclusive]` ("5 later
+      step(s) were not attempted"). `join`, `feed`, `thread` and `moderation`
+      green. Unlike 3.1's failed `expect:`, a failed `wait_for:` stops the
+      run, as `e2e-suite-review` observed. CI
+      https://github.com/fryorcraken/dialectica/actions/runs/36214768792 red
+      in `QML lint` only, on "QML component tests": `tst_stoa_screens.qml` 133
+      passed, 3 failed, the three named above (CI's Qt is 6.8.3, and the
+      local prediction was made on 6.10.3). `Lint`, `UI spec validation`,
+      `Rust core tests` and `Build LGX` green
 - [ ] 4.2 Revert pushed; both workflows green on it
 
 ### 5. `feed.yaml` goes red when an empty read renders as a failure
