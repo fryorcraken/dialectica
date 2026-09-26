@@ -170,90 +170,6 @@ holds nothing for from one it has not counted.
   been answered
 - **THEN** no number from that listing appears in any row
 
-### Requirement: What is shared carries the founding record, not the address alone
-
-A share affordance MUST produce something carrying **both** the Stoa's address
-and its genesis record, and MUST NOT produce the address alone.
-
-This is a property of the address rather than a shortcoming of the share. The
-address is a one-way hash of the record: enough to verify a record somebody hands
-over, and not enough to reconstruct one. `stoa-membership`'s requirement "Joining
-takes an address and the record it names, and verifies rather than trusts" states
-that a bare address is not joinable. So a share producing only an address
-produces something whose recipient can do nothing with it — and, worse, something
-that looks like it should work.
-
-What is shared MUST carry the address **in full**. An abbreviated address is a
-recognition aid for a reader looking at a screen; as a thing to be pasted it is
-lossy, and the abbreviation exists precisely because a head and a tail can be
-ground to match.
-
-**The view MUST NOT reconstruct a genesis record it was not given**, and MUST NOT
-offer a share for a Stoa whose record it does not hold. Deriving a record from an
-address is exactly what a one-way hash forbids, and a share affordance that
-produced a plausible-looking string without one would produce something that
-fails to verify at the recipient — a failure that surfaces on somebody else's
-machine, as a refusal they cannot explain. Where the record is not available for
-a Stoa, no share is offered for it; the affordance's absence is the honest
-rendering, and it is not an error state.
-
-**The case a user meets first is the one worth naming rather than leaving as an
-edge case: a Stoa this peer has just created cannot be shared at all.** Neither the
-listing reply nor the creation reply carries a genesis record — creation answers
-with the address, the founding title and the policy — so the only records the view
-ever holds are the ones a user pasted when joining, and they are lost on restart.
-
-The consequence is sharper than the restart case and points the other way from
-what a reader would assume: **the primary creation flow ends with an address on
-screen and nothing to hand anybody**, immediately, for a Stoa whose entire purpose
-is to be shared and which no registry can be looked up in later. A joined Stoa can
-be shared until the view restarts; a created one cannot be shared even once.
-
-This is a degradation of the interface caused by a core reply, not a decision this
-capability is making, and it is recorded so the core change that widens the
-listing item has a requirement pointing at it. **What the view MUST do meanwhile is
-account for the absence somewhere the user can read it**, so that a share missing
-from a row reads as a reference this copy does not have rather than as a feature
-that broke. The screen MUST NOT present the missing share as an error, and MUST
-NOT offer a share that produces nothing.
-
-#### Scenario: A Stoa joined in this session can be shared
-
-- **WHEN** a Stoa is joined from a pasted reference and its row is rendered
-- **THEN** a share is offered for it, the record having arrived with the paste
-
-#### Scenario: A Stoa just created offers no share
-
-- **WHEN** a Stoa is created successfully and its row is rendered
-- **THEN** no share is offered for it, the creation reply carrying no record
-- **AND** its address is still rendered, so what was made can be named
-
-#### Scenario: A held Stoa whose record is not held offers no share, and the screen says why
-
-- **WHEN** the list renders a Stoa from the listing for which no record is held
-- **THEN** no share is offered for that row
-- **AND** the screen carries an explanation that a row without a record offers no
-  share
-- **AND** nothing is rendered as an error for that row
-
-#### Scenario: A share carries both halves
-
-- **WHEN** a user shares a Stoa whose genesis record the view holds
-- **THEN** what is produced contains that Stoa's full address
-- **AND** it contains the Stoa's genesis record
-- **AND** it contains the address unabbreviated
-
-#### Scenario: What is shared is what a join accepts
-
-- **WHEN** what a share produced for a Stoa is supplied back to the paste field
-- **THEN** the preview it produces names that same Stoa
-
-#### Scenario: No share is offered for a Stoa whose record the view does not hold
-
-- **WHEN** the list renders a Stoa for which no genesis record was supplied
-- **THEN** no share affordance is offered for that row
-- **AND** nothing is produced that carries the address without a record
-
 ### Requirement: The reference encoding is a compatibility surface and is fixed here
 
 A shared reference MUST be a JSON object carrying the address under `stoa` and the
@@ -343,8 +259,8 @@ answers one for a `(address, record)` pair this peer has not joined.** A preview
 happens before a join. The title is inside the record the reader was handed, so a
 missing one is a gap in the module surface rather than in the data, and closing
 it inside the view would mean decoding the genesis record there, which "What is
-shared carries the founding record, not the address alone" forbids for the same
-reason it forbids reconstructing one.
+shared carries the founding record, and a Stoa is shareable wherever a reply
+carried it" forbids for the same reason it forbids reconstructing one.
 
 **Before a join, `stoa-metadata`'s `getStoa` call answers a founding title for a
 Stoa it reports as falling back, and for no other.** A `getStoa` reply whose
@@ -1613,3 +1529,97 @@ reference, and nothing answered for the previous one MUST be rendered for it.
 - **THEN** the second reference's title is rendered in the founding-title
   position
 - **AND** the first reference's current title is not rendered
+
+### Requirement: What is shared carries the founding record, and a Stoa is shareable wherever a reply carried it
+
+A share affordance MUST produce something carrying **both** the Stoa's address
+and its genesis record, and MUST NOT produce the address alone.
+
+This is a property of the address rather than a shortcoming of the share. The
+address is a one-way hash of the record: enough to verify a record somebody hands
+over, and not enough to reconstruct one. `stoa-membership`'s requirement "Joining
+takes an address and the record it names, and verifies rather than trusts" states
+that a bare address is not joinable. So a share producing only an address
+produces something whose recipient can do nothing with it — and, worse, something
+that looks like it should work.
+
+What is shared MUST carry the address **in full**. An abbreviated address is a
+recognition aid for a reader looking at a screen; as a thing to be pasted it is
+lossy, and the abbreviation exists precisely because a head and a tail can be
+ground to match.
+
+**The view MUST NOT reconstruct a genesis record it was not given**, and MUST NOT
+offer a share for a Stoa whose record it does not hold. Deriving a record from an
+address is exactly what a one-way hash forbids, and a share affordance that
+produced a plausible-looking string without one would produce something that
+fails to verify at the recipient — a failure that surfaces on somebody else's
+machine, as a refusal they cannot explain. Where the record is not available for
+a Stoa, no share is offered for it; the affordance's absence is the honest
+rendering, and it is not an error state.
+
+**The view holds a record for every Stoa a core reply named with one.**
+`stoa-membership`'s requirement "A reply naming a Stoa carries the record that
+Stoa's address is the hash of" puts the record on the creation reply, on the join
+reply and on every listing item. The view MUST keep the record each of those
+replies carries for the Stoa it names, and MUST offer a share for that Stoa
+wherever its row is rendered. A Stoa created in this session MUST be shareable
+from the record its creation reply carried, whether or not a later listing item
+for it carries one. A Stoa the listing reports MUST be shareable from the record
+its listing item carried, whether or not the view created or joined it in this
+run.
+
+A listing item that carries no record, or an empty one, supplies no record, and
+MUST NOT take away a record an earlier reply supplied for the same Stoa. Where no
+reply has supplied a record for a listed Stoa, its row MUST still be rendered,
+carrying its address. The view MUST NOT offer a share for it, MUST NOT render
+anything as an error for it, and MUST leave the list in its read-succeeded state.
+
+#### Scenario: A Stoa joined in this session can be shared
+
+- **WHEN** a Stoa is joined from a pasted reference and its row is rendered
+- **THEN** a share is offered for it, the record having arrived with the paste
+
+#### Scenario: A Stoa just created can be shared from its creation reply
+
+- **WHEN** a Stoa is created successfully with a creation reply carrying its
+  record, and the listing read afterwards reports that Stoa with an item carrying
+  no record
+- **THEN** a share is offered for that Stoa's row
+- **AND** what the share produces carries the record the creation reply carried
+- **AND** the address the creation reply returned is rendered, so what was made
+  can be named
+
+#### Scenario: A Stoa the listing reports can be shared from its listing item
+
+- **WHEN** the listing reports a Stoa whose item carries its record, and the view
+  has neither created nor joined that Stoa in this run
+- **THEN** a share is offered for that Stoa's row
+- **AND** what the share produces carries the record the listing item carried
+
+#### Scenario: A listing item with no record gets a row, no share, and no error
+
+- **WHEN** the listing reports one Stoa whose item carries no record field, and
+  another whose item carries an empty record, and the view has neither created
+  nor joined either in this run
+- **THEN** a row is rendered for each, carrying its address
+- **AND** no share is offered for either row
+- **AND** nothing is rendered as an error for either row
+- **AND** the list is in its read-succeeded state
+
+#### Scenario: A share carries both halves
+
+- **WHEN** a user shares a Stoa whose genesis record the view holds
+- **THEN** what is produced contains that Stoa's full address
+- **AND** it contains the Stoa's genesis record
+- **AND** it contains the address unabbreviated
+
+#### Scenario: What is shared is what a join accepts
+
+- **WHEN** what a share produced for a Stoa is supplied back to the paste field
+- **THEN** the preview it produces names that same Stoa
+
+#### Scenario: No share is offered for a Stoa whose record the view does not hold
+
+- **WHEN** the list renders a Stoa for which no genesis record was supplied
+- **THEN** no share affordance is offered for that row
+- **AND** nothing is produced that carries the address without a record

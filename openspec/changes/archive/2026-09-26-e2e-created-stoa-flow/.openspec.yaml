@@ -1,0 +1,16 @@
+schema: spec-driven
+created: 2026-09-26
+
+# Two spec deltas, both found by checking the new end-to-end specifications'
+# steps against `openspec/specs/` (proposal.md, "Capabilities"):
+#
+# - `stoa-navigation-view`: "What is shared carries the founding record, not the
+#   address alone" still said a created Stoa cannot be shared, which has been
+#   false since `genesis-in-replies` put the record on the creation reply and
+#   the listing. The feed specification opens a created Stoa with its record.
+# - `feed-view`: the feed screen's empty-versus-unreadable pair was named as a
+#   rule in two other capabilities' prose and required nowhere. The feed
+#   specification's central observation is that pair.
+#
+# The harness's own obligations stay out of every capability, for the reason
+# the archived `e2e-ui-suite` change's `.openspec.yaml` gives.

@@ -63,7 +63,8 @@
 //!   is more than one hour ahead of its own current time, so an author can lead
 //!   honest ops by at most that hour and cannot place an op beyond it at all.
 //!   This replaced an advance bound that stored every counter, and it is a
-//!   refusal on purpose — `op-ordering` states the cost.
+//!   refusal on purpose; the cost is in the archived `time-pegged-clock`
+//!   change's `design.md`, Decision 11.
 //! - The **adversary-set wall clock** is not bounded into safety; it is removed
 //!   from every decision, which is the stronger defence because there is no
 //!   decision left for a forged value to reach. The window reads the counter and
@@ -562,8 +563,9 @@ pub struct OpClock {
     /// admissible is stored whatever this field says, because the receive window
     /// reads the counter alone. That is narrower than it was. A skewed clock
     /// does get an author's ops refused — through the counter, which an honest
-    /// author pegs to the same clock — and `op-ordering` states that cost. What
-    /// holds is that this field is never the reason.
+    /// author pegs to the same clock — and the archived `time-pegged-clock`
+    /// change's `design.md`, Decision 11, works that cost through. What holds
+    /// is that this field is never the reason.
     pub asserted_ms: u64,
 }
 

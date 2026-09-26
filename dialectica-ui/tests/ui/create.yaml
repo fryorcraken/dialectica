@@ -1,0 +1,99 @@
+# End-to-end: a fresh profile makes this machine's key, then a Stoa.
+#
+# Run by `.github/workflows/ui-tests.yml` against a Basecamp and a profile that
+# `lgs basecamp setup` and `install` built; the harness is the `e2e-ui-suite`
+# change's, and why this route is four files rather than one is the
+# `e2e-created-stoa-flow` change's design.md.
+#
+# What it observes, each already a requirement in `stoa-navigation-view` or
+# `view-navigation`: the list opens in the no-key state; the create-key action
+# reaches the key-held state, where the create affordance is present and the key
+# block is gone; creating a Stoa renders the address the core returned; the
+# listing, read again, holds exactly that Stoa; and a share is offered for its
+# row, from the record the creation reply carried.
+#
+# `state:` reads the read-only handles on Main.qml's root; `text:` and
+# `not_text:` on an `objectName` only where the claim IS about the element tree.
+# Every absence is asserted beside a presence in the same snapshot, because a
+# lone `not_text` passes against a screen that never rendered (the
+# `e2e-ui-suite` change's design.md D5).
+
+app: dialectica_ui
+
+# The second hop sitometres does not walk: see join.yaml.
+with: [dialectica, delivery_module]
+timeout: 30s
+
+steps:
+  - name: the app opens
+    open: dialectica_ui
+
+  - name: it starts on the Stoa list
+    wait_for:
+      state: "root.screenShown === 'list'"
+    timeout: 45s
+
+  - name: membership was read, not merely empty
+    wait_for:
+      state: "root.listReadState === 'ok'"
+
+  # The precondition that makes "holds that one Stoa" below mean something: the
+  # one row it counts was not there before this run made it.
+  - name: this profile starts in no Stoas
+    expect:
+      state:
+        - "root.stoaCount === 0"
+        - "root.listedStoas.length === 0"
+
+  - name: a fresh profile is offered a key and not a Stoa
+    wait_for:
+      text: { objectName: "createKeyButton" }
+      not_text:
+        - { objectName: "createTitleField" }
+        - { objectName: "createStoaButton" }
+
+  - name: make this machine's key
+    click: { objectName: "createKeyButton" }
+
+  # The mirror of the no-key step, and the key block's absence is what this run
+  # can see that `join.yaml` cannot: that minting a key takes the key block
+  # away rather than drawing the create affordance beside it.
+  - name: the key is held, so a Stoa is offered and a key is not
+    wait_for:
+      text:
+        - { objectName: "createTitleField" }
+        - { objectName: "createStoaButton" }
+      not_text:
+        - { objectName: "keyBlock" }
+        - { objectName: "createKeyButton" }
+
+  - name: name the new Stoa
+    type:
+      into: { objectName: "createTitleField" }
+      text: "A Stoa made end to end"
+
+  - name: create it
+    click: { objectName: "createStoaButton" }
+
+  # The address is the core's, read off the creation reply the screen kept; its
+  # shape, not its value, is asserted, because the value is a hash of a record
+  # whose creator key is minted fresh each run.
+  - name: the address the core returned is rendered
+    wait_for:
+      state: "/^[0-9a-f]{64}$/.test(root.createdStoa)"
+      text: { objectName: "createdAddress" }
+
+  # Compared against the creation reply's address rather than counted: a
+  # listing of one Stoa that is not the one just made passes a count.
+  - name: the listing, read again, holds that one Stoa
+    expect:
+      state:
+        - "root.listReadState === 'ok'"
+        - "root.listedStoas.length === 1"
+        - "root.listedStoas[0] === root.createdStoa"
+
+  # A share is offered only where the view holds the Stoa's founding record, and
+  # for a created Stoa that record came with the creation reply.
+  - name: and it can be shared
+    expect:
+      text: { objectName: "shareButton" }

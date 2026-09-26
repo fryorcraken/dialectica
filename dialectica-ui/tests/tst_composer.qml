@@ -59,6 +59,46 @@ TestCase {
         DComposer {}
     }
 
+    // ---- the names the end-to-end suite drives it by ----------------------
+    //
+    // `tests/ui/feed.yaml` and `thread.yaml` type into the draft field and press
+    // submit by `objectName`, and both names are derived from `kind` so the
+    // feed's composer and the thread's never share one. What this pins is that
+    // each name lands on the element that does the job — the field the draft
+    // lives in, and the control that publishes it — and that a composer of one
+    // kind carries no name of the other. A name on the wrong element would
+    // leave the e2e run typing into nothing, and only after a Basecamp build.
+    function test_the_field_and_the_submit_are_named_by_kind() {
+        var kinds = ["post", "reply"]
+        for (var i = 0; i < kinds.length; i++) {
+            var kind = kinds[i]
+            var other = kind === "post" ? "reply" : "post"
+            var c = makeComposer({
+                "publish_post": '{"opId":"' + "aa".repeat(32) + '","wasNew":true}',
+                "publish_reply": '{"opId":"' + "bb".repeat(32) + '","wasNew":true}'
+            }, { kind: kind, parentOp: "cc".repeat(32) })
+
+            var field = findChild(c, kind + "DraftField")
+            verify(field !== null, kind + ": the draft field carries its name")
+            field.text = "typed into the named field"
+            compare(c.draft, "typed into the named field",
+                    kind + ": the named field is the one the draft lives in")
+
+            var submit = findChild(c, kind + "SubmitButton")
+            verify(submit !== null, kind + ": the submit control carries its name")
+            compare(submit.visible, true, kind + ": and it is offered for this draft")
+            submit.clicked()
+            compare(c.outcome, "stored", kind + ": the named control is the one that publishes")
+            compare(spec.lastCall.method, "publish_" + kind)
+
+            compare(findChild(c, other + "DraftField"), null,
+                    kind + ": no name of the other kind")
+            compare(findChild(c, other + "SubmitButton"), null,
+                    kind + ": no name of the other kind")
+            c.destroy()
+        }
+    }
+
     // ---- the UTF-8 byte count ------------------------------------------
     //
     // The unit is the thing a composer gets wrong, so it is asserted directly
