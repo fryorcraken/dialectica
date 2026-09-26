@@ -41,7 +41,7 @@ is design prose, so only the two dimensions that read design prose re-run.
 
 - [x] re-review D6: design — `design-reviewer`. The finding was theirs; D6 is a Decisions entry.
 - [x] re-review D6: readability — `code-reviewer`. New prose with checkable citations.
-- [ ] re-review the D6 wording fix: readability — `code-reviewer`. The D6
+- [x] re-review the D6 wording fix: readability — `code-reviewer`. The D6
   readability finding ("Two things" against one) is answered in `design.md`;
   only the dimension that raised it re-reads the fix.
 - [ ] ~~re-review D6: correctness, security, architecture, spec-test~~ Not
