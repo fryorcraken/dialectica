@@ -1807,3 +1807,86 @@ Scope: `git diff --stat 1380d50..c3bda2b` touches `.claude/agents/RUNNER.md`
 and nothing else under `.claude/`. Its hunks are the "What you read" row,
 "Record the call" and the repair bullet, all within #171's re-review
 mechanism. Nothing in the range adds a route to `main`, a force or `--admin`.
+
+## Re-review round 14 `c3bda2b..e5dcce4`
+
+- [x] **re-review round 14 `c3bda2b..e5dcce4`: no findings** — read `git diff c3bda2b e5dcce4 -- .claude/agents/RUNNER.md` in full, `RUNNER.md:516-800`, `proposal.md:230-630`, `design.md:930-1060`, and this file's round-13 section; ran the derivation, the number-check listing, and the tail check from the chain's end on this tree, plus an archive-masking probe in `./tmp/r14sec/` (since deleted); clean
+
+Security only, on Opus, narrowed. No mutation: the change is prose. Nothing
+below reaches medium, so it stays in prose.
+
+**Both of my round-13 boxes are closed.**
+
+- *A late `<review>`.* Step 2 (`RUNNER.md:519-531`) forbids bringing on a
+  commit, committing, or dispatching a writer from the time the review round
+  is dispatched until every reviewer's commit is on HEAD. "Record the call"
+  (`:636-637`) now bases the derivation on that rule. Under the rule, the
+  first findings commit is picked onto the dispatch HEAD, so the parent it
+  records is that HEAD. That was the box's scenario, a writer handing back
+  mid-round, and it is now a breach. The breach is disclosed as a residual
+  that neither check nor a second reader sees (`proposal.md:591-595`). The
+  box asked for the rule or the residual, and the change carries both.
+  Holding back the writer, not only its commits, also covers the
+  `dev-writer`'s own push to the remote ref. On this tree the derivation's
+  last line is `f94f7b8d c222c37b` and the next is `c43c7a71 f94f7b8d`, so
+  the second reviewer's add sits on the first reviewer's.
+- *No chain check.* The fourth condition (`RUNNER.md:723-748`) follows the
+  ranges from the derived `<review>`. It requires every line to be followed
+  or passed over, and it runs the tail check from the chain's end. The
+  box's off-by-one (`f1..f2`) leaves a line that is neither followed nor
+  passed over, so the check fails. A forgotten untick with no archive or
+  merge after it shows up in the tail. Every range diff is a tree diff, so
+  consecutive ranges cover `<review>`'s tree through the chain end's tree
+  whether or not each end is an ancestor of the next, and the squash merges
+  exactly that net tree. On this tree, following the lines from `c222c37`
+  takes rounds 1, 2, 3, 5-7 and 9-14 through to `e5dcce4`, passing over 4
+  and 8. `git diff --no-renames --name-only e5dcce4 HEAD` lists `tasks.md`
+  only, and its diff is the round 14 line, so the tail passes.
+
+**Question 2: the ways I tried, each low.**
+
+- *A skipped archive or merge line can hide a forgotten commit (low; it
+  needs a runner breach).* For a skipped line to be followed, it has to
+  start at the chain's end, so it spans every commit from there to the
+  archive or merge. Neither tail command names commits, only files. In
+  `./tmp/r14sec/` I built chain end `E`, an unrecorded `design.md` edit `F`,
+  the findings deletion `D`, and the archive move `ARCH`.
+  `git diff --no-renames --name-only` from `E` and from `F` to `ARCH` print
+  the same five paths, because the archive already lists every file of the
+  change at both paths. A merge of `main` hides `F` the same way whenever
+  `main` touched the same file, and otherwise among `main`'s paths.
+  `F` can only sit there if a commit landed after a tick and the runner
+  forgot to untick it. The runner checks already disclose that they cannot
+  see that before the tick (`proposal.md:595-598`). This adds that the
+  runner's next check, after a red `closer` return, misses it too when the
+  change is archived. A cheap tightening, if the owner wants one: list
+  `git log --format="%h %p %s" <end>..HEAD` and write the skipped line as
+  that one commit, `<parent>..<sha>`. The chain then forces a line of its
+  own for whatever lies between.
+- *"A clean merge of `main`" is still the `closer`'s word.* This range now
+  names the merge as a skipped line the runner writes. Nothing checks it was
+  conflict-free. An empty `git show --remerge-diff <merge>` would. This
+  predates the range (round 2's out-of-range note).
+- *Prefix-matching.* It compares strings on the round lines, and those are
+  the runner's own. A mistyped longer SHA whose prefix is right still counts
+  as the same commit, but the tail commands pass that string to git, which
+  rejects it, so it fails closed. A false match needs two commits sharing a
+  7-character prefix, both written at that length.
+- *Passed-over re-runs.* A pass-over is keyed on the range, and the
+  forms-check exemption is keyed on "a line below it ran again over the same
+  range". A skipped line runs nothing, so it exempts no lane. A new round
+  templated with its predecessor's range unchanged is passed over, and the
+  tail check then lists the commits it should have covered, so it fails
+  closed.
+- *Branching lines.* Two lines starting at one commit with different ends
+  can never both be followed or passed over. Lines are never edited, so
+  those rows cannot pass. That fails closed, and it is a liveness cost only.
+- *A writer already running when the round is dispatched.* "Dispatch no
+  writer" does not reach it. Its commits still cannot be brought on, and
+  its push to the remote piece ref would make the `closer`'s refspec push
+  non-fast-forward, which stops the `closer`. Fails closed.
+
+Scope: `git diff --stat c3bda2b e5dcce4` touches `.claude/agents/RUNNER.md`
+and nothing else under `.claude/`. Its hunks are step 2, "Record the call",
+the number check and its "What you read" row, all within #171's re-review
+mechanism. Nothing in the range adds a route to `main`, a force or `--admin`.
