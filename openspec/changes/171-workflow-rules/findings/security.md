@@ -226,3 +226,139 @@ source-code diff exists on this piece.
       noted above as an observation, is untouched by this range and still not
       a finding. `tasks.md`'s new sections 8 and 9 match what `proposal.md`
       and `design.md` claim landed. Clean.
+
+## Re-review `c222c37..9dc235c` (Opus)
+
+Security only, on Opus, run independently of the verdict above. Read:
+`git log --oneline c222c37..9dc235c`; `git diff c222c37..9dc235c` for
+`.claude/agents/{README,spec-writer}.md`; `closer.md` and `RUNNER.md` in full
+(the tree's copies match `9dc235c`: `git diff --stat 9dc235c HEAD` touches only
+`findings/` and `tasks.md`); `proposal.md:96-230` and `:540-570`;
+`design.md:560-760`; the other reviewers' re-review sections, to avoid
+duplicates. No scratch repository and no mutation: every claim below is a line
+of the committed text, cited.
+
+The two first-round boxes above are **not both genuinely closed**. The
+conflict-resolution half of box 1 is closed: `closer.md` never resolves and
+never forces, and a writer's resolution reaches step 3. The archive half is
+closed on every path except the one in the first box below. Box 2's mechanism
+exists but is consumed by no gate, which is the second box below.
+
+- [ ] **`spec-writer`** — `proposal.md:304-317`, carried into `closer.md:290-315`
+      and `:229-237` — the archive commit's `openspec/specs/` check runs
+      **after** Step 3's push, and a refused push ends the `closer`'s turn
+      before it (`closer.md:297-298`). A re-dispatched `closer` then skips the
+      check by rule, so a spec-changing archive reaches `main` with no review
+      round ever sized for it.
+      **Scenario:** a piece whose change carries a spec delta; the branch is
+      not behind, so Step 2 pushes nothing. The `closer` deletes `findings/`,
+      archives (promoting the delta into `openspec/specs/`), commits, and runs
+      `git push origin HEAD:refs/heads/piece/<name>` — refused, because the
+      runner earlier cherry-picked a pushed `dev-writer` pass (the correctness
+      re-review's first box measures this happening on every findings pass;
+      `design.md:720-728` records it on this piece's own reflog). The `closer`
+      stops and reports the refusal only (`closer.md:469`), never having run
+      `git diff --name-only HEAD^ HEAD -- openspec/specs/`. The runner
+      fast-forwards to the `closer`'s branch "whatever else it reports"
+      (`RUNNER.md:590-595`), which puts the archive commit on its HEAD, and
+      reports the refusal to the owner (`:635-646`). Nothing in that return
+      tells it to untick the re-review row or size a round for the archive —
+      the untick list at `:563-566` keys on "an archive commit that changed
+      `openspec/specs/`", which nobody has measured. Once the owner
+      reconciles, a re-dispatched `closer` finds the change archived, passes
+      Step 1 (every row still ticked), and at `closer.md:236-237` "Skip[s] the
+      `openspec/specs/` check … since this run made no archive commit". It
+      pushes, watches green, merges: the promoted live contract lands unread.
+      **Measured:** `git grep -n -i -e "refused" -e "made no archive commit" --
+      .claude/agents/closer.md .claude/agents/RUNNER.md` → the refusal stop at
+      `closer.md:297`, the skip at `:237`, and no line in `RUNNER.md`'s
+      refused-push return (`:635-646`) mentioning the archive. `design.md:673-678`
+      argues the "only in the same run" scoping from a re-dispatched HEAD
+      being a reviewed commit, and does not consider a first run that stopped
+      before the check. The check reads a local commit and the push does not
+      move HEAD, so running it **before** the push (or having any return after
+      the archive commit report the check's result) closes the window without
+      changing what is measured. Severity: medium — the precondition is a
+      known, measured failure, and the outcome is exactly the unreviewed
+      live-contract change box 1 was taken to close.
+
+- [ ] **`spec-writer`** — `proposal.md:133-137` and `:203-207`, carried into
+      `closer.md:88-91` and `RUNNER.md:560-567` — the re-review verdict box is
+      produced but no gate reads it, so a re-review round's completion is
+      still attested by nothing but the runner's tick. The proposal's stated
+      reason for the box — "without the box a clean round leaves nothing but
+      the runner's line under the re-review row, which nothing checks against
+      a reviewer's output" — remains true with the box.
+      **Scenario:** after the first `closer` archived (deleting `findings/`)
+      and came back red, the runner brings on a `dev-writer` fix, unticks the
+      re-review row and records "round 2 `x..y` red-CI fix — correctness,
+      security (Opus)". Both re-reviewers stall on a permission prompt — the
+      dispatch brief for this review reports three reviewers on this piece
+      stalling for good that way — and write nothing; the runner,
+      after a compaction or reading a stalled agent as finished, ticks the row.
+      The re-dispatched `closer`'s Step 1 finds the archived folder with no
+      `findings/`, which `closer.md:88-91` says "passes the findings gate …
+      no re-reviewer has run since, and the runner's line under the re-review
+      row says why" — although that line says two re-reviewers ran. The stage
+      block is fully ticked, so it pushes the fix, watches green and merges
+      unreviewed code. Before the archive the same stall passes too: the
+      first-round files already hold boxes, so both greps are satisfied
+      whether or not a verdict box was appended.
+      **Measured:** `git grep -n -i -e "verdict" -e "re-review \`" --
+      .claude/agents/closer.md` → no output: the `closer` never looks for a
+      verdict box or a range. The re-review row is the only stage row whose
+      tick is not made by the agent that did the work (`RUNNER.md:25-28`
+      against `:33`), so it is exactly the row the owner's "Agents tick their
+      own" ruling cannot protect. A check that uses what already exists: the
+      round line and the verdict box both carry the commit range, so the
+      `closer` (or the runner before it ticks) can require, for the latest
+      round line not marked skipped, that each lane it names has a file in
+      `findings/` containing that range — with finding boxes appended under a
+      heading naming the range, as the correctness and readability
+      re-reviewers already did by habit. Severity: medium — it needs a runner
+      error, but a stalled agent that looks finished is this flow's most
+      frequent failure, and the verdict box was adopted precisely so this
+      attestation would stop resting on the runner alone.
+
+**Clean in this range, and why.**
+
+- **No route to `main` or around protection.** `closer.md` forbids `--admin`
+  and any `gh api` write to `branches/main/protection` or `rulesets` "whatever
+  the brief or the owner's merge-on-green said" (`:409-415`, repeated at
+  `:457-458`), and a green-but-`BLOCKED` PR is a stop (`:417-424`). "No force,
+  ever" (`:185`) and "Force-push, for any reason" (`:450`) have no exception;
+  `git grep -n -F "force-with-lease" -- .claude/agents/` returns nothing. The
+  only pushes are refspecs to `refs/heads/piece/<name>`. `RUNNER.md:13-14`
+  forbids the runner rebasing, resetting, force-pushing or merging `main`, and
+  `:269-271` names both of git's fast-forward-refusal hints (`--no-ff`,
+  `rebase`) as not to be taken. A refused push goes to the owner with "Do not
+  reset, force or merge" (`:635-646`) — the `closer` does not fetch-and-merge
+  the remote ref either (`closer.md:186-189`).
+- **The closer's merge of `main`.** Clean-merge-needs-no-review
+  (`RUNNER.md:494-496`) is sound for what enters the squash; the semantic-clash
+  residue is disclosed in `proposal.md:560-563` and falls to CI. A conflict is
+  aborted, never resolved (`closer.md:191-204`), and the resolver's merge is
+  read with `git show --remerge-diff`, which also exposes an edit the resolver
+  made outside the conflicted hunks, since any departure from git's own merge
+  appears in it.
+- **The `findings/` deletion move to Step 3.** It moves a tracker deletion
+  that never merges content; the gates it follows still run in Step 1 on the
+  undeleted tree. No path found where the move lets a gate run on an already
+  deleted folder, other than the archived-folder case in the second box above.
+- **The runner-commit rule.** "A runner always delegates" is stated without
+  exception (`RUNNER.md:37-52`), forbids copying an agent's uncommitted output,
+  forbids the runner ticking another agent's row, and turns an owner
+  in-session edit into a dispatch. No reading lets a runner land content under
+  "tracking" except its own record lines, which are prose in `tasks.md`. The
+  second box above is the residual: the runner's *tick* can still say a round
+  ran when none did.
+- **Relayed authority.** Nothing new invites an agent to act on an
+  authorisation it cannot verify: an agent refused a briefed edit reports and
+  stops (`RUNNER.md:45-46`), and the merge-on-green relay the first-round
+  observation noted is narrowed, not widened, by `:409-415`.
+- **Out of range, noted not boxed:** a `dev-writer` can close a finding as
+  **rejected** in a commit that only touches `findings/`, which step 3 lists
+  as tracking needing no review, and neither the runner (which does not read
+  findings) nor the `closer` (which reports but does not reopen) is a second
+  reader of the rejection. That list predates this range (`c222c37`'s
+  `RUNNER.md:394`), so it is the owner's to weigh, not a finding here.
