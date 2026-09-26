@@ -725,3 +725,67 @@ mutation: the change is prose.
   the un-numbered round 1 forms list all six files, and the numbered round 2
   forms list none, so a runner using the wrong form fails closed and cannot
   tick.
+
+## Re-review round 5 `dc1390a..d1c8726`
+
+- [x] **re-review round 5 `dc1390a..d1c8726`: no findings** — read `git show` of `47f6008`, `549c09c` and `d1c8726` in full, `RUNNER.md:540-665`, this file's round-3 box, and ran both of `549c09c`'s round-1 and round-2 checks with `-n`; clean
+
+Security only, on Opus, narrowed to the round-3 box and `549c09c`. No
+mutation: the change is prose. Nothing below reaches medium, so it is prose.
+
+**The round-3 box is closed.** `RUNNER.md:604-616` keys the line to the lane
+being run again, not to how, and `:636-638` says "ran" where it said
+"dispatched", so a continued re-run's lane is exempted from the old round's
+check and required by the new one. In the box's scenario the continued
+reviewer is given round `N+1`'s forms, which the rejected run's record cannot
+contain, so a stalled continuation leaves `N+1`'s check unlisted and the row
+unticked. The three no-line cases each hold up: *finishing an unrecorded
+round* has no rejected record on any branch for the check to find, so the only
+record that can satisfy it is the continuation's own; *committing* adds no
+review; *rebasing* an accepted run adds none, and one that also adds review
+("rebase, and read X") is caught by the governing clause, "only when it adds
+no review". `git grep -n -F -e "dispatched again" -e "round dispatched" -e
+"not a new dispatch"` over `.claude/agents`, `proposal.md` and `design.md`
+leaves only `design.md:445-446`, which narrate the old rule, and
+`closer.md:203`, which is about the `closer`. The round-3 prose note on a
+skipped re-run line is also better for the wording: a line marked skipped did
+not *run*, so it no longer reads as the exemption.
+
+**Ways I tried to break the exception, each low.**
+
+- *"Committed" where.* The exception says "a record already committed"; the
+  check runs "once every lane's findings commit is on your HEAD". A runner
+  that rejects a run before bringing its commit over could read "has not yet
+  recorded" as "not yet on my HEAD", continue without a line, and later bring
+  the agent's branch over whole, rejected commit included; if the
+  continuation had stalled, round `N`'s check then passes on the rejected
+  record. That needs both the misreading and picking a commit from a run the
+  runner rejected, and "findings commit" in `:628` already names the
+  reviewer's commit, not the runner's HEAD, so the natural reading is right.
+- *The line after the message.* Nothing orders the `N+1` line before the
+  `SendMessage` that carries its forms; a continuation sent and a line
+  forgotten leaves round `N`'s check un-exempted and satisfied by the
+  rejected record. That is a runner skipping its own rule, the same class as
+  the residual `design.md` carries in Risks, a runner that skips the check.
+- *The check quoting itself.* The check command contains its own two patterns
+  as substrings, so a findings file that quotes the command with literal
+  values is listed by it. `spec-test.md:360` is an instance, for round 2's
+  un-numbered forms; harmless there, since `spec-test.md:147` holds the real
+  heading. It needs the same lane's own committed file, so an agent of that
+  lane did run, and a rejected round-`N` run cannot quote `N+1`'s literals.
+  It is a variant of the disclosed "quotes an earlier round's form whole".
+
+**`549c09c` adds no new way to pass for a future round, but its round-1
+command passes on the rejected run alone (low).** Run with `-n`, round 1's
+command lists `security.md` twice: `:199`, the Sonnet verdict box the runner
+did not accept (`0f55b92`), and `:230`, the Opus section (`5961903`). Round 2's
+lists each file once, plus `spec-test.md:360` above. So "lists all six files"
+is true, but for `security` it would be true with the Opus section deleted:
+it is the exact two-runs-one-range defect the number exists to close, which a
+pre-numbering round cannot close retroactively. No lane is unreviewed today,
+because the Opus record is committed and the round lines say `security` re-ran
+on Opus; `correctness.md:146` and `readability.md:157` are single matches, the
+Opus runs. The annotation lives on the runner's own line and binds only rounds
+1 and 2, so it cannot be reused for a later round. If the owner wants the line
+to be self-sufficient, it could name `security.md:230`, or `5961903`, as the
+accepted record; nobody needs to act for the check to be sound.
