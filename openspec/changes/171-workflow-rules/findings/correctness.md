@@ -1586,3 +1586,109 @@ Below the box threshold, in prose only:
   "followed or passed over" with "4 and 8 passed over". This round added no
   task for the rewrite. That is the historical record of a pass and does not
   steer a runner. Low.
+
+## Re-review round 16 `bad7c88..b5ceed2`
+
+- [x] **re-review round 16 `bad7c88..b5ceed2`: no findings** — read `git diff bad7c88 b5ceed2` over `RUNNER.md`, `proposal.md`, `design.md` and `tasks.md`, `RUNNER.md:72-91` and `:520-790`, `proposal.md:330-480`, `git show b5ceed20` for `design.md`, and PR #174's last two body revisions from GitHub; walked the rule on this tree and on a `./tmp/` copy with a mid-chain gap; clean
+
+**Q1, walking the rule.** At HEAD `0c3683bf` the derivation's last line is
+`f94f7b8d c222c37b`, so `<review>` is `c222c37b`. The number-check listing
+prints the row at `tasks.md:24`, round lines at 25-40 and the `closer`'s row
+at 41. The lines run without a gap, rounds 1 to 16 appear once each, and at
+least one round line stands between the rows. The chain reaches `c222c37`, then
+round 1's end `9dc235c`, then `34fd428`, then `dc1390a` (rounds 3 and 4), then
+`d1c8726`, `6d43cda`, `d1d2165` (rounds 7 and 8), `c4b1df5`, `842758b`,
+`dd4fe18`, `1380d50`, `c3bda2b`, `e5dcce4`, `bad7c88` and `b5ceed2`. Every line
+is reached. From `b5ceed2`, `git diff --no-renames --name-only b5ceed2 HEAD`
+lists only `tasks.md`, and its diff is the round 16 line added, so the tail is
+tracking only. The runner should conclude that the number check passes and
+the row is still not tickable: round 16's five lanes have no records yet, so
+the forms check must wait for every lane's commit.
+
+On `./tmp/r16cor/tasks.md`, round 10 is written ``round 10 `328c192..842758b` ``.
+`328c192` is the spec-writer commit after round 9's end, and the line starts
+there. The listing still passes the first three conditions, with lines 4-19
+numbered 1 to 16 once each. The chain stops at `c4b1df5`, because no line
+starts there. From `c4b1df5` the tail lists `RUNNER.md`, `design.md` and
+`proposal.md`, so it fails. The second repair is
+``round 17 `c4b1df5..328c192` ``. The text now requires it to be sized with
+at least one lane, and `git diff --no-renames --name-only c4b1df5 328c192`
+lists `proposal.md`, so that lane reads the commit that was left out. With the
+repair line in place, the chain goes on through 10 to `b5ceed2`. The strict
+one-commit off-by-one on this piece's own conventions is
+``round 10 `94f913f..842758b` ``. `94f913f`'s parent is `c4b1df5`, so the
+repair range is exactly `94f913f`, as the text says. That commit is round 9's
+record line, and the diff lists only `tasks.md`. So the forced lane reads a
+tracking-only range, the cost `design.md` already names.
+
+Nothing in the text still lets a repair line be skipped. The tail bullet
+forbids a skip for both repairs and gives the reason. The only skipped lines
+it allows are the closed pair. The lost-line bullet's skip is still gated by
+its own check.
+
+**Q2, `RUNNER.md:734-756` against `proposal.md:408-437`.** They match on
+every point a runner acts on: both repairs are rounds; either is sized, runs
+at least one lane and is never marked skipped; the off-by-one's range is
+exactly `f1`, with the reason; "either is sound"; and the closed pair of
+skipped lines, each on a line of its own. The differences are wording only.
+`RUNNER.md` says "sized as above" where the proposal says "sized as step 3
+says". It drops "since both lines are read". And it says "Only two commits they
+list" where the proposal has "the only commits … the two that … the first
+command lists". None is a box.
+
+**Q3, `tasks.md` 21.3 and section 22.** Every claim is true on this tree. The
+21.3 verify holds: the derivation's last line is `f94f7b8d c222c37b`, and the
+chain reaches rounds 1 to 15 through `bad7c88` (16 through `b5ceed2` at HEAD),
+with 4 and 8 reaching the same ends as 3 and 7. I ran three verify commands:
+
+- 22.1's `git grep` over `.claude/agents/` prints nothing.
+- 22.2's `git grep` over `design.md` prints nothing.
+- `openspec validate 171-workflow-rules --strict` passes, for 22.4.
+
+22.1's claim that the "What you read" row names neither the repairs nor the
+skip is true (`RUNNER.md:82`). 22.2's "five sites" is right. At `bad7c88`,
+`design.md` had four ("chain's end" at 1006, 1009, 1916 and 1944). `8de35bf7`
+added a fifth in its "Kept" paragraph, and `b5ceed20` rewrote all five.
+
+**Q4, the PR body.** The first node was edited at 18:05:35Z. That is 15 s
+after `b5ceed20`'s commit time of 18:05:20Z, and it equals the PR's
+`lastEditedAt`. I compared it paragraph by paragraph against the 17:45:33Z
+node. The changes are confined to the four passages the dev-writer named:
+
+- step 3's tail repair: "a round ending at that start"; "Either is sized, runs
+  at least one lane and is never marked skipped", with the off-by-one reason;
+  and "Only two commits get a skipped line there", in place of "A clean merge
+  of `main` or a spec-free archive gets a skipped line";
+- the `design.md` summary's chain bullet: "every file difference … lies in the
+  diff of a round's range", plus the sentence on ranges, not reads;
+- the new summary bullet on repairs never skipped, with its two rejections
+  and the kept pair;
+- the standing-test follow-up: "pass over a commit landed after the last
+  round" becomes "miss a commit landed after that end".
+
+No other sentence changed, no claim was lost, and no follow-up was dropped.
+`Closes #171`, `Closes #170`, `Closes #169` and `Closes #133` stand on four
+separate lines in both revisions.
+
+Below the box threshold, in prose only:
+
+- **"Only two commits" reads as a count** (`RUNNER.md:752-753`,
+  `proposal.md:433-434`, the PR body's step 3). A piece whose `closer` merges
+  `main` twice has two clean merges. A literal reader would size a round over
+  the second one. That fails safe and costs a lane. "Only two kinds of commit"
+  would say what is meant. Low.
+- **"Record the call"'s general skip (`RUNNER.md:621-623`) does not point to
+  the tail bullet's exception.** Suppose a runner meets an unrecorded commit at
+  the tail check. It could treat the line as a late "Record the call" line,
+  where any reason is allowed, rather than as a repair. For an off-by-one that
+  reopens the hole. The tail bullet names the case and the reason in the place
+  the runner stands when it writes the line, so a runner following the text
+  does not do this. Low.
+- **The cost case is the ordinary case here.** Ranges on this piece start at
+  the previous round's end, and the first commit after an end is the runner's
+  record line. So a one-commit off-by-one usually leaves out a tracking
+  commit, and the forced lane reads only that commit, as measured above.
+  `design.md`'s cost sentence names "a gap holding only tracking" but not how
+  often it will happen. Low.
+
+`./tmp/r16cor/tasks.md`, the copy used above, has since been deleted.
