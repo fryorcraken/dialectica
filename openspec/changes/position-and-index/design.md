@@ -214,6 +214,64 @@ without testing the place it names. `a_thread_post_with_clock` is the one
 constructor for fixture posts, so this fixture and `a_thread_post` build the
 `Op` the same way. They differ only in the clock.
 
+### D6. The boundary with `feed-read` is recorded in `identity-onboarding`'s Purpose, in one direction only
+
+**Chosen:** `openspec/specs/identity-onboarding/spec.md`'s Purpose gains a
+paragraph of its own, after its boundary paragraph. It names `feed-read` as the
+owner of the `page`/`perPage` refusal, cites the new requirement by name, says
+the two cover the same kinds of malformed value and that neither restates the
+other, and says a change to what `feed-read` counts as malformed has to be
+checked against the `index` requirement. `feed-read`'s Purpose is not edited.
+
+Without the paragraph, a reader of the live `identity-onboarding` spec has no
+sign after archive that leaving `feed-read` out of its boundaries was
+deliberate. `proposal.md` and this file carry that reasoning, and archive moves
+both into `openspec/changes/archive/`. `docs/OPENSPEC-ARCHIVE.md` ("Two
+capabilities asserting one rule") names that silence as what let `spec-backfill`
+produce a duplicate. The architecture review raised it.
+
+**The edit is made to the live spec directly**, because a delta cannot change a
+Purpose. #160 set the precedent (`d8a56272`). Archive appends only the delta's
+ADDED requirement and never touches `## Purpose`, so the paragraph survives it.
+The architecture re-review confirmed this by running a real
+`openspec archive position-and-index -y` and discarding the result. The
+paragraph came through byte for byte, and the requirement title it cites matched
+the delta's heading exactly.
+
+**Considered, and ruled out:**
+
+- **A fourth name in the existing boundary list.** That list names `identity`,
+  `keystore` and `posting-capability`. This capability relies on each of them
+  and deliberately restates none. `feed-read` is not one of those. It is a
+  parallel: it states the same kind of rule over different fields. Putting it in
+  the same list would hide which relationship each name has.
+- **Naming `parse_index` in the Purpose.** The shared parser is why the two
+  refusals agree today, but it is implementation, and D1 records it. A Purpose
+  that named it would have to change if the parser were ever split.
+- **A reverse pointer in `feed-read`'s Purpose.** Ruled out for two reasons.
+  First, `feed-read`'s five boundaries all name capabilities whose rules it
+  uses, and `identity-onboarding` owns no rule `feed-read` uses, so a sixth
+  entry would break the list's own pattern. Second, if `feed-read` named every
+  other capability that refuses a field by name, the list would be open-ended.
+  It would go stale the moment another such capability appeared, and nothing
+  would notice. The relationship runs one way: `index`'s list of malformed kinds
+  was taken from `feed-read`'s (`proposal.md`, What Changes), so the note belongs
+  on the side that followed. `op-ordering` does the same for `op-format`. Its
+  Purpose names `op-format` and declines to restate it, and `op-format`'s
+  Purpose has no note pointing back.
+
+**What this costs.** The boundary is asymmetric. The architecture finding's
+scenario starts with a reader in `feed-read` who changes what counts as a
+malformed `page`, and that reader gets no pointer to `index`. Two things narrow
+the gap without closing it. While both fields share `parse_index` (D1), a code
+change that stops refusing one of `MALFORMED_INDEXES`' kinds, or drops the name,
+reaches `index` too, and `each_malformed_kind_of_index_is_refused_by_name` goes
+red. A change that refuses a new kind also reaches `index`, but no test of
+`index` sees it, because the table lists only today's kinds. A change to
+`feed-read`'s spec text alone, with no code change, reaches nothing, and only a
+reader who starts from `identity-onboarding` sees the note. This choice has no
+test, because a Purpose states no behaviour.
+
 ## Risks / Trade-offs
 
 - **[`u64::MAX + 1` gives the wrong reason]** → `18446744073709551616` is not

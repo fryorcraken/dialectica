@@ -146,7 +146,7 @@ Checked and confirmed against the code and tests as they now stand:
 
 ## One gap: the asymmetric-Purpose-edit reasoning is recorded where it will be deleted
 
-- [ ] **`dev-writer`** — `design.md` has no Decisions entry for "edit
+- [x] **`dev-writer`** — `design.md` has no Decisions entry for "edit
       `identity-onboarding`'s Purpose directly rather than through a delta,
       and only in one direction." This is exactly the shape of the other five
       entries — a real alternative existed (a fourth boundary name in the
@@ -174,6 +174,23 @@ Checked and confirmed against the code and tests as they now stand:
       Decision, or a line added to D1 given both concern `parse_index`'s
       shared-refusal boundary) or into `proposal.md`'s existing note, before
       the `closer` deletes `findings/`.
+
+      **Outcome (`dev-writer`): fixed** in the commit that ticks this box.
+      `design.md` gains D6, a Decisions entry of its own rather than a line in
+      D1: D1 is about the parser, and this is about where the spec records a
+      boundary. D6 carries everything `findings/architecture.md` held and
+      `proposal.md` did not. It says why the paragraph is separate from the
+      boundary list, and why the Purpose leaves `parse_index` unnamed. It says
+      why `feed-read` gets no reverse pointer: its boundaries name capabilities
+      whose rules it uses, a list of every by-name refuser would be open-ended
+      and go stale, and the note belongs on the side whose list of kinds
+      followed the other's, as `op-ordering`'s does for `op-format`. It also
+      keeps the architecture re-review's measured evidence that the direct
+      Purpose edit survives a real `openspec archive`. D6 states the cost as
+      well. The boundary is asymmetric, so a reader who starts in `feed-read`
+      gets no pointer. The shared parser narrows that gap, and D6 says which
+      change the by-name test catches and which it cannot see. No test covers
+      this outcome, because it changes prose only.
 
 No other findings from this round. The rest of the re-reviewed material —
 D1/D2/D5's rewritten prose, the fixture refactor, the spec MUST→SHALL edit,
