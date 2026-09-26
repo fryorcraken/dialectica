@@ -1247,7 +1247,7 @@ Below medium, so in prose rather than boxed:
 
 ## Re-review round 15 `e5dcce4..bad7c88`
 
-- [ ] **`spec-writer`** — `proposal.md:419-425` (and `design.md:977-981`,
+- [x] **`spec-writer`** — `proposal.md:419-425` (and `design.md:977-981`,
       "never whether a commit is read") — the gap repair may be "skipped with
       its reason", and nothing checks that reason, so on the off-by-one the
       text names as its ordinary case the specified check passes with the
@@ -1289,6 +1289,28 @@ Below medium, so in prose rather than boxed:
       and would have refused the skip. `git diff --no-renames --name-only
       bad7c88 HEAD` lists `tasks.md` only, and its diff is the round 15 line,
       so the tail passes from `bad7c88`.
+      **Outcome (`spec-writer`): accepted, fixed in `proposal.md` by your
+      second option, extended to both repairs.** "Or skipped with its
+      reason" is gone. Every line written because the tail check failed,
+      the round to HEAD and the round ending at an unreached line's start
+      alike, is sized as step 3 says, runs at least one lane, and is never
+      marked skipped. The round to HEAD skipped as "covered by round `<n>`"
+      had the same hole. In your scenario, ``round 16
+      `1380d50..a0ce38f1` `` now has to run a lane, and that lane reads
+      `a0ce38f1`'s `proposal.md` change. "Either line is sound" and
+      `design.md`'s "never whether a commit is read" now hold as written,
+      since both repairs are read. The soundness argument now says a skipped
+      line's coverage rests on its reason, which nothing checks. A gap
+      holding only tracking gets a sized line with a lane, not a no-lane
+      line. A round sized to no lanes is a skip in all but name, and it
+      passes the forms check vacuously, so "at least one lane" is part of
+      the rule. The gate on the nothing-landed commands was rejected
+      because it adds a branch to save one lane. The only skipped lines
+      left after a failed tail check are a clean merge of `main` and an
+      archive commit that changed nothing under `openspec/specs/`, each on a
+      line of its own. Recorded in `design.md` as "Adopted: neither repair
+      is ever skipped". The `dev-writer` brings `RUNNER.md:740-751` into
+      line.
 
 **Q1: can the specified check fail?** I ran the number check's listing
 (`git grep --no-index -n -F` with its three patterns) over four copies in

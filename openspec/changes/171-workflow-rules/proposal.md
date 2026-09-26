@@ -415,16 +415,25 @@ another file.
         the runner's own tracking. If they fail, a commit that needs review
         lies after that end, and the runner writes the next line, below the
         last with the next number as every line is, starting at that end: a
-        round over the commits from there to its HEAD, sized as step 3 says,
-        or, where a line the chain does not reach starts later, a line
-        ending at that start, sized the same way or skipped with its reason,
-        so that the chain goes on through that line. The ordinary case for
-        the second is an off-by-one: a round over the commits `f1` to `f2`
+        round over the commits from there to its HEAD, or, where a line the
+        chain does not reach starts later, a round ending at that start, so
+        that the chain goes on through that line. The ordinary case for the
+        second is an off-by-one: a round over the commits `f1` to `f2`
         written ``round <n> `f1..f2` ``, which leaves `f1` out, since a
-        two-dot range excludes its start. Either line is sound; the choice
-        changes only how much is read again. A commit that needs no review
-        but that the first command lists, such as a clean merge of `main`
-        or the archive commit, gets a line of its own marked skipped with
+        two-dot range excludes its start. **Either line is sized as step 3
+        says and runs at least one lane; neither is ever marked skipped.**
+        In the off-by-one the second line's range is
+        exactly `f1`, and the belief that wrote the off-by-one, that the
+        round covered `f1`, is the reason a skip would give; a skipped line
+        extends the chain like any other and the forms check skips it, so
+        `f1` would merge unread with every check passing
+        (`findings/security.md` and `findings/spec-test.md`, re-review round
+        15 `e5dcce4..bad7c88`, box of each). Since both lines are read,
+        either is sound; the choice changes only how much is read again.
+        The only commits that get a line marked skipped here are the two
+        that need no review but that the first command lists, a clean merge
+        of `main` and an archive commit that changed nothing under
+        `openspec/specs/`: each gets a line of its own marked skipped with
         that reason, and the chain runs past it.
 
       Measured on this tree at `ab53b41c`: the derivation's last line is

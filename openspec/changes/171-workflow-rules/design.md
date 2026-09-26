@@ -968,20 +968,67 @@ check names. `RUNNER.md` gives it as the fourth bullet of the number check.
     tail commands take, and whether or not each end is an ancestor of the
     next (`findings/security.md`, re-review round 14 `c3bda2b..e5dcce4`, the
     chain-check note). The tail check then covers that end to HEAD. So a
-    pass from any reached end means every commit after `<review>` is in a
-    round's range or is tracking.
+    pass from any reached end means every file difference after `<review>`
+    lies in the diff of a round's range or is tracking. That is what the
+    argument shows, and it is a claim about ranges, not reads: a range is
+    read wherever its round's lanes read it, and a round marked skipped is
+    read by none, so coverage by a skipped line rests on its reason, which
+    nothing checks. That is why the tail check's own repairs are never
+    skipped (below).
   - **Why "every line is followed" is not needed.** A commit left out by a
     gap lies after every end reached before the gap, so the tail check from
     any of those ends lists its changes whenever they merge. The condition
     caught nothing the tail check misses; what it added was the dead end.
   - **Why any reached end, and either repair, will do.** The choice of end
     and of repair changes only how much is read again, never whether a
-    commit is read: a round from a reached end to HEAD always makes the tail
-    pass from its own end, so the check always terminates. The smaller
-    repair for an off-by-one, a line ending at the start of a line the chain
-    does not reach, is the gap bullet's old one, now bounded: its end is that
+    commit is read, because both repairs are rounds whose lanes read their
+    range: a round from a reached end to HEAD always makes the tail pass
+    from its own end, so the check always terminates. The smaller repair
+    for an off-by-one, a round ending at the start of a line the chain does
+    not reach, is the gap bullet's old one, now bounded: its end is that
     line's start, which answers where a gap ends
     (`findings/correctness.md`, re-review round 14, first low note).
+  - **Adopted: neither repair is ever skipped** (`findings/security.md` and
+    `findings/spec-test.md`, re-review round 15 `e5dcce4..bad7c88`, box of
+    each). The round-15 text let the smaller repair be "sized the same way
+    or skipped with its reason", and in its own ordinary case skipping is
+    the one choice that fails open. The off-by-one's repair range is exactly
+    the commit its round left out, and the belief that wrote the off-by-one,
+    that the round covered that commit, is the reason a skip would give. A
+    skipped line extends the chain like any other, the tail from past it
+    passes, and the forms check skips it, so the commit merges unread with
+    every condition met. Security measured it in a scratch repository and
+    spec-test on a copy of this stage block with round 13 written one commit
+    late. The round to HEAD has the same hole when skipped as "covered by
+    round `<n>`", so the rule covers both repairs: sized as step 3 says,
+    at least one lane, never marked skipped. The cost is a lane where a skip
+    would have been right: a gap holding only tracking, or a formatting fix
+    the runner would have skipped by judgement had it recorded that round
+    when the commit landed rather than meeting it at the tail check.
+    - **Rejected: skip a repair only when the nothing-landed commands pass
+      over its range** (the first fix both boxes offered). It adds a branch,
+      and a check to run inside it, to buy back the one case where a skip is
+      harmless, and that case costs one lane reading an empty diff. Every
+      box on this gate since round 5 has been an edge of mechanism added to
+      close the one before; removing the option leaves nothing to misapply.
+    - **Rejected: keep the skip and scope "either is sound" to sized lines**
+      (the wording half of `findings/security.md`'s fix). It makes the
+      sentence true by narrowing it, and leaves the fail-open path offered as
+      an option to exactly the runner whose slip made the gap.
+    - **Kept: the skipped line for a clean merge of `main` or an archive
+      commit that changed nothing under `openspec/specs/`.** Its reason is a
+      fact about that one commit, not a claim that another round covered
+      something, and without a line the tail from before it lists every path
+      the merge or archive touched, so no later tail check could pass. It is not
+      the same hole. Both commits are the `closer`'s, made after the tick, so
+      a commit that needs review can sit inside such a line's range only if
+      it landed after the tick and the runner did not untick, which the
+      proposal already discloses as a residual neither check sees
+      (`findings/security.md`, re-review round 14 `c3bda2b..e5dcce4`,
+      archive-masking note). That note's round-15 variant, a skipped archive
+      line over the archive's own range leaving a line from the chain's end
+      to the archive's parent, needed that second line skipped too; it is a
+      repair, so it is now sized, and the variant is closed.
   - **What it costs.** A round 1 whose start is earlier than the derived
     `<review>`, or a line starting inside another's range, is not reached,
     and the commits after it are read again rather than accepted as covered.

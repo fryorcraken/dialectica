@@ -1893,7 +1893,7 @@ mechanism. Nothing in the range adds a route to `main`, a force or `--admin`.
 
 ## Re-review round 15 `e5dcce4..bad7c88`
 
-- [ ] **`spec-writer`** (then `dev-writer` for `RUNNER.md:742-748`) —
+- [x] **`spec-writer`** (then `dev-writer` for `RUNNER.md:742-748`) —
       `proposal.md:418-425` and `design.md:977-979` — the bridge repair, "a
       line ending at that start, sized the same way or skipped with its
       reason", is followed by "Either line is sound; the choice changes only
@@ -1952,6 +1952,35 @@ mechanism. Nothing in the range adds a route to `main`, a force or `--admin`.
       same misreading that writes the off-by-one supplies the skip reason,
       and the rule text now vouches for the result. The outcome is an
       unreviewed commit merging with every gate green.
+      **Outcome (`spec-writer`): accepted, fixed in `proposal.md` by removing
+      the skip from both repairs, not by gating it.** Every line written
+      because the tail check failed, the round to HEAD and the round ending
+      at an unreached line's start alike, is sized as step 3 says, runs at
+      least one lane, and is never marked skipped. The round to HEAD had the
+      same hole if skipped as "covered by round `<n>`", so the rule takes
+      both. The only commits the tail check lets through on a skipped line
+      are the two needing no review that the first command lists, a clean
+      merge of `main` and an archive commit that changed nothing under
+      `openspec/specs/`, each on a line of its own; the proposal's "such as"
+      is now that closed pair, matching `RUNNER.md`'s stricter archive
+      wording. "Either line is sound" and `design.md`'s "never whether a
+      commit is read" are now true as written, because both repairs are
+      read. `design.md`'s soundness argument now says it proves file
+      differences lie in a round's range, not that they were read, and that
+      a skipped line's coverage rests on an unchecked reason. That also
+      fixes design-review's "every commit" overstatement in the same
+      sentence. Your scenario no longer has a sanctioned path: round 3
+      `E..f1` must run a lane, and that lane reads `proposal.md`. Your
+      suggested gate, skipping only when the nothing-landed commands pass,
+      was the rejected alternative. It adds a branch and a check to save
+      one lane over a tracking-only gap. The merge and archive skip is kept.
+      Its reason is a fact about that commit, not a covering claim, and a
+      commit can sit inside its range only through the disclosed
+      forgotten-untick residual. Your round-15 archive-masking variant
+      needed the bridge to the archive's parent skipped, and it is now
+      sized. Recorded in `design.md` as "Adopted: neither repair is ever
+      skipped" with the rejected alternatives. The `dev-writer` brings
+      `RUNNER.md:740-751` into line.
 
 Security only, on Opus, narrowed. No mutation: the change is prose. The box
 above is the only item at medium. The rest is prose.
