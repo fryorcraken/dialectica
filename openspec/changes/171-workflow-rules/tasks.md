@@ -13,12 +13,12 @@
       behaviour to assert. A test pinning the new wording would fail when the
       wording changed, not when the rule was wrong. The check that can see
       this change is the six reviewers reading the prose.
-- [ ] review: correctness — `code-reviewer`
-- [ ] review: security — `code-reviewer`
-- [ ] review: readability — `code-reviewer`
-- [ ] review: architecture — `code-reviewer`
+- [x] review: correctness — `code-reviewer`
+- [x] review: security — `code-reviewer`
+- [x] review: readability — `code-reviewer`
+- [x] review: architecture — `code-reviewer`
 - [ ] review: spec-test — `spec-test-reviewer`
-- [ ] review: design — `design-reviewer`
+- [x] review: design — `design-reviewer`
 - [ ] re-review: every commit after the review round — runner
 - [ ] findings all ticked, `findings/` deleted — `closer`
 - [ ] `openspec validate --strict`, then `archive` — `closer`
