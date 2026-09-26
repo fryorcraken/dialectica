@@ -195,3 +195,81 @@ Checked and confirmed against the code and tests as they now stand:
 No other findings from this round. The rest of the re-reviewed material —
 D1/D2/D5's rewritten prose, the fixture refactor, the spec MUST→SHALL edit,
 and `proposal.md`'s note — matches the code, the tests, and each other.
+
+## Re-review of the D6 commit
+
+Read the owner's decision comment
+(https://github.com/fryorcraken/dialectica/issues/166#issuecomment-5832956024,
+2026-09-25) again before this round. It settles item 2 and is unchanged by
+anything in `536a03e`.
+
+Scope: `git show 536a03e`, which adds `design.md` D6 in answer to the "One
+gap" finding above and ticks that finding's box.
+
+- **Does D6 answer the finding?** Yes. The finding asked for the
+  "why one-directional" reasoning to move out of `findings/architecture.md`
+  (deleted before merge) into `design.md` or `proposal.md`, in the shape of
+  the other five Decisions entries: what was chosen, the constraint, the
+  alternatives and what ruled each out, and what it costs. D6 has all four:
+  chosen (the paragraph, direct edit, one direction), constraint (a delta
+  cannot touch a Purpose), three alternatives each ruled out with a distinct
+  reason, and a "What this costs" paragraph naming the asymmetry and stating
+  plainly that the choice is untested because a Purpose states no behaviour
+  (matching CLAUDE.md's guidance to say so rather than pad with a box).
+
+- **Agreement with `proposal.md`, the live `identity-onboarding` Purpose,
+  `feed-read`'s Purpose, and D1:** confirmed. The live
+  `openspec/specs/identity-onboarding/spec.md` Purpose (lines 25-31) contains
+  exactly the paragraph D6 describes — names `feed-read`, states the parallel,
+  says neither restates the other, and notes a `feed-read` change must be
+  checked against `index`'s requirement. `openspec/specs/feed-read/spec.md`'s
+  Purpose is unedited and has no mention of `identity-onboarding` or `index`,
+  matching D6's "not edited" claim. `proposal.md` (lines 15-96) states the
+  same constraint, the same direct-edit choice and the same one-directional
+  reasoning D6 elaborates; nothing contradicts. D1 (lines 59-84) is about the
+  parser-sharing decision and the `{field}`-formatting guard; D6 correctly
+  treats it as a separate concern ("D1 is about the parser, and this is about
+  where the spec records a boundary") rather than duplicating it, and D6's
+  "What this costs" paragraph correctly restates D1's mutation evidence
+  (dropping the field name from either `parse_index` arm turns
+  `each_malformed_kind_of_index_is_refused_by_name` red) rather than
+  re-deriving it.
+
+- **Citations, checked against source:**
+  - `docs/OPENSPEC-ARCHIVE.md` ("Two capabilities asserting one rule"),
+    lines 136-145: real, and it does name the `op-ordering`/`op-format`
+    precedent and say `spec-backfill`'s silence produced a duplicate — matches
+    D6's characterisation.
+  - Commit `d8a56272`: real (`#160`, "Make the identity spec's no-rotation
+    scenario testable, and align two Purposes with 0.0.1"). Its commit
+    message states "The identity and identity-onboarding Purpose paragraphs
+    are edited directly, since a delta cannot change a Purpose" — the exact
+    precedent D6 cites it for.
+  - `op-ordering` and `op-format`'s Purposes: `op-ordering/spec.md:7` names
+    `op-format`'s requirement and declines to restate it ("That requirement is
+    not restated here… Two specs asserting one rule is how two copies drift");
+    `op-format/spec.md`'s Purpose (lines 3-4) carries no reference back to
+    `op-ordering`. Matches D6's claim precisely, including the one-directional
+    shape it draws the parallel from.
+  - Test name `each_malformed_kind_of_index_is_refused_by_name`
+    (`dialectica/rust-lib/dialectica-core/src/wire.rs:5090`): real.
+
+- **Is the by-name test's catch/miss claim true?** Yes, verified by reading
+  the test and its fixture table (`wire.rs:5075-5121`).
+  `MALFORMED_INDEXES` is a fixed 8-entry table of today's known malformed
+  kinds; the test loops over it and asserts `message.contains("index")` for
+  each. D6's claim that "a code change that stops refusing one of
+  `MALFORMED_INDEXES`' kinds, or drops the name, reaches `index` too, and
+  `each_malformed_kind_of_index_is_refused_by_name` goes red" holds — this is
+  the same mechanism D1 already describes and pins with mutation evidence.
+  D6's claim that "a change that refuses a new kind also reaches `index`, but
+  no test of `index` sees it, because the table lists only today's kinds"
+  also holds: the table is a hand-maintained literal, not derived from
+  `parse_index`'s own arms, so a new malformed shape `parse_index` starts
+  refusing (or a shape it currently accepts and starts rejecting) has no
+  corresponding table entry and the loop never exercises it.
+
+No findings. D6 answers the finding it was written for, agrees with every
+document and spec text checked against it, and every citation checked
+(`docs/OPENSPEC-ARCHIVE.md`, `d8a56272`, `op-ordering`/`op-format`, the test
+name) is real and accurately characterised.
