@@ -512,3 +512,44 @@ was written.
       standing-test follow-up and the `closer`-side follow-up match
       `proposal.md`.
 - [x] 17.6 `openspec validate 171-workflow-rules --strict` passes.
+
+### 18. After the `spec-writer`'s unique-numbers rule (`57f4f76`)
+
+Supersedes 17.1's number-check rule (a skip is no longer a fault, and a line
+is never lowered) and 16.4's rejection of "one more than the highest". Follows
+`proposal.md` as `57f4f76` left it, and the list for the `dev-writer` under
+`findings/correctness.md`'s re-review round 10 first box. The number check was
+run on this tree, and on scratch copies of the stage block and `findings/`
+under `./tmp/` (since deleted), before any claim about its output was written.
+
+- [x] 18.1 `RUNNER.md` "What you read": the number-check row carries the
+      three-pattern command and says what it is for.
+- [x] 18.2 `RUNNER.md` "Record the call": one line per round, six spaces,
+      nothing else between the rows; a new line's number is one more than
+      the highest under the row; the row is never struck, and a piece where
+      nothing landed gets a skipped first line before the tick; a re-run gets
+      a new number by the same rule; "the forms check below".
+- [x] 18.3 `RUNNER.md` tick paragraph: the new command, what it prints, and
+      the three conditions (every line between the rows listed, at least one
+      line, no repeat) replacing the consecutive-numbers rule, the two-case
+      repair and the empty-listing sentence; the upward repair and "never
+      lower a number" with its reason. Verify: at `57f4f763` the command
+      prints `tasks.md:24`, `:25-34` and `:35`; with seven spaces in the
+      pattern it prints `:24` and `:35` alone.
+- [x] 18.4 `RUNNER.md` forms check: the exception is a lane a line below it
+      in the row ran again, since after a repair a number does not say where
+      a line stands.
+- [x] 18.5 `design.md`: the stage-block summary and the numbered-lines bullet
+      take the new rule; "neighbouring rounds"; the "one more than the
+      highest" rejection folded into the number-check Decision as adopted;
+      that Decision gains the command, the three conditions, why the numbers
+      need only be unique, why the rows are in the listing, the measurements
+      and four new rejected alternatives; "What it still cannot see" gains a
+      removed line and a lowered number; both Risks entries follow.
+- [x] 18.6 PR #174's body: step 3, the `design.md` summary, the
+      standing-test follow-up and the `closer`-side follow-up follow the
+      same rule.
+- [x] 18.7 `findings/correctness.md`'s round 10 `dev-writer` box flipped with
+      its outcome.
+- [x] 18.8 The sweep in that box's item 13 returns nothing.
+- [x] 18.9 `openspec validate 171-workflow-rules --strict` passes.

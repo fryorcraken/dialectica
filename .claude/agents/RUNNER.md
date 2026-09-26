@@ -78,7 +78,7 @@ You read exactly enough to decide the next dispatch:
 | `openspec/changes/<name>/tasks.md` — the `## Stages` block (once the `closer` has archived: `openspec/changes/archive/<date>-<name>/`, see "Rebuild the state") | which stage is next, and whether anyone is on it |
 | `ls openspec/changes/<name>/findings/` — **the filenames** (once the `closer` has archived: `openspec/changes/archive/<date>-<name>/`, see "Rebuild the state") | whether a reviewer has reported, and which dimension |
 | `grep -rn "^- \[ \]"` over `findings/` | whether anything is unanswered, as a count |
-| `git grep -n -F "      round "` over `tasks.md` — **the round lines** | whether the round numbers under the re-review row run 1, 2, 3 … once each (step 3 of "From the `dev-writer`'s hand-back to the merge") |
+| `git grep -n -F -e "] re-review: every commit" -e "      round " -e "] findings all ticked"` over `tasks.md` — **the re-review row, its round lines and the next row** | whether every line between the re-review row and the next row is a round line, and whether any round number repeats (step 3 of "From the `dev-writer`'s hand-back to the merge") |
 | ``git grep -l -F -e '## Re-review round <n> `<range>`' -e '**re-review round <n> `<range>`: no findings**'`` over `findings/` — **file names only** | whether each lane of a re-review round left its record (step 3 of "From the `dev-writer`'s hand-back to the merge") |
 | the `closer`'s report | whether the piece closed, or what stopped it |
 
@@ -598,13 +598,22 @@ the next round. Each round covers only what landed since the last, so rounds
 shrink.
 
 **Record the call**, in your report and in the stage block's re-review row. One
-indented line per round under that row, starting ``round <n> `<range>` ``,
-numbered from 1 in the order you write the lines: then what landed, the lanes
-and model each ran on, and why that size. A round you decide to skip gets a
-line too, with its reason — a skip is a decision, and an unrecorded one looks
-exactly like a forgotten one. **A lane you run again over a range it already
-had gets a line of its own** — the next number, the same range, the lanes it
-re-runs, and why: a run you did not accept, or an agent replaced after a stall.
+line per round under that row, indented by exactly six spaces as in the sample
+below, with nothing but round lines between that row and the next. Each starts
+``round <n> `<range>` ``, then gives what landed, the lanes and model each ran
+on, and why that size. **Its number is one more than the highest already under
+the row**, 1 for the first. Lines are only ever added below the last, and a
+line's number changes only to repair a repeat (the number check below). A round
+you decide to skip gets a line too, with its reason — a skip is a decision, and
+an unrecorded one looks exactly like a forgotten one.
+**The row is never struck.** When nothing that merges lands after the review
+round at all, it still gets round 1, with both ends of its range at your HEAD
+when you write the line (``round 1 `<sha>..<sha>` ``), marked skipped because
+nothing landed, and then the tick: every tick follows at least one round line.
+**A lane you run
+again over a range it already had gets a line of its own** — a new number, one
+more than the highest under the row, the same range, the lanes it re-runs, and
+why: a run you did not accept, or an agent replaced after a stall.
 That holds however you run it again: a fresh dispatch, or the same agent
 continued with `SendMessage`, whose message then gives the new line's two forms
 whole, as a brief does. Continuing an agent gets no line only when it adds no
@@ -612,9 +621,9 @@ review to a record already committed: finishing a round it has not yet
 recorded, such as after a stall, committing, or rebasing. Its record, once
 committed, is the round's own. A continued run needs the new number as much as
 a fresh one: the rejected run's record is already committed under the old
-number, so the check below would pass on it before the continuation had done
-anything. The number is what tells two runs of one lane over one range apart,
-which the range alone cannot:
+number, so the forms check below would pass on it before the continuation had
+done anything. The number is what tells two runs of one lane over one range
+apart, which the range alone cannot:
 
 ```markdown
 - [ ] re-review: every commit after the review round — runner
@@ -624,28 +633,41 @@ which the range alone cannot:
 ```
 
 **Tick the row when no commit that merges is unreviewed** — and before you
-tick it, run two checks on your HEAD. **First, the number check**: list the
-round lines in the stage block as it now stands.
+tick it, run two checks on your HEAD. **First, the number check**: in the stage
+block as it now stands, list the re-review row, its round lines and the row
+after them.
 
 ```
-git grep -n -F "      round " -- <change folder>/tasks.md
+git grep -n -F -e "] re-review: every commit" -e "      round " -e "] findings all ticked" -- <change folder>/tasks.md
 ```
 
-The six spaces are a round line's indent under the row. The lines it prints
-directly under the re-review row must carry 1, 2, 3 … in the order they stand,
-each number once; a line elsewhere in the file that starts the same way, such
-as a wrapped line in the implementation checklist, is not a round line, and the
-line numbers show which lines stand under the row. A number that repeats or one
-that is skipped means a line is wrong, and you do not tick. Put the line right:
-a line with the wrong number gets the number it should carry, and a round whose
-line was lost gets its line back. A lane briefed from a line whose number
-changes runs again under the new number, with forms copied from the corrected
-line, since a record written under a repeated number cannot be told from the
-earlier run's. An empty listing means the command was mistyped, not that there
-are no rounds: every tick follows at least one round line. A re-run's line
-templated from the previous one with its number unchanged is why this check
-exists: the copy rule below carries that number into the brief and the forms
-check, so all three agree and only this listing shows the number twice.
+It prints each with its line number: the re-review row, the round lines, and
+the `closer`'s first row. Do not tick unless all three hold:
+
+- **Every line between the two rows is listed**: the round lines' line numbers
+  run without a gap from the one after the re-review row to the one before the
+  next row. A line between them that the listing leaves out is not in the
+  round-line form — indented by four spaces or a tab, say, or a round line
+  wrapped onto a second line — and the forms check would copy its forms from a
+  line this check never read. Put it into the form and list again. A listed
+  line outside the two rows, such as a wrapped line in the implementation
+  checklist, is not a round line.
+- **At least one round line stands between them.** The two rows on adjacent
+  line numbers mean the line is not written yet: write it, as "Record the call"
+  says for a piece where nothing landed. A listing that lacks either row means
+  the command was mistyped, or run on a file with no stage block.
+- **No number repeats.** Order and gaps do not matter. Repair each line whose
+  number a line above it already carries by giving it one more than the
+  highest under the row; a lane briefed from it runs again under the new
+  number, with forms copied from the repaired line. **Never lower a number**,
+  to close a gap or to repair a repeat: a lowered line can land on a number
+  another line carried, and its forms check then passes on that line's
+  records.
+
+A re-run's line templated from the previous one with its number unchanged is
+why this check exists: the copy rule below carries that number into the brief
+and the forms check, so all three agree and only this listing shows the number
+twice.
 
 **Then the forms check**: every lane of every round the tick closes left its
 own record. A round the tick closes is one recorded since the row was last
@@ -659,9 +681,11 @@ git grep -l -F -e '## Re-review round <n> `<range>`' -e '**re-review round <n> `
 ```
 
 It must list the findings file of every lane the round ran (the names are in
-"How many at once"), except a lane a later round ran again over the same range:
-that round's own check covers it. It prints file names, not findings, and it
-searches the two exact forms rather than the bare range, because reviewers cite
+"How many at once"), except a lane that a line below it in the row ran again
+over the same range: that line's own check covers it. Below, not
+higher-numbered: after a repair a line's number does not say where it stands.
+It prints file names, not findings, and it searches the two exact forms rather
+than the bare range, because reviewers cite
 ranges in prose, earlier rounds' included. A number typed from memory, such as
 the earlier line's for a lane run again, matches the rejected run's record
 whenever that run left one for the lane. A lane whose

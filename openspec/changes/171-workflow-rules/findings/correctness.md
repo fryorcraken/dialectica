@@ -972,7 +972,7 @@ Below the box threshold, in prose only:
           `git grep -n -e "in the order you write" -e "next number" -e "unique and consecutive" -e "gets its line back" -e "number it should" -- .claude/agents openspec/changes/171-workflow-rules/design.md`
           should return nothing once items 1 to 11 land.
 
-- [ ] **`dev-writer`** — `RUNNER.md:644-645` — "An empty listing means the
+- [x] **`dev-writer`** — `RUNNER.md:644-645` — "An empty listing means the
       command was mistyped, not that there are no rounds: every tick follows
       at least one round line" is false for a piece where nothing lands after
       the review round, and `RUNNER.md` never tells the runner to write a line
@@ -1018,6 +1018,24 @@ Below the box threshold, in prose only:
       tick follows at least one round line." The line itself goes into
       "Record the call" (`:600-617`). Both are items 2 and 3 of the list in
       the box above.
+
+      **Fixed** (`dev-writer`, this commit). "Record the call" now says
+      **"The row is never struck."** and that when nothing that merges lands
+      after the review round the row still gets round 1, both ends of its
+      range at the runner's HEAD (``round 1 `<sha>..<sha>` ``), marked
+      skipped because nothing landed, and then the tick. The empty-listing
+      sentence is gone. The number check's second condition replaces it: the
+      two rows on adjacent line numbers mean the line is not yet written, and
+      the runner writes it as "Record the call" says; a listing that lacks
+      either row means the command was mistyped, or run on a file with no
+      stage block. So the finished piece in your scenario has a way forward
+      that the text names. `git grep -n -e "never struck" -e "nothing
+      landed" -- .claude/agents` now returns `RUNNER.md`'s "Record the call"
+      and the number check's second bullet, and `git grep -n -F "empty
+      listing" -- .claude/agents` returns nothing. Measured on a scratch copy
+      of the stage block under `./tmp/` with no round line (since deleted):
+      the new command prints the two rows on lines 2 and 3. No test can see
+      this, since nothing runs `RUNNER.md`; the check is reading it.
 
 **Tick paragraph, applied to this tree.** At `b5c3786b`, `git grep -n -F "      round " -- openspec/changes/171-workflow-rules/tasks.md`
 lists `tasks.md:25-34`. Those are the ten lines directly under the row at
