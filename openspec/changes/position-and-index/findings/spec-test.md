@@ -154,3 +154,91 @@ full three-dot diff of `wire.rs`'s `mod tests`, `parse_index` (read only for
 the mutation), `Placed::at` (read only for the mutation), and
 `feed-read`'s `malformed_pagination_fields_are_refused_by_name` for comparison
 against `parse_index`'s shared field-naming behaviour.
+
+## Re-review of the findings-round commits
+
+Scope: `git diff 19667a04...HEAD` (three dots) only — the `thread-read` delta's
+MUST→SHALL change, the new Purpose paragraph in the live
+`openspec/specs/identity-onboarding/spec.md`, and the test-fixture refactor in
+`dialectica/rust-lib/dialectica-core/src/wire.rs` (commit `70bef05`). Read the
+owner's 2026-09-25 decision comment
+(https://github.com/fryorcraken/dialectica/issues/166#issuecomment-5832956024)
+before starting; it settles item 2 (malformed `index` refused, naming `index`)
+and leaves item 1 unchanged, which is what this round's diff reflects — no new
+tests, only a spec wording fix and a fixture refactor.
+
+**1. `thread-read`'s MUST→SHALL change.** Read the whole requirement block
+(`specs/thread-read/spec.md`). The two sentences changed
+(*The position SHALL be determined by the place alone…* and *…those two items
+SHALL carry the same position*) sit inside a paragraph where every surrounding
+sentence already uses SHALL; the two MUSTs were the only holdouts. No
+requirement text, scenario, or testable claim moved — this is a keyword
+normalisation, not a behaviour change. The 11 scenarios are unchanged text and
+unchanged coverage from the first round.
+
+**2. The new Purpose paragraph in the live `identity-onboarding` spec.**
+`proposal.md` explains why: a delta cannot edit a Purpose, so the
+cross-capability note ("index is refused in parallel with `feed-read`, not by
+it") is written directly into the live file so it survives archive (which only
+merges the ADDED requirement). Checked for soundness rather than trusting that
+explanation:
+- The paragraph's claim that `identity-onboarding` states *A malformed `index`
+  in a keep request is refused with a message naming `index`* is a verbatim
+  requirement title in `openspec/changes/position-and-index/specs/identity-onboarding/spec.md`
+  (unchanged this round, already reviewed).
+- Its claim that this covers "the same kinds of malformed value" as
+  `feed-read`'s `page`/`perPage` checked against `openspec/specs/feed-read/spec.md`
+  line 555: "negative, fractional, written with a decimal point or an exponent,
+  not a number, or an integer larger than the largest this peer accepts" —
+  matches the index requirement's five bullets exactly.
+- Checked it does not contradict the immediately preceding boundary paragraph
+  ("restates none of the three" — `identity`, `keystore`,
+  `posting-capability`): the new paragraph is about a fourth capability,
+  `feed-read`, and says explicitly "Neither restates the other," so the two
+  paragraphs are about different pairings and do not conflict.
+
+No self-consistency defect found.
+
+**3. The `wire.rs` fixture refactor (`70bef05`).** Read `git diff
+19667a04...HEAD -- dialectica/rust-lib/dialectica-core/src/wire.rs`: a pure
+extract-function refactor. `a_thread_post` now delegates to a new
+`a_thread_post_with_clock(..., None)`, preserving the old hardcoded
+`clock: None`; `a_thread_log_with_a_hidden_reply_and_a_reply_after_it`'s inline
+`Op` literal is replaced by a call to the same helper with its clock supplied.
+No assertion, fixture data, or ordering changed.
+
+Measured rather than trusted, in this worktree (`worktree-agent-ac1b4040025c5b8c6`),
+against `thread_page_json` in `wire.rs`:
+
+- **Mutation A — `"position": item.author`.** Baseline (`cargo test
+  --manifest-path dialectica/rust-lib/Cargo.toml -p dialectica -p
+  dialectica-core position`) green (6/6). With the mutation:
+  `no_two_items_of_a_thread_share_a_position_even_when_they_share_an_author`
+  and `the_item_at_a_place_carries_that_places_position_in_every_read` FAILED;
+  `a_position_is_the_same_whatever_page_size_the_read_used` stayed green, as
+  its own comment says it must (an author-derived value is stable across page
+  sizes). This is the exact regression issue #166 reported against the old
+  fixture (`a_thread_log`, one author per item) — confirms the new
+  shared-author fixture (`a_thread_log_with_shared_authors`) still catches it
+  after the refactor. Reverted; `git diff` on the file was empty before the
+  next mutation.
+- **Mutation B — a per-page restarting index** (`.iter().enumerate()`,
+  `"position": mutation_index.to_string()`, so the value resets to 0 at the
+  start of every page's JSON, modelling a handler that indexes only the page it
+  is building). Result:
+  `no_two_items_of_a_thread_share_a_position_even_when_they_share_an_author`
+  and `a_position_is_the_same_whatever_page_size_the_read_used` FAILED;
+  `the_item_at_a_place_carries_that_places_position_in_every_read` stayed
+  green — expected, since a per-page index restarts identically in both the
+  including- and excluding-hidden reads and that test only compares those two
+  reads against each other, not against a one-page baseline. Reverted; `git
+  diff --stat` on the file was empty afterward, and baseline reran green
+  (6/6).
+
+Both mutations were caught by the tests the design intends to catch them, none
+survived, and `cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p
+dialectica -p dialectica-core` (full suite, no filter) passed 1185+30 tests
+with nothing failed, confirming the refactor changed no other test's fixture
+behaviour. No mutation is left in the tree; `git diff` on `wire.rs` is empty.
+
+No findings from this round.
