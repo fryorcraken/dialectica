@@ -434,7 +434,12 @@ another file.
         that need no review but that the first command lists, a clean merge
         of `main` and an archive commit that changed nothing under
         `openspec/specs/`: each gets a line of its own marked skipped with
-        that reason, and the chain runs past it.
+        that reason, starting at an end the chain reaches and **ending at
+        that commit, never at HEAD or any later commit**, so the chain runs
+        past it and the tail from it lists whatever landed after it. A range
+        running past the commit its reason names would vouch, under a reason
+        true of that one commit, for every commit after it
+        (`findings/security.md`, re-review round 16 `bad7c88..b5ceed2`, box).
 
       Measured on this tree at `ab53b41c`: the derivation's last line is
       `f94f7b8d c222c37b`; the thirteen round lines at `tasks.md:25-37`
@@ -612,7 +617,18 @@ another file.
       and since
       `<review>` is read from the repository, that reader can derive it
       again and see a line whose range starts late (the `closer`-side
-      check in "Out of scope"). **Nor does either check see the review-round
+      check in "Out of scope"). **Nor does either check see a skipped line
+      after round 1 that breaks the tail check's rules**: a repair marked
+      skipped, whatever its reason, or a line skipped as a clean merge of
+      `main` or an archive commit whose range ends past that commit. The
+      number check reads only the line's fixed start, the chain follows a
+      skipped line like any other, and the forms check skips it, so a commit
+      in its range that needs review merges unread; only the reason on the line tells a
+      permitted skip from a forbidden one, and nothing checks the reason or
+      where the range ends (`findings/spec-test.md` and
+      `findings/security.md`, re-review round 16 `bad7c88..b5ceed2`, box of
+      each). Reaching this takes a runner breaking a stated rule, and the
+      `closer`-side check in "Out of scope" would see it. **Nor does either check see the review-round
       rule broken**: a commit brought onto the piece while the review round
       is out, before its first findings commit, becomes the derived
       `<review>`, the chain starts after it, and a second reader derives the
@@ -1382,7 +1398,14 @@ another file.
     whose range starts later is a `<review>` the runner supplied or misread,
     and a diff over that line's own range alone would pass with it
     (`findings/security.md`, re-review round 12 `dd4fe18..1380d50`, second
-    box). That is the runner's
+    box). For every other line marked skipped, check that its range ends at
+    a clean merge of `main` or at an archive commit that changed nothing
+    under `openspec/specs/`, and run the nothing-landed check's two commands
+    over the range from the line's start to that commit's first parent: a
+    repair marked skipped, or a skipped line whose range runs past the
+    commit its reason names, then fails (`findings/spec-test.md` and
+    `findings/security.md`, re-review round 16 `bad7c88..b5ceed2`, box of
+    each). That is the runner's
     two checks run again by a second reader, which is what they add for a
     runner that skipped one; for a line with a repeated number, the runner's
     own number check already sees it when it is run. Matching alone cannot

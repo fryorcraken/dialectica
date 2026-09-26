@@ -2054,7 +2054,7 @@ re-review mechanism. Nothing in the range adds a route to `main`, a force or
 
 ## Re-review round 16 `bad7c88..b5ceed2`
 
-- [ ] **`spec-writer`** (then `dev-writer` for `RUNNER.md:752-756` and
+- [x] **`spec-writer`** (then `dev-writer` for `RUNNER.md:752-756` and
       `design.md:1018-1031`) — `proposal.md:433-437` — the surviving skipped
       line for a clean merge of `main` or a spec-free archive has its start
       fixed ("starting at that end") but not its end. Nothing says the range
@@ -2111,6 +2111,20 @@ re-review mechanism. Nothing in the range adds a route to `main`, a force or
       - With the archive line ending at `07ad57d` instead, the tail from
         there lists `archive-c/tasks.md` and `src/a.rs`, so it fails and
         `X` is caught.
+      **Fixed** (`spec-writer`), as the box's own fix: `proposal.md:433-442`
+      now says each skipped merge or archive line starts at an end the chain
+      reaches and ends at that commit, never at HEAD or any later commit, so
+      the tail from it lists whatever landed after it; in the scenario,
+      `round 3` must end at `A`, and `X` is then caught by the tail. The
+      start is left at the reached end, not narrowed to `<first parent>..<sha>`,
+      for the reason the box gives (the tick is no line's end). The rule
+      itself is unchecked, so it is also recorded among the residuals neither
+      check sees (`proposal.md:620-631`) and added to the `closer`-side
+      follow-up in "Out of scope" (`proposal.md:1401-1408`), which checks
+      that every skipped line after round 1 ends at such a commit. The
+      `dev-writer` brings `RUNNER.md:752-756` into line and makes
+      `design.md`'s "Kept" argument (`:1018-1031`) say it bounds the start
+      side, with the end side fixed by the range ending at the commit.
 
 Security only, on Opus, narrowed. No mutation: the change is prose. The box
 above is the only item at medium. The rest is prose.

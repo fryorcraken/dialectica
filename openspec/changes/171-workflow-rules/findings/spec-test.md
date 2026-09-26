@@ -1374,7 +1374,7 @@ not updated since before round 14). Nothing under `.claude/agents/`, and no
 
 ## Re-review round 16 `bad7c88..b5ceed2`
 
-- [ ] **`spec-writer`** — `proposal.md:423-437` with `:498-500`, `:606-622`
+- [x] **`spec-writer`** — `proposal.md:423-437` with `:498-500`, `:606-622`
       and `:1376-1380` (and `design.md:1018-1031`) — "neither is ever marked
       skipped" is a runner rule nothing checks, and unlike every other
       unchecked runner rule in this contract it is neither disclosed nor in
@@ -1434,6 +1434,26 @@ not updated since before round 14). Nothing under `.claude/agents/`, and no
       --format="%h %p %s" 1380d50..a0ce38f1` lists seven commits, none of
       them a merge. The one-commit check in (2) would therefore refuse this
       line.
+      **Fixed** (`spec-writer`), by record-and-route with no new in-piece
+      check. (1) `proposal.md:620-631` adds to the "Nor does either check
+      see" list a skipped line after round 1 that breaks the tail check's
+      rules: a repair marked skipped, whatever its reason, or a merge or
+      archive line whose range ends past that commit; it names why both
+      checks pass it and routes it to the `closer`-side check. (2) That
+      follow-up in "Out of scope" (`proposal.md:1401-1408`) now covers every
+      skipped line other than round 1: its range must end at a clean merge
+      of `main` or an archive commit that changed nothing under
+      `openspec/specs/`, and the nothing-landed check's two commands must
+      pass over the range from the line's start to that commit's first
+      parent. That form rather than the box's `git log ... <range>` lists
+      one commit: a two-dot range ending at a merge lists every commit the
+      merge brought from `main`, and a line starting at a reached end also
+      holds the runner's tick, so a correct line would fail it; your round
+      17 line still fails, since `1380d50..a0ce38f1` ends at no merge or
+      archive. (3) The optional clause is taken in the security form
+      (`proposal.md:433-442`): the skipped line's range ends at the commit
+      its reason names. The `dev-writer` brings `RUNNER.md:752-756` and
+      `design.md:1018-1031` into line.
 
 **Q1: is the round-15 box closed?** Yes, for a runner that follows the text.
 Under `:423-424` the repair has to be a sized round with at least one lane.
