@@ -239,7 +239,7 @@ the next push.
 
 ### 7. `moderation.yaml` goes red when an inert control withdraws the way out
 
-- [ ] 7.1 Break: "Mark as moderated" hides `moderationBackButton`, pushed
+- [x] 7.1 Break: "Mark as moderated" hides `moderationBackButton`, pushed
       alone. Predicted: `sitometres moderation spec` red on "acting on an
       inert control leaves the way out offered", on its `text:` half after
       the step's 30s; the other four green. This is also the measurement
@@ -247,6 +247,20 @@ the next push.
       click lands. `QML lint` red on one test, measured locally and
       re-measured after 3.3 (567 passed, 1 failed): `tst_navigation.qml`'s
       `test_the_moderation_screen_can_be_left_after_pressing_its_controls`
+
+      **Observed, on head `ed5c482`, the break pushed alone, as predicted.**
+      UI tests https://github.com/fryorcraken/dialectica/actions/runs/36217172782:
+      `sitometres moderation spec` failed on "acting on an inert control
+      leaves the way out offered" after 30.1s. It clicked
+      `FlatButton_QMLTYPE_130 "Mark as moderated"`, then
+      `x sees "{\"objectName\":\"moderationBackButton\"}"`, while
+      `+ state "root.screenShown === 'moderation'"` held. So the step read a
+      snapshot taken after the click, which is the measurement design.md D5
+      rests on. "take the way out" then failed with no such control, and one
+      step was `inconclusive`. `create`, `feed`, `thread` and `join` green. CI
+      https://github.com/fryorcraken/dialectica/actions/runs/36217172763 red
+      in `QML lint` only, on exactly the one predicted test. `Lint`, `UI spec
+      validation`, `Rust core tests` and `Build LGX` green
 - [ ] 7.2 Revert pushed; both workflows green on it
 
 ### 8. Hand-back

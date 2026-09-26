@@ -186,8 +186,10 @@ objectName …") if either is missing.
   click. It reads a snapshot taken after the click only because of the
   one-second settle floor (Context). If a session ever ran without log
   evidence, `no_errors` would drop out, every check would be monotone-positive,
-  and this step would return at t≈0 and prove nothing. The D6 break is the
-  evidence it currently can fail.
+  and this step would return at t≈0 and prove nothing. The D6 break shows
+  that it currently can fail: with the way out hidden by the press, the
+  step's `text:` half failed after its 30s while `screenShown` still held
+  (`tasks.md` 7.1).
 - **No `calls:` and no `no_calls:`**, for the `e2e-ui-suite` change's design.md
   D10 reason: every observation here is an effect. `no_calls` on the inert
   click would also hold every step to its full timeout, because a negative
