@@ -410,7 +410,9 @@ so the owner's "Agents tick their own" cannot protect it. So:
 - **Before it ticks, the runner runs, for every unskipped round the tick
   closes,**
   ``git grep -l -F -e '## Re-review round <n> `<range>`' -e '**re-review round <n> `<range>`: no findings**' -- <change folder>/findings/``,
-  on its HEAD once every lane's findings commit is there. It must list the
+  on its HEAD once every lane's findings commit is there, with
+  ``round <n> `<range>` `` copied from that round's own line under the
+  re-review row, as the brief's was, not typed. It must list the
   file of every lane the round ran, except a lane a later round ran again
   over the same range, which that round's check covers. A lane not listed
   has not finished: the runner continues that reviewer or dispatches a fresh
@@ -472,11 +474,45 @@ would give it a line for no review.
   hole, silently. Numbering the re-run closes it whichever way the lane is
   run.
 
+**The check's number and range are copied from the round's line, not typed.**
+The brief's two forms are already copied from that line, so one clause in the
+tick paragraph makes the check search exactly what the reviewer was told to
+write, by construction. The number only sets a rejected run aside if the check
+uses the new line's number: a check for a lane run again, typed with the
+earlier line's number, matches the earlier run's record over the same range
+whenever that run left one for the lane, and the runner ticks before the
+re-run has written anything. `RUNNER.md` carries the clause once, in the tick
+paragraph, with the reason in one sentence after the command's description.
+
+- **Rejected: leaving the number typed.** It fails open in the case the line
+  rule makes routine, two numbers over one range. Measured at `c3d697e9` over
+  `34fd428..dc1390a`: round 3's forms list five files, every lane's but
+  `readability.md`, and the forms copied from round 4's line list
+  `readability.md` alone. The round 3 readability run wrote nothing, so this
+  piece's round 4 would have failed closed under round 3's number; a lane
+  whose earlier run did write would not. `findings/spec-test.md`'s round 5
+  box first raised the copy as the open mitigation, and
+  `findings/design-review.md`'s round 6 box asked for the call to be recorded
+  either way.
+- **Rejected: a mechanical guard** that derives the forms from the round
+  lines rather than trusting the runner's copy. It needs either a script that
+  parses the round lines, whose only fixed part is their start, or a second
+  reader of those lines; the second reader is the `closer`-side check
+  deferred to the owner ("What else was considered", below, and `proposal.md`,
+  "Out of scope").
+
 **What it still cannot see.** A later reviewer who quotes an earlier round's
 heading or verdict box whole, in prose, satisfies that round's check. The
 forms are chosen to make that unlikely, not impossible: a finding that
 discusses the forms quotes them with `<n>` and `<range>` as placeholders, as
-`findings/security.md`'s outcomes do, and matches no real round.
+`findings/security.md`'s outcomes do, and matches no real round. And the check
+searches whatever forms it is given: copied from the wrong line, such as the
+neighbouring line over the same range or the previous round's line, it passes
+on that line's records. At `c3d697e9`, round 5's forms list `spec-test.md` and
+`design-review.md` among others, the two lanes round 6 ran, so a round 6
+check run with round 5's forms would pass whatever round 6 had written. No
+test of the role files can see this, since the command there carries `<n>` and
+`<range>` as placeholders; it is in Risks, with a runner that skips the check.
 
 **This piece's rounds 1 and 2 predate the number.** Their briefs gave the
 un-numbered forms, so the check for those two rounds searches those forms,
@@ -510,7 +546,8 @@ lines, whose only fixed part is their start. A runner-side check is one
 command against files that already exist. **What breaks without it:** a
 round's completion rests on the runner's reading of whether an agent has
 finished, which is the failure a stalled agent produces; the residual, a
-runner that skips the check, is in Risks. **What breaks without the number:**
+runner that skips the check or copies its forms from the wrong line, is in
+Risks. **What breaks without the number:**
 a lane run again, fresh or continued, has its check satisfied by the run it
 replaced. **What
 breaks without the exact forms:** a later round's prose satisfies an earlier
@@ -1257,33 +1294,41 @@ no role file.
     merge; a pre-tick search cut down to the bare range matches it in prose,
     and one cut to a single SHA also matches the previous round's records,
     so the runner ticks over lanes that never ran (`findings/spec-test.md`,
-    re-review `9dc235c..34fd428`, measured); a pre-tick search for a lane run
-    again, typed with the earlier line's round number, matches the earlier
-    run's record over the same range whenever that run left one for the
-    lane, so the runner ticks before the re-run has written anything — the
-    record the line rule's number exists to set aside, as with round 1's
-    Sonnet security box (`findings/spec-test.md`, re-review round 5
-    `dc1390a..d1c8726`, measured at `80c1bcc8` over `34fd428..dc1390a`: the
-    round 3 forms list every lane's file but `readability.md`, and the
-    round 4 forms list `readability.md` alone; the round 3 readability run
-    wrote nothing, so this piece's round 4 would have failed closed under
-    round 3's number, and a lane whose earlier run did write would not);
-    and the save with `HEAD` dropped writes only the unstaged changes, step
-    2 discards the staged ones, and step 4 applies cleanly with the staged
-    mutation gone (`findings/architecture.md` and `findings/spec-test.md`,
-    re-review `9dc235c..34fd428`, both measured).
+    re-review `9dc235c..34fd428`, measured); and the save with `HEAD`
+    dropped writes only the unstaged changes, step 2 discards the staged
+    ones, and step 4 applies cleanly with the staged mutation gone
+    (`findings/architecture.md` and `findings/spec-test.md`, re-review
+    `9dc235c..34fd428`, both measured).
+
+  A stale round number also fails open, and it is not a defect in a role
+  file's copy of a command. A pre-tick search for a lane run again, typed with
+  the earlier line's number, matches the earlier run's record over the same
+  range whenever that run left one for the lane, so the runner ticks before
+  the re-run has written anything (`findings/spec-test.md`, re-review round 5
+  `dc1390a..d1c8726`, measured at `80c1bcc8` and again at `c3d697e9`). The
+  line rule makes two numbers over one range routine. But the command in
+  `RUNNER.md` carries `<n>` and `<range>` as placeholders, so no role file can
+  hold a wrong number: the number is the runner's input when it runs the
+  check, and a test that runs the role file's command against fixtures stays
+  green whatever the runner types. It is answered by the copy rule in
+  Decisions ("The check's number and range are copied from the round's line,
+  not typed"): the check's round and range are copied from that round's own
+  line, as the brief's are. What that leaves, a runner copying from the wrong
+  line, is the next Risk.
 
   `RUNNER.md`'s `--ff-only`, `--remerge-diff` and `--cherry-mark` claims
   describe git's own behaviour, and a test of them would mostly re-test git.
   → Deferred to the standing-test follow-up in `proposal.md`'s "Out of
   scope", listed in PR #174's follow-ups in place of the earlier
   pathspec-only one: a script under the `lint` job that extracts each command
-  from the role file and runs it against fixtures, the four fail-open cases
+  from the role file and runs it against fixtures, the three fail-open cases
   first. Not added here: this change adds no tests or CI, and a test holding
   its own copy of a command would not fail when a role file's copy changed.
 - **[Only the runner runs the pre-tick check.]** It makes the re-review row's
-  tick rest on the re-reviewers' own records, but a runner that skips it goes
-  unnoticed: the `closer` reads neither the heading nor the verdict box. →
+  tick rest on the re-reviewers' own records, but a runner that skips it, or
+  runs it with forms copied from the wrong line, goes unnoticed: the `closer`
+  reads neither the heading nor the verdict box, and nothing else reads the
+  round lines against the forms the check used. →
   Deferred to the owner as a design question (`proposal.md`, "Out of scope",
   "An independent check of the re-review row by the `closer`").
 - **[The review round costs at least three `SendMessage` round trips.]** →

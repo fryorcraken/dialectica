@@ -626,8 +626,9 @@ which the range alone cannot:
 tick it, check that every lane of every round the tick closes left its own
 record. A round the tick closes is one recorded since the row was last ticked
 and not marked skipped. For each, once every lane's findings commit is on your
-HEAD, run, in single quotes because both patterns hold backticks, which a shell
-expands inside double quotes:
+HEAD, run, with ``round <n> `<range>` `` copied from that round's own line as
+the brief's was, not typed, and in single quotes because both patterns hold
+backticks, which a shell expands inside double quotes:
 
 ```
 git grep -l -F -e '## Re-review round <n> `<range>`' -e '**re-review round <n> `<range>`: no findings**' -- <change folder>/findings/
@@ -637,7 +638,9 @@ It must list the findings file of every lane the round ran (the names are in
 "How many at once"), except a lane a later round ran again over the same range:
 that round's own check covers it. It prints file names, not findings, and it
 searches the two exact forms rather than the bare range, because reviewers cite
-ranges in prose, earlier rounds' included. A lane whose
+ranges in prose, earlier rounds' included. A number typed from memory, such as
+the earlier line's for a lane run again, matches the rejected run's record
+whenever that run left one for the lane. A lane whose
 file is not listed has not finished the round, however finished its agent looks
 and whatever its hand-back said: continue that reviewer, or dispatch a fresh one
 for the lane — which gets its own line — and do not tick. This row is the one

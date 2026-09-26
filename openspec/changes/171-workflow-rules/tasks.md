@@ -413,3 +413,36 @@ standing-test entry as `e2f2729` left it; no `.claude/` file changes.
       Verify: `git grep -n -i "three fail" --
       openspec/changes/171-workflow-rules/design.md` returns nothing.
 - [x] 14.2 `openspec validate 171-workflow-rules --strict` passes.
+
+### 15. After the `spec-writer`'s copy rule (`16958b3`)
+
+Supersedes 14.1's stale-number entry in the fail-open list. Follows
+`proposal.md`'s pre-tick bullet and standing-test entry as `16958b3` left
+them.
+
+- [x] 15.1 `RUNNER.md`'s tick paragraph: the check's ``round <n> `<range>` ``
+      is copied from that round's own line as the brief's was, not typed; one
+      sentence after the command's description says a number typed from
+      memory matches the rejected run's record whenever that run left one.
+      "What you read" and the brief bullet unchanged. Verify:
+      `git grep -n -F "copied from that round's own line" -- .claude/agents`
+      returns the tick paragraph only.
+- [x] 15.2 `design.md`'s pre-tick Decision: the check bullet states the copy
+      rule; a new entry records it with two rejected alternatives (typed,
+      measured at `c3d697e9`; a mechanical guard, which is the deferred
+      `closer`-side reader); "What it still cannot see" gains the wrong-line
+      case with a pointer to Risks. Verify: at `c3d697e9` the round 3 forms
+      over `34fd428..dc1390a` list five files, the round 4 forms
+      `readability.md` alone, and the round 5 forms over `dc1390a..d1c8726`
+      include `spec-test.md` and `design-review.md`.
+- [x] 15.3 `design.md` Risks: the stale-number case leaves the fail-open list
+      for its own paragraph (a runtime input, answered by the copy rule); the
+      follow-up's count is three again; "Only the runner runs the pre-tick
+      check" covers forms copied from the wrong line. Verify:
+      `git grep -n -F "four fail-open" --
+      openspec/changes/171-workflow-rules/design.md` returns nothing.
+- [x] 15.4 PR #174's body: step 3 says the check's forms are copied from the
+      round's line; the `closer`-side follow-up names a check run with forms
+      copied from the wrong line.
+- [x] 15.5 `findings/design-review.md`'s round 6 box flipped with its outcome.
+- [x] 15.6 `openspec validate 171-workflow-rules --strict` passes.

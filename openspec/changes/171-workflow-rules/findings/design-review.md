@@ -347,7 +347,7 @@ Below medium, unboxed:
 
 ## Re-review round 6 `d1c8726..6d43cda`
 
-- [ ] **`dev-writer`** — `design.md:1261-1270` and `:1276-1283`: the Risk's
+- [x] **`dev-writer`** — `design.md:1261-1270` and `:1276-1283`: the Risk's
       remedy cannot reach the case this range added to it, and the open design
       call behind that case is not recorded. The standing-test follow-up is
       "a script … that extracts each command from the role file and runs it
@@ -384,6 +384,29 @@ Below medium, unboxed:
       the round 3 forms over `34fd428..dc1390a` list five files and the
       round 4 forms list `readability.md` alone, which matches the Risk's
       measurement.
+
+      **Fixed** (this commit), by taking the call, as the `spec-writer`
+      contracted in `16958b3`. `RUNNER.md`'s tick paragraph now says the
+      check's ``round <n> `<range>` `` is copied from that round's own line
+      as the brief's was, not typed, with one sentence on what a typed number
+      matches; `:574` and the "What you read" row are unchanged. In
+      `design.md` the Risk's fail-open list is back to three role-file
+      cases; the stale-number case is its own paragraph, saying it is a
+      runtime input no fixture test of the role files covers, that the copy
+      rule answers it, and that copying from the wrong line is the next Risk,
+      "Only the runner runs the pre-tick check", which now names it. The
+      follow-up's count reads "three". The pre-tick Decision's check bullet
+      states the copy rule, and a new entry records it with two rejected
+      alternatives: leaving it typed (re-measured at `c3d697e9`: round 3's
+      forms over `34fd428..dc1390a` list five files, round 4's
+      `readability.md` alone), and a mechanical guard, which needs a
+      round-line parser or a second reader, the deferred `closer`-side
+      check. The first unboxed note is answered too: "What it still cannot
+      see" now names the wrong-line case (round 5's forms at `c3d697e9`
+      include `spec-test.md` and `design-review.md`, re-measured) with a
+      pointer to Risks. The second note's analogy is gone with the
+      fail-open bullet that carried it.
+      `git grep -n -F "four fail-open"` over `design.md` now returns nothing.
 
 Read: `git diff d1c8726...6d43cda` in full. `design.md:370-530` (the pre-tick
 decision, "What it still cannot see", the rounds 1 and 2 measurements and
