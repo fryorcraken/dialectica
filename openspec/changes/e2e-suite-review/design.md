@@ -317,6 +317,43 @@ what the spec asks". With its `select` made to match nothing, exactly one check
 goes red, the injected-splice case. Its pairing case moves the same expression
 into the step's `env:` and must pass.
 
+### D9 — The apt install is one script both workflows call
+
+Both UI workflows install `yq` the same way. They move every non-Ubuntu apt
+source aside, let `apt-get update` fail, and treat `install` as the gate. The
+reason is that radicle's identical step once failed `update` on a 403 from a
+preconfigured third-party source. #164 wrote that procedure out twice, in
+ci.yml's `ui-specs` and in ui-tests.yml's `spec`, and nothing would notice if
+one copy were fixed and the other left.
+
+**Chosen:** `dialectica-ui/tests/install-yq.sh [package...]`. It installs `yq`
+and any packages it is given, so ui-tests.yml passes the graphics libraries and
+ci.yml passes nothing. It lives beside `require-jq-yq.sh` and
+`adjudicate-ui-run.sh`, the suite's other shared scripts. It also runs
+`require_jq_yq` once installed, so a runner image that puts the Go `yq` ahead
+of the jq wrapper on `PATH` fails at the install step. Before, it failed in
+whichever script called `yq` first.
+
+**Rejected:**
+
+- **Two copies and a check that they agree,** which is what archived D8 chose
+  for the tool versions. D8 kept a literal in each job because someone reading
+  the job needs to see which version it runs. Nobody reading a job needs the
+  apt-source procedure spelled out inline. The part that differs per job, the
+  package list, stays at the call site as arguments. A check on two copies of a
+  procedure would also have to compare script text, which fails when either
+  copy is reworded, not when they diverge.
+- **A composite action** under `.github/actions/`. It would work, but the repo
+  has none, and it is a second mechanism for what a checked-in script already
+  does here.
+
+**What breaks without it:** nothing local can go red. The script runs `sudo`
+against the runner's apt configuration and runs only in CI. With one copy,
+drift between the two workflows cannot happen, so this holds by construction
+and not by a test. CI is the evidence that it works: "Install yq" in
+`ui-specs` and the install step in `spec` both pass on the pushed tip, and the
+scripts after each one read YAML with the `yq` it installed.
+
 ## Risks / Trade-offs
 
 - **The `lgs` source read is a working tree, not the tag.** Its crate version

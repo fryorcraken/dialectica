@@ -15,7 +15,7 @@ Compared against the named model, `radicle-logos-module`'s
 
 ## Findings
 
-- [ ] **`dev-writer`** — `.github/workflows/ui-tests.yml:118-133` and
+- [x] **`dev-writer`** — `.github/workflows/ui-tests.yml:118-133` and
       `.github/workflows/ci.yml:1168-1180` — the apt third-party-source
       workaround is duplicated verbatim across the two workflows, with no
       shared script and no check that would catch the copies drifting.
@@ -54,6 +54,23 @@ Compared against the named model, `radicle-logos-module`'s
       package list) that both workflows invoke, mirroring how
       `require-jq-yq.sh` and `adjudicate-ui-run.sh` are already shared rather
       than duplicated.
+      **Fixed** in the commit that flips this box, as the finding proposes.
+      `dialectica-ui/tests/install-yq.sh [package...]` holds the one copy of
+      the procedure. ci.yml's "Install yq" calls it with no arguments, and
+      ui-tests.yml's install step passes the six graphics libraries. It also
+      runs `require_jq_yq` once installed, so a wrong `yq` on `PATH` fails at
+      the install step. design.md D9 records the choice, and why the
+      two-copies-and-a-check shape archived D8 used for the version pins was
+      rejected for a procedure. **No test fails without this fix, and none
+      could.** The script runs `sudo apt-get` against the runner's sources,
+      so it runs only in CI. With one copy the two workflows cannot drift, so
+      this holds by construction. The evidence is both install steps passing
+      on the pushed tip (reported in the hand-back). `sh -n` passes locally,
+      and there is no `dash` here to try it under. **One correction to the
+      finding:** the "small drift" it cites is not in the tree. ci.yml's copy
+      did print `tomlq --version` (ci.yml:1181 before this commit, after
+      `command -v yq` and `yq --version`, the same three lines as
+      ui-tests.yml's).
 
 ## Clean
 

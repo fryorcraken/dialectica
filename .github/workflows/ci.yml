@@ -1160,25 +1160,12 @@ jobs:
       # `tomlq` it ships. The runner's preinstalled `yq` is a different tool,
       # the Go one, with no `tomlq` and not jq's language; this package
       # installs over it at /usr/bin/yq, and each script refuses by name to run
-      # on the wrong one (design.md D12). Same install as ui-tests.yml's, with
-      # its apt-source workaround rather than a bare `apt-get install`:
-      # radicle's identical step once failed `update` on a 403 from a
-      # preconfigured third-party source, so the extra sources are moved aside
-      # first and `install` is the real gate.
+      # on the wrong one (the e2e-ui-suite change's design.md D12). The same
+      # script as ui-tests.yml's install, which moves the runner's third-party
+      # apt sources aside first, so there is one copy of that procedure (the
+      # e2e-suite-review change's design.md D9).
       - name: Install yq
-        run: |
-          set -eu
-          sudo mkdir -p /etc/apt/disabled-sources.d
-          sudo find /etc/apt/sources.list.d -maxdepth 1 \
-            \( -name '*.list' -o -name '*.sources' \) \
-            ! -name 'ubuntu.sources' ! -name 'ubuntu.list' \
-            -exec mv -v -t /etc/apt/disabled-sources.d {} +
-          sudo apt-get update -qq \
-            || echo "::warning::apt-get update reported errors; install is the gate, continuing"
-          sudo apt-get install -y --no-install-recommends yq
-          command -v yq
-          yq --version
-          tomlq --version
+        run: dialectica-ui/tests/install-yq.sh
 
       # The adjudicator decides whether an end-to-end run proved anything, so
       # its own guards are checked here, on every PR, rather than only being

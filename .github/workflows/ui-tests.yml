@@ -115,30 +115,18 @@ jobs:
       #     reads the spec with. The runner's preinstalled `yq` is a different
       #     tool, the Go one, with no `tomlq` and not jq's language; this
       #     package installs over it at /usr/bin/yq, and the adjudicator
-      #     refuses by name to run on the wrong one. design.md D12.
+      #     refuses by name to run on the wrong one. The e2e-ui-suite change's
+      #     design.md D12.
       #
-      # The runner image preconfigures third-party apt repos this job does not
-      # use, and one of them failing takes `apt-get update` down with it —
-      # radicle's identical step failed that way on a 403 from
-      # packages.microsoft.com. Every package below is Ubuntu's own, so the
-      # extra sources are moved aside by pattern, and `update` may fail:
-      # `install` is the real gate.
+      # `install-yq.sh` installs `yq` plus the packages named here, after
+      # moving aside the runner's third-party apt sources, which once failed
+      # `apt-get update` for radicle. ci.yml's `ui-specs` job calls the same
+      # script, so the procedure has one copy. The e2e-suite-review change's
+      # design.md D9.
       - name: Install graphics runtime libraries and yq
-        run: |
-          set -eu
-          sudo mkdir -p /etc/apt/disabled-sources.d
-          # `find -exec` rather than a glob: no match must not be an error.
-          sudo find /etc/apt/sources.list.d -maxdepth 1 \
-            \( -name '*.list' -o -name '*.sources' \) \
-            ! -name 'ubuntu.sources' ! -name 'ubuntu.list' \
-            -exec mv -v -t /etc/apt/disabled-sources.d {} +
-          sudo apt-get update -qq \
-            || echo "::warning::apt-get update reported errors; install is the gate, continuing"
-          sudo apt-get install -y --no-install-recommends \
-            libopengl0 libglx0 libgl1 libegl1 libglu1-mesa libvulkan1 yq
-          command -v yq
-          yq --version
-          tomlq --version
+        run: >-
+          dialectica-ui/tests/install-yq.sh
+          libopengl0 libglx0 libgl1 libegl1 libglu1-mesa libvulkan1
 
       # Every spec file in the tree must be in the matrix above. A count is
       # sound in both directions because the first test proves THIS job's
