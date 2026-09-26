@@ -8559,11 +8559,28 @@ mod tests {
         parent: Option<crate::op::OpId>,
         body: &str,
     ) -> crate::op::SignedOp {
+        a_thread_post_with_clock(author_seed, thread, parent, body, None)
+    }
+
+    /// [`a_thread_post`] with its op clock chosen too, for a fixture that needs
+    /// replies in a known order. Two clock-less posts are ordered by op id, an
+    /// unpredictable hash; see
+    /// `a_thread_log_with_a_hidden_reply_and_a_reply_after_it`.
+    ///
+    /// The one place a fixture post's `Op` literal is written, so a field added
+    /// to `Op` or `OpKind::Post` is added here once.
+    fn a_thread_post_with_clock(
+        author_seed: u8,
+        thread: Option<crate::op::OpId>,
+        parent: Option<crate::op::OpId>,
+        body: &str,
+        clock: Option<crate::op::OpClock>,
+    ) -> crate::op::SignedOp {
         let key = feed_key(author_seed);
         Op {
             stoa: feed_genesis().address().unwrap(),
             author: key.public_key(),
-            clock: None,
+            clock,
             kind: OpKind::Post {
                 thread,
                 parent,
@@ -9330,22 +9347,16 @@ mod tests {
     fn a_thread_log_with_a_hidden_reply_and_a_reply_after_it() -> (MemoryOpLog, crate::op::OpId) {
         let root = a_thread_root();
         let under_root_at = |seed: u8, body: &str, counter: u64| {
-            let key = feed_key(seed);
-            Op {
-                stoa: feed_genesis().address().unwrap(),
-                author: key.public_key(),
-                clock: Some(crate::op::OpClock {
+            a_thread_post_with_clock(
+                seed,
+                Some(root.op.id()),
+                Some(root.op.id()),
+                body,
+                Some(crate::op::OpClock {
                     counter,
                     asserted_ms: A_TIME,
                 }),
-                kind: OpKind::Post {
-                    thread: Some(root.op.id()),
-                    parent: Some(root.op.id()),
-                    body: body.to_string(),
-                    attachments: vec![],
-                },
-            }
-            .sign(&key)
+            )
         };
         let to_hide = under_root_at(3, "will be hidden", 1);
         let after = under_root_at(4, "comes after the hidden one", 2);

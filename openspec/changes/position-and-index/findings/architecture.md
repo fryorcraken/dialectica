@@ -71,7 +71,7 @@ claim in `design.md`/`tasks.md`.
       as `op-ordering`'s does for `op-format`. No test covers this, because the
       Purpose states no behaviour.
 
-- [ ] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/wire.rs`,
+- [x] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/wire.rs`,
       the `under_root_at` closure inside
       `a_thread_log_with_a_hidden_reply_and_a_reply_after_it` — duplicates
       the existing `a_thread_post` helper's `Op` literal (same `stoa`,
@@ -94,6 +94,36 @@ claim in `design.md`/`tasks.md`.
       `a_thread_log_with_shared_authors` can't be reused — a different,
       correct point) — it is a stylistic/maintenance observation, not a
       blocking one. Low severity.
+
+      **Outcome (`dev-writer`): fixed** in the commit that ticks this box. The
+      `Op` literal moved into a new `a_thread_post_with_clock`, which takes the
+      clock as a parameter. `a_thread_post` now delegates to it with `None`, and
+      the hidden-reply fixture's `under_root_at` calls it with its ascending
+      counter. The `Op` literal for a fixture post now exists in one place. The
+      change is test-only and changes no behaviour: `a_thread_post` builds the
+      same op it did before, and signing is deterministic, so every fixture op
+      id is unchanged. The full suite stays green.
+      No test fails without this change, because it adds no behaviour. What
+      it has to show is that the fixtures still discriminate. Every mutation
+      `design.md` names was re-run against `thread_page_json` and `parse_index`
+      and then restored:
+      - constant position (`"0"`): the uniqueness and place tests go red, and
+        the page-size test stays green.
+      - `item.author`: the uniqueness and place tests go red, and the page-size
+        test stays green.
+      - op id (`item.id`): only the place test goes red.
+      - per-page index: the uniqueness and page-size tests go red, and the place
+        test stays green.
+      - `{field}` dropped from the wrong-type arm: the index and pagination
+        by-name tests go red. Dropped from the non-integer arm: those two go red
+        along with the largest-page test.
+
+      Every test stays green or goes red exactly as D2 and D5 predict. The place
+      test's failure under `item.author` and the op id is at place 1, where
+      `to_hide` and `after` disagree. That confirms the refactored fixture still
+      places `to_hide` immediately before `after`. The eight `OpKind::Moderate`
+      literals the finding counts are left as they are. They predate this
+      piece, and reshaping them would be a refactor this change does not need.
 
 ## What was clean
 
