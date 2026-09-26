@@ -250,3 +250,181 @@ Confirmed real, and already disclosed in `proposal.md`'s "Overlap with open PR
       2026-09-21T01:23:45Z — unchanged since the proposal's overlap section
       was written, so its four-file overlap description still holds. No new
       finding.
+
+## Re-review `9dc235c..34fd428`
+
+- [ ] **`spec-writer`** — `proposal.md:804-807` — the #132 overlap entry for
+      `RUNNER.md` is now false, and it is false at the one place the two PRs
+      actually collide there. This range edited `RUNNER.md`'s "How many at
+      once" table (`8cef5d1`): the `spec-writer` / `dev-writer` / `tester` row
+      went from "cherry-pick and commit before dispatching the next" to "bring
+      its commits onto your HEAD (cherry-pick, or fast-forward where
+      'Dispatching' says)". #132 edits the very next row of the same table
+      (`reviewers | **six, in parallel**` becomes "three to five"). The entry
+      still says #132 rewrites "How many at once" and the reviewer table, while
+      this piece rewrites other sections, so "The hunks differ".
+      **Scenario:** whoever merges second reads the overlap section to learn
+      what to reconcile in `RUNNER.md`. It points them at lane names in the
+      re-review guidance. It does not tell them that the one textual conflict
+      is in the table, between this piece's route wording and #132's tier
+      count. Adjacent changed rows conflict, which is this piece's own
+      measurement.
+      **Measured:** `git merge-tree --write-tree --name-only 34fd428
+      origin/piece/review-tiering` reports `CONFLICT (content)` in
+      `RUNNER.md`. `git grep -n -e "^<<<<<<<" -e "^>>>>>>>" -e "^=======" <tree>
+      -- .claude/agents/RUNNER.md` finds exactly one conflict block, at merged
+      lines 363-369, which is that table. Severity: low. The merge surfaces the
+      conflict anyway, but the section's job is to say where it will be.
+
+- [ ] **`spec-writer`** — `proposal.md:799-803` — the #132 overlap entry for
+      `closer.md` describes hunks #132 does not have. It says #132 "edits
+      Step 2's rebase and push prose", and that the second to merge "rewrites
+      #132's rebase hunks against a Step 2 that no longer rebases". #132's
+      `closer.md` diff touches none of Step 2's rebase text. It has four hunks:
+      Step 2's opening "Three PRs here…" / `UNKNOWN` evidence paragraph,
+      Step 3's `openspec --version` paragraph, Step 3's "Then push it" upstream
+      check, and Step 4's cancelled-run anecdote.
+      **Scenario:** the second merger goes looking for rebase hunks to
+      rewrite and finds none. Meanwhile `closer.md` auto-merges silently, so
+      nothing prompts anyone to read #132's shortened Step 3 upstream-check
+      paragraph against this piece's Step 3. That paragraph now sits between
+      this piece's new pre-push `openspec/specs/` check and its three push
+      outcomes.
+      **Measured:** `git diff origin/main...origin/piece/review-tiering --
+      .claude/agents/closer.md` shows four hunks, at old lines 113, 193, 226 and
+      260, and none of them contains "rebase". The `git merge-tree` above
+      prints `Auto-merging .claude/agents/closer.md` with no conflict.
+      This predates the range: round 1 of this lane called the section
+      accurate and did not check the hunks. Severity: low.
+
+- [ ] **`spec-writer`** — `proposal.md:788` — "The two PRs overlap in four
+      files" is a count, and it checks false: the PRs overlap in six. This
+      piece and #132 both change `README.md`, `RUNNER.md`, `closer.md`,
+      `spec-writer.md`, `dev-writer.md` and `tester.md`. The `dev-writer.md`
+      overlap is new in this range (`8cef5d1`'s one-clause edit). The
+      `tester.md` overlap predates it.
+      **Scenario:** a merger who trusts the count does not open
+      `dev-writer.md` or `tester.md`. Both auto-merge cleanly today, #132 at
+      `dev-writer.md:214-240` and `tester.md:70` against this piece at
+      `dev-writer.md:131` and `tester.md:34-54`, so no defect ships this way.
+      But the section holds a number that is wrong, which this range's own
+      "returns as examples, no count" decision exists to avoid.
+      **Measured:** `gh pr view 132 --json files` lists nine paths.
+      `git diff --stat origin/main...34fd428 -- .claude/` lists six, and all
+      six appear among the nine. Severity: low. Either say six and name the
+      two that merge cleanly, or drop the count.
+
+- [ ] **`spec-writer`** — `proposal.md:708-730` — the standing-test
+      follow-up, written to be lifted into an issue, leaves out the commands
+      in the rebase with mutations that this range added. One of them is the
+      clearest fail-open case in the whole set. `design.md:1076-1080`'s
+      matching Risks entry does list "the commands in the mutating reviewer's
+      rebase", so the two accounts of the same follow-up disagree, and the
+      issue will be filed from the proposal's.
+      **Scenario:** a runner's continuation message drops `HEAD` from step 1,
+      which gives `git diff --binary --output=tmp/uncommitted.patch`. The
+      patch then holds only unstaged changes. Step 2's
+      `git restore --source=HEAD --staged --worktree -- .` discards the staged
+      ones, step 4's `git apply` succeeds, and every command exits 0. The
+      reviewer reports that the patch applied, and the mutation its findings
+      cite is gone. Under the proposal's own taxonomy that fails open: it
+      destroys the evidence silently, rather than stopping like a mistyped
+      pathspec.
+      **Measured:** git 2.55.0, in a scratch repo at `tmp/scratch-arch/` in
+      this tree. One unstaged edit went to `a.txt` and one staged edit to
+      `b.txt`. `grep -c MUTATED` gives `nohead.patch:1` and `withhead.patch:2`.
+      After step 2 and `git apply nohead.patch`, it gives `a.txt:1` and
+      `b.txt:0`. Every command exited 0. Severity: low to moderate, because
+      the inventory is what the follow-up test is scoped from.
+
+- [ ] **`spec-writer`** — `proposal.md:740-745` — the follow-up "The reviewer
+      role files on rebasing with mutations" cannot be lifted into an issue
+      as it stands, and it leaves the one-copy question open. It says the
+      steps are carried "(above)" and never names where they live, which is
+      `RUNNER.md`'s "Dispatching", the paragraph "An agent whose tree holds
+      uncommitted changes…". It calls the role files the "durable home"
+      without saying what happens to `RUNNER.md`'s four steps once they move.
+      **Scenario:** the project manager files the entry verbatim. The
+      implementer adds the four steps to `code-reviewer.md` and
+      `spec-test-reviewer.md` and leaves `RUNNER.md`'s copy in place, because
+      nothing says to shrink it. That gives three copies of a command
+      sequence, one per file, the drift this piece's "each rule is stated
+      once" principle exists to prevent. The alternative is that the
+      implementer has to rediscover whether `RUNNER.md` keeps a pointer, and
+      that `--no-gpg-sign` stays in the brief rather than going into the role
+      file (`proposal.md:682-694`).
+      **Measured:** `git grep -n -F "(above)" --
+      openspec/changes/171-workflow-rules/proposal.md` hits line 743 inside
+      the entry. The entry names no `RUNNER.md` section. Severity: low.
+
+- [ ] **`spec-writer`** — `proposal.md:731-739` — the follow-up "An
+      independent check of the re-review row by the `closer`" is also not
+      self-contained. It names the check it complements only as "The runner's
+      check before it ticks (above)", and it names no file the change would
+      touch. That leaves out `closer.md` Step 1, `RUNNER.md` step 3's
+      record-line format, and the sample round lines under the template.
+      **Scenario:** lifted into an issue, "(above)" points at nothing, and the
+      reader has to search `RUNNER.md` to find the `git grep -l -F "<range>"`
+      paragraph the issue is about. The one-file-per-stage-row entry sets the
+      standard these follow-ups are held to, with its "Who reads the stage
+      block, and would change" list. This entry does not meet it.
+      **Measured:** `git grep -n -F "(above)" --
+      openspec/changes/171-workflow-rules/proposal.md` hits line 732 inside
+      the entry. Severity: low, a readability-grade defect in a document
+      meant to be copied out.
+
+- [ ] **`dev-writer`** — `.claude/agents/closer.md:482-484` — this range
+      decided, in `RUNNER.md` and `design.md` ("The `closer`'s returns are given
+      as examples, with no count"), that a list of the closer's returns must not
+      read as complete. `closer.md` keeps an enumeration of exactly that shape
+      at the mirror site: "A red run, an unticked box, a conflict, an archive
+      commit that changed `openspec/specs/`, or a refused push ends your turn".
+      It leaves out stops `closer.md` itself defines: Step 6's `BLOCKED` with
+      every check green (#170's case), Step 1's zero-box file and zero or
+      several change folders, Step 3's `merge refs/heads/main` upstream,
+      Step 5's body/diff disagreement, and isolation that did not take.
+      **Scenario:** a `closer` on #170's path finds the PR `BLOCKED` with
+      checks green. It reports, as Step 6 says, and then reads the closing
+      paragraph, whose list of what ends a turn does not name a block. A block
+      can read as transient, so the closer keeps polling `mergeStateStatus`.
+      That is the "stalled agent that looks like a working one" the same
+      paragraph warns about, and it holds a `ListAgents` row while the runner
+      waits. `proposal.md`'s Impact names "the closing paragraph's list of
+      what ends a turn" as owner-authorised, so this edit is in scope.
+      **Measured:** `git grep -n -F "ends your turn" -- .claude/agents/closer.md`
+      finds only the list at line 482-484. `git grep -n -F "BLOCKED" --
+      .claude/agents/closer.md` finds lines 426 and 467, and neither is in
+      that list. Severity: low. The fix is the same as `RUNNER.md`'s: say the
+      list is examples, and that anything reported ends the turn.
+
+**Clean in this range, in prose.** The pieces sit in the right files.
+`closer.md` Step 3 holds the spec check before the push. `RUNNER.md` holds the
+returns routed by kind, the pre-tick `git grep`, the rebase for a tree with
+uncommitted changes, and the fast-forward rule. The pre-tick check is in step 3
+and the "What you read" table, and so with the runner, which alone ticks the
+re-review row. The command prints file names only, so it does not breach "you
+do not read the findings".
+
+I traced the flow for termination, and no agent is left with only a forbidden
+move:
+- A spec-changing archive whose push was accepted comes back, is fast-forwarded,
+  gets a round, and is re-dispatched.
+- A spec-changing archive whose push was refused has the round recorded first
+  and then goes to the owner.
+- Every `dev-writer` pass, a findings pass, a red-CI fix or a conflict
+  resolution, pushes from the runner's HEAD. The remote ref is an ancestor of
+  that HEAD, so the push is accepted and the fast-forward applies.
+- A review-round tick conflict goes back to the agent. A mutating agent patches,
+  restores, rebases and re-applies, and the re-pick is clean.
+- A refused fast-forward and a refused push both stop and go to the owner. No
+  path needs a reset, a force, `--no-ff` or a stash.
+
+`dev-writer.md:131`'s new clause resolves to `spec-writer.md:47-53`, which
+points on to `RUNNER.md`, so it is a pointer and not a restatement. README's
+"brought onto" rewording leaves the reviewer-specific cherry-pick sentences
+alone. Two follow-ups are liftable as they stand: the one-file-per-stage-row
+entry, and "A second reader for a rejected finding", which is self-contained
+with three options and a recommendation. #132 is still `OPEN`, `CONFLICTING`,
+and last updated 2026-09-21T01:23:45Z, and "drops `security` for a prose-only
+change" still matches its tier table. What is inaccurate about the #132
+section is in the three boxes above.
