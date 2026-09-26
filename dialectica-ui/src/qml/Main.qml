@@ -242,7 +242,7 @@ Item {
             return
         var from = root.chosen
         root.enterOnly("reading", { stoa: from.stoa, foundingTitle: from.foundingTitle,
-                                    genesis: "", rootOp: rootOp })
+                                    genesis: from.genesis, rootOp: rootOp })
     }
 
     // Out of the thread, back to the feed it was opened from — without the view
