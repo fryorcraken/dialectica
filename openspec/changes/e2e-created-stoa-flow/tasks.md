@@ -288,9 +288,18 @@ the next push.
       it (design.md D9)
 - [x] 8a.3 A `wait_for:` on the submit control before each click, in
       `feed.yaml` and `thread.yaml`: steps 18 and 23. Both parse with `yq`
-- [ ] 8a.4 Predicted on the pushed fix: `UI spec validation` printing
+- [x] 8a.4 Predicted on the pushed fix: `UI spec validation` printing
       `feed.yaml: ok (18 steps)` and `thread.yaml: ok (23 steps)`; all five
-      UI jobs green; every CI job green
+      UI jobs green; every CI job green. **Observed, on head `963227f`, as
+      predicted:** UI tests
+      https://github.com/fryorcraken/dialectica/actions/runs/36218368171 green
+      in all five jobs, `thread` printing `ok: all 23 steps passed`, its "the
+      reply can be published" wait taking 1.0s and its publish step logging
+      `dialectica.publish_reply`; CI
+      https://github.com/fryorcraken/dialectica/actions/runs/36218368173 green
+      in every job, `UI spec validation` printing the two counts above. One
+      green run does not prove an intermittent miss gone; design.md D9 carries
+      the mechanism
 
 ### 8. Hand-back
 
