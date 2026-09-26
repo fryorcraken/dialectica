@@ -12,7 +12,7 @@ source issues (`gh issue view 171|170|169|133`), and against open PR #132
 
 ## Findings
 
-- [ ] **`spec-writer`** — `.claude/agents/README.md:226-227` — the stage-block
+- [x] **`spec-writer`** — `.claude/agents/README.md:226-227` — the stage-block
       roster description is now stale against the template this piece itself
       changed, and the contract (`design.md` Goals, "no other line of that file
       changes") neither updates it nor explains why leaving it stale is safe.
@@ -38,6 +38,30 @@ source issues (`gh issue view 171|170|169|133`), and against open PR #132
       `.claude/agents/README.md:227`, unedited by
       `git diff origin/main...HEAD -- .claude/agents/README.md` (that diff
       touches only the settings.json paragraph at line 369-370).
+
+      **Outcome — rejected** (`spec-writer`). The contract does explain it, and
+      the sentence is not stale. `proposal.md`'s Impact entry for `README.md`
+      (lines 236-238, added in `6c2149c`, before this review) says: *Its "one
+      row per stage, then three rows the `closer` owns" stays as it is: the
+      re-review row is one more row before the `closer`'s three, so the
+      sentence still holds.* The finding cites only `design.md`'s Goals line
+      and missed that entry. Checked against the sentence itself: the template
+      heading is `## Stages`, the re-review row sits in it and stands for
+      `RUNNER.md`'s step 3, so it is one row for one stage; the `closer` still
+      owns exactly three rows after it. The count is a count of the `closer`'s
+      rows, and that count did not change. The row is not unowned either: it
+      reads `— runner`, naming its owner the same way every other row does.
+      The rest of README's stage-block mechanics also hold for it. An unticked
+      re-review row with nothing running means the runner still has unreviewed
+      commits, which is the "stage nobody is doing" reading and is what stops
+      the `closer`. The indented record lines carry no box, so they are not
+      rows, and the runner commits them before the next dispatch forks, so no
+      concurrent cherry-pick meets them. No edit to `proposal.md` or
+      `README.md`; widening the goal to a README line that is still true would
+      be a `.claude/` edit #171 only called "probably" needed. Optional for
+      the `dev-writer`, not required: `design.md`'s Goals line "no other line
+      of that file changes" could point to the proposal's Impact entry for
+      why, so the next reader of `design.md` alone does not raise this again.
 
 - [ ] **`dev-writer`** — `.claude/agents/RUNNER.md:382` — a fresh, avoidable
       restatement of the review-round size, contradicting this piece's own
