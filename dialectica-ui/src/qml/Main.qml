@@ -28,13 +28,14 @@ Item {
 
     // The Stoa whose feed is up, or `null` when the list is.
     //
-    // `{stoa, foundingTitle, genesis}`. `genesis` is "" where the view holds no
-    // record — the listing does not return one — and FeedScreen passes that
-    // through to the core unchanged. The core then refuses it, and the feed
-    // renders that refusal, which is honest and is distinguishable from a Stoa
-    // holding nothing. **Nothing here invents a record**: a fabricated one would
-    // fail verification in the core and surface as a refusal the user cannot
-    // act on.
+    // `{stoa, foundingTitle, genesis}`. `genesis` is the record the list screen
+    // holds for that Stoa — every creation, join and listing reply carries one
+    // (`stoa-membership`, since `genesis-in-replies`) — or "" where no reply
+    // supplied one, and FeedScreen passes that through to the core unchanged.
+    // The core then refuses it, and the feed renders that refusal, which is
+    // honest and is distinguishable from a Stoa holding nothing. **Nothing here
+    // invents a record**: a fabricated one would fail verification in the core
+    // and surface as a refusal the user cannot act on.
     property var chosen: null
 
     // A reference being previewed, or `null`. Set by the paste field and by an
@@ -131,6 +132,32 @@ Item {
     readonly property string pasteFailure: list.pasteFailure
     readonly property string joinState: join.joinState
     readonly property string joinFailure: join.failure
+
+    // The created-Stoa route (`e2e-created-stoa-flow`). Same rules as above:
+    // each is a projection of a value its screen already owns, and each is
+    // pinned in `tst_e2e_handles.qml`.
+    //
+    // `listedStoas` reads `visibleRows`, never `lastListing`, for the reason
+    // `stoaCount` does. `createdStoa` reads the creation reply the list screen
+    // kept, so a spec can compare "what was made" against "what was listed"
+    // rather than trusting a count of one.
+    readonly property var listedStoas: list.visibleRows.map(function (row) {
+        return row !== null && typeof row.stoa === "string" ? row.stoa : ""
+    })
+    readonly property string createdStoa:
+        list.created !== null && typeof list.created.stoa === "string" ? list.created.stoa : ""
+
+    // `feedRowCount` reads `visibleRows`, which is empty unless the read
+    // succeeded: `rows` keeps the last good page across a failed reload, so a
+    // count of it would report posts the screen has said it could not read.
+    readonly property string feedReadState: feed.readState
+    readonly property int feedRowCount: feed.visibleRows.length
+    readonly property bool feedCanPost: feed.capability.canPost === true
+
+    // The thread screen empties `items` on every failure path itself, so the
+    // count needs no guard of its own here.
+    readonly property string threadReadState: thread.readState
+    readonly property int threadItemCount: thread.items.length
 
     // ---- the one transition primitive -----------------------------------
     //
@@ -354,18 +381,13 @@ Item {
                     // The record IS held for a Stoa joined in this session — it
                     // is the one the user pasted — so record it, which is what
                     // gives that row a share affordance and lets its feed open
-                    // with a record. It is lost on restart, because the listing
-                    // does not return retained records; closing that is a core
-                    // change this piece does not make.
+                    // with a record even before the reload below reports it.
                     //
-                    // **A JOINED Stoa is the only kind this ever holds a record
-                    // for.** A Stoa the user CREATED is unshareable immediately,
-                    // not merely after a restart: `create_stoa` returns
-                    // `{stoa, foundingTitle, policy}` and no genesis record, so
-                    // there is nothing to put in this map for it. The asymmetry
-                    // is worth stating here because "lost on restart" alone
-                    // reads as though creation and joining behaved alike, and
-                    // they do not.
+                    // A created Stoa gets its record the same way, from the
+                    // creation reply (`DStoaListScreen.create()`), and a listed
+                    // one from its listing item (`reload()`): `stoa-navigation-
+                    // view`'s "What is shared carries the founding record, and a
+                    // Stoa is shareable wherever a reply carried it".
                     var held = list.genesisByStoa
                     held[stoa] = genesis
                     list.genesisByStoa = held

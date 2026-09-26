@@ -554,7 +554,12 @@ ScreenFrame {
             color: DTheme.inkMuted
             textFormat: Text.PlainText
 
+            // Named for the end-to-end suite, for the reason `readThreadArea`
+            // is — and here the reason bites: the first handler in this
+            // header's row is the "All Stoas" button's, so a click aimed at
+            // `moderateLink` by label would leave the feed for the list.
             MouseArea {
+                objectName: "moderateArea"
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
                 onClicked: screen.moderationRequested()
@@ -905,7 +910,14 @@ ScreenFrame {
                         color: DTheme.ink
                         textFormat: Text.PlainText
 
+                        // Named separately from the Text above, for the
+                        // end-to-end suite: sitometres looks for a click target
+                        // among a label's ANCESTORS' descendants, never its own
+                        // children, so a click on `readThreadLink` would land on
+                        // whichever handler its enclosing row lists first. The
+                        // handler itself is the unambiguous target.
                         MouseArea {
+                            objectName: "readThreadArea"
                             anchors.fill: parent
                             cursorShape: Qt.PointingHandCursor
                             onClicked: screen.threadOpened(parent.target)
