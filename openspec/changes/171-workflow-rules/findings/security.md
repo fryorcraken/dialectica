@@ -1144,3 +1144,68 @@ Nothing under `.claude/` changed in the range. `git diff d1d2165..c4b1df5
 --stat` touches only `openspec/changes/171-workflow-rules/`. Nothing in it
 adds a route to `main`, a force, `--admin`, or a way for a round to count as
 done that was not there before.
+
+## Re-review round 10 `c4b1df5..842758b`
+
+- [x] **re-review round 10 `c4b1df5..842758b`: no findings** — read `git diff c4b1df5...842758b` of `RUNNER.md`, `proposal.md` and `design.md` in full, `RUNNER.md:560-690`, PR #174's body, and re-ran the number check at HEAD and at `94840b52`; clean
+
+Security only, on Opus, narrowed to the round-9 box and `328c192`, `842758b`.
+No mutation: the change is prose.
+
+**Does the number check close the templated duplicate for a faithful runner?**
+Yes. The round-9 scenario: round 3 security is not accepted, and the runner
+templates the re-run's line from round 3's with `round 3` left. At the tick,
+`RUNNER.md:627-648` has it run `git grep -n -F "      round " -- <change
+folder>/tasks.md` first. A templated line keeps the template's six-space
+indent, so the listing shows `round 3` on two adjacent lines under the row, and
+"a number that repeats … you do not tick" stops it before the forms check can
+pass on the rejected run's record. The repair is fail-closed in every variant I
+tried: the listing fixes each line's number by its position ("in the order they
+stand"), so the runner cannot resolve the pair by renumbering the original; the
+renumbered line's lanes run again under the new number, so the rejected run's
+round-3 record never satisfies the new forms; and the original round 3 still
+excuses security only because a later round re-ran it, which the renumbered
+round now really does. A duplicate carrying a different range, or a skip such
+as 1, 2, 4, also blocks the tick and only ever adds runs. Re-measured: at this
+HEAD the command prints `tasks.md:25-34`, `round 1` to `round 10` once each; at
+`94840b52` it prints `tasks.md:25-33`, 1 to 9, matching both documents' claims.
+The round-9 box's Fixed note holds, and the `RUNNER.md` edits carry out items 1
+and 2 of its dev-writer list as written.
+
+**Are the residuals recorded honestly and routed?** Two of three, fully.
+Copying the forms from the wrong line and skipping either check are in both
+documents' "What it still cannot see", in `design.md`'s two Risks, in
+`proposal.md`'s standing-test bullet and follow-up, and in both PR-body
+follow-ups, each routed to the `closer`-side second reader, which would see
+both. The round-8 reasoning ("adds no check", "stays in the class … skips the
+check") is gone from the rejection; `git grep -n -F "adds no check"` finds it
+nowhere in `proposal.md`, `design.md` or `.claude/agents`.
+
+The third is recorded but not routed (low, prose only). A re-run given no line
+of its own is in "What it still cannot see" in `proposal.md` and `design.md`,
+correctly said to break "Record the call" outright. It is not in `design.md`'s
+"[Only the runner runs the pre-tick checks.]" Risk or in either PR-body
+follow-up, and no follow-up could take it: the `closer`-side check reads the
+same lines and the same forms, so it would pass the same way. It is effectively
+an accepted residual that no entry names as accepted. That is low rather than
+medium because reaching it needs a runner to break a rule stated in bold
+(`RUNNER.md:605-607`), not to follow every step, and the record says so. Adding
+one clause saying so to that Risk would make the acceptance explicit.
+
+**Does anything new let a round count as done without every lane's accepted
+run?** No. Every new instruction either stops the tick or adds a run. One
+narrow gap in the new check, low, prose only: the listing depends on the
+six-space indent (`RUNNER.md:634`), while "Record the call" (`:600-601`) asks
+only for "one indented line per round". A line written fresh with another
+indent and a number typed from memory would be left out of the listing, so
+the numbers would read unique while the forms check, copied from that line,
+passes on the earlier record. Only a runner who both mis-indents a fresh line
+and types its number from memory reaches it, and a templated line, which is
+the case the check exists for, keeps the indent. Saying "six spaces" in "Record
+the call" as well would close it.
+
+Scope: `git diff --stat c4b1df5...842758b` touches `.claude/agents/RUNNER.md`
+and nothing else under `.claude/`, and the `RUNNER.md` hunks are the tick
+paragraph and one "What you read" row, both within #171's re-review mechanism.
+Nothing in the range adds a route to `main`, a force, `--admin`, or a way to
+tick the re-review row that was not there before.
