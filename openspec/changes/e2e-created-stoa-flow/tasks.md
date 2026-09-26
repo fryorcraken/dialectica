@@ -20,7 +20,7 @@
       closing a partial gap in `stoa-navigation-view`'s "A listing item with no
       record gets a row, no share, and no error" (rows still rendered, no error),
       proven by mutation
-- [ ] review: correctness — `code-reviewer`
+- [x] review: correctness — `code-reviewer`
 - [x] review: security — `code-reviewer`
 - [x] review: readability — `code-reviewer`
 - [x] review: architecture — `code-reviewer` — no blocking finding;
