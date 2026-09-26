@@ -501,3 +501,41 @@ Below medium, in prose:
 - The new Decision has no cost line. The cost is small (the runner copies
   rather than types, which it already does for the brief), and saying so
   would make the entry complete.
+
+## Re-review round 9 `d1d2165..c4b1df5`
+
+- [x] **re-review round 9 `d1d2165..c4b1df5`: no findings** — read `git diff d1d2165...c4b1df5` of `design.md` and `proposal.md`, `design.md:470-590`, `RUNNER.md:546-648`, `findings/security.md`'s round-8 box and `tasks.md`'s round lines; clean
+
+**The two documents agree on all five.** "What it still cannot see": the same
+residual, scenario and measurement (``round 3 `34fd428..dc1390a` `` forms at
+`9e6dde2f` and `291499c7`, five files), the same "n-th line carries n"
+argument, and both end on the unique-and-consecutive criterion. The
+stale-number Risk: `design.md` and `proposal.md` both name two residuals, the
+wrong line and a repeated or stale number on the line, both routed to the
+`closer`-side follow-up. "[Only the runner runs the pre-tick check.]": both add
+the repeated-number line to what goes unnoticed and say the deferred check
+sees it only by the number criterion; `proposal.md` adds the fixed-start note
+and the 1-to-8 measurement, which is detail and not a disagreement. "What else
+was considered" (`design.md:580-581`) gains the third residual. The Rejected
+entry has no counterpart in `proposal.md`, which is right: a rejected
+alternative belongs in the Decision, and `proposal.md` carries the premise it
+rests on ("already fixes each line's number").
+
+**The Rejected entry's reasoning is sound in its main argument.** A clause
+restating the numbering rule, applied by the runner whose slip it targets, adds
+no check; that holds. Below medium, in prose:
+
+- The entry cites the weaker of two rules. `RUNNER.md:604-606` already says a
+  lane run again "gets a line of its own — the next number, the same range",
+  which is the templated re-run case exactly. Citing it would show the slip
+  breaks an explicit rule for that very case, not only an inference from
+  "numbered from 1".
+- "Reopen a role file to the correctness, security and readability lanes" is
+  unmeasured, as the dev-writer flagged, and this piece's own record half
+  contradicts it: round 7 (`tasks.md:31`) re-reviewed a one-clause `RUNNER.md`
+  edit with correctness and security and skipped readability ("one clause").
+  "Correctness and security" is what the record supports. It is also a
+  review-process cost, not a design reason, and the entry does not rest on it;
+  dropping the sentence would lose nothing.
+- Round 7's note stands unfixed: `proposal.md` still says "run with round 5's
+  start would pass" where `design.md` says "round 5's forms".
