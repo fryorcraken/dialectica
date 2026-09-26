@@ -391,8 +391,7 @@ Item {
                     var held = list.genesisByStoa
                     held[stoa] = genesis
                     list.genesisByStoa = held
-                    // e2e proof break (e2e-successful-join design.md D6): the
-                    // listing is not read again after a join. Reverted next.
+                    list.reload()
                 }
 
                 onCancelled: root.enterOnly("", null)
