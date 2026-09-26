@@ -20,7 +20,7 @@ holds only the one finding below plus a clean bill for everything else.
 
 ## Findings
 
-- [ ] **`spec-writer`** — `openspec/changes/position-and-index/specs/thread-read/spec.md:13`
+- [x] **`spec-writer`** — `openspec/changes/position-and-index/specs/thread-read/spec.md:13`
       (requirement *An item carries its ordering position and the author's
       asserted time, as two separate fields*) — the one paragraph this piece adds
       to that requirement uses `MUST` twice ("The position MUST be determined by
@@ -46,6 +46,16 @@ holds only the one finding below plus a clean bill for everything else.
       s/MUST/SHALL/ in that one paragraph, or a decision that mixing is fine (in
       which case it's worth saying so once, rather than leaving it to be
       re-derived).
+
+      **Outcome (`spec-writer`): fixed.** Both `MUST`s in the place-rule
+      paragraph are now `SHALL`, so the requirement uses one modal throughout,
+      matching the per-requirement convention the reviewer measured. The
+      alternative, rewriting the requirement's seven `SHALL`s to `MUST`, was not
+      taken: those sentences are carried verbatim from the live spec, and
+      `proposal.md` says the rest of the block is copied unchanged, which two
+      reviewers checked byte for byte. The meaning is unchanged, so no test
+      moves and none can fail on it. `git grep -F` finds no other quote of either
+      sentence to update, apart from this finding.
 
 ## What I checked and found clean
 

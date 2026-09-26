@@ -22,6 +22,14 @@ rest, what unlocks it and what is refused; `posting-capability` owns the probe t
 gates posting. This capability owns only the act of *acquiring* an identity, and
 deliberately restates none of the three.
 
+**A keep request's `index` is refused by name in parallel with `feed-read`, not by
+it.** `feed-read` owns the refusal of a malformed `page` or `perPage`, and requires
+its message to name the field. This capability states the same of `index` in *A
+malformed `index` in a keep request is refused with a message naming `index`*, over
+the same kinds of malformed value. Neither restates the other, and each governs its
+own fields only. A change to what `feed-read` counts as malformed is a change to
+check against that requirement.
+
 ## Requirements
 
 ### Requirement: A user is offered several candidate identities and chooses one

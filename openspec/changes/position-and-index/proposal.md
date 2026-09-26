@@ -63,6 +63,16 @@ None.
   *Every entry point refuses malformed input rather than guessing* is left
   unchanged: it requires the refusal but says nothing about the message.
 
+  **One edit is made directly to the live spec, not through the delta**, because
+  a delta cannot change a Purpose. `openspec/specs/identity-onboarding/spec.md`'s
+  Purpose gains a paragraph after its boundary paragraph, naming `feed-read` and
+  saying the two refusals run in parallel and neither restates the other. Without
+  it, a reader of the live spec after archive has no sign that leaving
+  `feed-read` out of the boundary is deliberate. Archive merges only the ADDED
+  requirement, so the direct edit survives it untouched. `feed-read`'s Purpose
+  is not edited: its boundaries name the capabilities whose rules it uses, and
+  `index` is not one of them.
+
 - `thread-read`: MODIFIED *An item carries its ordering position and the
   author's asserted time, as two separate fields*. Two edits and one scenario;
   the rest of the block is copied unchanged. Its uniqueness sentence now reads

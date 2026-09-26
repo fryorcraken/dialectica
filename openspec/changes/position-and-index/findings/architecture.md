@@ -14,7 +14,7 @@ claim in `design.md`/`tasks.md`.
 
 ## Findings
 
-- [ ] **`spec-writer`** — `openspec/specs/identity-onboarding/spec.md`
+- [x] **`spec-writer`** — `openspec/specs/identity-onboarding/spec.md`
       (Purpose section) — the new ADDED requirement shares `parse_index` with
       `feed-read`'s `page`/`perPage` refusal, and `proposal.md` ("Modified
       Capabilities") and `design.md` (D1) both reason carefully about why this
@@ -46,6 +46,30 @@ claim in `design.md`/`tasks.md`.
       Severity: moderate — not a behavioural defect, but a discoverability
       gap in exactly the place `docs/OPENSPEC-ARCHIVE.md` calls out as
       already having bitten this repo once.
+
+      **Outcome (`spec-writer`): fixed.** `identity-onboarding`'s Purpose gains a
+      paragraph after its boundary paragraph. It names `feed-read` as the owner
+      of the `page`/`perPage` refusal, cites the new requirement by name, says
+      the two apply to the same kinds of malformed value, that neither restates
+      the other and each covers only its own fields, and that a change to what
+      `feed-read` counts as malformed has to be checked against the `index`
+      requirement. It is a separate paragraph rather than a fourth name in the
+      existing list, because that list names capabilities this one relies on,
+      and `feed-read` is a parallel. The parser goes unnamed because it is
+      implementation, and D1 in `design.md` already records it. The edit is made
+      directly to the live spec, because a delta cannot change a Purpose. That
+      follows #160's precedent (`d8a56272`), and `proposal.md` now records it
+      under Modified Capabilities. Archive merges only the ADDED requirement, so
+      the edit survives it.
+
+      Only one direction is fixed. The scenario starts with a reader in
+      `feed-read`, and `feed-read`'s Purpose gains no reverse pointer. Its five
+      boundaries name the capabilities whose rules it uses. Listing every other
+      capability that refuses a field by name would be an open-ended list that
+      goes stale when a sixth one appears. The dependency points from `index`'s
+      list of kinds to `feed-read`'s, so the note belongs on the dependent side,
+      as `op-ordering`'s does for `op-format`. No test covers this, because the
+      Purpose states no behaviour.
 
 - [ ] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/wire.rs`,
       the `under_root_at` closure inside
