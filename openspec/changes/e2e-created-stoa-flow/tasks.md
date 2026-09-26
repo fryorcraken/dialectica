@@ -230,7 +230,12 @@ the next push.
       https://github.com/fryorcraken/dialectica/actions/runs/36216375946 red
       in `QML lint` only, on exactly the five re-measured tests. `Lint`,
       `UI spec validation`, `Rust core tests` and `Build LGX` green
-- [ ] 6.2 Revert pushed; both workflows green on it
+- [x] 6.2 Revert pushed; both workflows green on it. **Observed, on head
+      `18f5bee`** (the revert `df19182` plus the 6.1 record): UI tests
+      https://github.com/fryorcraken/dialectica/actions/runs/36216812878 green
+      in all five jobs; CI
+      https://github.com/fryorcraken/dialectica/actions/runs/36216812897 green
+      in every job
 
 ### 7. `moderation.yaml` goes red when an inert control withdraws the way out
 
@@ -239,8 +244,8 @@ the next push.
       inert control leaves the way out offered", on its `text:` half after
       the step's 30s; the other four green. This is also the measurement
       design.md D5 rests on: a green here would mean the step reads before the
-      click lands. `QML lint` red on one test, measured locally (565 passed, 1
-      failed): `tst_navigation.qml`'s
+      click lands. `QML lint` red on one test, measured locally and
+      re-measured after 3.3 (567 passed, 1 failed): `tst_navigation.qml`'s
       `test_the_moderation_screen_can_be_left_after_pressing_its_controls`
 - [ ] 7.2 Revert pushed; both workflows green on it
 
