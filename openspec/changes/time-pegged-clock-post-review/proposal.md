@@ -9,7 +9,8 @@ The same PR also merged four commits that landed after its review round and were
 - **Remove the reasoning prose that #165 added to, or rewrote in, the live specs** of `op-ordering`, `op-format`, `op-transport`, `feed-view`, `post-revision` and `thread-read`. That covers history ("previously", "used to", "this replaces"), justification ("on purpose", "the cost is stated", the SDS provenance) and scenario notes about renaming.
 - **No behaviour changes.** Every requirement keeps its normative text, and every scenario is carried over word for word. Where a paragraph mixed a behaviour statement with reasoning, the behaviour statement stays. Three of them are reworded so they read on their own. "Judgement calls" below lists them.
 - **Reasoning that #165 did not add or rewrite is left alone**, even where it is still reasoning. There is plenty of it in these specs. Removing it is a separate piece.
-- **Nothing is lost.** The archived `design.md` of #165 is history and is not edited. So every removed passage is recorded verbatim below, with where it came from, for the `dev-writer` to carry into this change's `design.md` Decisions.
+- **Nothing is lost.** Every removed passage is recorded verbatim below, with where it came from, for the `dev-writer` to carry into this change's `design.md` Decisions. The reasoning goes there, not into the archived `design.md` of #165; this change's `design.md`, Decision 1, says why.
+- **Two forward pointers are added to the archived `design.md` of #165.** Review of #165's unreviewed tail found two of its Decisions, 3 and 10, wrong about what they describe. Each correction is argued in this change's `design.md`, Decision 11. The archived Decision it corrects gets a short note, directly after the paragraph it corrects and marked as added by a later change, that names Decision 11. Nothing else in the archived change is edited.
 - **This piece carries the review of #165's unreviewed tail.** See "Review scope".
 
 ## Review scope
@@ -46,6 +47,7 @@ For each capability, the delta restates only the requirements #165 touched. The 
 
 - **Code, wire API, tests: none.** No behaviour changes, so no test should change. A test that has to change is evidence that this change altered behaviour, and that is a defect.
 - **`openspec/specs/`**: six files, on archive.
+- **`openspec/changes/archive/2026-09-25-time-pegged-clock/design.md`**: two labelled notes, one under each of archived Decisions 3 and 10, pointing to this change's `design.md`, Decision 11.
 - **`design.md`** (new, the `dev-writer`'s): gets the reasoning listed below.
 
 ## Reasoning removed from the specs, for `design.md`
