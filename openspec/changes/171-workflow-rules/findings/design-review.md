@@ -131,3 +131,27 @@ a change with no source diff and no test suite that reads `.claude/agents/` —
 doesn't have.
 
 No findings to report.
+
+## Round 2
+
+- [x] **re-review `c222c37..9dc235c`: no findings** — read `design.md` in full
+      (the new merge-not-rebase, closer-stops-on-conflict, spec-changing-archive,
+      fast-forward, "what the runner commits", clean-verdict-box,
+      findings/-deletion-in-Step-3 and corrected-product-decision entries), the
+      role-file diffs over the range (`RUNNER.md`, `closer.md`, `README.md`,
+      `spec-writer.md`), `proposal.md`'s diff over the range, and the four issues
+      fresh via `gh issue view --json body,comments`. Re-ran the reflog
+      command (`git reflog show --date=iso piece/171-workflow-rules`) and
+      confirmed the cited SHAs and timestamps (`abc7693`, `c67aa24..d41d0fd`,
+      the four cherry-picks at 23:32:26–27, the `reset` to `d41d0fd` at
+      23:32:47) match exactly. Checked the numbered-step structure in
+      `RUNNER.md`'s new section against `design.md`'s claim (four steps,
+      `**1.**`–`**4.**`, with `### The \`closer\`, and what comes back` as
+      step 4's subsection) — matches. Checked the findings-gate grep commands
+      in `closer.md` (`grep -rn "^- \[ \]"`, `grep -rc "^- \["`) against
+      `design.md`'s citation of them for the verdict-box mechanism — matches.
+      Grepped for stale rebase-era phrasing in `closer.md`, `RUNNER.md` and
+      `README.md` (`closer.*rebase`) — none found. Every Decisions entry added
+      or changed in this range has a matching, word-for-word implementation in
+      the role files, including its rejected alternatives; nothing in `design.md`
+      is stale against a later ruling in this same range. Clean.
