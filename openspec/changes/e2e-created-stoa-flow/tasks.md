@@ -195,17 +195,25 @@ the next push.
       whose fake answers the feed's read with no items, so the break reads it
       as a failure. `Lint`, `UI spec validation`, `Rust core tests` and
       `Build LGX` green
-- [ ] 5.2 Revert pushed; both workflows green on it
+- [x] 5.2 Revert pushed; both workflows green on it. **Observed, on head
+      `fa3eaa4`** (the revert `ad672a1` plus the 5.1 record): UI tests
+      https://github.com/fryorcraken/dialectica/actions/runs/36215967034 green
+      in all five jobs; CI
+      https://github.com/fryorcraken/dialectica/actions/runs/36215966995 green
+      in every job
 
 ### 6. `thread.yaml` goes red when the thread is opened without its record
 
 - [ ] 6.1 Break: `Main.openThread` sends `genesis: ""`, pushed alone.
       Predicted: `sitometres thread spec` red on "the thread was read, and
       holds the root with no replies", the core refusing an empty record; the
-      other four green. `QML lint` red on three tests, measured locally (563
-      passed, 3 failed): `tst_navigation.qml`'s
-      `test_a_feed_row_opens_its_thread_with_the_stoa_and_the_root_op`, and
-      `tst_thread_navigation.qml`'s
+      other four green. `QML lint` red on five tests, re-measured locally on
+      the fixed tree (563 passed, 5 failed; the first measurement, before
+      3.3, found the first and the last two): `tst_navigation.qml`'s
+      `test_a_feed_row_opens_its_thread_with_the_stoa_and_the_root_op`,
+      `test_the_feed_is_read_with_the_record_on_every_route_onto_it` ("back
+      from a thread") and `test_the_thread_is_read_with_the_record_when_it_is_opened`,
+      and `tst_thread_navigation.qml`'s
       `test_the_feed_it_was_opened_from_is_recoverable_while_reading` and
       `test_the_thread_is_given_the_feeds_stoa_and_record`
 - [ ] 6.2 Revert pushed; both workflows green on it
