@@ -380,7 +380,7 @@ Below medium, so in prose rather than boxed:
 
 ## Re-review round 5 `dc1390a..d1c8726`
 
-- [ ] **`spec-writer`** — `proposal.md:844-847` (standing-test entry, fail
+- [x] **`spec-writer`** — `proposal.md:844-847` (standing-test entry, fail
       closed) versus `proposal.md:199-203` (the line rule, added in this range)
       — the entry says "A pre-tick pattern with a wrong character lists
       nothing, and the runner cannot tick". That is false for one character,
@@ -417,6 +417,26 @@ Below medium, so in prose rather than boxed:
       and the correct one would have held the tick. Severity: medium. It is a
       fail-open gate classified as fail closed, in the entry written to be
       lifted into the follow-up issue.
+      **Outcome (`spec-writer`): accepted, fixed in `proposal.md`'s
+      standing-test entry.** Re-measured at `80c1bcc8`: the round 3 forms over
+      `34fd428..dc1390a` list five files, every lane but `readability.md`,
+      and the round 4 forms list `readability.md` alone. One refinement to the
+      box: the stale number fails open only when the earlier run over the
+      range left a record for that lane. This piece's own round 4 would have
+      failed closed, because the round 3 readability run wrote nothing. A lane
+      whose rejected run did write, as round 1's Sonnet security run did,
+      fails open. That is the case the line rule's number exists for, so it
+      belongs on the fail-open list. Changes: the fail-closed sentence now
+      reads "a wrong character that no committed record carries". The
+      fail-open list gains the stale-number case, with the measurement and
+      the refinement, and its count goes from "Three" to "Four". The design
+      call the box leaves open (whether the runner should copy the number
+      from the new line rather than type it) is not taken here: it is
+      `design.md`'s, and the entry is a follow-up. `design.md`'s matching
+      Risks entry ("The git commands the role files name have no standing
+      test", fail closed/fail open lists and "the three fail-open cases
+      first") carries the same misclassification. That is listed for the
+      `dev-writer`, not edited here.
 
 Read: the `proposal.md` range diff in full, and `proposal.md` at HEAD in full
 (`d1c8726`'s proposal is HEAD's; `07f0a5f` changes only `tasks.md`).

@@ -843,14 +843,14 @@ another file.
   They do not fail alike, and that sets the order a test covers them in:
   - **Fail closed: the agent stops or reports.** A mistyped `ls-files`
     pathspec returns no path or several, and the `closer` stops. A pre-tick
-    pattern with a wrong character lists nothing, and the runner cannot
-    tick. The save step with `--binary` dropped writes `Binary files a/<f>
-    and b/<f> differ` for a binary change, and `git apply` then refuses it
+    pattern with a wrong character that no committed record carries lists
+    nothing, and the runner cannot tick. The save step with `--binary`
+    dropped writes `Binary files a/<f> and b/<f> differ` for a binary change, and `git apply` then refuses it
     (`error: cannot apply binary patch to '<f>' without full index line`,
     exit 1), so the reviewer reports that the patch did not apply; step 2
     has already discarded that change from the tree, so the loss is
     reported, not prevented.
-  - **Fail open: every command exits 0 and the flow carries on.** Three,
+  - **Fail open: every command exits 0 and the flow carries on.** Four,
     and they are the ones a test covers first:
     - a mistyped `openspec/specs/` path lists nothing, and the `closer`
       carries on past an archive that changed the live contract, so an
@@ -863,6 +863,18 @@ another file.
       `findings/` listed all six files, every one matched by round 1's
       records (`findings/spec-test.md`, re-review `9dc235c..34fd428`, third
       box);
+    - a pre-tick search for a lane run again, typed with the earlier line's
+      round number, matches the earlier run's record over the same range
+      whenever that run left one for the lane. The runner ticks before the
+      re-run has written anything. The line rule above makes two numbers
+      over one range routine, and the earlier run's record is the one its
+      number exists to set aside, as with round 1's Sonnet security box.
+      Measured at `80c1bcc8` over `34fd428..dc1390a`: the round 3 forms list
+      every lane's file but `readability.md`, and the round 4 forms list
+      `readability.md` alone (`findings/spec-test.md`, re-review round 5
+      `dc1390a..d1c8726`, box). The round 3 readability run wrote nothing,
+      so this piece's round 4 would have failed closed under round 3's
+      number; a lane whose earlier run did write would not;
     - the save step with `HEAD` dropped,
       `git diff --binary --output=tmp/uncommitted.patch`, writes only the
       unstaged changes. Step 2 then discards the staged ones, step 4's
