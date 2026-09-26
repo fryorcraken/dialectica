@@ -164,3 +164,69 @@ with `git merge --ff-only ee8e145` (a pure ref move; `8368b2f` was already an
 ancestor, confirmed with `git merge-base --is-ancestor`, and the merge added
 no code, only the missing `openspec/` and `CLAUDE.md` files). Worth checking
 whether the other parallel reviewers on this piece hit the same stale base.
+
+## Round 2 (HEAD 532794e)
+
+Scope: `git diff ee8e145...HEAD` — the fix pass (job-level `env:` for
+`REPORT`/`JUNIT`/`"$LGS_VERSION"`, the new `tst_workflow_run_bodies.sh` gate,
+`install-yq.sh`), the `view-navigation` spec delta, and the new/extended
+`tst_e2e_handles.qml` and `tst_adjudicate_ui_run.sh` cases, read in the context
+of the whole suite as it now stands.
+
+**The round-1 finding is fixed, confirmed against the live files, not just the
+new test's own fixtures.** Converted both workflows with `yq . <file>` and read
+every `steps[].run` value directly: `ui-tests.yml`'s `spec` job now carries
+`REPORT`/`JUNIT` as job-level `env:` beside `SPEC`, its three consumers
+(`--json`, `--junit`, the adjudicator call) read `"$REPORT"`/`"$JUNIT"`, and
+both workflows' `cargo install logos-scaffold --version` lines read
+`"$LGS_VERSION"`. No `${{` appears in any `run:` body of either file. Ran
+`tst_workflow_run_bodies.sh` and `tst_ui_tool_pins.sh` directly (not read —
+executed): both pass against the live workflows, and the former's own fixture
+pair (a splice / the same value through `env:`) is reported / not-reported as
+its comments claim. The new gate is wired into `ci.yml`'s `ui-specs` job, so it
+runs on every PR rather than only existing as an uncalled script — the same gap
+round 1's `design-review.md` flagged for its sibling
+`tst_scaffold_values_unchanged.sh`, not repeated here.
+
+**`install-yq.sh` opens nothing new.** Both call sites (`ci.yml` with no
+arguments, `ui-tests.yml` with six hardcoded graphics-library names) pass only
+repo-literal strings as `"$@"`, never a value that could carry attacker- or
+even PR-branch-controlled content, so consolidating the apt-source-juggling
+`sudo` procedure into one script does not change who can influence it. The
+script still moves aside only non-Ubuntu apt sources, treats `install` (not
+`update`) as the gate, and calls `require_jq_yq` after installing — the same
+shape round 1 read clean, now in one place instead of two.
+
+**The `adjudicate-ui-run.sh` NO-SPEC additions (D6, D7) keep the fail-closed
+shape round 1 checked.** The new `expected=null` path (a spec whose `steps:`
+is absent, non-list, or unparseable) is produced either by jq's own `null` or
+by catching a `yq` failure with `if ! expected=$(...); then expected=null; fi`
+— under `set -eu` this is the one place a bare `expected=$(...)` would
+otherwise abort the script on `yq`'s exit code before the other two conditions
+are checked, and the fallback correctly still leaves `problem` called and the
+verdict/failed-steps checks running. Ran `tst_adjudicate_ui_run.sh` directly:
+all cases pass, including the three new ones (no `steps:`, `steps: 2` as a
+scalar, and unparseable YAML) and the two "names a run that never
+started"/"was killed" additions to the missing-report case. These are CI-local
+files (the sitometres report, the repo's own spec YAML), not peer- or
+network-supplied bytes, so this is a CI-tooling robustness fix, not a
+trust-boundary one — consistent with round 1's characterisation of this whole
+script family.
+
+**The `Main.qml` root handles are unchanged this round** — the diff touches
+only `tst_e2e_handles.qml` (new table-driven cases and a `makeStandaloneMain`
+helper) and `join.yaml` (a comment and a second refused-paste case), not the
+five `readonly property` handles themselves or their `null`/no-bridge handling.
+The new "no bridge to the core" case (`Core.bridge = null`, bypassing
+`bridgeFor`) is exercised only inside `tst_e2e_handles.qml`'s own fixtures and
+changes no production code path.
+
+**No new dependency, no new secret, no new trigger.** The diff adds one new
+script (`install-yq.sh`) and one new test script
+(`tst_workflow_run_bodies.sh`), both shell, no new package installs beyond what
+round 1 already reviewed (`yq`, the six graphics libraries), and no change to
+either workflow's `on:`, `permissions:`, or `secrets.*` surface (grepped
+`github.event` across both files: no hits, so no PR-title/body-shaped
+injection vector was added alongside the `${{ … }}`-splice fix).
+
+No new findings this round.
