@@ -60,11 +60,29 @@ out before the next push.
 
 ### 3. Green in CI
 
-- [ ] 3.1 Predicted: every `ci.yml` job green, `UI spec validation` printing
+- [x] 3.1 Predicted: every `ci.yml` job green, `UI spec validation` printing
       `seeded-join.yaml: ok (14 steps)` beside the other five, and `Rust core
       tests` running the three seeded tests; all six `ui-tests.yml` jobs
       green, `seeded-join`'s adjudicator printing `verdict: pass` and `ok: all
       14 steps passed`
+
+      **Observed, on head `8c098d7`, as predicted.** UI tests
+      https://github.com/fryorcraken/dialectica/actions/runs/36230185986 green
+      in all six jobs. `sitometres seeded-join spec` printed `14 passed in
+      9.7s`, and its adjudicator printed `verdict: pass`, fourteen `[pass]`
+      and `ok: all 14 steps passed`. The preview step saw "A Stoa seeded
+      outside this profile" and `fallbackNote`, with `joinState ===
+      'previewing'` (1.0s). The join step logged `calls: dialectica.join_stoa,
+      dialectica.list_stoas` and saw `joinedPanel` and not `joinFailurePanel`.
+      "go back to the list" clicked `"Cancel"`, and the next step held
+      `listedStoas.length === 1` and `listedStoas[0] === 'a4b3e43d…'`, with
+      `shareButton` seen. The feed step held `feedReadState === 'ok'` and
+      `feedRowCount === 0`. CI
+      https://github.com/fryorcraken/dialectica/actions/runs/36230185961 green
+      in every job (`Release` skipped). `UI spec validation` printed
+      `seeded-join.yaml: ok (14 steps)` among `ok: 6 spec(s) parsed`.
+      `Rust core tests` ran `tests/seeded_reference.rs`, 3 passed, and its
+      count gate printed `ok: all 1213 declared tests ran and passed`
 
 ### 4. `seeded-join.yaml` goes red when the joined Stoa does not reach the list
 
