@@ -75,11 +75,17 @@ None.
 
 - `thread-read`: MODIFIED *An item carries its ordering position and the
   author's asserted time, as two separate fields*. Two edits and one scenario;
-  the rest of the block is copied unchanged. Its uniqueness sentence now reads
-  *"for two distinct items returned by one read of a thread, taken across all of
-  that read's pages"*. A new paragraph says the position is determined by the
-  place alone. A new scenario, *The item at a place carries that place's position
-  in every read*, tests that paragraph. The current code already behaves this way:
+  the rest of the block is copied unchanged from the live requirement as it
+  stands after #173. #173 removed the paragraph beginning "The alternatives all
+  invite arithmetic that means nothing" from this requirement and moved it to
+  its own `design.md`, Decision 10
+  (`openspec/changes/archive/2026-09-26-time-pegged-clock-post-review/`). The
+  block does not carry that paragraph, because a MODIFIED block replaces the
+  whole requirement on archive and would put it back. Its uniqueness sentence
+  now reads *"for two distinct items returned by one read of a thread, taken
+  across all of that read's pages"*. A new paragraph says the position is
+  determined by the place alone. A new scenario, *The item at a place carries
+  that place's position in every read*, tests that paragraph. The current code already behaves this way:
   the position is the item's index in the sequence the read returned.
 
 ## Deliberately left unspecified
