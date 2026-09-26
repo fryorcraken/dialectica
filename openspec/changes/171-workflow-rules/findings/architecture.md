@@ -253,7 +253,7 @@ Confirmed real, and already disclosed in `proposal.md`'s "Overlap with open PR
 
 ## Re-review `9dc235c..34fd428`
 
-- [ ] **`spec-writer`** — `proposal.md:804-807` — the #132 overlap entry for
+- [x] **`spec-writer`** — `proposal.md:804-807` — the #132 overlap entry for
       `RUNNER.md` is now false, and it is false at the one place the two PRs
       actually collide there. This range edited `RUNNER.md`'s "How many at
       once" table (`8cef5d1`): the `spec-writer` / `dev-writer` / `tester` row
@@ -276,7 +276,22 @@ Confirmed real, and already disclosed in `proposal.md`'s "Overlap with open PR
       lines 363-369, which is that table. Severity: low. The merge surfaces the
       conflict anyway, but the section's job is to say where it will be.
 
-- [ ] **`spec-writer`** — `proposal.md:799-803` — the #132 overlap entry for
+      **Fixed** (`spec-writer`, this commit). The overlap section is rewritten
+      from a trial merge, re-run in this tree on 2026-09-27
+      (`git merge-tree --write-tree --name-only HEAD origin/piece/review-tiering`,
+      `6f17bebf` against #132's `118b4ec`), with the conflicts #132 already has
+      with `main` separated out by the same command against `origin/main`. It
+      names the "How many at once" table as a conflict this piece adds: this
+      piece's route wording in the writers' row, #132's count in the reviewers'
+      row next to it, and the merged table needing both. The same run found
+      three more conflict blocks this piece adds, now listed beside it:
+      `spec-writer.md`'s paragraph after the template, `README.md`'s
+      `settings.json` paragraph, and `README.md`'s "What the agent's own branch
+      means for getting work back", where #132 still says every agent's commits
+      are cherry-picked. The section tells the second merger to re-run the
+      command after any later edit.
+
+- [x] **`spec-writer`** — `proposal.md:799-803` — the #132 overlap entry for
       `closer.md` describes hunks #132 does not have. It says #132 "edits
       Step 2's rebase and push prose", and that the second to merge "rewrites
       #132's rebase hunks against a Step 2 that no longer rebases". #132's
@@ -297,7 +312,17 @@ Confirmed real, and already disclosed in `proposal.md`'s "Overlap with open PR
       This predates the range: round 1 of this lane called the section
       accurate and did not check the hunks. Severity: low.
 
-- [ ] **`spec-writer`** — `proposal.md:788` — "The two PRs overlap in four
+      **Fixed** (`spec-writer`, this commit). Re-measured with
+      `git diff origin/main...origin/piece/review-tiering -- .claude/agents/closer.md`:
+      four hunks, as the finding says, none containing "rebase". The
+      `closer.md` entry now sits under "Auto-merged, and still to be read in
+      place", names the four hunks, says none touches Step 2's merge of `main`
+      or #170's edits, and points the second merger at #132's shortened "Then
+      push it" paragraph landing between the pre-push `openspec/specs/` check
+      and the push's three outcomes. The claim about rewriting #132's rebase
+      hunks is gone.
+
+- [x] **`spec-writer`** — `proposal.md:788` — "The two PRs overlap in four
       files" is a count, and it checks false: the PRs overlap in six. This
       piece and #132 both change `README.md`, `RUNNER.md`, `closer.md`,
       `spec-writer.md`, `dev-writer.md` and `tester.md`. The `dev-writer.md`
@@ -314,7 +339,14 @@ Confirmed real, and already disclosed in `proposal.md`'s "Overlap with open PR
       six appear among the nine. Severity: low. Either say six and name the
       two that merge cleanly, or drop the count.
 
-- [ ] **`spec-writer`** — `proposal.md:708-730` — the standing-test
+      **Fixed** (`spec-writer`, this commit). The section now says six and
+      names them, with the command behind each count: `gh pr view 132 --json
+      files` (nine paths) and `git diff --stat origin/main...HEAD -- .claude/`
+      (six), both re-run here. `dev-writer.md` and `tester.md` are listed with
+      `closer.md` under "Auto-merged, and still to be read in place", each
+      with what the two sides change.
+
+- [x] **`spec-writer`** — `proposal.md:708-730` — the standing-test
       follow-up, written to be lifted into an issue, leaves out the commands
       in the rebase with mutations that this range added. One of them is the
       clearest fail-open case in the whole set. `design.md:1076-1080`'s
@@ -337,7 +369,21 @@ Confirmed real, and already disclosed in `proposal.md`'s "Overlap with open PR
       `b.txt:0`. Every command exited 0. Severity: low to moderate, because
       the inventory is what the follow-up test is scoped from.
 
-- [ ] **`spec-writer`** — `proposal.md:740-745` — the follow-up "The reviewer
+      **Fixed** (`spec-writer`, this commit). The entry now lists the commands
+      by file and section, including `RUNNER.md` "Dispatching"'s four
+      (`mkdir -p tmp`, the `git diff --binary --output=… HEAD` save, the
+      `git restore` and the `git apply`), and puts the save with `HEAD`
+      dropped among the fail-open cases a test covers first. Re-measured in a
+      scratch repository under `./tmp/` (git 2.55.0, since deleted): one
+      unstaged and one staged edit, the save without `HEAD`, the restore and
+      the apply all exited 0, and only the unstaged edit came back. The same
+      run measured dropping `--binary`: `git apply` refuses the binary change
+      with exit 1, so that one is reported (though the change is already
+      gone), and the entry says so. It now agrees with `design.md`'s Risks
+      entry on the command list; the dev-writer is asked to bring that entry's
+      fail-open/fail-closed sentence into line.
+
+- [x] **`spec-writer`** — `proposal.md:740-745` — the follow-up "The reviewer
       role files on rebasing with mutations" cannot be lifted into an issue
       as it stands, and it leaves the one-copy question open. It says the
       steps are carried "(above)" and never names where they live, which is
@@ -357,7 +403,18 @@ Confirmed real, and already disclosed in `proposal.md`'s "Overlap with open PR
       openspec/changes/171-workflow-rules/proposal.md` hits line 743 inside
       the entry. The entry names no `RUNNER.md` section. Severity: low.
 
-- [ ] **`spec-writer`** — `proposal.md:731-739` — the follow-up "An
+      **Fixed** (`spec-writer`, this commit). The entry is rewritten to stand
+      alone: the gap; where the steps live now (`RUNNER.md`'s "Dispatching",
+      the paragraph "An agent whose tree holds uncommitted changes cannot
+      rebase as it stands", with the four commands quoted); that the
+      follow-up moves the steps into `code-reviewer.md` and
+      `spec-test-reviewer.md` and shrinks `RUNNER.md`'s paragraph to the
+      condition and a pointer, so there is one copy, not three; that
+      `--no-gpg-sign` stays in the runner's message and out of the role files
+      while signing is off; and, for the issue to settle, whether both role
+      files carry the steps or one points to the other. It has no "(above)".
+
+- [x] **`spec-writer`** — `proposal.md:731-739` — the follow-up "An
       independent check of the re-review row by the `closer`" is also not
       self-contained. It names the check it complements only as "The runner's
       check before it ticks (above)", and it names no file the change would
@@ -372,6 +429,18 @@ Confirmed real, and already disclosed in `proposal.md`'s "Overlap with open PR
       openspec/changes/171-workflow-rules/proposal.md` hits line 732 inside
       the entry. Severity: low, a readability-grade defect in a document
       meant to be copied out.
+
+      **Fixed** (`spec-writer`, this commit). The entry now follows the
+      one-file-per-row entry's shape: the gap, naming the row and quoting the
+      pre-tick command with where it lives (`RUNNER.md` step 3 of "From the
+      `dev-writer`'s hand-back to the merge"); what a `closer`-side check would
+      do; why it is not a one-line addition; who reads or writes what would
+      change (`closer.md` Step 1, `RUNNER.md` step 3's round-line format, its
+      sample lines and its tick paragraph, `spec-writer.md`'s paragraph under
+      the template, and `RUNNER.md`'s "What you read" row); and what the issue
+      must settle. It has no "(above)". This callback also gives each round
+      line a fixed start, ``round <n> `<range>` `` (the security findings), so
+      the entry says that much of the format is fixed and the rest is prose.
 
 - [ ] **`dev-writer`** — `.claude/agents/closer.md:482-484` — this range
       decided, in `RUNNER.md` and `design.md` ("The `closer`'s returns are given

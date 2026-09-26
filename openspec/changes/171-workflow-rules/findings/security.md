@@ -442,7 +442,7 @@ notes say, on the paths those findings named.
   ways boxed below. Both come from the same thing: the grep accepts the range
   string anywhere in the file.
 
-- [ ] **`spec-writer`** — `proposal.md:177-191`, carried into
+- [x] **`spec-writer`** — `proposal.md:177-191`, carried into
       `RUNNER.md:595-609`. The pre-tick check cannot tell one dispatch of a
       lane from another dispatch of the same lane in the same round. When the
       runner re-dispatches a lane within a round because it will not accept the
@@ -473,7 +473,28 @@ notes say, on the paths those findings named.
       per dispatch. The grep then searches for that tag rather than for the
       range alone.
 
-- [ ] **`spec-writer`** — `proposal.md:177-183`, carried into
+      **Fixed** (`spec-writer`, this commit), by the first of the two fixes
+      offered, with the round number as the tag. Every round line under the
+      re-review row now starts ``round <n> `<range>` ``, numbered in the order
+      written. A lane dispatched again over a range it already had (a run not
+      accepted, or an agent replaced after a stall) gets a line of its own:
+      the next number, the same range, the lanes it re-runs. The heading and
+      the verdict box carry ``round <n> `<range>` `` in exact forms,
+      ``## Re-review round <n> `<range>` `` and
+      ``**re-review round <n> `<range>`: no findings**``, and the pre-tick
+      check searches those two forms. The earlier line's check skips the lanes
+      a later line re-ran over the same range, so the rejected run's record
+      no longer satisfies anything the re-run must. Continuing the same agent
+      with `SendMessage` is not a new dispatch. Not chosen: a separate
+      per-dispatch tag, which would add a second identifier where the round
+      line already carries one the runner writes anyway. This piece's own
+      rounds 1 and 2 predate the number: the proposal records that round 1's
+      re-dispatch is settled all the same (the Sonnet correctness and
+      readability runs wrote nothing, and `security.md` holds the Opus run's
+      heading from `59619032`), so the runner can close them by the forms
+      their briefs gave. `RUNNER.md` and `design.md` are the dev-writer's.
+
+- [x] **`spec-writer`** — `proposal.md:177-183`, carried into
       `RUNNER.md:596-605`. One tick can close several rounds ("every round
       recorded since the row was last ticked"). The grep for an earlier round
       is a fixed-string search over the whole file, so a **later** round's
@@ -506,6 +527,18 @@ notes say, on the paths those findings named.
       ``## Re-review round 1 (`c222c37..9dc235c`)``. Its verdict box at `:216`
       would still match, but a lane with findings that used that heading
       would not, so the brief must fix the heading form exactly.
+
+      **Fixed** (`spec-writer`, this commit), as suggested, with the round
+      number added (the box above). The check is now
+      ``git grep -l -F -e '## Re-review round <n> `<range>`' -e '**re-review round <n> `<range>`: no findings**' -- <change folder>/findings/``,
+      in single quotes because both patterns hold backticks. The brief gives
+      both forms whole rather than "such as", and the proposal cites
+      `architecture.md:214`'s loose heading as the form that would match
+      neither. Measured on this tree at `6f17bebf` with the un-numbered forms
+      rounds 1 and 2 were briefed with: each lists all six files, where a
+      bare-range search for round 1 also hits prose in five of the six. The
+      proposal records the residual: a later reviewer who quotes an earlier
+      round's heading or box whole, in prose, still satisfies it.
 
 **Clean in this range, and why.**
 

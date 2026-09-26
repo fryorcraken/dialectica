@@ -162,7 +162,7 @@ test for the git commands the role files name") names the Step 1 pathspec, the
 `NO SPEC:` command and the pre-tick grep. `tasks.md:11-17`'s struck tester row
 no longer says there is no executable behaviour, and points to that entry.
 
-- [ ] **`spec-writer`** — `proposal.md:779-782` versus `proposal.md:454-470`:
+- [x] **`spec-writer`** — `proposal.md:779-782` versus `proposal.md:454-470`:
       `dev-writer.md`'s "The runner cherry-picks your commits onto its own
       local `piece/<name>` afterwards" is kept, while this range corrects
       `README.md`'s four passages because they state the same route.
@@ -193,7 +193,25 @@ no longer says there is no executable behaviour, and points to that entry.
       on by fast-forward". Severity: low. It is a contradiction between two
       shipped role files, and the contract sets out to prevent exactly that.
 
-- [ ] **`spec-writer`** — `proposal.md:708-730` (the standing-test entry)
+      **Fixed** (`spec-writer`, this commit), by applying the `README.md` rule.
+      The reason given for keeping the sentence did not separate the cases,
+      as the finding says. The proposal now states one criterion for every
+      file this piece edits: a sentence saying the `dev-writer`'s commits, or
+      every agent's, reach the piece by cherry-pick has its route words
+      changed; one true of a cherry-pick whatever the route, or about an agent
+      still cherry-picked, stays. Under it `dev-writer.md` has four such
+      sentences, not one, all now contracted: "The runner cherry-picks it
+      onto `piece/<name>` once you hand back" ("Where your commits go"), and
+      under "The PR is yours" "you do not need the runner's cherry-pick to get
+      there", "The runner cherry-picks your commits onto its own local
+      `piece/<name>` afterwards" and "A local cherry-pick is the runner's."
+      Kept, with the reason: "is not something the runner can cherry-pick",
+      about commits made from the piece branch when isolation failed, which
+      holds of either route. The "Out of scope" and Impact entries, and the
+      opening paragraph's account of what is corrected, say the same. The edit
+      itself is the dev-writer's.
+
+- [x] **`spec-writer`** — `proposal.md:708-730` (the standing-test entry)
       does not name the mutating reviewer's save/restore/re-apply commands,
       which this range adds (`:555-560`), and they fail open.
       **Scenario:** `RUNNER.md` is to carry `mkdir -p tmp`,
@@ -222,7 +240,21 @@ no longer says there is no executable behaviour, and points to that entry.
       leaves out exactly the staged changes that step 2 then discards.
       Severity: moderate.
 
-- [ ] **`spec-writer`** — `proposal.md:718-720` says "a mistyped pre-tick
+      **Fixed** (`spec-writer`, this commit), with one part corrected by
+      measurement. The entry now lists the four commands by file and section,
+      and the save with `HEAD` dropped is one of the three fail-open cases a
+      test covers first, beside the `openspec/specs/` check. Measured in a
+      scratch repository under `./tmp/` (git 2.55.0, since deleted): one
+      unstaged and one staged edit, save without `HEAD`, restore, apply; every
+      command exited 0 and only the unstaged edit came back. Dropping
+      `--binary` does not fail silently, though: the patch holds `Binary files
+      a/i.png and b/i.png differ`, and `git apply` refuses it (`error: cannot
+      apply binary patch to 'i.png' without full index line`, exit 1). So the
+      reviewer reports the failure, though step 2 has already discarded the
+      change. The entry files that case under fail-closed and says the loss is
+      reported, not prevented.
+
+- [x] **`spec-writer`** — `proposal.md:718-720` says "a mistyped pre-tick
       grep lists nothing, and the runner cannot tick ... Both fail closed".
       That is false for one plausible mistype, and in that case the check
       fails open.
@@ -248,6 +280,18 @@ no longer says there is no executable behaviour, and points to that entry.
       listed all six files (`architecture.md`, `correctness.md`,
       `design-review.md`, `readability.md`, `security.md`, `spec-test.md`), all
       matched by round 1's `c222c37..9dc235c` headings. Severity: moderate.
+
+      **Fixed** (`spec-writer`, this commit), both the classification and the
+      check. "Both fail closed" is gone. The entry now says a pre-tick pattern
+      with a wrong character lists nothing (fail closed), and one cut down to
+      the bare range matches it in prose, or to a single SHA also matches the
+      previous round's records, since consecutive rounds share an endpoint
+      (fail open, first in the queue beside the `openspec/specs/` check). It
+      cites your measurement. The check itself now searches the heading and
+      verdict-box forms carrying ``round <n> `<range>` ``, not the bare range
+      (`findings/security.md`'s two boxes in this round), so the round number
+      keeps consecutive rounds' records apart and only a truncation that drops
+      it fails open.
 
 Clean in this round, in prose. On internal consistency after the four
 callbacks, the returns are consistent. `:412-419` gives no count to
