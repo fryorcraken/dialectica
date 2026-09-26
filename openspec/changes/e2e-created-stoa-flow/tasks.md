@@ -204,7 +204,7 @@ the next push.
 
 ### 6. `thread.yaml` goes red when the thread is opened without its record
 
-- [ ] 6.1 Break: `Main.openThread` sends `genesis: ""`, pushed alone.
+- [x] 6.1 Break: `Main.openThread` sends `genesis: ""`, pushed alone.
       Predicted: `sitometres thread spec` red on "the thread was read, and
       holds the root with no replies", the core refusing an empty record; the
       other four green. `QML lint` red on five tests, re-measured locally on
@@ -216,6 +216,20 @@ the next push.
       and `tst_thread_navigation.qml`'s
       `test_the_feed_it_was_opened_from_is_recoverable_while_reading` and
       `test_the_thread_is_given_the_feeds_stoa_and_record`
+
+      **Observed, on head `9d9323b`, the break pushed alone.** UI tests
+      https://github.com/fryorcraken/dialectica/actions/runs/36216375991:
+      `sitometres thread spec` failed on "the thread was read, and holds the
+      root with no replies" after its 30s, on all three checks
+      (`noRepliesNotice` not seen, `threadReadState === 'ok'` false,
+      `threadItemCount === 1` false). The next step, "write a reply", then
+      failed with `No object has objectName "replyDraftField"`, because a
+      failed read renders no composer. That stopped the run, and four steps
+      were `inconclusive`. Fifteen steps passed before the read. `create`,
+      `feed`, `moderation` and `join` green. CI
+      https://github.com/fryorcraken/dialectica/actions/runs/36216375946 red
+      in `QML lint` only, on exactly the five re-measured tests. `Lint`,
+      `UI spec validation`, `Rust core tests` and `Build LGX` green
 - [ ] 6.2 Revert pushed; both workflows green on it
 
 ### 7. `moderation.yaml` goes red when an inert control withdraws the way out
