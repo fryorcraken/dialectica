@@ -24,11 +24,11 @@ The runner records this. It covers the commits after `19667a04`:
 - `9e550eb`: `design.md` D1, D2 and D5 rewritten as measured.
 - `4e2b8c0`: rustfmt of one in-piece line.
 
-- [ ] re-review: correctness — `code-reviewer`. Test fixture refactored in `wire.rs`.
-- [ ] re-review: readability — `code-reviewer`. Spec keyword change, `design.md` prose, formatting.
-- [ ] re-review: architecture — `code-reviewer`. Live-spec Purpose edit, test helper structure.
-- [ ] re-review: spec-test — `spec-test-reviewer`. Fixture refactor under the position tests, `thread-read` delta edit.
-- [ ] re-review: design — `design-reviewer`. D1, D2 and D5 rewritten.
+- [x] re-review: correctness — `code-reviewer`. Test fixture refactored in `wire.rs`.
+- [x] re-review: readability — `code-reviewer`. Spec keyword change, `design.md` prose, formatting.
+- [x] re-review: architecture — `code-reviewer`. Live-spec Purpose edit, test helper structure.
+- [x] re-review: spec-test — `spec-test-reviewer`. Fixture refactor under the position tests, `thread-read` delta edit.
+- [x] re-review: design — `design-reviewer`. D1, D2 and D5 rewritten.
 - [ ] ~~re-review: security — `code-reviewer`~~ Not re-run: no production or
   boundary code changed; the new commits are test fixtures and prose, and the
   five rows above cover every one of them.
