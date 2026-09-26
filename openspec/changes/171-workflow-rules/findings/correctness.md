@@ -352,3 +352,123 @@ and passes the `closer`'s two gates as designed.
 is continued to rebase. That file is not this piece's to edit, so the box is
 addressed to the RUNNER.md side. Whether the role file should change is the
 owner's call.
+
+## Re-review `9dc235c..34fd428`
+
+Correctness only. I read the range's diff to `RUNNER.md`, `closer.md`,
+`README.md` and `dev-writer.md`, then read `closer.md` Steps 1 to 3 and "Your
+report" and `RUNNER.md`'s "Dispatching", step 3 and "The `closer`, and what
+comes back" in full, taking each as its agent would. I ran commands against
+this tree and against a scratch repository under `./tmp/r2/` (git 2.55.0,
+`commit.gpgsign false` set in that repository only, since deleted).
+
+- [ ] **`dev-writer`** — `.claude/agents/RUNNER.md:282-310` — the four steps
+      are sent to "an agent whose tree holds uncommitted changes", but an
+      untracked-only change is uncommitted and never blocks a rebase. On such
+      a tree, step 4 fails and reports that the patch did not apply. Neither
+      text says what that failure means.
+      **Scenario:** a correctness reviewer's only mutation is a new probe
+      file it never `git add`ed. Its hand-back says it left that file in its
+      tree, as `code-reviewer.md` requires. Its tick conflicts in the review
+      round, and the runner's continuation message carries the four steps,
+      since the tree does hold an uncommitted change. Step 1 writes an empty
+      patch, because `git diff HEAD` does not see untracked files. Step 2
+      leaves the untracked file where it is. Step 3 rebases normally. Step 4
+      exits 128. The agent does as step 4 says and reports that the patch did
+      not apply. That reads as lost mutation evidence, although the file is
+      still in the tree and nothing was lost. `RUNNER.md` routes no report
+      of a failed apply, and it cannot tell this case from a genuine
+      failure. The same happens for any agent sent the steps with a tree that
+      holds nothing tracked. Severity: low. Nothing is lost, and the rebase
+      itself works, but an unattended runner gets a false alarm about
+      evidence it has been told only it may discard. Two readings would fix
+      it: tie the steps to `git rebase`'s own refusal (`cannot rebase: You
+      have unstaged changes`) rather than to "uncommitted changes", or say
+      that an empty patch file means there is nothing to re-apply.
+      **Measured** (scratch): with only untracked files in the tree,
+      `git status --porcelain` → `?? other_lane.txt` / `?? probe_staged.txt`
+      / `?? probe_untracked.txt`. `git diff --binary
+      --output=tmp/u2.patch HEAD` exited 0. `git apply tmp/u2.patch` →
+      `error: No valid patches in input (allow with "--allow-empty")`, exit
+      128. The first run below shows an untracked file does not stop
+      `git rebase`.
+
+The brief's known gap, the untracked mutation: it **does not break the
+rebase, and the evidence stays behind in place**, measured. The scratch tree
+was a reviewer branch with a tick one row from the piece's tick. It held an
+unstaged edit to `code.txt`, a staged new `probe_staged.txt` and an untracked
+`probe_untracked.txt`, so `git status --porcelain --ignored` printed
+` M code.txt` / `A  probe_staged.txt` / `?? probe_untracked.txt`. The patch
+from step 1 held `code.txt` and `probe_staged.txt` and not the untracked
+file. After step 2 the status was `?? probe_untracked.txt` / `!! tmp/`, so the
+staged new file left both the index and the tree. Step 3's `git rebase piece`
+stopped on `CONFLICT (content): Merge conflict in tasks.md` with the untracked
+file present. It was resolved and added, and `git rebase --continue` printed
+`Successfully rebased and updated refs/heads/rev.` Step 4 applied with no
+output. The status was then ` M code.txt` / `?? probe_staged.txt` /
+`?? probe_untracked.txt` / `!! tmp/`. One detail sits beside `RUNNER.md:309`'s
+"come back unstaged": a staged *new* file comes back **untracked**. It is
+still in the tree and in the patch, so nothing is lost. That is a note, not a
+box. The one input that does stop the rebase is an untracked file at a path
+an incoming commit adds. The scratch run gave `error: The following untracked
+working tree files would be overwritten by checkout: other_lane.txt` /
+`error: could not detach HEAD`. That aborts before any change, so the tree and
+the patch are both intact. In the review round the incoming commits are other
+lanes' ticks and findings files, which a reviewer does not hold untracked, so
+I found no reachable case.
+
+Verified against the code rather than the outcomes, and clean:
+
+- **Round 1, first box (fast-forward every `dev-writer` pass):** closed. The
+  per-agent sequence (`RUNNER.md:242-245`), the already-pushed paragraph
+  (`:260-269`), "How many at once" (`:363`), the red-run fixer (`:655-657`)
+  and the prune sequence (`:443-446`) all now say fast-forward, or point to
+  "Dispatching". `git grep -n -i "cherry-pick" -- .claude/agents/RUNNER.md
+  .claude/agents/README.md` leaves no passage that sends a `dev-writer`'s
+  commits by cherry-pick. `dev-writer.md:203`'s "The runner cherry-picks
+  your commits" remains. `design.md:826-828` records it as deliberate, and
+  it changes nothing the `dev-writer` does. I walked every agent against the
+  rule. A `spec-writer`, a `tester` and a reviewer never push, so
+  cherry-picking them diverges nothing. A `dev-writer` pass forks from the
+  runner's HEAD, including local-only reviewer ticks. Its push carries those
+  ticks to the remote, and `--ff-only` then leaves local and remote equal.
+  `--ff-only` also succeeds when a pass made no push, so the rule is safe
+  even where its premise does not hold.
+- **Round 1, second box (rebase with mutations in the tree):** closed, apart
+  from the empty-patch case above. The steps ran end to end.
+- **Round 1, third box (`README.md` push sentence):** closed.
+  `README.md:170-173` names both `closer` push points and every `dev-writer`
+  pass.
+- **The `closer`'s Step 3 check before the push, and its three outcomes**
+  (`closer.md:281-324`). The check sits after the archive commit and before
+  the upstream check and the push. Nothing between them makes a commit, so
+  `HEAD^ HEAD` is still the archive commit when it runs. The three outcomes
+  cover every case. The first ("Push refused") carries its own "if this run
+  made the archive commit" condition, so it also covers the already-archived
+  path, which skips the check (`:233-237`) and otherwise goes straight to
+  Step 4. "Your report" (`:478-480`) asks for the check's result with a
+  refusal, and `RUNNER.md:694-697` acts on it by unticking and recording a
+  round before it goes to the owner. That closes the hole a later
+  `closer` would open by skipping the check. A stop at the upstream check
+  after the archive commit is covered too: "Your report" asks for the files
+  wherever the archive changed `openspec/specs/`, which is not conditional
+  on the push.
+- **The returns, with no count** (`RUNNER.md:647-650`). `git grep -n -i -E
+  "(two|three|four|five|six|seven) (things|returns|outcomes) (come|that
+  come)"` over `.claude/agents/` and `proposal.md` returns nothing. `closer.md`
+  also stops on a zero-box findings file, on a `git ls-files` that returns more
+  than one path or none, and on a wrong upstream. None of those is named in
+  `RUNNER.md`, and "route it by what it is" covers each with the evidence the
+  `closer` reports. The new `BLOCKED` return matches `closer.md:426-433`.
+- **The pre-tick check** (`RUNNER.md:595-609`). `git grep -l -F
+  "c222c37..9dc235c" -- openspec/changes/171-workflow-rules/findings/` lists
+  all six: `architecture.md`, `correctness.md`, `design-review.md`,
+  `readability.md`, `security.md` and `spec-test.md`. The same search for
+  `9dc235c..34fd428` finds only `tasks.md:26`, the runner's record line, which
+  sits outside `findings/`. So before this round no lane's file falsely
+  claims it ran. A folder with no `findings/`
+  (`openspec/changes/archive/2099-01-01-171-workflow-rules/findings/`) and a
+  range no file holds (`zzzzzzz..yyyyyyy`) both print nothing, so the check
+  fails closed. A lane's file cannot hold a round's range before that round
+  exists: the range ends at a commit made after every earlier outcome was
+  written.
