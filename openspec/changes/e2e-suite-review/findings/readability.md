@@ -125,3 +125,62 @@ the five read-only root handles #164 added (confirmed against
   their own terms — proposal, design and tasks cross-reference each other
   correctly, and Observed/Predicted pairs in `tasks.md` are easy to tell
   apart from each other.
+
+## Round 2 (HEAD 532794e)
+
+Scope: `git diff ee8e145...HEAD` (three dots) — design.md's D6–D10, the D10
+citation-qualifying pass across the workflows and shell scripts, the new
+`view-navigation` spec delta, `install-yq.sh`, `tst_workflow_run_bodies.sh`,
+the `tst_e2e_handles.qml` and `tst_adjudicate_ui_run.sh` test additions, and
+the `proposal.md`/`.openspec.yaml` rewrites. Round 1's finding is fixed as
+described above; verified directly with `git grep -n -F "design.md"` over the
+suite's files (`adjudicate-ui-run.sh`, `tst_adjudicate_ui_run.sh`,
+`require-jq-yq.sh`, `tst_ui_tool_pins.sh`, `tst_scaffold_values_unchanged.sh`,
+`join.yaml`, `ci.yml`, `ui-tests.yml`) — every hit now names a change, and
+`design.md`'s own `grep -n "^### D" design.md` returns D1 through D10 in
+order, matching the text.
+
+- [ ] **`dev-writer`** — `.github/workflows/ci.yml:1179-1182`,
+      `dialectica-ui/tests/require-jq-yq.sh:25-27`,
+      `dialectica-ui/tests/tst_scaffold_values_unchanged.sh:4-6`,
+      `dialectica-ui/tests/tst_ui_tool_pins.sh:12-14` — the D10 fix (naming
+      the change in every decision citation) was applied by inserting the
+      qualifier text ("The e2e-ui-suite change's" / "the e2e-suite-review
+      change's") in front of the existing citation without reflowing the rest
+      of the paragraph, so each of these four comment blocks now carries one
+      or two lines far short of the file's own wrap width, splitting a single
+      clause across lines with no reason to.
+      **Scenario:** in `tst_ui_tool_pins.sh:12-14`, "single file loaded by
+      both" (28 characters) and "workflows was rejected." (25 characters) sit
+      on their own lines — together 56 characters, well under the ~79-column
+      wrap the rest of the file's comments use, and under the 74-character
+      line immediately above them. The same pattern repeats in
+      `tst_scaffold_values_unchanged.sh:4-6` ("and `lgs basecamp install`",
+      28 chars, alone between two ~79/74-char lines), `require-jq-yq.sh:25-27`
+      ("`yq` at all, and what" / "breaks without this check, measured.", 23
+      and 38 chars), and `ci.yml:1179-1182` ("and a check, rather than" / "one
+      file both workflows load.", 32 and 37 chars). **Measured:** line
+      lengths taken directly (`awk '{print length($0)}'` over each range,
+      shown above); the surrounding lines in the same files run 74-82
+      characters, so these are not a narrower wrap convention, they are a
+      paragraph that was edited and not rewrapped.
+      **Severity:** low — content and meaning are unaffected, and no test can
+      see it (design.md D10 itself says the check is `git grep`, not a test).
+      It is cosmetic, but it is the same handful of comment blocks CLAUDE.md's
+      own "a number in a comment is a claim" spirit asks be kept legible, and
+      a future editor re-wrapping by hand around one of these lines risks
+      pulling the qualifier back apart from the decision letter it names.
+      Fix is mechanical: rewrap each of the four comment blocks to the
+      surrounding file's normal column width.
+
+Everything else in this diff — `design.md` D6–D10's own prose, the
+`view-navigation` spec delta, `proposal.md` and `.openspec.yaml`'s rewrites,
+`install-yq.sh`, `tst_workflow_run_bodies.sh`, and the test additions in
+`tst_e2e_handles.qml` and `tst_adjudicate_ui_run.sh` — reads clearly: comments
+explain the *why* (e.g. `install-yq.sh`'s three-part header on what/why for
+the apt workaround and the `yq`-collision check; `tst_workflow_run_bodies.sh`'s
+header on why splicing is unsafe and what stays sanctioned), new test helper
+names are self-explanatory (`makeStandaloneMain`,
+`verifyOnlyTheListIsRendered`), and table-driven tests carry a comment stating
+which cases are covered elsewhere and why the remainder were collapsed into a
+table rather than repeated. No other readability defect found.
