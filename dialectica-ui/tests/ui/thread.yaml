@@ -1,0 +1,114 @@
+# End-to-end: the thread of a post published in a Stoa this profile created.
+#
+# Run by `.github/workflows/ui-tests.yml`; see create.yaml for the harness and
+# the `e2e-created-stoa-flow` change's design.md for the layout.
+#
+# What it observes: acting on the feed row opens its thread; the read succeeded
+# and holds the root with no replies; a reply submitted there leaves the thread,
+# read again, holding the root and the reply; the way back renders the feed.
+# The routes in and out are `view-navigation`'s. What the thread screen renders
+# is `thread-view`'s, which lives only in the unarchived
+# `openspec/changes/ui-thread-view/` — see this change's proposal.md.
+#
+# The steps before "open its thread" only get there, and assert nothing about
+# the list or the feed; feed.yaml and create.yaml own those.
+
+app: dialectica_ui
+
+# The second hop sitometres does not walk: see join.yaml.
+with: [dialectica, delivery_module]
+timeout: 30s
+
+steps:
+  - name: the app opens
+    open: dialectica_ui
+
+  - name: it starts on the Stoa list
+    wait_for:
+      state: "root.screenShown === 'list'"
+    timeout: 45s
+
+  - name: the key can be made
+    wait_for:
+      text: { objectName: "createKeyButton" }
+
+  - name: make this machine's key
+    click: { objectName: "createKeyButton" }
+
+  - name: a Stoa can be created
+    wait_for:
+      text: { objectName: "createTitleField" }
+
+  - name: name the new Stoa
+    type:
+      into: { objectName: "createTitleField" }
+      text: "A Stoa whose thread is read end to end"
+
+  - name: create it
+    click: { objectName: "createStoaButton" }
+
+  - name: its row is listed
+    wait_for:
+      text: { objectName: "openStoaButton" }
+
+  - name: open it
+    click: { objectName: "openStoaButton" }
+
+  - name: a post can be written
+    wait_for:
+      text: { objectName: "postDraftField" }
+
+  - name: write a post
+    type:
+      into: { objectName: "postDraftField" }
+      text: "A post whose thread is read end to end"
+
+  - name: publish it
+    click: { objectName: "postSubmitButton" }
+
+  - name: its row offers its thread
+    wait_for:
+      text: { objectName: "readThreadArea" }
+
+  # ---- the thread -------------------------------------------------------
+
+  - name: open its thread
+    click: { objectName: "readThreadArea" }
+
+  - name: the thread is rendered
+    wait_for:
+      state: "root.screenShown === 'thread'"
+
+  # `threadReadState` tells a read that succeeded from one that failed, which
+  # also leaves no items; one item is the root and nothing else, and the
+  # screen says so in its own words.
+  - name: the thread was read, and holds the root with no replies
+    expect:
+      state:
+        - "root.threadReadState === 'ok'"
+        - "root.threadItemCount === 1"
+      text: { objectName: "noRepliesNotice" }
+
+  - name: write a reply
+    type:
+      into: { objectName: "replyDraftField" }
+      text: "A reply published end to end"
+
+  - name: publish it
+    click: { objectName: "replySubmitButton" }
+
+  # Two items is the thread read again: the view inserts nothing of its own.
+  - name: it was saved on this machine, and the thread now holds the root and the reply
+    wait_for:
+      text: "Your reply was saved on this machine."
+      state:
+        - "root.threadReadState === 'ok'"
+        - "root.threadItemCount === 2"
+
+  - name: leave the thread
+    click: { objectName: "threadBackButton" }
+
+  # Which screen, and nothing about its read: that is feed.yaml's.
+  - name: the feed is rendered again
+    wait_for:
+      state: "root.screenShown === 'feed'"

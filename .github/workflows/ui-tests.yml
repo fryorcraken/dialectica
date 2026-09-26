@@ -63,7 +63,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        spec: [join]
+        spec: [join, create, feed, thread, moderation]
 
     # Every value a `run:` body reads arrives through `env:`, never as a
     # `${{ … }}` spliced into the script text, where a value carrying shell

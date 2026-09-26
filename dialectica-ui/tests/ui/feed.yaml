@@ -1,0 +1,109 @@
+# End-to-end: the feed of a Stoa this profile has just created.
+#
+# Run by `.github/workflows/ui-tests.yml`; see create.yaml for the harness and
+# the `e2e-created-stoa-flow` change's design.md for the layout.
+#
+# What it observes: opening the created Stoa's row renders its feed; the read
+# SUCCEEDED and holds nothing, which is a different screen from a read that
+# failed (`feed-view`, "A feed that holds nothing and a feed that could not be
+# read are different screens"); with the key held the posting gate is open;
+# publishing a post states it was saved on this machine, and the feed, read
+# again, holds one row (`composer-view`); the way back renders the list
+# (`view-navigation`).
+#
+# This is also the reproduction issue #152 asks for — a Stoa created fresh on
+# current `main`, opened immediately — run on every PR. If the read step goes
+# red with "genesis record ended mid-field", that is #152 and the finding goes
+# there; the step is not to be weakened to pass.
+#
+# The steps before "open it" only get there: each waits for exactly what the
+# next action needs and asserts nothing about the list, which is create.yaml's
+# job. That keeps a break in one screen red in one spec.
+
+app: dialectica_ui
+
+# The second hop sitometres does not walk: see join.yaml.
+with: [dialectica, delivery_module]
+timeout: 30s
+
+steps:
+  - name: the app opens
+    open: dialectica_ui
+
+  - name: it starts on the Stoa list
+    wait_for:
+      state: "root.screenShown === 'list'"
+    timeout: 45s
+
+  - name: the key can be made
+    wait_for:
+      text: { objectName: "createKeyButton" }
+
+  - name: make this machine's key
+    click: { objectName: "createKeyButton" }
+
+  - name: a Stoa can be created
+    wait_for:
+      text: { objectName: "createTitleField" }
+
+  - name: name the new Stoa
+    type:
+      into: { objectName: "createTitleField" }
+      text: "A Stoa whose feed is read end to end"
+
+  - name: create it
+    click: { objectName: "createStoaButton" }
+
+  - name: its row is listed
+    wait_for:
+      text: { objectName: "openStoaButton" }
+
+  # ---- the feed ---------------------------------------------------------
+
+  - name: open it
+    click: { objectName: "openStoaButton" }
+
+  - name: its feed is rendered
+    wait_for:
+      state: "root.screenShown === 'feed'"
+
+  # The central observation. `feedReadState` is "ok" only on a read that
+  # succeeded, and a failed read also leaves no rows, so the row count alone
+  # would pass against the failure this step exists to tell apart.
+  - name: the feed was read, and holds nothing
+    expect:
+      state:
+        - "root.feedReadState === 'ok'"
+        - "root.feedRowCount === 0"
+
+  # Open by the probe, and the composer is there to prove the screen drew it.
+  - name: with the key held, the posting gate is open
+    expect:
+      state: "root.feedCanPost"
+      text: { objectName: "postDraftField" }
+
+  - name: write a post
+    type:
+      into: { objectName: "postDraftField" }
+      text: "A post published end to end"
+
+  - name: publish it
+    click: { objectName: "postSubmitButton" }
+
+  # The success sentence is the view's own copy and `composer-view` requires
+  # its claim (saved on this machine, nothing about delivery), so it is matched
+  # whole. The row count is the feed read again: the view inserts no row of its
+  # own, so one row here is one the core reported.
+  - name: it was saved on this machine, and the feed now holds it
+    wait_for:
+      text: "Your post was saved on this machine."
+      state:
+        - "root.feedReadState === 'ok'"
+        - "root.feedRowCount === 1"
+
+  - name: leave the feed
+    click: { objectName: "feedBackButton" }
+
+  - name: the list is rendered again
+    wait_for:
+      state: "root.screenShown === 'list'"
