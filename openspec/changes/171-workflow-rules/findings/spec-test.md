@@ -1113,6 +1113,105 @@ Below medium, so in prose rather than boxed:
   This is follow-up text, and "For the issue to settle" already names the
   archive boundary. Low.
 
+## Re-review round 14 `c3bda2b..e5dcce4`
+
+- [x] **re-review round 14 `c3bda2b..e5dcce4`: no findings** — read `proposal.md` in full and its range diff, `tasks.md`, `.openspec.yaml`, this file, the range stat and issue #171; clean
+
+Read: `git diff c3bda2b..e5dcce4 -- openspec/changes/171-workflow-rules/proposal.md`
+in full, and `proposal.md` at HEAD, with the whole of `:1-916` and
+`:1180-1623` read in full. `tasks.md`, `.openspec.yaml` and this file in full.
+`git diff c3bda2b..e5dcce4 --stat`, stat only: `RUNNER.md` is the only
+`.claude/` path in the range, so no `settings.json` and no hooks. I read
+issue #171 fresh (open, no comments) to judge the scope of the new step-2
+rule. I read nothing under `.claude/agents/`, no `design.md` and no other
+findings file. Two commit-subject listings, below, are the only other
+output I read.
+
+**Round 13's box is closed in the contract.** It took the box's first
+option. "Nothing lands on the piece while the review round is out"
+(`:124-135`) forbids all three routes: bringing any other commit onto
+`piece/<name>`, committing, and dispatching a writer. It holds from dispatch
+until every reviewer's commit is on HEAD, so a red-CI fixer waits for the
+round. It also explains why "the runner commits nothing" did not cover the
+case, which was the gap my box named. The derivation paragraph (`:254-262`)
+now rests on that rule, and it cites my box and the security box for what
+happens without it. The broken rule is recorded as a residual in two
+places: "What it still cannot see" (`:591-595`) and the standing-test
+entry's runner-input paragraph (`:1302-1305`). Both say the second reader
+derives the same commit, so neither claims the `closer`-side follow-up
+would see it. Impact (`:1543-1544`) names step 2's rule. The rule is not in
+#171's text, but #171 asks for a place to record re-review rounds, and the
+derived `<review>` behind the round-1 line depends on this rule. I read it
+as inside the authorisation.
+
+**The contract is consistent after `5203661`:**
+
+- **"Four".** The number check's lead-in (`:334-344`) now says "numbers
+  and ranges" and "Four things must hold". Four bullets follow: every line
+  listed, at least one, no repeat, and the ranges chain.
+- **The chain bullet (`:394-425`) agrees with the rules it draws on.** A
+  gap is repaired by a new line below the last line with the next number,
+  and an existing range is never edited. That matches "only ever added"
+  and "never lowers". Passing over a same-range line matches the re-run
+  line rule. The tail check lets round lines through in the `tasks.md`
+  diff, which matches step 3's list of tracking. The skipped line for a
+  clean merge of `main` or the archive commit matches step 3's no-review
+  list.
+- **Measurements re-checked.** The chain measurement (`:427-447`) holds
+  against `tasks.md:25-37`. Rounds 4 and 8 repeat 3 and 7, and the chain
+  runs from `c222c37` to `c3bda2b`. `git log --oneline --reverse
+  c3bda2b..ab53b41c` lists six commits: the round 13 record and five
+  re-reviewers' commits, as `:430-432` says. With round 14's line, the
+  chain now reaches `e5dcce4`.
+- **"What it still cannot see" (`:562-598`).** A removed line is now
+  narrowed to one that repeated a range. The broken review-round rule and
+  a missed untick are added. Each says which second reader, if any, would
+  see it.
+- **The standing-test entry (`:1226-1228`) is correct.** The three
+  fail-open cases that mistype the nothing-landed check's two commands
+  also blind the chain's tail check. The fourth case, the archived-folder
+  derivation, is not among the three, which is right. For the chain, that
+  derivation starts at a commit where no line starts, so it fails closed.
+- **The follow-up and Impact agree.** The `closer`-side gap statement
+  (`:1333-1334`) and "would do" (`:1347-1351`) carry the chain to the
+  `closer`'s own HEAD. Impact (`:1560-1562`) carries the fourth condition.
+
+**The `1f62afd4` wording (the dev-writer's note).** The note is right.
+`git log --oneline --reverse 9dc235c..1f62afd4` lists nine commits before
+`1f62afd4`. All of them are tracking: the round 1 record, its correction,
+and seven re-reviewers' commits (`456e1cfa` to `59619032`). So `1f62afd4`
+is the first commit after round 1 that needs review. It is not "the first
+commit that landed after round 1" (`:436-437`). None of the conclusions
+depends on the phrase:
+
+- the chain still stops at `9dc235c`;
+- `git diff 9dc235c 1f62afd4` still holds the `spec-writer`'s commit;
+- the round 14 repair still chains.
+
+Low, so in prose. The fix is one word: "the first commit that needed review
+after round 1".
+
+Below medium, so in prose rather than boxed:
+
+- **"Adds no command beyond the two the range rule names" (`:395-396`)
+  undercounts.** The chain starts at a derived `<review>`, so it also runs
+  the `git log` derivation, which is a third command. The two `git diff`
+  commands belong to the check rule, not to the range rule proper. The tail
+  bullet's "the range rule's two commands" has the same wording issue. Low.
+- **Removing the original of a same-range pair is a different failure from
+  the one described.** Suppose round 2 ran correctness and security over
+  `B..C`, and round 3 re-ran security over `B..C`. If line 2 is removed,
+  line 3 is followed and the chain holds. Round 3's forms check then covers
+  security alone, so round 2's correctness lane is never checked. "When it
+  repeated a range" (`:563`) can be read to cover this, but the explanation
+  after it describes only removing the re-run. This is the same
+  runner-breaks-a-rule class, since lines are only ever added. Low.
+- **The `closer`-side "would do" bullet has two stale clauses.** Its
+  round-1 derive-and-compare clause (`:1352-1356`) is now covered by the
+  chain it asks for in the same sentence. And "the runner reads the number
+  after it" (`:1369-1370`) now also reads the range. This is follow-up
+  text. Low.
+
 ## Areas checked clean
 
 - **Issue coverage.** Every "Done when" / proposed-change bullet in #171,
