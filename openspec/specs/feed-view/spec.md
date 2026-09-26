@@ -1,7 +1,7 @@
 # feed-view Specification
 
 ## Purpose
-Defines what the feed screen may and may not claim about the order it presents posts in, and about the time it shows against each one. It exists because the feed is where a reader forms their belief about *when* things happened, and the two values behind that belief — a causal counter and an author's own assertion — support a much narrower claim than a forum feed is ordinarily read as making.
+Defines what the feed screen may and may not claim about the order it presents posts in, and about the time it shows against each one, and how it keeps a feed that holds nothing apart from one that could not be read. It exists because the feed is where a reader forms their belief about *when* things happened, and the two values behind that belief — a causal counter and an author's own assertion — support a much narrower claim than a forum feed is ordinarily read as making.
 
 ## Requirements
 
