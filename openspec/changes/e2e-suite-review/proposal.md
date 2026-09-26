@@ -102,11 +102,28 @@ Ubuntu jq-wrapper, so filters are written in jq syntax.
 - `lgs` is used in CI wherever an `lgs` verb exists.
 - No local `npm install` or `pip install`.
 
-**The NO SPEC marker at `tst_adjudicate_ui_run.sh:110` stays.** The run
-adjudicator's contract is deliberately kept out of any capability (archived
-`.openspec.yaml`), and its missing-report behaviour is recorded in archived
-`design.md` D1. No spec exists that the marker could be resolved into. That
-is a decision, not an oversight.
+**The `NO SPEC:` markers in `tst_adjudicate_ui_run.sh` stay, and none of them
+becomes a requirement.** There are two:
+
+- the missing-report marker, above the case "a missing report says nothing was
+  proved, not that a file is absent";
+- the spec-shape marker, above the case "a spec with no steps: list is
+  reported, alongside every other problem". It also covers the two cases after
+  it: "a steps: value that is not a list is refused, not counted" and "a spec
+  that does not parse is reported, alongside every other problem".
+
+The run adjudicator's contract is deliberately kept out of any capability. The
+archived `e2e-ui-suite` change's `.openspec.yaml` says why: these are
+obligations on CI tooling, not on dialectica. That reason still holds after this
+piece's fixes. A refused spec shape and a missing report are inputs to the test
+harness, not behaviour of the forum, so no capability exists that either marker
+could be resolved into.
+
+The markers pin the right behaviour. Each case fails the run and reports its
+cause, and none of them can pass a run that proved nothing. The reasoning is in
+the `e2e-ui-suite` change's `design.md` D1 (missing report), corrected by this
+change's D6, and in this change's D7 (spec shape). Keeping them unspecified is a
+decision, not an oversight.
 
 The PR carries `Part of #134`.
 

@@ -15,6 +15,7 @@ created: 2026-09-25
 # requirements so the tests have a contract to cite.
 #
 # The harness's own obligations are still deliberately not a capability: the
-# three adjudication conditions, the missing-report behaviour and the pins. The
-# archived `e2e-ui-suite` change's `.openspec.yaml` says why, and its design.md
-# records them.
+# three adjudication conditions, the missing-report behaviour, the refusal of a
+# spec with no countable `steps:` list, and the pins. The archived
+# `e2e-ui-suite` change's `.openspec.yaml` says why. Its design.md and this
+# change's D6 and D7 record them.
