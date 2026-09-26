@@ -66,7 +66,12 @@ the next push.
       **Observed, on head `34eaa20`: `feed.yaml` red on its central step, and
       stopped here per the brief.** UI tests
       https://github.com/fryorcraken/dialectica/actions/runs/36213442819:
-      `join`, `create`, `thread` and `moderation` green; `sitometres feed
+      `join`, `create`, `thread` and `moderation` green, the adjudicator
+      printing `verdict: pass` and `ok: all 12 steps passed` for `create`,
+      `ok: all 21 steps passed` for `thread` and `ok: all 15 steps passed`
+      for `moderation`, whose inert-control step took 1.0s, the settle floor
+      design.md D5 rests on; `UI spec validation` printed the four step
+      counts predicted above; `sitometres feed
       spec` failed on "the feed was read, and holds nothing",
       `root.feedReadState === 'ok'` evaluating to false after its 30s and
       `feedRowCount === 0` passing. Every later step passed: after the post
