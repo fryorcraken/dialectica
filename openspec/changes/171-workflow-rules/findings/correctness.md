@@ -626,3 +626,59 @@ Below the box threshold, in prose only:
   `re-review`. `-F` without `-i` is case-sensitive, so a reviewer who
   capitalises the box fails the check and is re-dispatched. That is also
   fail-closed, and the brief gives the form whole.
+
+## Re-review round 5 `dc1390a..d1c8726`
+
+- [x] **re-review round 5 `dc1390a..d1c8726`: no findings** — read `git diff dc1390a..d1c8726` of `RUNNER.md`, `proposal.md`, `design.md` and `tasks.md`, `RUNNER.md` "Record the call" through the pre-tick check as a runner would, and ran the pre-tick check for rounds 1 to 4 on this tree; clean
+
+Correctness only, narrowed as briefed. Nothing reaches medium.
+
+**Round 3's owner box is closed.** At `07f0a5f`, the commands that
+`tasks.md:25` and `:26` now carry on round lines 1 and 2 each list all six
+findings files. The numbered command for round 3 lists five, with no
+`readability.md`. Round 4's line re-runs readability over the same range, so
+round 3's check skips that lane, and round 4's command lists `readability.md`.
+A runner rebuilding from the stage block therefore reads each round's check on
+the line itself and can tick rounds 1 to 4 without re-dispatching anything. The
+row is still unticked only because round 5's four lanes are in flight.
+
+**The restated rule, walked case by case** (`RUNNER.md:604-616`, check at
+`:625-645`):
+
+- *Stall, then continuation.* No record is committed, so the continuation is
+  "finishing a round it has not yet recorded" and gets no line. It writes the
+  original round's form, and that round's check needs its file. Right line,
+  right check. The same holds for continuing an agent to commit
+  (`RUNNER.md:47-52`).
+- *Rejected run, then continuation.* The record is committed and the
+  continuation adds review, so it gets the next number over the same range.
+  The old round's check skips the lane because a later round ran it again. The
+  new round's check fails until the continuation writes the new form, so the
+  rejected record satisfies nothing. Right on both counts. If the rejected run
+  had not committed yet, it gets no line, and the old round's check can pass
+  only on a commit that already holds the continuation's review. That is also
+  right.
+- *Rebase continuation.* The record is committed and nothing is added, so it
+  gets no line and keeps the round's own record. That round's check lists the
+  file once the pick lands. Right.
+- *Fresh re-dispatch.* It gets a line, the earlier round skips the lane, and
+  its own check needs the new form. Right. Round 4 on this piece is a live
+  instance, and it checks out as above.
+
+Below the box threshold, in prose only:
+
+- `RUNNER.md:610-611` and `proposal.md:192-193` read "finishing a round it has
+  not yet recorded, such as after a stall, committing, or rebasing". This
+  parses either as three cases or as three examples of "not yet recorded", and
+  the second reading is false for a rebase. `design.md:453` gives the three
+  cases without "such as", which is clearer. The governing clause, "adds no
+  review to a record already committed", gives the right answer under both
+  readings, so no outcome changes.
+- "Committed" does not say where: on the agent's branch or on the runner's
+  HEAD. It only matters if a runner picks a rejected run's commit, then loses
+  track of a continuation it recorded no line for, and ticks. That needs the
+  line to be skipped as well, which is the "runner skips a step" residual
+  already in Risks.
+- `RUNNER.md` does not say that a round line may carry its own check. The
+  round 1 and 2 annotations still work, because they sit on the line the
+  runner reads before it runs the check, and they only apply to this piece.
