@@ -247,3 +247,98 @@ Nothing else in the `439c192..HEAD` diff drew a correctness finding:
   failed, on the clean tree (after reverting the temporary mutation above).
 - `nix build ./dialectica#lgx` from the tree root: succeeded (no output, exit
   0).
+
+## Re-review of e03230e..HEAD
+
+Re-review scope, per dispatch: PR #173, dimension **correctness only**,
+reviewing `git diff e03230e HEAD` — the commits after the prior re-review
+entry above (`8f6b08cd` naming `ADVANCE_BOUND` in `revision.rs` and pointing
+the archived design at the correction, `f095ed3f` giving `moderation.rs` the
+same wording, `690bbe3e` and `b8c8ff4c` on `proposal.md`'s Impact). Read the
+owner's #162 decision comment again; its first line, unchanged from the
+sections above:
+
+> **Decision (owner, 2026-09-25): peg the Lamport counter to wall-clock time,
+> as SDS does (LIP-109, `logos-lips/docs/anoncomms/raw/sds.md`, lines 148-155
+> and 184-192).**
+
+No correctness defects found. No checkboxes below; see "What was checked".
+
+### What was checked
+
+- **The diff is doc-comment and proposal/design prose only.** `git diff
+  e03230e HEAD --stat` touches `moderation.rs`, `op.rs`, `revision.rs`
+  (comments), the two `design.md` files (post-review and archived), and
+  `proposal.md`/`tasks.md`. No `.rs` line outside a comment changed —
+  confirmed by reading each hunk directly.
+- **The specific claim in scope: are the reworded "permanently" sentences in
+  `revision.rs:300-303` and `moderation.rs:437-440` true of the code as it
+  stood under `ADVANCE_BOUND`, and not read as describing the present.**
+  Checked against `0177eb1^` (the commit before #165), not against either
+  earlier review's prose:
+  - `arrival.rs` at `0177eb1^` line 178: "It does **not** refuse the op. An op
+    carrying an absurd counter is authentic" — an over-bound op was stored,
+    never rejected.
+  - `clock_from_counters` (`0177eb1^:arrival.rs:252-276`) only advances the
+    clock when `counter - clock <= ADVANCE_BOUND`; a counter of `u64::MAX`
+    from a clock near zero never advances it — pinned by the existing test
+    `a_maximal_counter_does_not_advance_the_clock`
+    (`clock_from_counters([u64::MAX]) == 0`).
+  - `cmp_ops` (`0177eb1^:arrival.rs:429-449`) orders purely by each op's own
+    counter, descending, with no reference to the clock — so the `u64::MAX` op
+    leads every comparison regardless of what the clock does.
+  - `next_counter` (`0177eb1^:arrival.rs:292`, `clock.saturating_add(1)`) is
+    derived from the same capped clock, so neither a third party nor the
+    signing author's own later ops (which fold the same `u64::MAX` op into
+    their own `clock_from_counters` and get the same non-advance) can produce
+    a higher counter through ordinary publishing. Reaching `u64::MAX` by
+    legitimate `ADVANCE_BOUND`-sized steps is arithmetically possible but
+    requires on the order of `u64::MAX / ADVANCE_BOUND` ≈ 1.8×10^13 further
+    ops — the same order of magnitude "permanently" already carries in the
+    archived design's own Decision 10 ("*Before:* an author who signed
+    `u64::MAX` fixed that version as current permanently"), which both
+    reworded sentences now match in wording rather than introduce.
+  - Composing these: under `ADVANCE_BOUND`, an op signed at the maximum
+    counter was stored, was never displaced by the clock, and led `cmp_ops`
+    indefinitely — true for `moderation::resolve`'s "leading candidate" and
+    for `revision::current_version`'s "greatest counter" by the same
+    mechanics. Both reworded sentences are accurate.
+  - **Correctly scoped to the past, not the present.** Both sentences open
+    "Under `ADVANCE_BOUND`, which the receive window replaced in #165" before
+    stating the permanence claim, and both are followed by "Nothing here has
+    code of its own for this: the one-hour bound is the ordering rule's" —
+    naming the *current* mechanism separately and correctly. Verified the
+    quoted scenario title exists at
+    `openspec/specs/op-ordering/spec.md:396` and that `RECEIVE_WINDOW_MS` is
+    documented as one hour at `arrival.rs:182` in the current tree, so the
+    "one-hour bound" half of each sentence is accurate about the present
+    while the "permanently" half is correctly fenced off as `ADVANCE_BOUND`-era
+    history. No reader path was found where the past clause could be misread
+    as a live property of today's code.
+  - The two sentences differ only in their tail clause (`moderation.rs`: "a
+    moderator who signed it won such a dispute permanently"; `revision.rs`:
+    "that version was current permanently and its author's later revisions
+    could never displace it"), matching each file's own subject — checked
+    that `revision.rs`'s stronger claim (about the *signing author's own*
+    later revisions, not just third parties) also holds, via the
+    `next_counter`/`clock_from_counters` argument above.
+- **`design.md`'s Decision 11 and the two archived-design forward pointers**
+  describe exactly the correction made to `revision.rs` and `moderation.rs`,
+  and nothing else — read in full; no claim there is independent of the two
+  doc comments already checked.
+- **`proposal.md`'s Impact rewording** ("Code: comments only... Six files in
+  `dialectica/rust-lib/dialectica-core/src/` change, and every changed line is
+  a comment") lists `arrival.rs`, `op.rs` (×2), `transport.rs`, `moderation.rs`,
+  `revision.rs`, `authoring.rs` — six files, matching the full piece's
+  cumulative diff (not just `e03230e..HEAD`) as already verified in the "Diff
+  1"/"Diff 2" sections above; no new file appears that those sections did not
+  already account for.
+
+### Gates run (this re-review)
+
+- `cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p dialectica -p
+  dialectica-core`: **1180 passed** (lib) + **30 passed** (`end_to_end.rs`), 0
+  failed, on the clean tree (no mutation made this round — the diff is
+  comments only, so nothing here is reachable by a test).
+- `nix build ./dialectica#lgx` from the tree root: succeeded (no output, exit
+  0).
