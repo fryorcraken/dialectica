@@ -363,13 +363,6 @@ An op SHALL NOT carry the transport's sender identifier. That identifier binds a
 
 This omission SHALL be enforced by the encoding rather than merely documented: the encoding's length is fully accounted for by the fields that are present, so a further field cannot be added without the encoding's shape visibly changing.
 
-**Why the two admitted fields are admitted, when this requirement previously forbade both.** The prior text refused a self-asserted Lamport value because it "would be forgeable by exactly the author it is meant to order", and refused a wall clock because "a wall clock is a field the adversary sets". Both observations are true and neither has been withdrawn. What changed is that the transport does not supply the alternative and is not going to: no Lamport value reaches this system, so the practical effect of the prohibition was not a transport-assigned order but **no order at all**, with every resolver falling to a hash. The two objections are answered rather than set aside, and each is answered somewhere a test can reach:
-
-- **The forgeable counter** is bounded by `op-ordering`'s receive window, which refuses an op whose counter is more than one hour ahead of the receiving peer's own time. An author can lead honest ops by at most that hour, and cannot place an op beyond it at all.
-- **The adversary-set wall clock** is not bounded into safety; it is removed from every decision. It orders nothing, breaks no tie, and gates nothing. The window reads the counter and never this field, so there is no decision for an adversary's value to reach.
-
-**Why the two remain two fields, now that both carry a time.** The counter is pegged to its author's clock, so it is a claim about the time just as the wall-clock is. This requirement previously separated them by saying a counter is meaningful only relative to ops a peer has seen, while a wall-clock is an absolute claim about the world that a peer has nothing to check against. That distinction no longer holds and is withdrawn. What separates the two now is what each is held to. The counter is checked from above against the receiving peer's own time, and is raised past every counter its author held, so it may order. The wall-clock is checked by nothing, so it may not.
-
 #### Scenario: The encoding's length accounts for every field present
 
 - **WHEN** an op is encoded
@@ -669,9 +662,7 @@ It is carried because a reader is shown a time and expects one. That is its enti
 
 A peer SHALL NOT refuse, drop, or decline to store an op on account of its wall-clock value, however implausible. Every representable value SHALL be accepted.
 
-**This rule is now narrower than the principle it was written from, and the difference is deliberate.** It was written as one instance of a wider rule, that no op is refused for a field value. Its reason was that refusing an op for a bad clock is a censorship vector: a peer whose system clock is wrong (skewed, unset after a battery failure, or misconfigured) would have every op it publishes dropped by every conforming peer, silently and everywhere at once, with no error path by which the author learns of it. **That wider rule is withdrawn**, and the reason now describes a cost this system accepts. `op-ordering` refuses an op whose *counter* is more than one hour ahead of the receiving peer's time, and an honest peer signs its current time into the counter. So a peer whose clock runs more than an hour fast has its ops refused exactly as described. `op-ordering` states that cost and why it is accepted.
-
-What this requirement still guarantees is that the **wall-clock field** is never the reason. The receive window reads the counter alone. An op whose counter is admissible is stored whatever its wall-clock says, so the field remains a display value on which nothing is decided.
+The **wall-clock field** is never the reason an op is refused. The receive window reads the counter alone. An op whose counter is admissible is stored whatever its wall-clock says.
 
 The cost of accepting is real and is stated rather than hidden: **a reader may be shown a time that is not when the op was written.** That cost is bounded by display clamping, which `op-ordering` places on the read path, and is bounded absolutely by the fact that nothing decides anything on this value.
 
