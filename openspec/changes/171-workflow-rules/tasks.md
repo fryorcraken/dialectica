@@ -648,12 +648,14 @@ deleted), before any claim was written.
       last line's parent is the dispatch HEAD because of step 2's rule, with
       no restatement of it.
 - [x] 21.3 `RUNNER.md` number check: "all four hold", and a fourth bullet for
-      the chain (followed or passed over, repair by a new line and never by
-      editing a range, the tail check from the chain's end with round lines
-      allowed, a skipped line for a clean merge of `main` or a spec-free
-      archive, prefix-matching SHAs). No new command; the "What you read"
-      number-check row names what it now confirms. Verify: the listing on
-      this tree chains from `c222c37` to `c3bda2b`, 4 and 8 passed over.
+      the chain (it reaches `<review>` and the end of every line starting at
+      a commit it reaches; repair by a new line and never by editing a range;
+      the tail check from an end the chain reaches, with round lines allowed,
+      and its repairs as 22.1 states; prefix-matching SHAs). No new command;
+      the "What you read" number-check row names what it now confirms.
+      Verify: on this tree the derivation's last line is
+      `f94f7b8d c222c37b`, and the chain reaches the ends of rounds 1 to 15
+      through `bad7c88`, 4 and 8 reaching the same ends as 3 and 7.
 - [x] 21.4 `design.md` "Why the derived commit is the dispatch HEAD" rests on
       step 2's rule, with the round-13 failure and security's scratch
       measurement, why the writer is held back (the refused fast-forward,
@@ -674,3 +676,28 @@ deleted), before any claim was written.
 - [x] 21.9 `findings/design-review.md`'s round 13 `dev-writer` box flipped
       with its outcome.
 - [x] 21.10 `openspec validate 171-workflow-rules --strict` passes.
+
+### 22. After the `spec-writer`'s never-skipped tail repairs (`8de35bf7`)
+
+Follows `proposal.md` as `8de35bf7` left it. The derivation, the chain and
+the tail diff from `bad7c88` were re-run on this tree before 21.3 was
+rewritten.
+
+- [x] 22.1 `RUNNER.md` tail bullet: both repairs are rounds, the round to
+      HEAD and the round ending at the start of a line the chain does not
+      reach; either is sized as above, runs at least one lane and is never
+      marked skipped, with the off-by-one reason; "Either line is sound"
+      kept; a skipped line only for the closed pair, a clean merge of `main`
+      and an archive commit that changed nothing under `openspec/specs/`.
+      The "What you read" number-check row names neither the repairs nor the
+      skip, so it is unchanged. Verify:
+      `git grep -n -F -e "skipped with its reason" -e "such as a clean merge" -- .claude/agents/`
+      returns nothing.
+- [x] 22.2 `design.md`, wording only: "the chain's end", which only
+      `proposal.md` defines, reads "an end the chain reaches" at its five
+      sites, and "leave the chain broken" reads as the tail check failing.
+      No rule or decision changed. Verify:
+      `git grep -n -F -e "chain's end" -e "chain broken" -- openspec/changes/171-workflow-rules/design.md`
+      returns nothing.
+- [x] 22.3 PR #174's body: the tail-check repair passage follows 22.1.
+- [x] 22.4 `openspec validate 171-workflow-rules --strict` passes.

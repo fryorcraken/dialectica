@@ -739,16 +739,21 @@ the `closer`'s first row. Do not tick unless all four hold:
     end is never HEAD itself. If they fail, a commit that needs review lies
     after that end. Write the next line, below the last with the next number
     as every line is, starting at that end: a round over the commits from
-    there to your HEAD, sized as above, or, where a line the chain does not
-    reach starts later, a line ending at that start, sized the same way or
-    skipped with its reason, so that the chain goes on through that line. The
-    ordinary case for the second is an off-by-one: a round over the commits
-    `f1` to `f2` written ``round <n> `f1..f2` ``, which leaves `f1` out, since
-    a two-dot range excludes its start. Either line is sound; the choice
-    changes only how much is read again. A commit they list that needs no
-    review, such as a clean merge of `main` or an archive commit that changed
-    nothing under `openspec/specs/`, gets a line of its own marked skipped
-    with that reason, and the chain runs past it.
+    there to your HEAD, or, where a line the chain does not reach starts
+    later, a round ending at that start, so that the chain goes on through
+    that line. The ordinary case for the second is an off-by-one: a round over
+    the commits `f1` to `f2` written ``round <n> `f1..f2` ``, which leaves `f1`
+    out, since a two-dot range excludes its start. **Either line is sized as
+    above and runs at least one lane; neither is ever marked skipped.** In the
+    off-by-one the second line's range is exactly `f1`, and the reason a skip
+    would give, that the round covered `f1`, is the belief that wrote the
+    off-by-one: a skipped line extends the chain and the forms check skips
+    it, so `f1` would merge unread with every check passing. Either line is
+    sound; the choice changes only how much is read again. Only two commits
+    they list get a line marked skipped here, because they need no review: a
+    clean merge of `main`, and an archive commit that changed nothing under
+    `openspec/specs/`. Each gets a line of its own marked skipped with that
+    reason, and the chain runs past it.
 
 A re-run's line templated from the previous one with its number unchanged is
 why this check reads the numbers: the copy rule below carries that number into

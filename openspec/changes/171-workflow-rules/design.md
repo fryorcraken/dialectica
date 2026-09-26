@@ -1026,8 +1026,8 @@ check names. `RUNNER.md` gives it as the fourth bullet of the number check.
       proposal already discloses as a residual neither check sees
       (`findings/security.md`, re-review round 14 `c3bda2b..e5dcce4`,
       archive-masking note). That note's round-15 variant, a skipped archive
-      line over the archive's own range leaving a line from the chain's end
-      to the archive's parent, needed that second line skipped too; it is a
+      line over the archive's own range leaving a line from an end the chain
+      reaches to the archive's parent, needed that second line skipped too; it is a
       repair, so it is now sized, and the variant is closed.
   - **What it costs.** A round 1 whose start is earlier than the derived
     `<review>`, or a line starting inside another's range, is not reached,
@@ -1050,17 +1050,19 @@ check names. `RUNNER.md` gives it as the fourth bullet of the number check.
   never end at HEAD once a round is recorded. At `ab53b41c`, HEAD was six
   commits past round 13's end `c3bda2b`: the round 13 record `ad5c8733` and the
   five re-reviewers' commits. So the check runs the nothing-landed check's two
-  commands from the chain's end and asks what those commands already ask,
-  whether anything but tracking landed.
+  commands from an end the chain reaches and asks what those commands already
+  ask, whether anything but tracking landed.
 - **Round lines are allowed in the tail's `tasks.md` diff**, because the
-  round's own record line is one of the commits after the chain's end, and the
-  runner's record lines are tracking ("Every commit that merges", above).
+  round's own record line is one of the commits after an end the chain
+  reaches, and the runner's record lines are tracking ("Every commit that
+  merges", above).
   Without the allowance the check could never pass after a round is recorded.
 - **A commit that needs no review but that the first command lists**, a clean
   merge of `main` or an archive commit that changed nothing under
   `openspec/specs/`, gets a skipped line of its own, so the chain runs past it
   and the next round starts after it. Without the line, every later round
-  would have to include it in its range or leave the chain broken.
+  would have to include it in its range, or the tail check from every end the
+  chain reaches before it would list it and fail.
 - **Two SHAs match when one is a prefix of the other**, because the
   derivation's `%h` prints `c222c37b` where this piece's round 1 line has
   `c222c37`.
@@ -1960,7 +1962,8 @@ no role file.
   `git log --diff-filter=A --format="%h %p %s" -- openspec/changes/<name>/findings/`,
   and the two commands run from it, `git diff --no-renames --name-only
   <review> HEAD` and `git diff <review> HEAD -- <change folder>/tasks.md`,
-  which the number check's chain condition also runs from the chain's end; and
+  which the number check's chain condition also runs from an end the chain
+  reaches; and
   "Dispatching"'s `mkdir -p tmp`, `git diff --binary
   --output=tmp/uncommitted.patch HEAD`, `git restore --source=HEAD --staged
   --worktree -- .` and `git apply tmp/uncommitted.patch`. Each was measured
@@ -1987,9 +1990,9 @@ no role file.
     and each ends in a round 1 written as skipped over a range holding
     unreviewed work: the number check lists that one line, the forms check
     skips a round marked skipped, the row is ticked, and the commit merges,
-    as in the first. The chain condition runs the same two commands from the
-    chain's end, so the three that mistype them, the fourth to sixth below,
-    also let it pass over a commit landed after the last round. A mistyped
+    as in the first. The chain condition runs the same two commands from an
+    end the chain reaches, so the three that mistype them, the fourth to
+    sixth below, also let it miss a commit landed after that end. A mistyped
     `openspec/specs/` path lists nothing, and an unreviewed spec change would
     merge; a pre-tick search cut down to the bare range matches it in prose,
     and one cut to a single SHA also matches the previous round's records,
