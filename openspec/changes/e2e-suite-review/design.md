@@ -354,6 +354,36 @@ and not by a test. CI is the evidence that it works: "Install yq" in
 `ui-specs` and the install step in `spec` both pass on the pushed tip, and the
 scripts after each one read YAML with the `yq` it installed.
 
+### D10 — The suite's citations name the change whose decision they cite
+
+The merged suite cited its decisions as a bare "design.md D1", "D4", "D8",
+"D11" and "D12", meaning the `e2e-ui-suite` change's. This change's own
+Decisions also start at D1. Once both are archived, a bare "D1" names two
+unrelated decisions, and grepping `^### D1` gives two answers. D6–D10 above now
+reach D8 as well, so the argument that the archive's higher numbers resolve by
+elimination no longer holds either.
+
+**Chosen:** every citation in the suite's files names its change: the
+workflows' UI steps, the adjudicator and its test, `require-jq-yq.sh`,
+`tst_ui_tool_pins.sh`, `tst_scaffold_values_unchanged.sh` and `join.yaml`. Each
+reads "the e2e-ui-suite change's design.md D12", or the `e2e-suite-review`
+equivalent for the decisions above. `Main.qml:128` already used this form for
+the one citation #164 added there.
+
+**Rejected:** renumbering this change's decisions to avoid the collision, for
+example from D13. That removes this collision and leaves the cause in place:
+the next change on the suite starts at D1 again, and every bare citation is
+ambiguous again. A qualified citation stays correct whatever any later change
+numbers.
+
+**Not changed:** bare `design.md` citations elsewhere in the repo, such as
+`Main.qml:82,102,509` and other ci.yml jobs. They predate #164 and cite other
+changes, so they are outside this review's scope.
+
+**What breaks without it:** no test can see it, since it is prose. The check
+is `git grep -n -F "design.md"` over the files listed above, where every hit
+names a change.
+
 ## Risks / Trade-offs
 
 - **The `lgs` source read is a working tree, not the tag.** Its crate version
@@ -363,5 +393,8 @@ scripts after each one read YAML with the `yq` it installed.
 - **A pull_request run tests the merge of the branch with `main`.** If `main`
   moves between a break and its revert, the green run tests a different base
   from the red one. → Each run is recorded with the head SHA it ran on.
-- **R1 is also red in ci.yml's `qml` job** (D2). → Expected, recorded, and in
-  a different workflow from the spec it proves.
+- **The no-key break is also red in ci.yml's `qml` job** (D2). → Expected,
+  recorded, and in a different workflow from the spec it proves.
+- **D9's installer and D8's `env:` values are proved only by CI.** Nothing
+  local can run `sudo apt-get` against a runner's sources or drive the `spec`
+  job. → The hand-back reports both workflows' state on the pushed tip.

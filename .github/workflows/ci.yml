@@ -1177,7 +1177,8 @@ jobs:
 
       # Each workflow keeps its own literal for the tools the two share, where
       # someone reading that job can see it. This step keeps the literals equal
-      # and exact. design.md D8 says why two literals and a check, rather than
+      # and exact. The e2e-ui-suite change's design.md D8 says why two literals
+      # and a check, rather than
       # one file both workflows load.
       - name: The two UI workflows pin the same tool versions
         run: dialectica-ui/tests/tst_ui_tool_pins.sh
@@ -1192,7 +1193,7 @@ jobs:
       # The scaffold-diff guard's own tests, so whether its diff mechanism
       # tells a changed value from lgs's comment-and-reorder rewrite is
       # checked on every PR rather than only when a real run happens to trip
-      # it. design.md D11.
+      # it. The e2e-ui-suite change's design.md D11.
       - name: The scaffold-diff guard tells a changed value from lgs's rewrite
         run: dialectica-ui/tests/tst_scaffold_values_unchanged.sh
 

@@ -16,15 +16,16 @@
 #
 # The THIRD carries the weight. Drop it and an empty run satisfies the other
 # two and reads as a pass, which is worse than a red run: it reads as evidence
-# when it is the absence of evidence. design.md D1 records which checks in
-# tst_adjudicate_ui_run.sh go red without it, measured.
+# when it is the absence of evidence. The e2e-ui-suite change's design.md D1
+# records which checks in tst_adjudicate_ui_run.sh go red without it, measured.
 #
 # The report is the authority rather than the terminal summary because the
 # summary is styled for a human, ANSI-coloured with no stable field to match
 # on, while the report is written from a `finally`, on every exit path.
 #
 # The report is JSON and is read with `jq`. The spec is YAML and is read with
-# `yq`, the jq wrapper, so both are queried in one language. design.md D12.
+# `yq`, the jq wrapper, so both are queried in one language. The e2e-ui-suite
+# change's design.md D12.
 #
 # EVERY failing condition is reported before exiting, not just the first: a run
 # that fails two of them should say so once rather than over two CI runs.

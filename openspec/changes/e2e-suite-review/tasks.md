@@ -3,7 +3,7 @@
 ## Stages
 
 - [x] spec — `spec-writer` — `proposal.md`; one delta, `specs/view-navigation/spec.md` (two requirements added, from findings/spec-test.md); `skip_specs` dropped
-- [x] design + code — `dev-writer` — design.md written; CLAUDE.md line; both proofs red then green in CI (Implementation 2 and 3)
+- [x] design + code — `dev-writer` — design.md written; CLAUDE.md line; both proofs red then green in CI (Implementation 2 and 3); review findings fixed (Implementation 5, design.md D6–D10)
 - [ ] tests — `tester`
 - [x] review: correctness — `code-reviewer` — findings/correctness.md: two findings for `dev-writer` (adjudicate-ui-run.sh's missing-report cause, and its uncaught no-steps crash), rest checked clean
 - [x] review: security — `code-reviewer` — findings/security.md: one low-severity finding (unquoted `${{ matrix.spec }}` in ui-tests.yml run: bodies); rest clean
@@ -134,3 +134,30 @@ out before the next push.
       the 3.2 revert; its own CI state is reported in the hand-back and on the
       PR, not here, because this file cannot name a run of the commit that
       contains it
+
+### 5. Review findings addressed to `dev-writer`
+
+Each finding's box, outcome and predicted-versus-observed measurement is in
+`findings/`; these rows are the ordering.
+
+- [x] 5.1 The adjudicator names both causes of a missing report
+      (`correctness.md` 1, `design-review.md`; design.md D6).
+      `tst_adjudicate_ui_run.sh` "names a run that never started" was red
+      before the change and is green after it
+- [x] 5.2 A spec with no, a non-list or an unparseable `steps:` is a reported
+      problem, not a jq abort (`correctness.md` 2; design.md D7). Three new
+      `NO SPEC:` cases in `tst_adjudicate_ui_run.sh`, and two mutations
+      measured
+- [x] 5.3 No `${{ … }}` in any workflow's `run:` body (`security.md`;
+      design.md D8). `tst_workflow_run_bodies.sh` wired into `ui-specs`, red
+      against the workflows #164 left and green after
+- [x] 5.4 One `install-yq.sh` for both workflows (`architecture.md`; design.md
+      D9). Satisfied by construction: one copy cannot drift, and no local test
+      can run it. CI on the pushed tip is the evidence
+- [x] 5.5 Decision citations in the suite's files name their change
+      (`readability.md`; design.md D10). Prose, checked by `git grep`, and no
+      test can see it
+- [x] 5.6 design.md D5 records the correction to the archived proposal's
+      "every behaviour `join.yaml` asserts is already a requirement", which
+      the `view-navigation` delta makes true, and to archived D1's premise
+      for the missing-report message

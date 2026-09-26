@@ -9,7 +9,8 @@
 #
 # TWO LITERALS AND A CHECK, NOT ONE HOME. Each workflow keeps its own literal as
 # a job-level `env:` value, where someone reading that job sees it, and this
-# file keeps them equal. design.md D8 says why a single file loaded by both
+# file keeps them equal. The e2e-ui-suite change's design.md D8 says why a
+# single file loaded by both
 # workflows was rejected.
 #
 # It also fails on a version written straight into a `run:` body. A literal

@@ -156,7 +156,8 @@ expect_says "still reports the verdict" "expected 'pass'"
 
 # The other half of this pair is the first case above, which runs the real
 # `yq` and passes. Here a `yq` that answers in YAML, as the Go yq on GitHub's
-# runner image does, is put first on PATH. design.md D12.
+# runner image does, is put first on PATH. The e2e-ui-suite change's design.md
+# D12.
 echo "a yq that is not the jq wrapper is refused by name"
 mkdir -p "$work/other-yq"
 cat > "$work/other-yq/yq" <<'EOF'

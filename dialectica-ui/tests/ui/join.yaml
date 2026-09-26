@@ -80,7 +80,8 @@ app: dialectica_ui
 #
 # Naming it is not what makes it PRESENT. In CI, `lgs basecamp install` builds
 # and installs all three into the profile the run is pointed at; see
-# ui-tests.yml, and design.md, "lgs builds and installs; sitometres drives".
+# ui-tests.yml, and the `e2e-ui-suite` change's design.md, "lgs builds and
+# installs; sitometres drives".
 #
 # `dialectica` is named although sitometres would resolve it anyway as the app's
 # own declared dependency: it costs nothing, and it keeps the whole chain

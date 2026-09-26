@@ -11,7 +11,7 @@ the five read-only root handles #164 added (confirmed against
 
 ## Findings
 
-- [ ] **`dev-writer`** — `openspec/changes/e2e-suite-review/design.md:39,109,167`
+- [x] **`dev-writer`** — `openspec/changes/e2e-suite-review/design.md:39,109,167`
       — this piece's own Decisions reuse the letters `D1` and `D4`, which the
       merged code already cites, unqualified, to mean the *archived*
       `e2e-ui-suite` change's `design.md` — and after this piece archives,
@@ -66,6 +66,25 @@ the five read-only root handles #164 added (confirmed against
       piece archives, and it sits in exactly the kind of numeric citation
       CLAUDE.md's own "a number in a comment is a claim" principle warns
       reads as more precise than it is.
+
+      **Fixed** in the commit that flips this box, by the second of the two
+      remedies the finding offers: every decision citation in the suite's
+      files now names its change. That covers `adjudicate-ui-run.sh` (D1,
+      D12), `tst_adjudicate_ui_run.sh`, `require-jq-yq.sh`,
+      `tst_ui_tool_pins.sh` (D8), `tst_scaffold_values_unchanged.sh` (D4, and
+      its "this piece's tasks.md and design.md Risks"), ci.yml's `ui-specs`
+      steps (D8, D11, D12), and `ui-tests.yml` and `join.yaml`'s by-title
+      citations. Each new citation this change's earlier commits added was
+      written qualified. Renumbering was rejected: the next change on the
+      suite would start at D1 again. The finding's elimination argument for
+      D8/D11/D12 also stopped holding once this change's Decisions reached
+      D10 (design.md D10). **No test fails without this, and none could:**
+      it is prose. The check is `git grep -n -F "design.md"` over those
+      files, where every hit now names `e2e-ui-suite` or `e2e-suite-review`
+      (the two unprefixed hits in `ui-tests.yml` are the second line of a
+      wrapped qualified citation). Bare citations outside the suite, such as
+      `Main.qml:82,102,509`, predate #164, cite other changes and are left
+      alone.
 
 ## Checked and clean
 

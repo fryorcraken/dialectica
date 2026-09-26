@@ -30,8 +30,8 @@ on:
     branches: [main]
   # On PRs, and not post-merge only. The defect class this layer exists for —
   # a view that breaks only inside the host — is introduced by a PR, and a
-  # signal that arrives after the merge arrives after the damage. See design.md,
-  # "CI cost and cadence".
+  # signal that arrives after the merge arrives after the damage. See the
+  # e2e-ui-suite change's design.md, "CI cost and cadence".
   pull_request:
     branches: [main]
   workflow_dispatch:
