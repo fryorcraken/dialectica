@@ -232,3 +232,79 @@ finding asked for. This closes clean.
 - **`nix build ./dialectica#lgx`**: succeeded.
 
 Only architecture was in scope for this re-review pass.
+
+## Re-review of e03230e..HEAD
+
+Read the owner's decision comment on issue #162 again for this pass; its first
+line is unchanged from what is quoted above:
+
+> **Decision (owner, 2026-09-25): peg the Lamport counter to wall-clock time,
+> as SDS does (LIP-109, `logos-lips/docs/anoncomms/raw/sds.md`, lines 148-155
+> and 184-192).**
+
+Reviewed `git diff e03230e HEAD` in full: `moderation.rs`, `revision.rs` (the
+`ADVANCE_BOUND` naming fix, tasks 4.4/4.7), `op.rs` (a pure line-rewrap, no
+text change), the two forward-pointer notes in the archived
+`2026-09-25-time-pegged-clock/design.md`, this piece's `design.md` (Decision 1
+and Decision 11 rewritten, plus the Risks bullet's rewrap), `proposal.md`
+(Impact reworded, and the "not edited" claim replaced), `tasks.md` (§4's three
+new rows), and the finding this piece closes in this file.
+
+**My own prior finding closes correctly.** The forward pointers exist exactly
+where the outcome text says: `git grep -n -F -e
+"time-pegged-clock-post-review" -- openspec/changes/archive/2026-09-25-time-pegged-clock`
+returns line 137 (Decision 3) and line 275 (Decision 10), matching the box's
+citation. Both notes are headed `*Added by a later change:*`, sit directly
+after the paragraph they correct, and name this change's `design.md`, Decision
+11 — the same shape design.md itself describes. Decision 1's claim that the
+archive is "history and are not edited" is gone; Context and Decision 1 now
+distinguish *reasoning* (never added to the archive) from the two labelled
+*pointers* (the only edit made), and both places state that distinction the
+same way, so a reader of either section gets a consistent account.
+
+**The `ADVANCE_BOUND` rewording (tasks 4.4, 4.7) is now identical prose in both
+sites**, verified by reading `moderation.rs:437-444` and `revision.rs:300-307`
+side by side: both read "Under `ADVANCE_BOUND`, which the receive window
+replaced in #165, the lead had no end: an op signed at the maximum counter was
+stored and led the order while the clock stayed below it, so [it] ... won such
+a dispute permanently / that version was current permanently", differing only
+in the words specific to each reader. `ADVANCE_BOUND` itself is not a live
+symbol (`git grep -n -F -e "ADVANCE_BOUND" -- dialectica/rust-lib` finds it
+only inside doc comments, in `arrival.rs` too, which already used the name
+before this diff) — it is used purely as a historical handle, consistently
+with `arrival.rs`'s existing idiom, not introduced fresh. No stray "Before the
+window" phrasing survives outside quotation in the findings files and tasks.md
+(`git grep -n -F -e "Before the window" -- dialectica openspec` — the only
+hits are in `findings/correctness.md`, `findings/readability.md` and
+`tasks.md`, all quoting the old text as history, not live doc comments).
+
+**Not a defect, but a gap worth naming for whoever picks up archive-correction
+work next:** the convention this piece just invented — correct an archived
+`design.md` by leaving its original prose alone and appending a short,
+labelled, dated forward pointer to wherever the correction actually lives —
+is argued well in *this* piece's Decision 11, but recorded **only** there.
+`docs/OPENSPEC-ARCHIVE.md` (the file whose own header says "read this when you
+are archiving") has no section on correcting an archived design after the
+fact; I checked (`git grep -n -i "correct" -- docs/OPENSPEC-ARCHIVE.md` finds
+one unrelated hit, on "correct exactly when the cwd is"). **Scenario:** a
+future change needs to correct a different archived design (say, an error
+found in `2026-09-11-op-model`'s `design.md`). Its author has no repo-wide
+place to learn that a labelled forward-pointer note is the established
+answer, rather than rewriting the archived text in place or adding a sibling
+file — both alternatives this piece's Decision 11 already considered and
+rejected, for reasons that would have to be independently rediscovered. Once
+this piece itself archives, the precedent sits inside a dated archive folder
+found only by a reader who already knows to look for it — the exact
+discoverability problem Decision 11 was written to solve, recurring one level
+up. Not raising this as a blocking box: it is new work beyond what issue
+#162's decision comment scopes this piece to, the current fix is sound on its
+own terms, and no live citation trail depends on the general convention being
+written down anywhere else. Worth an issue of its own, or a short addition to
+`docs/OPENSPEC-ARCHIVE.md`'s "Four traps" section, the next time an archived
+design needs correcting.
+
+- **`cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p dialectica -p
+  dialectica-core`**: 1180 + 30 tests, 0 failed.
+- **`nix build ./dialectica#lgx`**: succeeded.
+
+No new blocking findings this pass. Only architecture was in scope.
