@@ -6,7 +6,20 @@
 - [x] design + code — `dev-writer` — design.md D1–D8; four specs green in CI
       and each seen red for its reason (Implementation 3–7); #152's binding race
       found by `feed.yaml`, fixed test-first (3.2–3.3, design.md D8)
-- [ ] tests — `tester`
+- [x] tests — `tester` — verified the dev's named gaps directly: `feedReadState`/
+      `threadReadState` fail on a constant-mutation (measured, both); `readThreadArea`/
+      `moderateArea` genuinely have no component-test click (confirmed: component
+      tests invoke the signals directly, and `tst_navigation.qml` has no window
+      for `mouseClick`); the `feed-view` ADDED requirement's five scenarios are
+      pinned in `tst_feed_states.qml`; D8's every-read fix pinned in both binding
+      orders (measured: removing the feed's guard reddens exactly one test as
+      predicted, and removing the thread's guard with `threadId` bound first
+      reddens three, matching design.md/tasks.md word for word); D9's `wait_for`
+      cannot be pinned by any test here (see hand-back). Added one assertion pair
+      to `tst_stoa_screens.qml`'s `test_an_item_short_of_its_record_is_not_recorded_as_an_empty_one`
+      closing a partial gap in `stoa-navigation-view`'s "A listing item with no
+      record gets a row, no share, and no error" (rows still rendered, no error),
+      proven by mutation
 - [ ] review: correctness — `code-reviewer`
 - [ ] review: security — `code-reviewer`
 - [ ] review: readability — `code-reviewer`
