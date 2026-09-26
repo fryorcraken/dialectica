@@ -146,7 +146,10 @@ another file.
     search for those two forms. The brief gives both forms whole, not "such
     as": a heading written loosely, such as
     ``## Re-review round 1 (`c222c37..9dc235c`)`` on this piece, matches
-    neither.
+    neither. `RUNNER.md` gives that example with placeholders,
+    ``## Re-review round <n> (`<range>`)``, so that no role file carries
+    this piece's SHAs; it fails to match for the same reason, the
+    parenthesis.
     The reviewer writes and commits that box itself, as it would a finding.
     It is the reviewer's own record that the round ran: a re-reviewer's stage
     row is already ticked, so without the box a clean round leaves nothing
@@ -641,8 +644,27 @@ another file.
     does not create the directory; for step 2,
     `git restore --source=HEAD --staged --worktree -- .`; and for step 4, a
     plain `git apply tmp/uncommitted.patch`. The changes come back unstaged
-    whether or not they were staged before, and the patch file stays in
-    `tmp/` either way. `RUNNER.md` names no signing flag: while
+    whether or not they were staged before, a staged new file coming back
+    untracked, and the patch file stays in `tmp/` either way. **An untracked
+    file is outside the four steps, and `RUNNER.md` says so:** `git diff`
+    does not save it, step 2 leaves it in place, and it stays in the tree
+    throughout. It does not stop the rebase unless an incoming commit adds a
+    file at its path; then `git rebase` refuses before it starts
+    (`error: The following untracked working tree files would be
+    overwritten by checkout`), with no rebase in progress and the file
+    untouched. **A tree whose only changes are untracked saves an empty
+    patch**, and step 4's `git apply` refuses it
+    (`error: No valid patches in input`, exit 128). `RUNNER.md` says that
+    refusal means there was nothing tracked to re-apply, not that evidence
+    was lost, and has the continuation message carry that sentence, so the
+    agent reports it as such. The commands stay as above for this case:
+    step 4 stays a plain `git apply`, with no `--allow-empty` and no check
+    added before step 1. Measured by the `spec-writer` with git 2.55.0 in a
+    scratch repository: an untracked file at a path the piece's commit
+    added refused the rebase as quoted; one at a path nothing incoming
+    touched survived the save, restore, rebase and apply; the save wrote an
+    empty file and the apply refused it as quoted; and a staged new file
+    came back from the apply untracked. `RUNNER.md` names no signing flag: while
     signing is off the runner's message adds `--no-gpg-sign` to the rebase,
     as every brief does, since the correctness re-reviewer's
     `git rebase --continue` hung on the signing prompt. The durable home for
