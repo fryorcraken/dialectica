@@ -21,7 +21,7 @@
       record gets a row, no share, and no error" (rows still rendered, no error),
       proven by mutation
 - [ ] review: correctness — `code-reviewer`
-- [ ] review: security — `code-reviewer`
+- [x] review: security — `code-reviewer`
 - [x] review: readability — `code-reviewer`
 - [ ] review: architecture — `code-reviewer`
 - [ ] review: spec-test — `spec-test-reviewer`
