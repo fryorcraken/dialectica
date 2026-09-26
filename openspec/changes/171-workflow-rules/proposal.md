@@ -3,7 +3,10 @@
 Closes #171, #170, #169 and #133. All four are `workflow` issues, and all four
 edit files under `.claude/agents/`. The owner authorised those edits for this
 piece, limited to what the four issues ask for and to four additions the owner
-authorised in session, each marked **owner-authorised** below.
+authorised in session, each marked **owner-authorised** below. One sentence in
+`spec-writer.md` is corrected as well: it is measured false, and left alone it
+would contradict a rule this piece adds under an owner ruling. The entry for
+it says why that is inside the authorisation.
 
 ## Why
 
@@ -299,8 +302,12 @@ another file.
     credential, the runner reports that to the owner and waits. If the agent
     cannot be continued, the runner dispatches a fresh agent for the stage,
     which redoes it rather than copying the old agent's file. The signing
-    failure behind `c43c7a7` no longer arises: the owner removed the signing
-    requirement, and agents commit with `--no-gpg-sign`.
+    failure behind `c43c7a7` does not arise while signing is off: the owner
+    has switched the requirement off for the days they are away, and briefs
+    tell agents to commit with `--no-gpg-sign`. Once signing is back, a
+    signing failure is again a blocker only the owner can clear, handled as
+    above: the runner reports it and waits. See "Out of scope" for why no
+    role file changes for this.
   - **A cherry-pick that stops on a conflict is not the runner's to
     resolve.** The runner runs `git cherry-pick --abort`, keeps the agent's
     tree, and continues that agent with `SendMessage`: it rebases its own
@@ -308,8 +315,39 @@ another file.
     back. The runner then cherry-picks again. The agent's branch is local and
     never pushed, so the rebase rewrites nothing anyone else holds. If the
     agent cannot be continued, the runner dispatches a fresh agent for the
-    stage. This is the case the six review rows meet: see "Open, for the
-    owner" below.
+    stage.
+  - **The review round meets that conflict every time, and `RUNNER.md` says
+    so** where it sets out the per-agent sequence, so the runner expects it
+    rather than reading it as a fault. The six reviewers fork from one HEAD,
+    each ticks its own row, and the six review rows are adjacent. Measured on
+    this pass with git 2.55.0, in a scratch repository holding the template's
+    stage block: two such ticks cherry-picked one after the other conflict
+    when their rows are adjacent (`CONFLICT (content): Merge conflict in
+    tasks.md`), and merge cleanly with one unchanged row between them. Picked
+    in template order, each of the second to sixth review cherry-picks stops.
+    No order stops fewer than three: a pick is clean only if neither
+    neighbouring row is ticked yet, and at most three of six consecutive rows
+    can be picked that way. Sequential stages never meet it, since each forks
+    after the previous tick is on the runner's HEAD. This piece does not
+    change the template to avoid the conflict: see "Out of scope".
+  - **`spec-writer.md` stops saying that ticks on neighbouring rows cannot
+    conflict.** Its sentence "That is what keeps their cherry-picks clean —
+    git conflicts on the same line, not on neighbouring ones" is false by
+    the measurement above. It is also the premise behind the runner ticking
+    reviewers' rows: `a284e51`'s message gives the conflict as the reason,
+    and the owner's ruling "Agents tick their own" now forbids that practice.
+    Left as it is, the file holding the template would say the review
+    round's cherry-picks are clean while `RUNNER.md`, in this same piece,
+    tells the runner they conflict. Only that sentence changes, and no row
+    of the template. What replaces it says three things: an agent forked
+    after the previous tick reached the runner's HEAD cherry-picks cleanly;
+    ticks on adjacent rows by agents forked from the same HEAD, which is the
+    review round, conflict when cherry-picked one after another, because git
+    conflicts on neighbouring lines as well as on the same line; and
+    `RUNNER.md` says who resolves that. This edit is inside the piece's
+    authorisation because it follows from a ruling the owner took into this
+    piece: it corrects the ruling's premise in the file that stated it, and
+    adds no rule.
   - **"You do not write the work — not even one small edit while an agent is
     being prepared" stays, and gains no exception.**
 - **This piece's own history predates the ruling, and is not redone.** Four
@@ -326,29 +364,73 @@ another file.
   round, so the six reviewers read its edits. The owner may raise these
   commits separately; this piece does not.
 
-### Open, for the owner: six reviewers' ticks conflict on cherry-pick
-
-Measured on this pass in a scratch repository: two commits forked from one
-stage block, each ticking a different row, conflict when cherry-picked one
-after the other if the two rows are adjacent (`CONFLICT (content): Merge
-conflict in tasks.md`). With one unchanged line between the two rows, the
-second cherry-pick merges cleanly. The template's six review rows are
-adjacent, so when each reviewer ticks its own row, the second to sixth
-cherry-pick of a review round each stops on a conflict. That is the reason
-`a284e51`'s message gives for the runner ticking the rows. The premise that
-fails is `spec-writer.md`'s "git conflicts on the same line, not on
-neighbouring ones".
-
-This proposal handles the conflict within the ruling, by the conflicting
-cherry-pick rule above: each reviewer after the first rebases and resolves
-its own tick. That works, but costs up to five `SendMessage` round trips per
-review round, one after another. Whether to also remove the conflict from the
-template, for example with a blank line between rows, and to correct that
-sentence in `spec-writer.md`, is the owner's call. This piece makes no edit
-for it unless the owner authorises one.
-
 ### Out of scope
 
+- **One file per stage row, so that no two agents' ticks can conflict.** The
+  owner suggested this in answer to the measured conflict above. It changes the
+  stage block's design, which the owner cannot rule on while away, so this
+  piece keeps the template and handles the conflict by the cherry-pick rule
+  above. It is a follow-up for the project manager to file, and this entry is
+  written to be lifted into that issue as it stands:
+  - **The conflict.** The stage block is one list in one `tasks.md`. The six
+    reviewers of a review round fork from the same runner HEAD, and each
+    ticks its own row. The runner then cherry-picks their commits onto
+    `piece/<name>` one after another, and each commit changes a file the
+    earlier picks have already changed. Measured with git 2.55.0 in a scratch
+    repository holding the template's stage block: a tick on a row next to
+    one already picked stops with `CONFLICT (content): Merge conflict in
+    tasks.md`, and a tick with one unchanged row between it and the picked
+    one applies cleanly. Git conflicts on neighbouring changed lines, not only
+    on the same line. The six review rows are adjacent, so in template order
+    the second to sixth picks each stop, and no order stops fewer than three.
+    Each stop costs a `SendMessage` round trip, one after another, for the
+    agent to rebase onto the piece and resolve a one-character change.
+    Sequential stages never meet it: each agent forks after the previous
+    tick is on the runner's HEAD.
+  - **Why separate files remove it by construction.** A cherry-pick merges
+    path by path, and two commits that change different files cannot
+    conflict in content, in any order. With one file per stage row, the way
+    `findings/<dimension>.md` is one file per reviewer, each agent's tick
+    changes a file no other agent touches. The six reviewers already write
+    six findings files at once, with no conflict, for the same reason.
+  - **Who reads the stage block, and would change:**
+    - `spec-writer.md`: the template, and the paragraph above it on why
+      ticks stay clean.
+    - `README.md`'s stage-block section in "Two files carry the state of a
+      change": the block's shape, "Each agent flips its own row and adds
+      none, so concurrent cherry-picks never touch the same line", a struck
+      row keeping its empty box, and `openspec archive` counting a struck row
+      as incomplete.
+    - `closer.md` Step 1: the stage-block gate, and the `git ls-files`
+      command that finds `tasks.md` in the live or the archived change
+      folder.
+    - `RUNNER.md`'s "What you read" table and "Rebuild the state": the
+      `tasks.md` rows and their greps, `grep -rn "^- \[ \]"` and
+      `grep -c "^## Stages"`, and the paragraph on where the block is once
+      the change is archived. Also `RUNNER.md` step 3, whose re-review row
+      carries the runner's record lines, tick and untick.
+  - **For the issue to settle:** how a struck row and its reason are written
+    when a row is a file; whether `openspec archive`, which reads `tasks.md`,
+    still warns about an incomplete stage; and what the check for "an
+    unticked row with no agent running" becomes.
+  - **Offered with it, and not chosen for this piece:** a blank line between
+    the template's rows, which the measurement shows would stop the conflict
+    but holds only while every later edit to the template keeps the spacing;
+    and serialising the reviewers, which removes the conflict by giving up
+    the parallel round.
+- **`closer.md`'s signing text, and `--no-gpg-sign` in role files.** The
+  owner has switched signing off for the days they are away, and said both
+  are "temporary". So two passages in `closer.md` are false for that period
+  and are **not edited**: Step 2's paragraph that says commit signing is
+  required on `main`, that a signing failure is a stop-and-ask, and not to
+  reach for `--no-gpg-sign` or `commit.gpgsign false`; and Step 6's "it
+  requires four green checks and a signed commit". Both become true again
+  when signing is restored, and editing them now would mean a second edit to
+  undo it then. Do not "fix" either. For that period `--no-gpg-sign` is in
+  the runner's briefs and in no role file. The Step 2 paragraph is carried
+  into the rewritten Step 2 with its rule unchanged. The only change is the
+  operation it names, from "a rebase" to the merge of `main`, because
+  Step 2 no longer rebases.
 - **Why #165 was `BLOCKED`** (#170's closing paragraph). This piece only stops
   a closer from going around a block. It does not diagnose one.
 - **A semantic clash between the piece and a clean merge of `main`**, such as
@@ -359,12 +441,14 @@ for it unless the owner authorises one.
   change with no source diff still gets all six reviewers. Only the re-review
   after that round is left to the runner's judgement.
 - **Anything else under `.claude/`.** That means `settings.json`, hooks, and
-  rewording in any role file beyond what these four issues and the
-  owner-authorised additions above ask for. The writer and reviewer role files
+  rewording in any role file beyond what these four issues, the
+  owner-authorised additions and the `spec-writer.md` correction above ask
+  for. The writer and reviewer role files
   are not edited for the `closer`'s commits: a conflict resolver and a
   re-reviewer of an archive commit get what differs in the runner's brief, as
-  every re-reviewer does. No role file is edited to name `--no-gpg-sign`:
-  the brief carries it. `CLAUDE.md` is not edited either.
+  every re-reviewer does. No role file is edited for signing, as the entry
+  on `closer.md`'s signing text above says. `CLAUDE.md` is not edited
+  either.
 
 ### Overlap with open PR #132 (`piece/review-tiering`)
 
@@ -415,10 +499,12 @@ None. This change edits agent instructions and no system behaviour, so
   to its agent, and the fast-forward and "You do not rebase"), step 3's lists
   of what needs review (owner-authorised), the per-agent sequence in
   "Dispatching" (cherry-pick, or fast-forward for the `closer` and a conflict
-  resolver; a cherry-pick that conflicts goes back to its agent;
-  owner-authorised), and where "What you read" and "Rebuild the state" find
+  resolver; a cherry-pick that conflicts goes back to its agent, and the
+  review round's ticks are expected to conflict; owner-authorised), and where "What you read" and "Rebuild the state" find
   the stage block once the change is archived (#171).
-- `.claude/agents/spec-writer.md`: the stage-block template (#171).
+- `.claude/agents/spec-writer.md`: the stage-block template (#171); and the
+  one sentence above it claiming ticks on neighbouring rows cannot conflict,
+  corrected (following from the owner's ruling "Agents tick their own").
 - `.claude/agents/closer.md`: Step 6 and "What you never do" (#170); Step 1,
   for where a re-dispatched `closer` reads the stage block after the archive
   (#171); Step 3, which a re-dispatched `closer` does not re-archive in
@@ -428,7 +514,9 @@ None. This change edits agent instructions and no system behaviour, so
   (stop after an archive that changes `openspec/specs/`, and push HEAD on a
   re-dispatch), Step 4's pointer to Step 2, "What you never do" (no
   force-push, no conflict resolution), "Your report", and the closing
-  paragraph's list of what ends a turn.
+  paragraph's list of what ends a turn. Not edited: the signing text in
+  Step 2 and Step 6, except where Step 2's paragraph names the operation
+  (see "Out of scope").
 - `.claude/agents/tester.md`: what a marker the brief names as decided becomes,
   and "must not remove" narrowed to open markers (#169, owner-authorised).
 - `.claude/agents/README.md`: one paragraph (#133); and, owner-authorised, the
