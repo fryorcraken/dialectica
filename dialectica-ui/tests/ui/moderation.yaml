@@ -1,0 +1,95 @@
+# End-to-end: the moderation screen, reached from a created Stoa's feed.
+#
+# Run by `.github/workflows/ui-tests.yml`; see create.yaml for the harness and
+# the `e2e-created-stoa-flow` change's design.md for the layout.
+#
+# The screen shipped inert (#127): no control on it publishes anything. What
+# this observes: the feed's moderation affordance renders the screen; the
+# screen states that its controls publish nothing; acting on one of them leaves
+# the way out offered; and the way out renders the feed. Those are
+# `moderation-view`'s, which lives only in the unarchived
+# `openspec/changes/moderation-screen/` — see this change's proposal.md.
+#
+# The steps before "open moderation" only get there, and assert nothing about
+# the list or the feed.
+
+app: dialectica_ui
+
+# The second hop sitometres does not walk: see join.yaml.
+with: [dialectica, delivery_module]
+timeout: 30s
+
+steps:
+  - name: the app opens
+    open: dialectica_ui
+
+  - name: it starts on the Stoa list
+    wait_for:
+      state: "root.screenShown === 'list'"
+    timeout: 45s
+
+  - name: the key can be made
+    wait_for:
+      text: { objectName: "createKeyButton" }
+
+  - name: make this machine's key
+    click: { objectName: "createKeyButton" }
+
+  - name: a Stoa can be created
+    wait_for:
+      text: { objectName: "createTitleField" }
+
+  - name: name the new Stoa
+    type:
+      into: { objectName: "createTitleField" }
+      text: "A Stoa whose moderation screen is opened end to end"
+
+  - name: create it
+    click: { objectName: "createStoaButton" }
+
+  - name: its row is listed
+    wait_for:
+      text: { objectName: "openStoaButton" }
+
+  - name: open it
+    click: { objectName: "openStoaButton" }
+
+  # The affordance is the MouseArea, not the "MODERATE" label: sitometres
+  # resolves a label's click target from its ancestors, and the first handler
+  # in the feed header is the "All Stoas" button's.
+  - name: the feed offers moderation
+    wait_for:
+      text: { objectName: "moderateArea" }
+
+  # ---- the moderation screen ----------------------------------------------
+
+  - name: open moderation
+    click: { objectName: "moderateArea" }
+
+  # The notice's presence; its words are `tst_moderation_screen.qml`'s to pin.
+  - name: the moderation screen is rendered, and says nothing on it publishes
+    wait_for:
+      state: "root.screenShown === 'moderation'"
+      text:
+        - { objectName: "inertNoticeHeading" }
+        - { objectName: "inertNoticeBody" }
+
+  # The check is on the click's own step, not the next one. Both halves already
+  # hold before the click; what makes them evidence about the click is that
+  # sitometres polls every step for at least its one-second settle window while
+  # the default `no_errors` check is live, so the verdict is read from a
+  # snapshot taken after the click was handled. The break recorded in this
+  # change's tasks.md is what shows it can fail.
+  - name: acting on an inert control leaves the way out offered
+    click: { objectName: "markModeratedButton" }
+    expect:
+      state: "root.screenShown === 'moderation'"
+      text: { objectName: "moderationBackButton" }
+
+  - name: take the way out
+    click: { objectName: "moderationBackButton" }
+
+  # Which screen, and nothing about its read: that is feed.yaml's.
+  - name: the feed is rendered again
+    wait_for:
+      state: "root.screenShown === 'feed'"

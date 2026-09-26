@@ -54,6 +54,31 @@ TestCase {
 
     readonly property string noKey: '{"hasMasterKey":false}'
 
+    readonly property string keyA:
+        "a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0"
+    readonly property string heldKey:
+        '{"hasMasterKey":true,"publicKey":"' + keyA + '","encrypted":false}'
+
+    readonly property string rootOp: "cc" + "11".repeat(31)
+    readonly property string replyOp: "dd" + "22".repeat(31)
+    readonly property string otherOp: "ee" + "33".repeat(31)
+
+    // A feed row in the shape core sends: `wire.rs` pins the key set, so a row
+    // carries `thread` and `currentVersion` and never an `id`.
+    function feedRow(op) {
+        return { thread: op, currentVersion: op, author: spec.keyA,
+                 body: { text: "a post", removed: 0, marked: 0 },
+                 attachments: [], isRevised: false, isHidden: false }
+    }
+
+    function feedPage(rows) {
+        return JSON.stringify({ items: rows, page: 0, hasMore: false })
+    }
+
+    readonly property string canPost: '{"canPost":true,"identity":"' + keyA + '"}'
+    readonly property string cannotPost: '{"canPost":false,"reason":"no key is held"}'
+    readonly property string someone: '{"hasIdentity":true,"publicKey":"' + keyA + '"}'
+
     // `replies` of `null` is how the "no bridge to the core" case is built:
     // `bridgeFor` always returns an object, so reaching an actually-missing
     // bridge needs this to bypass it rather than pass it an empty map.
@@ -158,6 +183,40 @@ TestCase {
         compare(main.listReadState, list.readState)
         compare(main.stoaCount, 2,
                 "two rows in the listing is two, so a handle fixed at 0 fails here")
+        compare(main.listedStoas, [spec.stoaA, spec.stoaB],
+                "the listed addresses, in the listing's order")
+    }
+
+    // `createdStoa` names what the CREATION REPLY named, and `listedStoas` what
+    // the listing read afterwards holds. The fixture keeps the two apart on
+    // purpose: the listing after creation holds a Stoa the peer was already in
+    // ahead of the new one, so a `createdStoa` bound to the first listed row
+    // reads stoaA here and fails, and a refused creation after a good one shows
+    // the handle is cleared rather than left naming the earlier success.
+    function test_the_creation_handles_follow_the_creation_reply() {
+        var replies = {
+            "list_stoas": '{"items":[{"stoa":"' + spec.stoaA + '","foundingTitle":"Nym Research"}],'
+                          + '"page":0,"hasMore":false}',
+            "get_master_key": spec.heldKey,
+            "create_stoa": JSON.stringify({ stoa: spec.stoaB, foundingTitle: "Cobalt",
+                                            policy: "open", genesis: "00ff" })
+        }
+        var main = spec.makeMain(replies)
+        var list = findChild(main, "stoaList")
+        compare(main.createdStoa, "", "nothing created yet, so nothing is named")
+        compare(main.listedStoas, [spec.stoaA])
+
+        replies["list_stoas"] = spec.twoStoas
+        list.createTitle = "Cobalt"
+        list.create()
+        compare(main.createdStoa, spec.stoaB,
+                "the address the creation reply returned, not the first listed row")
+        compare(main.listedStoas, [spec.stoaA, spec.stoaB],
+                "the listing was read again after the creation")
+
+        replies["create_stoa"] = '{"error":"the keystore could not be opened"}'
+        list.create()
+        compare(main.createdStoa, "", "a refused creation names no address")
     }
 
     // The pair the list screen exists to keep apart: a failed read is not an
@@ -197,6 +256,84 @@ TestCase {
                 "the failed reload left the previous listing in place")
         compare(main.stoaCount, 0,
                 "a listing the screen has said was not read is not counted")
+        compare(main.listedStoas, [],
+                "nor are its addresses listed")
+    }
+
+    // The feed's three handles, across the three outcomes the feed spec tells
+    // apart: rows, none, and a failed read. The failed read comes AFTER a good
+    // one on purpose — `FeedScreen.rows` keeps the earlier page across a failed
+    // reload, so only a handle reading `visibleRows` reads 0 there. The probe
+    // flips with it, so a `feedCanPost` fixed at `true` fails too.
+    function test_the_feed_handles_follow_the_feed_screen() {
+        var replies = {
+            "list_stoas": spec.twoStoas,
+            "get_master_key": spec.heldKey,
+            "list_threads": spec.feedPage([spec.feedRow(spec.rootOp), spec.feedRow(spec.otherOp)]),
+            "get_capabilities": spec.canPost,
+            "who_am_i": spec.someone
+        }
+        var main = spec.makeMain(replies)
+        var feed = findChild(main, "feed")
+        verify(feed !== null, "the feed screen is found by its objectName")
+
+        main.open(spec.stoaA, "Nym Research", "00ff")
+        compare(main.screenShown, "feed")
+        compare(main.feedReadState, "ok")
+        compare(main.feedRowCount, 2, "two rows read is two")
+        compare(main.feedCanPost, true)
+
+        replies["list_threads"] = spec.feedPage([])
+        feed.reload()
+        compare(main.feedReadState, "ok", "a read holding nothing is still a read that succeeded")
+        compare(main.feedRowCount, 0)
+
+        replies["list_threads"] = spec.feedPage([spec.feedRow(spec.rootOp), spec.feedRow(spec.otherOp)])
+        feed.reload()
+        compare(main.feedRowCount, 2)
+
+        replies["list_threads"] = '{"error":"genesis record ended mid-field"}'
+        replies["get_capabilities"] = spec.cannotPost
+        feed.reload()
+        compare(main.feedReadState, "failed")
+        compare(feed.rows.length, 2,
+                "precondition: the failed reload left the earlier page in `rows`")
+        compare(main.feedRowCount, 0,
+                "a feed the screen has said it could not read is not counted")
+        compare(main.feedCanPost, false, "the gate follows the probe")
+    }
+
+    // The thread's two handles. Two items (a root and its reply) is two, and a
+    // failed read after it is 0 and "failed", so neither a constant nor a
+    // handle reading the feed instead of the thread passes.
+    function test_the_thread_handles_follow_the_thread_screen() {
+        var replies = {
+            "list_stoas": spec.twoStoas,
+            "get_master_key": spec.heldKey,
+            "list_threads": spec.feedPage([spec.feedRow(spec.rootOp)]),
+            "get_capabilities": spec.canPost,
+            "who_am_i": spec.someone,
+            "read_thread": JSON.stringify({ items: [
+                { id: spec.rootOp, author: spec.keyA, body: { text: "root", removed: 0, marked: 0 },
+                  attachments: [], isRevised: false },
+                { id: spec.replyOp, parent: spec.rootOp, author: spec.keyA,
+                  body: { text: "reply", removed: 0, marked: 0 }, attachments: [], isRevised: false }
+            ], page: 0, hasMore: false })
+        }
+        var main = spec.makeMain(replies)
+        var thread = findChild(main, "thread")
+        verify(thread !== null, "the thread screen is found by its objectName")
+
+        main.open(spec.stoaA, "Nym Research", "00ff")
+        main.openThread(spec.rootOp)
+        compare(main.screenShown, "thread")
+        compare(main.threadReadState, "ok")
+        compare(main.threadItemCount, 2, "a root and its reply is two")
+
+        replies["read_thread"] = '{"error":"no root held for that thread"}'
+        thread.reload()
+        compare(main.threadReadState, "failed")
+        compare(main.threadItemCount, 0)
     }
 
     // `view-navigation`: "The view opens on the Stoa list", scenario "What the

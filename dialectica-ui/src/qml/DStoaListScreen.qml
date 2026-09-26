@@ -676,6 +676,11 @@ ScreenFrame {
                 }
 
                 FlatButton {
+                    // Named for the end-to-end suite, which opens a created
+                    // Stoa's feed through it. One per row, so a spec driving it
+                    // is unambiguous only on a list of one — which is what a
+                    // fresh profile holds after one creation.
+                    objectName: "openStoaButton"
                     text: "Open"
                     kind: "secondary"
                     onClicked: screen.stoaChosen(row.rowStoa, row.rowTitle,

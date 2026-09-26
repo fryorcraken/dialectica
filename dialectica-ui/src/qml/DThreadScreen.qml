@@ -245,6 +245,13 @@ ScreenFrame {
 
     // Re-read when the screen is pointed at a different thread, so reopening
     // from a feed row renders that row's thread rather than the previous one.
+    //
+    // **The Stoa and its record must already be here when the id arrives**,
+    // and that is the caller's to guarantee: `Main.qml` withholds the id until
+    // the address and the record it binds have landed. It used to hold only by
+    // the order QML happened to update the bindings in — the order `FeedScreen`
+    // lost, which was issue #152 (the `e2e-created-stoa-flow` change's design.md
+    // D8).
     onThreadIdChanged: screen.reload()
 
     function reload() {
