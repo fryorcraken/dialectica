@@ -1244,3 +1244,108 @@ Below medium, so in prose rather than boxed:
   for a callback) is addressed, not silently dropped — the proposal states it
   is declined and defers the reasoning to `design.md`, which is outside this
   review's scope.
+
+## Re-review round 15 `e5dcce4..bad7c88`
+
+- [ ] **`spec-writer`** — `proposal.md:419-425` (and `design.md:977-981`,
+      "never whether a commit is read") — the gap repair may be "skipped with
+      its reason", and nothing checks that reason, so on the off-by-one the
+      text names as its ordinary case the specified check passes with the
+      left-out commit unreviewed. "Either line is sound" is new in this range
+      and is false for the skipped form. A skipped line extends the chain like
+      any other, the forms check skips a round marked skipped, and the
+      nothing-landed commands are required only for a skipped round 1
+      (`:362-364`). The off-by-one arises exactly when the runner believes the
+      round covered the left-out commit, so "covered by round `<n>`" is the
+      reason it will write; round 14's correctness box itself offered
+      "skipped as covered" as a repair. `design.md`'s own "a covering claim
+      nothing checks is how a gate fails open" is the argument, applied only
+      to unreached lines.
+      **Scenario:** a copy of this stage block with round 13 written
+      ``round 13 `a0ce38f1..c3bda2b` `` (one commit late: `a0ce38f1` is the
+      `spec-writer` commit, and a two-dot range leaves it out). The chain
+      reaches `1380d50` and stops, and the tail fails from there, which is
+      right. The runner takes the text's second repair,
+      ``round 16 `1380d50..a0ce38f1` skipped: round 13's start was one commit
+      late; its lanes read this range``. The listing passes the first three
+      conditions (lines 3-18, numbered 1 to 16 once each). The chain now
+      reaches `a0ce38f1`, then `c3bda2b`, `e5dcce4` and `bad7c88`. The tail
+      from `bad7c88` passes and the forms check skips round 16, so the row
+      ticks. But round 13's lanes read `git diff a0ce38f1 c3bda2b`, which does
+      not contain `a0ce38f1`'s `proposal.md` change. That change merges with
+      no round having read it. **Severity:** medium. It is a fail-open path
+      that the text offers as a sound option, not one that needs a rule
+      broken. **Needs:** allow a gap line to be skipped only when the
+      nothing-landed check's two commands pass over its range. They are
+      already in "What you read", so no new command is needed. Otherwise the
+      line is sized. Alternatively, drop "or skipped with its reason" from the
+      gap repair. A gap holding only tracking commits then gets a sized
+      no-lane line, as a nothing-landed round 1 does.
+      **Measured:** `tmp/r15-spec-test/d2-skip-repair.md` (since deleted)
+      through the number check's listing with `git grep --no-index`: sixteen
+      round lines, contiguous and unique. `git diff --no-renames --name-only
+      1380d50 a0ce38f1` lists `proposal.md` beside the findings files and
+      `tasks.md`, so the nothing-landed check over the repair's range fails
+      and would have refused the skip. `git diff --no-renames --name-only
+      bad7c88 HEAD` lists `tasks.md` only, and its diff is the round 15 line,
+      so the tail passes from `bad7c88`.
+
+**Q1: can the specified check fail?** I ran the number check's listing
+(`git grep --no-index -n -F` with its three patterns) over four copies in
+`./tmp/r15-spec-test/`, since deleted. I derived `<review>` with the
+contract's `git log --diff-filter=A` (last line `f94f7b8d c222c37b`), walked
+the chain by hand, and ran the tail's two commands against this repository.
+All four copies pass the first three conditions.
+
+- **(a) Correct block** (rounds 1-15 as at HEAD): the chain reaches every end
+  through `bad7c88`. From `bad7c88` the tail is `tasks.md` alone, and its diff
+  is the round 15 line, so the check **passes**.
+- **(b) No line for the last commits** (round 15 dropped): the chain reaches
+  no further than `e5dcce4`. From there the tail lists `.claude/agents/RUNNER.md`,
+  `design.md` and `proposal.md`. Every other reached end is earlier and fails
+  too. The check **fails**, which is right.
+- **(c) Templated from the line before, only the end changed**
+  (``round 15 `c3bda2b..bad7c88` ``): rounds 14 and 15 both start at
+  `c3bda2b`, so both `e5dcce4` and `bad7c88` are reached, and the tail from
+  `bad7c88` passes. That is right, because round 15's range contains
+  everything. Round 14's dead end is gone.
+- **(d) Off-by-one mid-chain** (round 13 as `a0ce38f1..c3bda2b`): the chain
+  stops at `1380d50`. The tail from there lists `proposal.md`, `design.md` and
+  `RUNNER.md`, so the check **fails**, which is right. A sized repair (a
+  round `1380d50..HEAD`, or `1380d50..a0ce38f1` sized) then chains to
+  `bad7c88` and passes. The skipped repair also passes, which is the box
+  above.
+
+Below the box threshold, in prose only:
+
+- **The verdict on a correct block depends on which reached end the runner
+  picks.** On (a), the tail from `e5dcce4` (also reached) lists `RUNNER.md`,
+  `design.md` and `proposal.md`, and "If they fail … the runner writes the
+  next line" (`:415-416`) then owes a round `e5dcce4..HEAD` that duplicates
+  round 15. `design.md:977-978` accepts this ("changes only how much is read
+  again"), and the condition's wording reads as "some reached end". But the
+  proposal never says a fail from one end is overridden by a pass from
+  another, or which end to try first. One clause would close it: "it passes
+  if the commands pass from any end the chain reaches; try the latest line's
+  end first". It fails closed, so the cost is a wasted round. Low.
+
+**Q2: is the measured paragraph true?** Yes, for everything I re-ran:
+
+- `git diff --no-renames --name-only e5dcce4 bb6ed4e2` lists the five
+  round-14 findings files and `tasks.md`, and the `tasks.md` diff is the round
+  14 line added (`:450-454`).
+- `git diff --no-renames --name-only 9dc235c 1f62afd4` lists `proposal.md`
+  (`:444-445`).
+- `git diff --no-renames --name-only c3bda2b ab53b41c` lists the five findings
+  files and `tasks.md`.
+- `git log` shows six commits from `c3bda2b` to `ab53b41c` (`:433-435`).
+- Round 14 is at `tasks.md:38` at HEAD, so "fourteen lines at
+  `tasks.md:25-38`" holds for `bb6ed4e2`.
+- The round-14 templated copy's claim, that the tail passes from `e5dcce4`,
+  follows from the first result.
+
+Read: the `e5dcce4 bad7c88` diff of `proposal.md` and `design.md`,
+`proposal.md:150-470` and `:540-614`, `tasks.md:1-60`, round 14's sections of
+`findings/correctness.md` and this file, and issue #171 (open, no comments,
+not updated since before round 14). Nothing under `.claude/agents/`, and no
+`RUNNER.md` hunk.
