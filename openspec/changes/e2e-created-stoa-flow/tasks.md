@@ -167,7 +167,7 @@ the next push.
 
 ### 5. `feed.yaml` goes red when an empty read renders as a failure
 
-- [ ] 5.1 Break: `FeedScreen.reload()` puts a read with no items in the failed
+- [x] 5.1 Break: `FeedScreen.reload()` puts a read with no items in the failed
       state, pushed alone. Predicted: `sitometres feed spec` red on "the feed
       was read, and holds nothing"; `thread` and `moderation` green, their
       prefixes asserting nothing about the feed's read (design.md D2). `QML
@@ -179,6 +179,22 @@ the next push.
       `test_a_screen_asserting_no_extent_owes_no_locality_line`, and
       `tst_feed_states.qml`'s `test_an_empty_store_is_the_ok_state_with_no_rows`
       and `test_the_two_states_are_distinguishable`
+
+      **Observed, on head `aa0e694`, the break pushed alone.** UI tests
+      https://github.com/fryorcraken/dialectica/actions/runs/36215615054:
+      `sitometres feed spec` failed on "the feed was read, and holds nothing",
+      `root.feedReadState === 'ok'` evaluating to false after its 30s, every
+      other step passing; `verdict: fail`, sixteen `[pass]`, one `[fail]`.
+      `create`, `thread`, `moderation` and `join` green, as predicted: the two
+      prefixes that pass through the feed assert nothing about its read
+      (design.md D2). CI
+      https://github.com/fryorcraken/dialectica/actions/runs/36215615065 red
+      in `QML lint` only, on the five tests predicted **and a sixth the
+      prediction predates**: `tst_navigation.qml`'s
+      `test_the_feed_is_read_with_the_record_on_every_route_onto_it` (3.2),
+      whose fake answers the feed's read with no items, so the break reads it
+      as a failure. `Lint`, `UI spec validation`, `Rust core tests` and
+      `Build LGX` green
 - [ ] 5.2 Revert pushed; both workflows green on it
 
 ### 6. `thread.yaml` goes red when the thread is opened without its record
