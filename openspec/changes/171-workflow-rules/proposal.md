@@ -211,7 +211,9 @@ another file.
   - **Before it ticks the row, the runner checks that every lane of every
     round the tick closes left its own record.** A round the tick closes is
     one recorded since the row was last ticked and not marked skipped. For
-    each, run on the runner's HEAD once the round's commits are on it:
+    each, run on the runner's HEAD once the round's commits are on it, with
+    ``round <n> `<range>` `` copied from that round's own line under the
+    re-review row, not typed:
 
     ```
     git grep -l -F -e '## Re-review round <n> `<range>`' -e '**re-review round <n> `<range>`: no findings**' -- <change folder>/findings/
@@ -242,17 +244,42 @@ another file.
       one lane over one range (the line rule above), and it keeps
       consecutive rounds apart, which share an endpoint: round N's range
       ends at the SHA round N+1's starts at.
+    - **The number and range are copied from the round's line, as the
+      brief's are.** The brief's two forms are copied from that line, so the
+      check then searches exactly what the reviewer was told to write. A
+      number typed from memory is one way the check fails open: a check for a
+      lane run again, typed with the earlier line's number, matches the
+      earlier run's record over the same range whenever that run left one
+      for the lane, and the runner ticks before the re-run has written
+      anything. That is the record the line rule's number exists to set
+      aside. Measured at `c3d697e9` over `34fd428..dc1390a`: round 3's forms
+      list five files, every lane's but `readability.md`, and the forms
+      copied from round 4's line list `readability.md` alone. The round 3
+      readability run wrote nothing, so this piece's round 4 would have
+      failed closed under round 3's number; a lane whose earlier run did
+      write, as round 1's Sonnet security run did, would not.
     - **Single quotes, not double.** Both patterns contain backticks, which
       a shell expands inside double quotes.
     - **What it still cannot see:** a later reviewer who quotes an earlier
       round's heading or verdict box whole, in prose, satisfies that round's
       check. The forms are chosen to make that unlikely, not impossible.
+      And the check searches whatever forms it is given: copied from the
+      wrong line, such as the neighbouring line over the same range or the
+      previous round's line, it passes on that line's records. At
+      `c3d697e9`, round 5's forms list `spec-test.md` and `design-review.md`
+      among others, the two lanes round 6 ran, so a round 6 check run with
+      round 5's start would pass whatever round 6 had written. No test of
+      the role files can see this, because the command there carries `<n>`
+      and `<range>` as placeholders; only a second reader of the round lines
+      can ("An independent check of the re-review row by the `closer`", in
+      "Out of scope").
   - **This piece's rounds 1 and 2 predate the round number.** Their briefs
     gave ``## Re-review `<range>` `` and
     ``**re-review `<range>`: no findings**``, so the check for those two
-    rounds searches those forms. Measured at `6f17bebf`: both list all six
-    findings files for each round. Round 1 is the re-dispatch case the
-    number exists for, and it is settled without it: the Sonnet correctness
+    rounds searches those forms, not numbered forms copied from their lines;
+    each of their lines names its own check. Measured at `6f17bebf`: both
+    list all six findings files for each round. Round 1 is the re-dispatch
+    case the number exists for, and it is settled without it: the Sonnet correctness
     and readability runs wrote nothing, and `security.md` holds the Opus
     run's own heading, ``## Re-review `c222c37..9dc235c` (Opus)``, committed
     in `59619032`. From round 3 on, briefs use the numbered forms.
@@ -845,12 +872,13 @@ another file.
     pathspec returns no path or several, and the `closer` stops. A pre-tick
     pattern with a wrong character that no committed record carries lists
     nothing, and the runner cannot tick. The save step with `--binary`
-    dropped writes `Binary files a/<f> and b/<f> differ` for a binary change, and `git apply` then refuses it
+    dropped writes `Binary files a/<f> and b/<f> differ` for a binary
+    change, and `git apply` then refuses it
     (`error: cannot apply binary patch to '<f>' without full index line`,
     exit 1), so the reviewer reports that the patch did not apply; step 2
     has already discarded that change from the tree, so the loss is
     reported, not prevented.
-  - **Fail open: every command exits 0 and the flow carries on.** Four,
+  - **Fail open: every command exits 0 and the flow carries on.** Three,
     and they are the ones a test covers first:
     - a mistyped `openspec/specs/` path lists nothing, and the `closer`
       carries on past an archive that changed the live contract, so an
@@ -858,23 +886,11 @@ another file.
     - a pre-tick search cut down to the bare range matches it wherever a
       reviewer wrote it in prose, and one cut down to a single SHA also
       matches the previous round's records, since consecutive rounds share
-      an endpoint. The runner ticks with lanes that never ran. Measured at `34fd428`, before
-      any round-2 lane had written: `git grep -l -F "9dc235c"` over
-      `findings/` listed all six files, every one matched by round 1's
-      records (`findings/spec-test.md`, re-review `9dc235c..34fd428`, third
-      box);
-    - a pre-tick search for a lane run again, typed with the earlier line's
-      round number, matches the earlier run's record over the same range
-      whenever that run left one for the lane. The runner ticks before the
-      re-run has written anything. The line rule above makes two numbers
-      over one range routine, and the earlier run's record is the one its
-      number exists to set aside, as with round 1's Sonnet security box.
-      Measured at `80c1bcc8` over `34fd428..dc1390a`: the round 3 forms list
-      every lane's file but `readability.md`, and the round 4 forms list
-      `readability.md` alone (`findings/spec-test.md`, re-review round 5
-      `dc1390a..d1c8726`, box). The round 3 readability run wrote nothing,
-      so this piece's round 4 would have failed closed under round 3's
-      number; a lane whose earlier run did write would not;
+      an endpoint. The runner ticks with lanes that never ran. Measured at
+      `34fd428`, before any round-2 lane had written:
+      `git grep -l -F "9dc235c"` over `findings/` listed all six files,
+      every one matched by round 1's records (`findings/spec-test.md`,
+      re-review `9dc235c..34fd428`, third box);
     - the save step with `HEAD` dropped,
       `git diff --binary --output=tmp/uncommitted.patch`, writes only the
       unstaged changes. Step 2 then discards the staged ones, step 4's
@@ -887,6 +903,21 @@ another file.
       `9dc235c..34fd428`).
   - The `--ff-only`, `--remerge-diff` and `--cherry-mark` claims describe
     git's own behaviour, and a test of them would mostly re-test git.
+  - **A stale round number also fails open, and is not a command defect.**
+    A pre-tick search for a lane run again, typed with the earlier line's
+    number, matches the earlier run's record over the same range whenever
+    that run left one for the lane, and the runner ticks before the re-run
+    has written anything (measured at `80c1bcc8` and again at `c3d697e9`;
+    `findings/spec-test.md`, re-review round 5 `dc1390a..d1c8726`, box). The
+    line rule above makes two numbers over one range routine. But the
+    command in `RUNNER.md` carries `<n>` and `<range>` as placeholders, so
+    no role file can hold a wrong number: the number is the runner's input
+    when it runs the check, and a test that runs the role file's command
+    against fixtures stays green whatever the runner types. This piece
+    answers it in the pre-tick check itself, whose round and range are
+    copied from that round's own line (above). What that leaves, a runner
+    copying from the wrong line, is the same gap as a runner skipping the
+    check, and belongs to the `closer`-side follow-up below.
 
   Not added here: this change adds no tests or CI (Impact), and a test
   holding its own copy of a command would not fail when a role file's copy
@@ -902,12 +933,13 @@ another file.
     in step 3 of "From the `dev-writer`'s hand-back to the merge", has the
     runner run, before it ticks that row,
     ``git grep -l -F -e '## Re-review round <n> `<range>`' -e '**re-review round <n> `<range>`: no findings**' -- <change folder>/findings/``
-    for every round the tick closes, and not tick while the findings file
-    of any lane the round ran is missing. That makes the tick rest
-    on the re-reviewers' own records, but the runner both runs the check
-    and ticks the row, so a runner that skips the check goes unnoticed:
-    `closer.md` Step 1 checks only that every row but the `closer`'s own is
-    ticked or struck.
+    for every round the tick closes, with ``round <n> `<range>` `` copied
+    from that round's line, and not tick while the findings file of any
+    lane the round ran is missing. That makes the tick rest on the
+    re-reviewers' own records, but the runner both runs the check and ticks
+    the row, so a runner that skips the check, or runs it with forms copied
+    from the wrong line, goes unnoticed: `closer.md` Step 1 checks only that
+    every row but the `closer`'s own is ticked or struck.
   - **What a `closer`-side check would do:** in Step 1, match each round
     line under the re-review row against the findings files, by the same
     two forms.
@@ -1087,7 +1119,8 @@ None. This change edits agent instructions and no system behaviour, so
   line of its own for a lane run again over the same range, fresh or
   continued; the
   runner's check before it ticks the re-review row, searching those two
-  forms, with its row in "What you read"), "The `closer`, and what comes back" (#171; its returns
+  forms with the round and range copied from the round's line, with its row
+  in "What you read"), "The `closer`, and what comes back" (#171; its returns
   given as examples with no count, including a `BLOCKED` PR and an unticked
   stage row, and a refused push that also reports a spec-changing archive;
   owner-authorised),
