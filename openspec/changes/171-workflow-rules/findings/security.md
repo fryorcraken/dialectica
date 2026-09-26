@@ -957,7 +957,7 @@ beyond that changed in the range.
 
 ## Re-review round 9 `d1d2165..c4b1df5`
 
-- [ ] **`spec-writer`** — `proposal.md:284-293` and `design.md:503-514`,
+- [x] **`spec-writer`** — `proposal.md:284-293` and `design.md:503-514`,
       `:540-546` — the repeated-number residual is routed on the claim that
       "only a second reader of the round lines can" see it, and the
       `RUNNER.md` rejection argues that any runner-side measure "adds no
@@ -1008,6 +1008,96 @@ beyond that changed in the range.
       re-run ticked on the rejected run's record, now reached by a faithful
       runner. The record that keeps it open would stop the next reader from
       adding a check the piece's own precedent says is worth adding.
+
+      **Fixed** (`spec-writer`, this commit), by the first option: the
+      number check is added to the pre-tick step. The round-8 reasoning is
+      withdrawn. A runner that templates the line and then runs every step
+      skips nothing, so the slip is not in the "skips the check" class, and
+      the check it needs is one command. `proposal.md` contracts it once, as
+      a bullet ahead of the forms check under the re-review row. Before
+      ticking, the runner runs `git grep -n -F "      round " -- <change
+      folder>/tasks.md`, and the lines directly under the row must carry 1,
+      2, 3 … in order, each once. A repeat or a skip means a line is wrong,
+      and the runner does not tick. It puts the line right, and a lane
+      briefed from a line whose number changes runs again under the new
+      number. An empty listing means a mistyped command, since every tick
+      follows at least one round line. A line elsewhere in the file that
+      starts the same way is not a round line.
+      Measured:
+      - at `94840b52`, the command prints `tasks.md:25-33`, `round 1` to
+        `round 9` once each, and nothing else;
+      - on a copy of the stage block in `./tmp/` (searched with
+        `--no-index`, since the copy is untracked; deleted since) with a
+        tenth line templated from the ninth and its number left at 9, it
+        prints `round 9` on lines 15 and 16;
+      - with round 7's line deleted, it goes from `round 6` straight to
+        `round 8`;
+      - a seven-space pattern prints nothing on this tree.
+
+      Also in `proposal.md`:
+      - "What it still cannot see" now says only a second reader sees the
+        wrong-line case, and the number check sees the wrong number on the
+        line. It also records your third low note, a re-run given no line,
+        which neither check sees.
+      - The standing-test entry says the copy rule answers a typed number,
+        the number check answers a repeated one, and what is left is
+        wrong-line copying and a runner that skips either check. It lists
+        the number check's command, and its fail-closed case.
+      - The `closer`-side follow-up describes both runner checks and says
+        its own number criterion is a second reader for a runner that
+        skipped one. Its tree figure is now nine lines at `94840b52`.
+      - Impact names both checks and their "What you read" rows.
+
+      **For the `dev-writer`:**
+      1. `RUNNER.md`'s tick paragraph (`:625-648`): before the forms check,
+         add the number check with its command in a code block (double
+         quotes are fine, there is no backtick in it) and the rule above: a
+         repeat or skip means no tick, the line is put right, a lane
+         briefed from a renumbered line runs again, an empty listing means
+         a mistyped command, and only lines directly under the row count.
+         Give one sentence of reason: the copy rule carries a templated
+         line's repeated number into the brief and the forms check, so only
+         the listing shows it. "Record the call" (`:599-616`) is unchanged.
+      2. `RUNNER.md`'s "What you read" table (`:81`): add a row for the
+         number check over `tasks.md`, for whether the round numbers under
+         the re-review row run 1, 2, 3 once each.
+      3. `design.md`, a new Decision entry beside the copy rule (`:477`):
+         the number check, why it is taken (a faithful runner fails open
+         without it, and the check is one command applied by the runner,
+         like the forms check and the copy rule), the measurements above,
+         and the round-8 routing as a rejected alternative, with this box.
+      4. `design.md`, the Rejected `RUNNER.md` clause (`:503-514`): it stays
+         rejected, but because it restates `RUNNER.md:604-605`, "the next
+         number", word for word, as your first low note says. Drop "so it
+         adds no check" and "the slip stays in the class … a runner that
+         skips the check". Say that the check which enforces the rule is
+         the number check at the tick.
+      5. `design.md`, "What it still cannot see" (`:516-546`): the forms
+         check still cannot see a wrong number on the line, but the number
+         check does. "Only a second reader of the round lines can see them"
+         becomes true of the wrong-line case only. Add the re-run given no
+         line as a residual neither check sees.
+      6. `design.md`, "What else was considered" (`:577-581`): the residual
+         becomes a runner that skips either check or copies its forms from
+         the wrong line. Drop "writes a round line repeating an earlier
+         line's number".
+      7. `design.md` Risks, the standing-test entry (`:1333-1362`): replace
+         "That leaves two residuals" to match the proposal's standing-test
+         entry, and list the number check's command with its fail-closed
+         case. Rename "[Only the runner runs the pre-tick check.]"
+         (`:1363-1374`) to cover both checks. Its residual becomes skipping
+         either check or copying the forms from the wrong line, and the
+         `closer`-side number criterion becomes a second reader for a
+         runner that skipped the number check.
+      8. PR #174's body: step 3 names the number check ahead of the forms
+         check. The standing-test follow-up stops saying the copy rule
+         answers the stale number with nothing left over (your second low
+         note): the copy rule answers a typed number, the number check a
+         repeated one, and wrong-line copying and a skipped check remain,
+         both for the `closer`-side follow-up. It also lists the number
+         check's command. The `closer`-side follow-up says the runner
+         already runs the number check, and the `closer`'s is a second
+         reader.
 
 Security only, on Opus, narrowed to the round-8 box and `0fbebed`,
 `c4b1df5`. I read `git show` of both in full, `RUNNER.md:585-660`,
