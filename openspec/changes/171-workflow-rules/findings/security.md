@@ -1890,3 +1890,135 @@ Scope: `git diff --stat c3bda2b e5dcce4` touches `.claude/agents/RUNNER.md`
 and nothing else under `.claude/`. Its hunks are step 2, "Record the call",
 the number check and its "What you read" row, all within #171's re-review
 mechanism. Nothing in the range adds a route to `main`, a force or `--admin`.
+
+## Re-review round 15 `e5dcce4..bad7c88`
+
+- [ ] **`spec-writer`** (then `dev-writer` for `RUNNER.md:742-748`) —
+      `proposal.md:418-425` and `design.md:977-979` — the bridge repair, "a
+      line ending at that start, sized the same way or skipped with its
+      reason", is followed by "Either line is sound; the choice changes only
+      how much is read again". `design.md` says the choice of repair changes
+      "never whether a commit is read". Both claims are false for the skipped
+      variant. The text names the off-by-one as "the ordinary case" for that
+      line, and in that case the bridge's range is exactly the commit the
+      off-by-one left out. A skipped bridge over it passes all four
+      conditions, the forms check skips it, and the commit merges unread.
+      That is the failure round 13's second box asked this check to catch.
+      `design.md`'s soundness argument (`:960-972`) shows every commit is "in
+      a round's range". It never shows that commit was read, and a skipped
+      range is not read.
+      **Scenario:** round 1 ends at `E`. A `spec-writer` commit `f1` edits
+      `proposal.md`, then `f2` edits `design.md`. The runner writes
+      ``round 2 `f1..f2` `` (the off-by-one), and both lanes record. At the
+      tick the tail from `E` fails, listing `proposal.md`. The runner takes
+      the smaller repair the text offers and skips it, because the belief
+      that caused the off-by-one is also the natural skip reason:
+      ``round 3 `E..f1` … skipped: round 2's off-by-one, its lanes read on
+      from there``. The chain reaches `E`, then `f1` (round 3), then `f2`
+      (round 2). The tail from `f2` shows only the round lines. The number
+      check passes, the forms check covers round 2, and the row is ticked.
+      No lane read `f1`'s `proposal.md` change.
+      **Measured** in `tmp/r15sec/` (since deleted): `R` `b85161f`, `E`
+      `9cbcbcf`, `f1` `1265c9c` (`proposal.md`), `f2` `6a087ad`
+      (`design.md`), then `T` adding the three round lines above.
+      - The number-check listing prints the two rows with lines 2-4 between
+        them, numbered 1-3 once each.
+      - `git diff --no-renames --name-only 6a087ad HEAD` lists `c/tasks.md`
+        only, and its diff is the three round lines.
+      - `git diff --name-only 1265c9c 6a087ad`, the range round 2's lanes
+        read, lists `c/design.md` only.
+      - `git diff --no-renames --name-only 9cbcbcf 1265c9c`, the skipped
+        bridge, lists `c/proposal.md`.
+      - Before round 3 is added, the tail from `9cbcbcf` lists `design.md`,
+        `proposal.md` and `tasks.md`, so the gate did fire.
+
+      **What is and is not new:** the round-14 text accepted the same row.
+      It followed rounds 1, 3 and 2, and its gap bullet already offered
+      "sized as above or skipped with its reason". My round-14 review did
+      not raise it. This range adds the sentence that makes the skip look
+      safe. It also recasts the line from "a line for the missing range"
+      (missing reads) to a bridge "so that the chain goes on through that
+      line" (a chain connector), and pins that line's ordinary case to the
+      one where skipping it is always wrong.
+      **Fix, for the `spec-writer` to choose:** let the bridge be skipped
+      only when the two "Record the call" commands pass over its own range,
+      or when that range is a merge of `main` or the archive commit. Say that
+      a bridge over an off-by-one is never skipped, since its range is the
+      commit the off-by-one left out. Scope "Either line is sound", and
+      `design.md`'s "never whether a commit is read", to sized lines. State
+      in the soundness argument that coverage by a skipped range rests on
+      its reason, which nothing checks.
+      **Severity:** medium. It is reachable by slip rather than malice: the
+      same misreading that writes the off-by-one supplies the skip reason,
+      and the rule text now vouches for the result. The outcome is an
+      unreviewed commit merging with every gate green.
+
+Security only, on Opus, narrowed. No mutation: the change is prose. The box
+above is the only item at medium. The rest is prose.
+
+**Question 1: did removing "every line is followed or passed over" open a
+fail-open?** Apart from the box, no. The removed condition carried no weight
+for security. The proof rests only on the lines along one reached run from
+`<review>`, plus the tail from that run's end. An unreached line appears in
+neither, so it cannot stand in for coverage however it reads. Every reached
+end has a run from `<review>` of hops that are each a tree diff. If the tail
+from that end shows tracking only, HEAD's merging content is `<review>`'s plus
+those hop diffs. That makes it read wherever each hop was read. Composition
+holds at hunk level, not only per file, and does not depend on ancestry. The
+only unread content is inside skipped hops, which the box and my round-14
+notes cover. An unreached reviewed line fails closed: the tail from every end
+before it lists its commits. Its forms check still applies, since it counts
+rounds, not the chain, so a line recorded but never dispatched still blocks
+the tick. That is liveness, not security. On this tree the chain reaches
+`bad7c88` through rounds 1-15, and `git diff --no-renames --name-only bad7c88
+HEAD` lists `tasks.md` only. At `4663fb6b` its diff is the round-15 line.
+
+- *A branching skipped line.* An example is a merge or archive skip
+  templated from an earlier line with only its end changed, so it starts at
+  a reached commit before the chain's furthest end (low). The round-14 text
+  dead-ended on that line and failed closed by accident. It is now reached.
+  It hides no commit that a correctly started skip would not hide: the only
+  commits in its range that no reviewed round read are ones the runner never
+  recorded. That is the round-14 archive note's forgotten commit, below.
+- *Prefix-matching against every reached commit* rather than one followed
+  end at a time (low). The chance of a false match grows with the number of
+  reached ends, which is in the tens. It still needs two commits that share
+  a prefix at the written length. A mistyped SHA still fails closed in the
+  tail commands.
+- *Any reached end.* Picking an earlier end only makes the tail list more,
+  so the choice cannot fail open.
+
+**Question 2: my round-14 low notes under the new rule.** None rises to
+medium.
+
+- *Archive masking.* The note is unchanged in substance. The skipped archive
+  or merge line must now start at *a* reached commit rather than at the
+  chain's end, and the only extra commits it can span are ones already read.
+  The masked commit is still a commit that landed after a tick when the
+  runner forgot to untick. The new text does make the tightening I
+  suggested into the sanctioned path. A skipped line written as the archive
+  commit's own range, `<parent>..<sha>`, is unreached when a forgotten
+  commit sits before it. The tail from the chain's end then fails, and the
+  bridge `E..<parent>` is exactly the text's "line ending at that start".
+  That range excludes the archive, so the two commands over it name the
+  forgotten commit's file. The box's defect applies to that bridge too: if
+  it is skipped, the masking returns. That is one more reason for the box's
+  fix, not a separate item.
+- *"A clean merge of `main`" is the `closer`'s word.* This is unchanged.
+- *Prefix-matching.* Covered under question 1. It stays low.
+- *Passed-over re-runs.* "Passed over" is gone, and a re-run now reaches the
+  same end. The forms-check exemption is still keyed on a line below over the
+  same range. A new round templated with its predecessor's range unchanged
+  still makes the tail list the commits it should have covered, so it fails
+  closed.
+- *Branching lines.* The round-14 note called this liveness only. It is now
+  accepted. That is sound when the wider line was reviewed (its lanes read
+  the wider range) and rests on the skip reason when it was skipped. See
+  question 1.
+- *A writer already running at dispatch.* This is unchanged.
+
+Scope: `git diff --stat e5dcce4 bad7c88` touches `.claude/agents/RUNNER.md`
+and nothing else under `.claude/`. Its hunks are the number check's chain and
+tail bullets and the matching "What you read" row, all within #171's
+re-review mechanism. Nothing in the range adds a route to `main`, a force or
+`--admin`.
