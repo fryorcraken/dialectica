@@ -96,7 +96,7 @@ honours it.
 one of each, **one in total**. Each gets its own worktree, so this is not about
 sharing a tree; it is about what the *next* agent forks from. Every dispatch is
 cut from the runner's HEAD, so a second writer launched before the first's
-commits are cherry-picked forks from a HEAD that does not contain them, and the
+commits are brought onto the piece forks from a HEAD that does not contain them, and the
 two diverge silently. Two further reasons, neither of which surfaces as a git
 conflict either:
 
@@ -128,17 +128,17 @@ says so** rather than choosing either fallback.
 
 | Branch | Worktree | Whose | Holds |
 |---|---|---|---|
-| `piece/<name>` | the runner's | the runner, and the PR | **the** task branch, and the only one ever pushed. Work reaches it two ways: the runner cherry-picks every agent's commits onto its local copy, and the `dev-writer` and `closer` push a refspec to the remote copy |
-| `worktree-agent-<id>` | one per dispatch | one agent | **local only, and named by the harness** — whatever that agent committed, cherry-picked onto the piece and never pushed |
+| `piece/<name>` | the runner's | the runner, and the PR | **the** task branch, and the only one ever pushed. Work reaches it two ways: the runner brings every agent's commits onto its local copy — a cherry-pick, or a fast-forward where [`RUNNER.md`](RUNNER.md)'s "Dispatching" says — and the `dev-writer` and `closer` push a refspec to the remote copy |
+| `worktree-agent-<id>` | one per dispatch | one agent | **local only, and named by the harness** — whatever that agent committed, brought onto the piece and never pushed |
 | `main` | — | nobody | **no agent ever pushes here.** It takes commits through a PR only |
 
 **Every dispatched agent gets its own worktree and its own branch**, cut from the
 runner's HEAD. No agent stands in the piece's tree, so every agent's commits are
-cherry-picked onto it — writers exactly as reviewers.
+brought onto it by the runner — writers exactly as reviewers.
 
 **The branch name is the harness's, not the runner's.** There is no
 `review/<name>/<dimension>` to predict, so an agent reports the name it actually
-landed on (`git rev-parse --abbrev-ref HEAD`) and the runner picks from that. A
+landed on (`git rev-parse --abbrev-ref HEAD`) and the runner brings its commits on from that. A
 name nobody recorded is work nobody can find.
 
 **The PR is opened on `piece/<name>` and nothing else. Whichever ref it is opened
@@ -168,8 +168,9 @@ rather than the count. Say in the closing comment where the work went, and keep
 the branch.
 
 **`piece/<name>` is pushed by two agents only, and never by cherry-pick.** The
-`dev-writer` pushes it at the end of its first pass and opens the PR there; the
-`closer` pushes it again after the archive commit. Both push a **refspec to the
+`dev-writer` pushes it at the end of every pass, and opens the PR on its first;
+the `closer` pushes it after merging `main` and in its Step 3, whether or not it
+made an archive commit — [`closer.md`](closer.md) says when. Both push a **refspec to the
 remote piece ref** rather than checking the branch out — it is checked out in the
 runner's worktree, and git refuses a branch checked out elsewhere. **When and how
 the `dev-writer` does it is [`dev-writer.md`](dev-writer.md)'s**, stated once
@@ -182,7 +183,10 @@ being a bookkeeping commit; it is not, and it goes onto the piece branch like
 everything else.
 
 Cherry-pick rather than merge, so the task branch reads as a flat sequence rather
-than six merge commits carrying six branches.
+than six merge commits carrying six branches. The exceptions are branches the
+runner fast-forwards to instead, such as one carrying a merge of `main` or one
+whose commits are already on the remote piece ref;
+[`RUNNER.md`](RUNNER.md)'s "Dispatching" says which, and why.
 
 **Never `git add -A`** — commit named paths. Two reasons, and they are not the
 same rule:
@@ -309,7 +313,7 @@ is dispatched with `isolation: "worktree"` and arrives in a correct tree already
 > Act on the findings for `dev-writer` in
 > `openspec/changes/wire-request-envelope/findings/`. Piece branch
 > `piece/wire-request`. Commit to your own branch and say what it is called, so
-> the work can be cherry-picked onto the piece.
+> the work can be brought onto the piece.
 
 **Keep `git -C <worktree>` and `EnterWorktree` out of the briefs** — an agent
 already in the right place needs neither, and a brief carrying them sends it
@@ -366,16 +370,13 @@ agents were silently cut from `origin/main` and no error said so. If an agent
 reports a fork point that is not your HEAD, check this file before looking
 anywhere else.
 
-Like everything under `.claude/`, it is the owner's — CLAUDE.md's "`.claude/` is
-the owner's" carries the rule, and this line points rather than restating it,
-because a second copy is what invited reading the rest of the directory as fair
-game. What is local to this section: machine-local settings belong in
-`settings.local.json`, which stays ignored.
+It is the **user's** file. Do not edit it on your own initiative; machine-local
+settings belong in `settings.local.json`, which stays ignored.
 
 #### What the agent's own branch means for getting work back
 
 The agent lands on a harness-named branch, `worktree-agent-<id>` — **not** the
-piece branch. So commits still need a cherry-pick onto `piece/<name>`, exactly
+piece branch. So commits still need bringing onto `piece/<name>`, exactly
 the step reviewers already perform for findings, with one difference worth
 noticing: the branch name is assigned by the harness rather than being the
 `review/<name>/<dimension>` the runner chose, so **read it rather than assuming
@@ -413,7 +414,7 @@ than a red one, because the row gets ticked either way.
 **An agent cannot remove its own worktree, because it is standing in it.** `git
 worktree remove` refuses the directory you are in, so **tree removal belongs to
 the runner.** An agent's last act is to report its branch name and that its tree
-is ready to prune; the runner removes it after cherry-picking the work off.
+is ready to prune; the runner removes it after bringing the work onto the piece.
 
 **The reason the runner keeps a tree is that it may still need reading**: to
 re-check a finding against the exact tree that produced it, to compare two
