@@ -83,8 +83,44 @@ TestCase {
         return main
     }
 
-    // Every main-area screen `Main.qml` mounts, keyed the way `findChild` needs.
-    readonly property var mainAreaScreens: ["stoaList", "joinScreen", "feed", "thread", "moderation"]
+    // Chrome `Main.qml` gives every screen, gated on nothing — so it is not one
+    // of the screens `verifyOnlyTheListIsRendered` checks below. This is the one
+    // hand-typed name left: `namedDescendants` cannot tell chrome from a screen
+    // by structure alone (both are named Items), so a SECOND piece of chrome
+    // that later gets an `objectName` has to be added here explicitly. Until it
+    // is, the enumeration below still finds it and the per-screen loop checks
+    // its `visible` too — failing loudly on the very screenShown-mismatch the
+    // sibling assertion is built to catch, rather than silently skipping it.
+    readonly property var chromeNames: ["statusBar"]
+
+    // Every top-level named child `main` actually mounts, found by walking its
+    // real children — the spec-test finding this replaces named exactly this
+    // shape ("hand-maintained sweep lists go stale silently", CLAUDE.md) and
+    // pointed at `tst_workflow_run_bodies.sh`'s glob as the alternative already
+    // in this diff. A screen added to the main area is included the moment it
+    // exists, because nothing here has to be told its name.
+    //
+    // **Stops at the first named item on each branch and does not look inside
+    // it.** Every screen's own panels and buttons (`createKeyButton`,
+    // `pasteFailureText`, `joinButton`, ...) are named too, several levels
+    // deep, and their visibility is that screen's own business, gated on
+    // reasons that have nothing to do with the navigator — collecting them
+    // here would make this loop assert `pasteFailureText.visible === false`
+    // unconditionally, which is exactly backwards from what the paste-failure
+    // test needs. Only unnamed wrapper items (the background `Rectangle`, the
+    // `Flickable`, the `ColumnLayout`, the padding `Item`s) are recursed into.
+    function namedDescendants(item, out) {
+        if (item.children === undefined)
+            return out
+        for (var i = 0; i < item.children.length; i++) {
+            var child = item.children[i]
+            if (child.objectName !== undefined && child.objectName !== "")
+                out.push(child.objectName)
+            else
+                spec.namedDescendants(child, out)
+        }
+        return out
+    }
 
     // Asserts that `list` alone is rendered: `screenShown` reads "list", AND the
     // element actually shown on screen is the list and nothing else. The two are
@@ -94,8 +130,18 @@ TestCase {
     // actually match still passes a check that reads only `screenShown`.
     function verifyOnlyTheListIsRendered(main, label) {
         compare(main.screenShown, "list", label + ": the opening screen")
-        for (var i = 0; i < spec.mainAreaScreens.length; i++) {
-            var name = spec.mainAreaScreens[i]
+        var names = spec.namedDescendants(main, [])
+        // A floor check on the enumeration itself: if `namedDescendants` ever
+        // came back empty (a QML `children` reflection change, say), every
+        // per-screen assertion below would be silently skipped and this
+        // function would report a screen "rendered" that nothing looked at.
+        verify(names.indexOf("stoaList") !== -1,
+               label + ": the enumeration found the list itself (found: "
+               + names.join(", ") + ")")
+        for (var i = 0; i < names.length; i++) {
+            var name = names[i]
+            if (spec.chromeNames.indexOf(name) !== -1)
+                continue
             var screen = findChild(main, name)
             verify(screen !== null, label + ": " + name + " is mounted")
             compare(screen.visible, name === "stoaList",
@@ -210,7 +256,16 @@ TestCase {
 
         for (var i = 0; i < cases.length; i++) {
             var c = cases[i]
-            var main = spec.makeMain({ "list_stoas": spec.twoStoas, "get_master_key": spec.noKey })
+            // Standalone, not `makeMain`'s TestCase-parented one: this test's
+            // sibling (`test_the_view_opens_on_the_list_whatever_core_answers`)
+            // is where the parenting note above was measured, and
+            // `verifyOnlyTheListIsRendered` reads exactly the `visible`
+            // property that breaks under `makeMain`. Checking only
+            // `screenShown`, as this test used to, would miss a stray binding
+            // that rendered the join/preview screen ON TOP of the list after a
+            // refused paste — the same gap the sibling test closed for the
+            // opening screen.
+            var main = spec.makeStandaloneMain({ "list_stoas": spec.twoStoas, "get_master_key": spec.noKey })
             var list = findChild(main, "stoaList")
 
             compare(main.pasteFailure, "", c.label + ": nothing pasted, nothing refused")
@@ -218,7 +273,8 @@ TestCase {
             list.preview()
             verify(main.pasteFailure.length > 0, c.label + ": a malformed paste is refused")
             compare(main.pasteFailure, list.pasteFailure, c.label)
-            compare(main.screenShown, "list", c.label + ": and it does not navigate")
+            spec.verifyOnlyTheListIsRendered(main, c.label + ": and it does not navigate")
+            main.destroy()
         }
     }
 

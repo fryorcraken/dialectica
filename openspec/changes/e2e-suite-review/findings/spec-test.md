@@ -225,7 +225,7 @@ requirements' scenario text.
 
 ### Findings
 
-- [ ] **`tester`** — `test_a_paste_refused_as_not_a_stoa_reference_leaves_the_list_rendered`
+- [x] **`tester`** — `test_a_paste_refused_as_not_a_stoa_reference_leaves_the_list_rendered`
       (`tst_e2e_handles.qml`) checks `main.screenShown === "list"` and nothing
       else, where its sibling test added in the same commit
       (`test_the_view_opens_on_the_list_whatever_core_answers`) makes the
@@ -255,7 +255,29 @@ requirements' scenario text.
       `Main.qml` is this round's explicit no-read boundary and the gap is
       visible from the test file alone.
 
-- [ ] **`tester`** — `mainAreaScreens: ["stoaList", "joinScreen", "feed",
+      **Outcome (`tester`): fixed.** The test now uses `makeStandaloneMain`
+      and calls `verifyOnlyTheListIsRendered` — the same per-screen `visible`
+      helper its sibling uses — instead of comparing only `screenShown`, for
+      both cases in the table.
+
+      Mutation: `Main.qml`'s `joinScreen.visible` binding changed from
+      `root.screenShown === "join"` to the constant `true` (a stray-binding
+      shape matching the finding's own scenario). **Predicted:** this test
+      goes red on "joinScreen is not rendered", since the join screen is now
+      visible while the list is showing. **Observed:** exactly that —
+      `FAIL! ... plain text that is not a Stoa reference: and it does not
+      navigate: joinScreen is not rendered — Actual (): true, Expected ():
+      false` — and, as a side effect of sharing the same helper,
+      `test_the_view_opens_on_the_list_whatever_core_answers` also went red
+      on the same mutation (unsurprising: both call
+      `verifyOnlyTheListIsRendered`, and this mutation breaks the invariant
+      it names for every case, not just this test's). Both other cases (the
+      JSON-missing-`genesis` paste) and the rest of the suite still passed.
+      `Main.qml` restored immediately after
+      (`git diff --stat dialectica-ui/src/qml/Main.qml` empty); full suite
+      green again at 8/8.
+
+- [x] **`tester`** — `mainAreaScreens: ["stoaList", "joinScreen", "feed",
       "thread", "moderation"]` (`tst_e2e_handles.qml`) is a hand-maintained
       enumeration standing in for "every main-area screen `Main.qml` mounts,"
       and nothing ties it to that set structurally — it is exactly the
@@ -279,6 +301,74 @@ requirements' scenario text.
       or rule out that the list is currently complete without reading the
       implementation this round excludes. Flagged as a structural risk in the
       test regardless of whether the list happens to be accurate today.
+
+      **Outcome (`tester`): fixed, by deriving the list rather than
+      hand-typing it.** QML does let the test enumerate what `main` actually
+      mounts: `namedDescendants(item, out)` walks `main`'s real `children`
+      tree and collects every `objectName` it finds, but — unlike a plain
+      recursive sweep — stops at the first named item on each branch rather
+      than recursing into it. That boundary is load-bearing and not
+      arbitrary: every screen's own internals are also named several levels
+      deep (`createKeyButton`, `pasteFailureText`, `joinButton`, ...,
+      confirmed by `git grep -n objectName` across the five screen files),
+      and collecting those too would make the per-screen loop assert
+      `pasteFailureText.visible === false` unconditionally — exactly backwards
+      from what the paste-failure test needs, since that panel is supposed to
+      become visible on a refused paste. Stopping at the first named boundary
+      gives exactly the five screens plus `statusBar`, matching what
+      `mainAreaScreens` used to spell out by hand, but now because `main`
+      actually mounts them, not because someone typed five strings.
+
+      One hand-typed name is left, `chromeNames: ["statusBar"]` — the
+      structural walk cannot tell "chrome, gated on nothing" apart from "a
+      screen" by shape alone, both being named Items one level under `pane`.
+      This is the "if it can't [be fully derived], make it fail loudly on
+      divergence" fallback the brief asked for: a second piece of chrome
+      that later gets an `objectName` and is left out of `chromeNames` does
+      not get silently skipped, the way a screen used to; it gets swept into
+      `names` and checked as if it were a screen, so the run goes red on it
+      (a false failure demanding the name be added) rather than staying
+      green over a real gap. A floor check
+      (`verify(names.indexOf("stoaList") !== -1, ...)`) guards the other
+      direction: if the enumeration ever came back empty, every per-screen
+      assertion below it would be silently skipped, which would be exactly
+      the kind of test that cannot fail this whole review exists to catch.
+
+      Mutation, two runs, both against the same code path the finding
+      names:
+
+      1. Reused finding 1's mutation (`joinScreen.visible: true`).
+         **Predicted:** both tests using `verifyOnlyTheListIsRendered` go red
+         on `joinScreen`, the same as finding 1's run. **Observed:** exactly
+         that (see finding 1's transcript above) — confirms the derived
+         enumeration still finds and checks `joinScreen` the same way the old
+         hand list did, so nothing regressed for a screen already in that
+         list.
+      2. The finding's own scenario — a brand-new main-area screen `Main.qml`
+         mounts that was never in the old hand-typed list. Added a probe
+         `Item { objectName: "settingsScreen"; visible: true }` as a sibling
+         of `DStoaListScreen` inside `pane`, gated on nothing (simulating a
+         future screen added without being wired to the navigator).
+         **Predicted:** the OLD hand list (`["stoaList", "joinScreen",
+         "feed", "thread", "moderation"]`) could never have caught this —
+         `"settingsScreen"` is not a substring match for anything in that
+         array, so the per-screen loop would never call `findChild(main,
+         "settingsScreen")` at all, and the test would stay green despite the
+         probe being visible at the same time as the list. The NEW derived
+         enumeration should instead find `"settingsScreen"` automatically
+         (it is a named child one level under `pane`, same depth as the five
+         real screens) and fail on it, since `"settingsScreen" !== "stoaList"`
+         but its `visible` is `true`. **Observed:** exactly the predicted
+         divergence —
+         `FAIL! ... plain text that is not a Stoa reference: and it does not
+         navigate: settingsScreen is not rendered — Actual (): true,
+         Expected (): false`, and the same failure on
+         `test_the_view_opens_on_the_list_whatever_core_answers`. This is the
+         literal defect finding 2 named (a new main-area screen is included
+         the day it lands, with no edit to this test), reproduced and closed
+         in the same step. Probe removed immediately after
+         (`git diff --stat dialectica-ui/src/qml/Main.qml` empty); full suite
+         green again at 8/8.
 
 ### Checked and clean
 
