@@ -1087,3 +1087,90 @@ Below the box threshold, in prose only:
   so no check on this piece passes on a quotation alone. But the claim that
   this is unlikely is weaker than the paragraph says. The paragraph is outside
   this range, apart from the word "forms". Low.
+
+## Re-review round 11 `842758b..dd4fe18`
+
+- [x] **re-review round 11 `842758b..dd4fe18`: no findings** — read `git diff 842758b..dd4fe18` of `RUNNER.md`, `proposal.md` and `design.md`, `RUNNER.md` "Record the call" through the forms check literally as a runner would, ran the new number check on this tree and walked a repeat, a gap, mis-indented and wrapped lines, and the nothing-landed case on scratch copies; clean
+
+Correctness only, narrowed as briefed. Nothing reaches medium.
+
+**Round 10's first box (lowering) is closed**, measured. On a scratch stage
+block holding lines 1 to 6, ``round 8 `1111111..2222222` `` (correctness and
+security) and ``round 9 `1111111..2222222` `` (security re-run), with
+`findings/` holding the rejected run's round 8 heading and box in
+`security.md` and a round 8 verdict box in `correctness.md`: the new number
+check lists the row, eight round lines on consecutive line numbers and the
+next row, with no repeat, so it passes, and the gap in the round numbers is
+harmless as the text now says. Round 8's forms list `correctness.md` and
+`security.md`, and security is excepted because the line below re-ran it over
+the same range. Round 9's forms list nothing, so the tick is withheld until the
+re-run writes. `RUNNER.md` no longer gives any repair that lowers a number:
+"Never lower a number, to close a gap or to repair a repeat" is in the third
+bullet, and `git grep -n -e "in the order you write" -e "next number" -e "unique
+and consecutive" -e "gets its line back" -e "number it should"` over
+`.claude/agents`, `proposal.md` and `design.md` returns nothing.
+`design.md:557`'s "1, 2, 3 … in the order the lines stand" is the rejected
+history, described as such.
+
+**Round 10's second box (empty listing) is closed.** "Record the call" now says
+"The row is never struck" and gives the skipped round 1 line for a piece where
+nothing landed. On a scratch block with no round line, the command printed the
+two rows on adjacent line numbers (3 and 4). The second bullet reads that as "the
+line is not written yet: write it". Once written, the line is skipped, so the
+forms check does not run for it ("not marked skipped"), and the tick follows.
+The "empty listing" sentence is gone.
+
+**The number check on this tree** (`git grep -n -F -e "] re-review: every
+commit" -e "      round " -e "] findings all ticked"` over this change's
+`tasks.md`, at `dd4fe18` plus `6324524`) prints the row at `:24`, round lines
+at `:25-35` carrying 1 to 11 once each, and the next row at `:36`. There is no
+gap, no repeat, and nothing listed outside the rows. All three bullets hold.
+Round 10's forms list the five lanes it ran, and round 11's list nothing yet,
+which correctly holds back the tick.
+
+**The repair rules, walked on scratch copies** (under `./tmp/`, searched with
+`--no-index`, since deleted):
+
+- *Repeat.* A line templated from the one above with `round 2` left in place
+  printed `round 2` on lines 4 and 5. A wrapped checklist line starting
+  `      round the corner` was listed at line 10, outside the rows, as the first
+  bullet anticipates. Raising the lower line to 3 and giving `security.md` the
+  templated run's round 2 heading: round 3's forms list nothing, so the tick
+  waits for the re-run. Round 2's forms list `security.md`, but round 2 excepts
+  security because the line below re-ran it. So the check gives the right
+  answer. Without the repair, the round 2 forms, copied from the templated
+  line, pass on the rejected record, which is the case the check exists for.
+- *Mis-indented and wrapped lines.* Between rows at lines 2 and 9, a
+  four-space line, a tab line and a wrapped line's continuation left lines 4,
+  5 and 8 unlisted. Those are gaps, so the tick is withheld as the first
+  bullet says.
+- *Nothing landed:* as above.
+
+Below the box threshold, in prose only:
+
+- **"In turn" is in `proposal.md` but not in `RUNNER.md`.** `proposal.md` says
+  each repeating line "is repaired, in turn". `RUNNER.md`'s third bullet omits
+  "in turn". So a runner facing `1, 2, 2, 2` that computes every raise from
+  the first listing gives both lower lines 3, which is a repeat again. This
+  fails closed. The check runs again before any tick, so it sees 3 twice, and
+  the extra cost is one more re-run of that lane. Low.
+- **A skipped round 1 wrongly written.** The second bullet reads two adjacent
+  rows as "the line is not written yet: write it, as 'Record the call' says
+  for a piece where nothing landed". A runner that lost track of rounds after a
+  compaction, and ran none although commits landed, would write a skipped
+  round 1 and tick. That runner has already failed the row's own precondition,
+  "no commit that merges is unreviewed", and no dispatched round can lack a
+  line, since its brief's forms are copied from the line. So this is the
+  runner-skips-a-step residual, not a new hole. `proposal.md`'s wording ("so
+  the runner writes it") does not make the nothing-landed inference. Low.
+- **More than six spaces still matches.** An eight-space round line is listed,
+  because `-F` matches the six spaces as a substring. The line rule says
+  "exactly six" but the check does not enforce it. That is harmless: the forms
+  are copied from the listed line either way, and the line is still read. Low.
+- **A raise computed while a line is still unlisted.** The listing leaves out
+  a mis-indented line, so the "highest under the row" a runner reads off the
+  listing can miss that line's number. A raise can then land on it.
+  `design.md:569-571` says a raise "cannot land on a used number". That holds
+  once every line is listed. Because the first bullet sends the runner to
+  "list again" after putting the line into form, the repeat then shows, so
+  this fails closed. Low.
