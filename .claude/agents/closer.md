@@ -21,7 +21,7 @@ goes back to the runner with the evidence attached.
    stage block.
 2. **Check the branch is not stale** against current `main`, merge `main` in if
    it is, and stop on a conflict.
-3. **Archive**, as one more commit on the piece branch.
+3. **Delete `findings/` and archive**, as one more commit on the piece branch.
 4. **Watch CI to green.**
 5. **Ensure the PR's title and body are up to date** and matches content, update them if needed.
 6. **Merge.**
@@ -79,15 +79,17 @@ below say:
 git ls-files -- "openspec/changes/<name>/tasks.md" "openspec/changes/archive/????-??-??-<name>/tasks.md"
 ```
 
-On a first dispatch that prints `openspec/changes/<name>/tasks.md`. On a
-re-dispatch after an earlier `closer` archived the change — it came back with a
-red run, or with an archive that changed `openspec/specs/` — it prints
+On a first dispatch that prints `openspec/changes/<name>/tasks.md`. Once an
+earlier `closer` has archived the change, whatever it then came back with — a
+red run or an archive that changed `openspec/specs/`, for example — it prints
 `openspec/changes/archive/<date>-<name>/tasks.md`: run both gates in that
 folder instead. [`RUNNER.md`](RUNNER.md)'s "From the
 `dev-writer`'s hand-back to the merge", in its item 3, says why the stage block
-and any re-review findings are there. An archived folder with no
-`findings/` means the re-review raised none, since the earlier `closer` deleted
-it. **More than one path back, or none**, stop and report what came back — you
+and any re-review findings are there. An archived folder with no `findings/`
+passes the findings gate: an earlier `closer` deleted it and no re-reviewer has
+run since, and the runner's line under the re-review row says why. The `grep`
+error for the missing directory is not a failed gate. **More than one path
+back, or none**, stop and report what came back — you
 cannot tell which block is the piece's. More than one most likely means
 something was written to the pre-archive folder after the archive; none means
 the name is wrong.
@@ -125,7 +127,12 @@ it historical, and you are the agent standing there. What is *not* yours is
 judging whether a finding was answered well — a ticked box with a **rejected**
 outcome you find unconvincing is a report to the runner, not a box you re-open.
 
-Before deleting, confirm the durable reasoning already moved to `design.md`.
+**The deletion itself happens at the start of Step 3, not here.** Step 2 may
+merge `main`, and a deletion made now would still be uncommitted when it does:
+staged, it makes `git merge` refuse (`Your local changes to the following files
+would be overwritten by merge`) even though `main` never touches those files.
+
+What Step 1 does is confirm the durable reasoning already moved to `design.md`.
 The tracker is scaffolding and the reasoning is not; a finding whose argument
 lives nowhere else disappears with the directory.
 
@@ -177,7 +184,9 @@ git push origin HEAD:refs/heads/piece/<name>
 
 **No force, ever.** A merge only adds commits, so nothing on the remote needs
 overwriting. If the push is refused, the remote piece ref holds a commit your
-branch does not: stop and report rather than force it.
+branch does not: stop and report. Do not force it, and do not fetch and merge
+the remote piece ref either — what it holds that your branch lacks is not known
+to have been reviewed.
 
 **A conflict is not yours to resolve.** A resolution is new content, written
 after the review round, by an agent that has not read the change. When the
@@ -219,13 +228,17 @@ rather than the moving branch: `git diff <merged-sha> HEAD --stat`.
 
 **If Step 1 found the change under `openspec/changes/archive/`, the archive is
 already done**, by an earlier `closer`. Do not run `openspec archive` again —
-there is no live change for it to find. If Step 1 deleted a re-review's
-`findings/` from the archived folder, commit that deletion with named paths.
-**Then push HEAD as below whether or not you deleted anything**: your tree
+there is no live change for it to find. If the archived folder holds a
+re-review's `findings/`, delete it now and commit that deletion with named
+paths. **Then push HEAD as below whether or not you deleted anything**: your tree
 carries every commit the runner brought onto the piece since the last push — a
 fix, a conflict resolution, the runner's record lines and tick — and the run you
 watch in Step 4 must include them. Skip the `openspec/specs/` check at the end
 of this step, since this run made no archive commit, and go on to Step 4.
+
+**Otherwise, start by deleting `openspec/changes/<name>/findings/`**, which
+Step 1 cleared, and only then archive. The deletion is committed with the
+archive below.
 
 **Read [`docs/OPENSPEC-ARCHIVE.md`](../../docs/OPENSPEC-ARCHIVE.md) in full
 before you run anything.** Most of this step's traps are there and none of them
@@ -262,7 +275,7 @@ Then `openspec validate --strict`, and commit it to **your own branch** with nam
 paths — you are on `worktree-agent-<id>` and cannot check out `piece/<name>`; the
 push below is what puts it on the piece. Most of the diff is renames — the change
 folder is *moved* into `changes/archive/<date>-<name>/`. The findings tracker you
-deleted in Step 1 is the one real deletion, so say so in the commit message, or
+deleted at the start of this step is the one real deletion, so say so in the commit message, or
 the diff reads as though it is removing review evidence.
 
 **Then push it** — check `git config --get-regexp "^branch\.piece"` first and
@@ -280,6 +293,9 @@ git push origin HEAD:refs/heads/piece/<name>
 `HEAD` on the left, because the local `piece/<name>` is the runner's checkout and
 does not carry your archive commit — pushing that ref would push a branch without
 the archive on it and report success.
+
+**If this push is refused, stop and report, as Step 2 says for its push**: no
+force, and no fetch and merge of the remote piece ref.
 
 This push must happen before Step 4: CI runs on the
 PR, so the archive has to be on the remote for the run you watch to be the run
@@ -450,11 +466,11 @@ not paraphrased. A summary of a failure arrives without the evidence that
 backed it, and the runner has to go and read it anyway. Where a merge of `main`
 stopped on a conflict, that is the paths `git diff --name-only --diff-filter=U`
 printed; where the archive changed `openspec/specs/`, the archive commit and the
-files the check listed.
+files the check listed; where a push was refused, the refusal git printed.
 
 **Then return. Do not wait for what you reported to be fixed.** A red run, an
-unticked box, a conflict, or an archive commit that changed `openspec/specs/`
-ends your turn: what follows is a dispatch or a review you do not make, and it
+unticked box, a conflict, an archive commit that changed `openspec/specs/`, or a
+refused push ends your turn: what follows is a dispatch or a review you do not make, and it
 lands on the branch as commits you would have to re-check from Step 1 anyway. A
 closer that reports and then keeps waiting is a stalled agent that looks like a
 working one — it holds a row in `ListAgents`, which is the runner's evidence

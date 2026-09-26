@@ -128,7 +128,7 @@ says so** rather than choosing either fallback.
 
 | Branch | Worktree | Whose | Holds |
 |---|---|---|---|
-| `piece/<name>` | the runner's | the runner, and the PR | **the** task branch, and the only one ever pushed. Work reaches it two ways: the runner brings every agent's commits onto its local copy — a cherry-pick, or a fast-forward for the `closer` and a conflict resolver, as [`RUNNER.md`](RUNNER.md)'s "Dispatching" says — and the `dev-writer` and `closer` push a refspec to the remote copy |
+| `piece/<name>` | the runner's | the runner, and the PR | **the** task branch, and the only one ever pushed. Work reaches it two ways: the runner brings every agent's commits onto its local copy — a cherry-pick, or a fast-forward where [`RUNNER.md`](RUNNER.md)'s "Dispatching" says — and the `dev-writer` and `closer` push a refspec to the remote copy |
 | `worktree-agent-<id>` | one per dispatch | one agent | **local only, and named by the harness** — whatever that agent committed, brought onto the piece and never pushed |
 | `main` | — | nobody | **no agent ever pushes here.** It takes commits through a PR only |
 
@@ -182,9 +182,10 @@ being a bookkeeping commit; it is not, and it goes onto the piece branch like
 everything else.
 
 Cherry-pick rather than merge, so the task branch reads as a flat sequence rather
-than six merge commits carrying six branches. The exception is a branch carrying
-a merge of `main` — the `closer`'s, or a conflict resolver's — which the runner
-fast-forwards to instead; [`RUNNER.md`](RUNNER.md)'s "Dispatching" says why.
+than six merge commits carrying six branches. The exceptions are branches the
+runner fast-forwards to instead, such as one carrying a merge of `main` or one
+whose commits are already on the remote piece ref;
+[`RUNNER.md`](RUNNER.md)'s "Dispatching" says which, and why.
 
 **Never `git add -A`** — commit named paths. Two reasons, and they are not the
 same rule:

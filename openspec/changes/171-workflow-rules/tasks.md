@@ -181,3 +181,54 @@ Commands written into a role file were run in a scratch repository under
       the stale Context line and the stale Risks entry on the `closer`'s
       rebase are replaced.
 - [x] 8.8 `openspec validate 171-workflow-rules --strict` passes.
+
+### 9. After the `spec-writer`'s ruling on the dev-writer's decisions (`f9df27f`)
+
+Supersedes 7.2 (a re-reviewer writes only if it has a finding) and 8.3's "four
+returns". Commands written into a role file were run against this tree or a
+scratch repository under `./tmp/` (git 2.55.0), since deleted, before any claim
+about their output was written.
+
+- [x] 9.1 `closer.md` Step 3: a refused push stops the `closer` and it
+      reports, pointing to Step 2, which now also forbids fetching and merging
+      the remote piece ref. "Your report" and the closing list name a refused
+      push. Verify: a branch forked from a cherry-picked copy of pushed commits
+      was refused with `(non-fast-forward)` in the scratch repository.
+- [x] 9.2 `closer.md` Step 1 and `RUNNER.md`'s "By then the block may have
+      moved" state the condition — an earlier `closer` archived — with returns
+      as examples only.
+- [x] 9.3 `closer.md`: the `findings/` deletion moves to the start of Step 3
+      (both the first-pass and the re-dispatch paragraph); Step 1 keeps the
+      gates, the ownership paragraph and the `design.md` check; the commit
+      sentence names Step 3; the order list says so. Verify: with a staged
+      deletion, `git merge` refused with `Your local changes to the following
+      files would be overwritten by merge` in the scratch repository.
+- [x] 9.4 `closer.md` Step 1: an archived folder with no `findings/` means an
+      earlier `closer` deleted it and no re-reviewer has run since.
+- [x] 9.5 `RUNNER.md` step 3's brief: a clean re-reviewer appends one ticked
+      verdict box naming the range; after the archive every re-reviewer
+      writes its file; the verdict box is on the needs-no-review list. Verify:
+      `git grep -n -e "writes no file" -e "only if it has" -- .claude/agents`
+      returns nothing.
+- [x] 9.6 `RUNNER.md` step 1: "A hand-back that names none has decided them
+      all" is replaced; only markers covered by new spec text or whose
+      behaviour changes are named as decided.
+- [x] 9.7 `RUNNER.md` "Dispatching", "What a runner does" and "One piece is
+      one PR", and `README.md`'s branch table row and "The exceptions are…":
+      an agent whose commits are already on the remote piece ref is
+      fast-forwarded to, and README points to `RUNNER.md` without a list that
+      reads as complete. Verify: `git merge --ff-only` kept the pushed SHA and
+      `git cherry-pick --ff` onto a non-parent HEAD made a new SHA with exit 0,
+      in the scratch repository.
+- [x] 9.8 `RUNNER.md` "The `closer`, and what comes back": five returns; a
+      refused push goes to the owner with
+      `git log --oneline --left-right --cherry-mark HEAD...origin/piece/<name>`.
+      Verify: run on this tree, and in the scratch repository it printed `<`,
+      `>` and a `=` pair as the role file describes.
+- [x] 9.9 `design.md`: Decisions for the verdict box, the `findings/` deletion
+      point, the already-pushed fast-forward (citing
+      `git reflog show --date=iso piece/171-workflow-rules`) and the corrected
+      product-decision sentence; the two Risks entries replaced; stale
+      "Step 1 deletes" and "raised none" text updated.
+      `findings/security.md`'s second box gets its landed outcome.
+- [x] 9.10 `openspec validate 171-workflow-rules --strict` passes.

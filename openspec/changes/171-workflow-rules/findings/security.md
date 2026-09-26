@@ -113,6 +113,22 @@ source-code diff exists on this piece.
       spec-writer takes it, the `RUNNER.md` brief bullet changes in this
       piece, and this box's outcome stands as the record of why.
 
+      **Fixed** (this commit, superseding the deferral above). The
+      `spec-writer` took it (`f9df27f`, `proposal.md` "A re-review brief
+      carries four things"). `RUNNER.md` step 3's brief now has a re-reviewer
+      that finds nothing append one ticked verdict box naming the range it
+      read, and commit it itself; after the archive every re-reviewer writes
+      its file, clean or not. "A clean re-review writes no file" and "only if
+      it has a finding" are gone, and the verdict box is on step 3's list of
+      tracking that needs no review. `closer.md` Step 1 now reads an archived
+      folder with no `findings/` as "no re-reviewer has run since", not "the
+      re-review raised none". The reasoning is `design.md`'s "A clean
+      re-reviewer appends a ticked verdict box", which replaces the Risks
+      entry named above. Checked: `grep -rc "^- \["` counts a ticked box and
+      `grep -rn "^- \[ \]"` does not match one — on this folder, this file
+      counts 2 and the unticked grep returns nothing. No test can see the
+      prose; the check is the re-review round reading it.
+
 ## Areas checked and clean
 
 - **`--admin` / branch protection / rulesets.** `closer.md` Step 6's new text

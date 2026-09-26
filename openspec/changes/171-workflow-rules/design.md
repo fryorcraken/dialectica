@@ -150,11 +150,19 @@ re-review would be back to a rule the runner has to remember, and #171 is two
 cases of that failing on one day.
 
 **After the archive, that block is in the archive, and the untick goes there.**
-The `closer` deletes `findings/` in its Step 1 and archives in Step 3, both
-before it watches CI in Step 4. So by the time a red run, or a spec-changing
-archive, comes back, the change folder has moved to
+The `closer` deletes `findings/` and archives in its Step 3, before it watches
+CI in Step 4. So once an earlier `closer` has archived, whatever it then comes
+back with, the change folder has moved to
 `openspec/changes/archive/<date>-<name>/`, and the stage block with it.
 `RUNNER.md` says the untick and the round's line go in that `tasks.md`.
+
+**Both files name that condition, not a list of returns.** `closer.md` Step 1
+and `RUNNER.md`'s "By then the block may have moved" give a red run and a
+spec-changing archive as examples only. A list would read as complete, and it
+is not: a conflict met merging `main` after the archive (Step 4 finding the
+branch `BEHIND`) and a push refused after the archive commit also come back
+with the block moved. A runner reading "after a red run, or…" as the whole set
+would untick at the old path on either of those, where nothing reads it.
 
 **Both readers of the block find it by exact path.** The command is:
 
@@ -210,11 +218,16 @@ no longer shows.
 `closer.md` points to `RUNNER.md` for why the block is there rather than
 restating it. It adds two things only the `closer` needs:
 
-- **An archived folder with no `findings/` means the re-review raised none.**
-  The first `closer` deleted it, and `RUNNER.md` step 3 has a re-reviewer write
-  it afresh only when it has a finding. Without this sentence, `grep` on a
-  missing directory errors, and a `closer` could read the error as a failed
-  gate.
+- **An archived folder with no `findings/` passes the findings gate.** An
+  earlier `closer` deleted it, and no re-reviewer has run since: after the
+  archive every re-reviewer writes its file, clean or not (see "A clean
+  re-reviewer appends a ticked verdict box"). So its absence means the runner
+  ran no round there, and the runner's line under the re-review row says why.
+  Without this sentence, `grep` on a missing directory errors, and a `closer`
+  could read the error as a failed gate. The sentence once said the absence
+  meant "the re-review raised none"; that held only while a clean re-reviewer
+  wrote no file, and it would now let a `closer` read a skipped round as a
+  clean one.
 - **More than one path back, or none, means stop and report what came back.**
   The `closer` cannot tell which block is the piece's. More than one most
   likely means something recreated the pre-archive folder after the archive,
@@ -229,10 +242,13 @@ A findings pass always adds at least one commit, because the fixer flips the box
 and appends the outcome. If every commit counted, every piece would owe a
 re-review of box ticks. Counting only commits that change content keeps the rule
 meaningful. `RUNNER.md` lists what is tracking rather than content: a box
-flipped, a finding's outcome in `findings/`, a stage-row tick, and the runner's
-own record line under the re-review row.
+flipped, a finding's outcome in `findings/`, a re-reviewer's findings or verdict
+box in `findings/`, a stage-row tick, and the runner's own record line under the
+re-review row.
 
-- `findings/` is deleted before merge.
+- `findings/` is deleted before merge. A re-reviewer's verdict box in particular
+  must not count: if it did, recording that a round was clean would itself owe
+  a round.
 - A stage-row tick is tracking.
 - **The runner's record lines merge**, because `tasks.md` is archived with the
   change. They are still tracking: they record what the flow did, not what the
@@ -269,17 +285,19 @@ a round is owed at all.
 
 The reviewer role files describe a first-round review: tick your row, write your
 findings file. In a re-review the row is already ticked and the findings file
-exists. `RUNNER.md` tells the runner to put three things in the brief:
+exists. `RUNNER.md` tells the runner to put four things in the brief:
 
 - the commit range to read;
 - that the reviewer's row stays as it is;
-- that new findings are appended as boxes to the existing file.
+- that new findings are appended as boxes to the existing file;
+- that a re-review which finds nothing appends one ticked verdict box instead
+  (next entry).
 
 Appending still works with the findings gate, which only counts boxes.
 
 **When `findings/` is already gone, the file is written afresh in the archived
-folder.** The `closer` deletes `findings/` in its Step 1, before it archives.
-So a re-review after a red run has no file to append to. `RUNNER.md` has the
+folder.** The `closer` deletes `findings/` at the start of its Step 3, just
+before it archives. So a re-review after a red run has no file to append to. `RUNNER.md` has the
 brief say to write it under the same name, in
 `openspec/changes/archive/<date>-<name>/findings/`. Same name, because the
 runner reads reviewers by filename. That folder, because it is where the
@@ -287,18 +305,8 @@ re-dispatched `closer`'s Step 1 runs the gate (see the re-review row entry). A f
 anywhere else is one the gate never sees, and the finding in it would not block
 the merge.
 
-**Only a re-reviewer with a finding writes that file.** A clean re-review adds
-no box either way: before the archive it appends nothing, and after it it
-writes no file and says so in its report. The unconditional version was
-ruled out by the `closer`'s own gate. `code-reviewer.md` has every reviewer
-write a findings file, reporting clean areas in prose, and the `closer`'s
-`grep -rc "^- \["` requires every file to be non-zero. A fresh file with no
-box would send the piece back to the runner over a review that found nothing.
-What this costs is in Risks.
-
-The alternative was editing four reviewer files. It is ruled out by scope: the
-owner authorised edits for what these four issues ask for, and none asks for a
-reviewer-file change.
+After the archive, every re-reviewer writes that file, holding its findings or
+its verdict box.
 
 **A conflict resolution is read with `git show --remerge-diff <sha>`.** The
 resolution is a merge commit, and its diff against the piece is mostly `main`'s
@@ -308,6 +316,60 @@ markers included, against the committed one, so what a reviewer sees is the
 resolution and nothing else. Measured with git 2.55.0 in a scratch repository:
 on a merge whose one conflict was resolved to a third line, it printed exactly
 the five conflict-marker lines replaced by that one line.
+
+The alternative was editing four reviewer files. It is ruled out by scope: the
+owner authorised edits for what these four issues ask for, and none asks for a
+reviewer-file change.
+
+### A clean re-reviewer appends a ticked verdict box
+
+A re-reviewer that finds nothing appends one ticked box naming the commit range
+it read, and commits it itself, as it would a finding:
+
+```markdown
+- [x] **re-review `a1b2c3d..e4f5a6b`: no findings** — read <what>; clean
+```
+
+**Why a box at all.** A first-round reviewer's own tick on its stage row attests
+that its review ran. A re-reviewer's row was ticked in the first round, so a
+clean re-review that wrote nothing would leave no commit of the reviewer's: the
+only record would be the runner's line under the re-review row, which nothing
+checks against a reviewer's output (`findings/security.md`, second finding). A
+runner that wrote the line without dispatching, or a reviewer that under-read
+its range, would look exactly like a clean round. The verdict box is the
+reviewer's own trace, in the reviewer's own file.
+
+**Why ticked.** The `closer`'s Step 1 runs two greps. `grep -rn "^- \[ \]"`
+does not match a ticked box, so the verdict does not read as an open finding;
+`grep -rc "^- \["` does count it, so a file holding only the verdict box passes
+"every file non-zero". An unticked verdict would stop the `closer` as an
+unanswered finding; a fresh file written after the archive with no box would
+fail the non-zero check. Either sends the piece back over a review that found
+nothing.
+
+**Why one box for the round, and clean areas still in prose.** The reviewer
+role files say to report clean areas in prose rather than as boxes, and the box
+does not change that: it is one line saying the round ran. It takes the shape
+#182 recommends for a clean first-round review — reviewer-side, one ticked
+verdict box, because that "keeps the closer's gate mechanical" where the
+alternative, a `closer` that accepts a zero-box file stating "no findings",
+makes the gate read prose. So when #182 lands the two rules agree. #182's own
+first-round case stays out of scope here: it needs the reviewer role files.
+
+**Why the brief, not a role file.** The re-review is the runner's dispatch and
+the brief already carries what differs from a first round; the reviewer files
+are outside this piece's authorisation.
+
+**What breaks without it:** a clean re-review before the archive is invisible
+in `findings/`; after the archive a clean re-reviewer either writes a zero-box
+file that stops the `closer`, or writes nothing, which is the untraced case
+above. And `closer.md` Step 1's rule that an archived folder with no
+`findings/` means no round ran after the archive would stop being true.
+
+**Rejected: a clean re-reviewer writes nothing, and says so in its report.**
+That was this piece's first version. It avoided tripping the gate, but it was
+reasoned from what avoids the gate rather than from what leaves a trail, and a
+report goes to the runner and is not kept.
 
 ### Sizing guidance comes from #171, and names no model
 
@@ -426,10 +488,35 @@ one: `spec-writer.md` has it decide every routed marker, with no branch for
 runner is told to act on a signal the flow never produces.
 
 So `RUNNER.md` step 1 has the brief ask for it: which markers, if any, neither
-the issue nor the specs settle, so that the choice is the owner's. A hand-back
-that names none has decided them all. The request lives in the brief because
-the only file the runner reads is its own, and `spec-writer.md` is outside
-this piece's authorisation beyond its one corrected sentence.
+the issue nor the specs settle, so that the choice is the owner's. The request
+lives in the brief because the only file the runner reads is its own, and
+`spec-writer.md` is outside this piece's authorisation beyond its one corrected
+sentence.
+
+### A hand-back naming no product decision leaves nothing for the owner, and closes only the markers it covers
+
+What a `spec-writer` hand-back with no product decision settles is who acts
+next: nothing goes to the owner. It does not settle that every marker is
+closed. `RUNNER.md` step 1 has the next brief name as decided only the markers
+the hand-back says new spec text now covers, or whose behaviour is to change. A
+marker the `spec-writer` chose to leave in place stays open, and the brief does
+not name it as decided.
+
+**Why the two are separate.** `spec-writer.md` allows three outcomes for a
+routed marker — add the requirement, say the behaviour should change, or leave
+it in place, since "Leaving a marker in place is also a decision; say so rather
+than ignoring it". Only the first two produce spec text a marker can cite.
+`tester.md` closes a marker the brief names as decided by rewording it to cite
+the scenario now covering it, or by removing it. Told that a left-in-place
+marker was decided, a tester would reword it to cite a scenario that does not
+exist, or remove it, and the chosen-not-specified behaviour would lose the one
+marker that shows it was chosen.
+
+**Rejected: "a hand-back that names none has decided them all".** That was this
+piece's earlier wording. It joined the two questions, so a `spec-writer` that
+left one marker in place and named no product decision would have had that
+marker closed by the runner's brief. The spec-writer's ruling on this piece
+(`f9df27f`) corrected it.
 
 ### `--admin` is forbidden in Step 6, with a pointer from "What you never do"
 
@@ -530,6 +617,42 @@ decision about content. Its turn would end at the resolution anyway, since a
 commit that needs review ends it, so resolving buys nothing but an author who
 did not read the change.
 
+### The `closer` deletes `findings/` at the start of Step 3, not in Step 1
+
+Step 1 still runs both gates and confirms the durable reasoning is in
+`design.md`, and the ownership paragraph stays there; the deletion itself
+happens at the start of Step 3, immediately before `openspec archive`, and is
+committed with the archive. On a re-dispatch, a re-review's `findings/` in the
+archived folder is deleted at the same point in Step 3 and committed there.
+
+**Why: Step 2's merge of `main` sits between them.** A deletion made in Step 1
+is still uncommitted when Step 2 merges. Measured with git 2.55.0 in a scratch
+repository, re-run on this pass: with the deletion staged by `git rm -r`,
+`git merge main` refuses with `error: Your local changes to the following files
+would be overwritten by merge:` naming the findings file, although `main`'s
+only change was to a different file. Unstaged, the merge runs and `--abort`
+keeps the deletion, but that relies on git carrying uncommitted changes across
+a merge and its abort. After the move, nothing is uncommitted while Step 2 runs,
+in either form.
+
+**Why it is inside the Step 2 rewrite's authorisation.** Before this piece
+Step 2 rebased, which refuses any uncommitted change, so the Step 1 deletion was
+already a latent stop. Replacing the rebase with a merge made it a stop on
+every first dispatch whose branch is stale, since Step 1 deleted `findings/` on
+every first dispatch. The owner-authorised rewrite of Step 2 would not work
+without it.
+
+**Rejected: commit the deletion in Step 1.** It would work, but it splits the
+deletion from the archive commit whose message Step 3 has explain it, so the
+diff does not read as removing review evidence; one commit carrying both keeps
+that explanation next to the deletion. **Rejected: tell the
+`closer` to leave the deletion unstaged.** It works, measured above, but it is
+a guard on how a shell command is typed, and nothing would check it.
+
+**What breaks without it:** a stale first dispatch stops at Step 2 on an error
+caused by its own housekeeping, which is not a conflict and which Step 2 does
+not describe.
+
 ### The archive check applies only to an archive commit the `closer` made in the same run
 
 After Step 3's push, a `closer` that made the archive commit in that run runs
@@ -561,10 +684,10 @@ on this tree's HEAD it lists nothing.
 Its tree carries every commit the runner brought onto the piece since the last
 push: a fix, a conflict resolution, the runner's record lines and tick. The run
 it watches in Step 4 must include them. The earlier reading of Step 3 — push
-only when Step 1 deleted a re-review's `findings/` — would have had it watch a
+only when a re-review's `findings/` was deleted — would have had it watch a
 run on a tip missing the very fix it was re-dispatched for.
 
-### The runner fast-forwards to the `closer` and a conflict resolver; it cherry-picks everyone else
+### The runner fast-forwards to the `closer`, a conflict resolver and an already-pushed branch; it cherry-picks everyone else
 
 `git cherry-pick` cannot carry a merge commit's second parent: it refuses a
 merge outright (`is a merge but no -m option was given`, measured), and with
@@ -584,6 +707,56 @@ having merged, before the runner writes to the stage block or dispatches
 anyone. Its archive commit moved the stage block, so without the fast-forward
 the archived `tasks.md` the runner unticks is not in the runner's tree, and the
 next agent forks from a HEAD without the archive or the merge of `main`.
+
+**An agent whose commits are already on the remote piece ref is fast-forwarded
+to as well.** In this flow that is the `dev-writer`'s first pass, which pushes
+its tip to `refs/heads/piece/<name>` before handing back, so the PR opens early
+enough for CI. A cherry-pick copies those commits to new SHAs, and from then on
+the runner's `piece/<name>` does not descend from the remote ref. Every later
+push of a HEAD forked from it — the `closer`'s at Step 2 or Step 3, a
+findings-pass writer's — is refused as non-fast-forward, and no agent may
+force.
+
+This is not hypothetical; it is in this piece's own reflog
+(`git reflog show --date=iso piece/171-workflow-rules`). The `dev-writer`
+pushed `c67aa24`..`d41d0fd`, forked from the runner's `abc7693`. At 23:32:26–27
+on 2026-09-25 the runner cherry-picked them as `a255c19`, `c64f549`, `68211d9`
+and `938dc55`, new SHAs even though `abc7693` was the first one's parent, and at
+23:32:47 it ran `reset: moving to d41d0fd` to get back onto the pushed commits.
+That reset is what `RUNNER.md` now forbids ("never rebase, reset or force-push
+`piece/<name>`"), so without this rule the same mistake would have no exit but
+the owner.
+
+Measured with git 2.55.0 in a scratch repository, re-run on this pass:
+
+- a plain `git cherry-pick` of a pushed commit whose parent is HEAD made a new
+  SHA; a branch forked from it and pushed to the piece ref was refused with
+  `! [rejected] HEAD -> piece (non-fast-forward)`;
+- `git cherry-pick --ff` onto a HEAD that is not the commit's parent exits 0 and
+  makes a new SHA with no warning, so `--ff` is not a safe substitute: it
+  diverges silently in exactly the case that matters;
+- `git merge --ff-only` to the pushed branch kept its SHA, and on a diverged
+  branch refused with `fatal: Not possible to fast-forward, aborting.`
+
+So the rule names the case by its condition — commits already on the remote
+piece ref — with the `dev-writer`'s first pass as the one instance today.
+`dev-writer.md`'s "The runner cherry-picks your commits" is left as it is:
+bringing its first pass on is the runner's step, stated in `RUNNER.md`, and
+changes nothing the `dev-writer` does (`proposal.md`, "Out of scope").
+
+**A refused push goes to the owner, not to a fix of the runner's.** If one
+happens anyway — the remote piece ref holds a commit the runner's HEAD lacks —
+the runner cannot reconcile the two without a reset, a force-push or a merge
+of its own, and "What a runner does" forbids all three. So `RUNNER.md`'s "The
+`closer`, and what comes back" lists it as a fifth return: report
+`git log --oneline --left-right --cherry-mark HEAD...origin/piece/<name>` and
+wait. That command was chosen because it shows both what diverged and whether
+it is only copies: in the scratch repository it printed `<` for the commit only
+HEAD held and a `=` pair for a commit and its cherry-picked copy, and `>` for a
+commit only the remote held. The `closer`'s side of the same event is
+`closer.md`'s: a refused push at Step 2 or Step 3 stops it, with no force and
+no fetch and merge of the remote piece ref, because what the remote holds that
+the runner's HEAD lacks is not known to have been reviewed.
 
 ### What the runner commits: its re-review row and nothing else
 
@@ -702,17 +875,6 @@ no role file.
   The row is ticked when a round adds no merging commit. `RUNNER.md` does not
   cap the number of rounds: a cap would be a fixed rule, and #171 argued
   against fixed rules.
-- **[A clean re-review leaves no reviewer-authored trace.]** A clean
-  re-reviewer appends nothing, or writes no file after the archive, so the
-  only record that the round ran is the runner's own line under the re-review
-  row, which nothing cross-checks against a reviewer's output
-  (`findings/security.md`). The first round does not have this gap: each
-  reviewer ticks its own row. → Deferred to the `spec-writer`, because the
-  fix changes what `proposal.md` specifies ("A clean re-review adds no box
-  either way"). The candidate that closes it without tripping the `closer`'s
-  gate: a clean re-reviewer writes one **ticked** box naming the range it
-  read. `grep -rn "^- \[ \]"` ignores a ticked box, and `grep -rc "^- \["`
-  counts it, so a fresh file holding only that box passes both gates.
 - **[The `closer`'s Step 1 pathspec has no standing test.]** It is a
   deterministic `git ls-files` command, checkable against fixture folders
   without reading any prose. A later edit that mistypes it mostly fails
@@ -724,16 +886,6 @@ no role file.
   names. It is not added here: `proposal.md` says this change adds no tests
   or CI, and a test holding its own copy of the command would not fail when
   a role file's copy changed.
-- **[A staged `findings/` deletion stops the merge of `main`.]** `closer.md`
-  has the `closer` delete `findings/` in Step 1 and commit it in Step 3, with
-  Step 2's merge between them. Measured in a scratch repository: with the
-  deletion staged, `git merge` refuses (`Your local changes to the following
-  files would be overwritten by merge`) although `main` never touches those
-  files; with it unstaged, the merge runs and `--abort` keeps it. The rebase
-  this replaces refused any uncommitted change, so this is not new, but
-  nothing in `closer.md` says which form to use. → Reported in the hand-back
-  for the `spec-writer`; not changed here, since the order of Steps 1 to 3 is
-  outside what the proposal asks for.
 - **[The review round costs at least three `SendMessage` round trips.]** →
   Accepted for this piece. The one-file-per-row follow-up removes it.
 - **[`tester.md` said "Keep the markers and report each one — the spec-writer
@@ -751,7 +903,7 @@ no role file.
   archive was already done, so a fresh `closer` could run `openspec archive` on
   a change that is no longer live. → The owner authorised the edit for this
   piece. Step 3 now opens with that case: `openspec archive` is not run again,
-  and HEAD is pushed whether or not Step 1 deleted anything.
+  and HEAD is pushed whether or not it deleted anything.
 - **[`closer.md`'s signing text is false while signing is off.]** → Deliberate;
   see the Decisions entry. Do not "fix" it.
 - **[PR #132 edits the same template, the same README paragraph, and
