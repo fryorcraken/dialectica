@@ -852,3 +852,64 @@ Below medium, in prose:
   Re-dispatching is the way out, and the rule does not forbid it. Neither
   document mentions this cost, and it is plausible here, where agents have
   stalled for good on a permission prompt.
+
+## Re-review round 15 `e5dcce4..bad7c88`
+
+- [x] **re-review round 15 `e5dcce4..bad7c88`: no findings** — read `git diff e5dcce4 bad7c88` over `RUNNER.md`, `design.md` and `proposal.md`, `RUNNER.md:693-756` at `bad7c88`, `design.md:921-1123` and `:1900-1970`, and a sweep of all three files for "chain's end", "followed", "passed over" and "neither"; clean
+
+Below medium, in prose:
+
+- **`RUNNER.md` takes the adopted decision and neither rejected one, in both
+  bullets and the "What you read" row.** The chain bullet (`:723-733`) defines
+  reaching exactly as `design.md:947-959` does, names the two shapes that used
+  to dead-end (a re-run, a line templated with only its end changed), and
+  says an unreached line needs no repair. Nothing says "furthest" or orders
+  the ends, and "Record the call" gains no rule forbidding overlapping lines.
+  The tail bullet (`:734-751`) runs from "an end the chain reaches", offers
+  both repairs the entry names, and says "Either line is sound", which is the
+  entry's "either repair will do". `:82` says the same. No "followed",
+  "passed over" or "the chain's end" is left in `RUNNER.md`. This also closes
+  my round-14 prose note that the chain entry recorded no cost for
+  overlapping ranges: the new "What it costs" bullet records the cost that
+  remains.
+- **The soundness argument holds, and the removal was justified.** The old
+  "followed or passed over" condition was added in round 13 for one thing:
+  a gap, the off-by-one being the ordinary case (`design.md:921-935`, and
+  `proposal.md`'s round-13 history). A gap's commits lie after every end the
+  chain reaches before the gap, so the tail from any of those ends lists
+  them. And a path of consecutive ranges covers everything from `<review>` to
+  its end whether or not each end is an ancestor of the next, so no reached
+  end can skip a gap. I checked the cases a runner might produce: a
+  backwards range, an end off the branch, a re-run, a widened re-read, and a
+  line starting inside another's range. Each one either extends the chain
+  soundly, or leaves a tail that lists the missing commits (it fails closed).
+  One overstatement, too contrived to box. `design.md:971-972` says a pass
+  means "every commit after `<review>` is in a round's range or is tracking",
+  and `:975-976` says the old condition "caught nothing the tail check
+  misses". The tail is a tree diff, though. An off-by-one line whose missed
+  commit, together with everything in the unreached line's own range, nets
+  to zero against the reached end passes the tail, while the old condition
+  would have flagged it. No unreviewed content reaches the merged tree in
+  that case, so the claim holds of files, not of commits. The accurate
+  wording would be "every file difference", which is what the proof two
+  lines earlier actually establishes.
+- **Which reached end the tail runs from is left open, and the termination
+  argument depends on it.** The tick condition is existential ("an end the
+  chain reaches"), but the failure branch fires on the one end the runner
+  tried. `<review>` is itself reached. A runner that reads lines top-down and
+  tries an early end writes a round re-reading most of the piece, and the
+  entry records that ("changes only how much is read again"). But
+  `design.md:979-980`'s "the check always terminates" holds only if the
+  runner then re-checks from the end it just wrote, and neither document says
+  so. Checking the most recently written line's end first would make that
+  claim true by instruction rather than by habit. This costs rounds, not
+  soundness.
+- **`design.md` still says "the chain's end" in four places, without the
+  gloss `proposal.md:412` added** ("what 'the chain's end' means wherever this
+  text names it"): `:1006`, `:1009`, `:1916` and `:1944`. None is false under
+  reaching, since each reads true of any reached end. `:1945`'s "pass over a
+  commit" now echoes a term of art the entry above retired, in a different
+  sense. `:1016`'s "leave the chain broken" is loose: under reaching, nothing
+  breaks, the tail fails. A reader of `design.md` alone meets a singular end
+  eighty lines after an entry arguing there is none. The same gloss, or
+  "an end the chain reaches", fixes all four.
