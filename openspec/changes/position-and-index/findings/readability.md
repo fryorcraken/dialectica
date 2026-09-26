@@ -215,3 +215,98 @@ extraction with a doc comment that earns its place (explains *why* the clock
 became a parameter, not what the code already shows), and the `4e2b8c0f`
 formatting commit is exactly what it claims to be. `tasks.md`'s re-review
 section itself is clear and accurately scoped.
+
+## Re-review of the D6 commit
+
+Dimension: **readability only**, per `tasks.md`'s "Re-review of the D6 commit"
+row ("re-review D6: readability — `code-reviewer`. New prose with checkable
+citations."). I read issue #166 again (`gh issue view 166 --json
+body,comments`), including the owner's decision comment of 2026-09-25
+(https://github.com/fryorcraken/dialectica/issues/166#issuecomment-5832956024),
+which rules that a malformed `index` is refused with an error naming `index`
+and rules out leaving the message unspecified.
+
+Scope: `git show 536a03e` only — `design.md` D6 (lines 217–273) and the
+matching outcome note appended to this file's "One gap" finding — plus the
+"Re-review of the D6 commit" section `tasks.md` gained in `8b19089`.
+
+**Claims checked by running rather than reading:**
+
+- `docs/OPENSPEC-ARCHIVE.md`'s "Two capabilities asserting one rule" section
+  (`grep -n`, lands at lines 136–145): confirmed it says `op-ordering` "faced
+  this against `op-format`'s 'An op carries no ordering field', declined to
+  restate it, and said so in its Purpose" while `spec-backfill` "did not, and
+  produced the duplication above" — matches D6's citation of it as the
+  precedent for a silent boundary producing a duplicate.
+- `op-ordering`'s Purpose names `op-format` and declines to restate its "An op
+  carries no ordering field and no per-peer state" requirement
+  (`openspec/specs/op-ordering/spec.md:7`); `op-format`'s Purpose
+  (`openspec/specs/op-format/spec.md:3-4`) names no capability at all — no
+  reverse pointer. Confirmed by reading both Purpose sections directly, not
+  just grepping for the word `op-ordering` (which does appear later in
+  `op-format`'s body text, in requirement prose unrelated to the Purpose
+  boundary list — checking only for the string would have given a false
+  positive).
+- `d8a56272` (cited as where "#160 set the precedent" for editing a Purpose
+  directly rather than through a delta): `git show d8a56272 --stat` shows it
+  touches `openspec/specs/identity-onboarding/spec.md` and
+  `openspec/specs/identity/spec.md` directly, and its own commit message says
+  "The identity and identity-onboarding Purpose paragraphs are edited
+  directly, since a delta cannot change a Purpose." Matches.
+- The quoted requirement title *A malformed `index` in a keep request is
+  refused with a message naming `index`* is not in the live
+  `openspec/specs/identity-onboarding/spec.md` (this change is unarchived), but
+  exists verbatim as the delta's requirement heading at
+  `openspec/changes/position-and-index/specs/identity-onboarding/spec.md:3`,
+  and the scenario `each_malformed_kind_of_index_is_refused_by_name`
+  (`wire.rs:5090`) exercises exactly `MALFORMED_INDEXES`'s eight entries
+  (`wire.rs:5075`), asserting the error shape and that the message contains
+  `index` for each. Matches D6's description of what that test does.
+- The "architecture re-review confirmed this by running a real `openspec
+  archive position-and-index -y`" claim: I could not re-run this myself — the
+  harness's auto-mode classifier denied the command outright ("Modify Shared
+  Resources") before I could even reach the `-y`, independent of content, and
+  I did not pursue a workaround per that denial's own instructions. It is,
+  however, independently corroborated: `findings/architecture.md:182-200`
+  already records running that exact command in this worktree and discarding
+  the result, and states the Purpose paragraph "came through byte-for-byte
+  unchanged" and the cited requirement title "matches the delta's actual
+  heading character-for-character" — the same claim D6 makes, from a
+  first-hand run I can read but not reproduce here.
+
+**One finding.**
+
+- [ ] **`dev-writer`** — `openspec/changes/position-and-index/design.md:265-266`
+      — D6's "What this costs" paragraph opens with "Two things narrow the gap
+      without closing it," but only one narrowing mechanism is actually
+      described afterward: `parse_index` being shared means some code changes
+      (dropping the field name, or dropping a listed kind) reach `index` too
+      and turn `each_malformed_kind_of_index_is_refused_by_name` red. The two
+      sentences that follow — a change that adds a *new* malformed kind isn't
+      caught by any `index` test, and a spec-only change to `feed-read` isn't
+      caught at all — are both cases where the gap is *not* narrowed, not a
+      second narrowing mechanism. A reader counting "two things" as told finds
+      one. The findings-round outcome note this D6 answers
+      (`findings/design-review.md:191`, "The shared parser narrows that gap")
+      uses the singular for the same content, which reads as the more accurate
+      version and suggests "Two things" is a slip rather than an intended
+      second point the prose dropped. **Scenario:** a reader of the archived
+      `design.md` (the only place this reasoning survives once `findings/` is
+      deleted) reaches "Two things narrow the gap," looks for the second one
+      in the sentences that follow, and cannot find it — the paragraph reads
+      as promising a structure it doesn't deliver. Low severity (the
+      substance — what is and isn't caught — is correct and matches the code;
+      this is a miscount in the topic sentence, not a wrong claim), but worth
+      a one-word fix ("Two things" → "One thing", or naming what the second
+      thing actually is) before archive removes the chance to compare against
+      the outcome note.
+
+Everything else in D6 and its outcome note reads clearly to someone who never
+saw `findings/architecture.md` or `findings/design-review.md`'s earlier
+rounds: the "Considered, and ruled out" bullets each state a real alternative
+and a reason, the heading style matches D1–D5, and the citations (`d8a56272`,
+`docs/OPENSPEC-ARCHIVE.md`, the requirement title, the test name) are each
+precise enough to verify independently, which is what this review did. The
+`tasks.md` "Re-review of the D6 commit" section is itself clear and correctly
+scoped — it names the one finding it answers and says why only two dimensions
+re-run.
