@@ -434,11 +434,14 @@ impl Moderation {
 /// receiving peer's time. So a moderator can sign a `Hide` or `Unhide` up to an
 /// hour ahead and beat an opposite action that another moderator published
 /// within that hour without having received it. A correction published after
-/// receiving it carries the greater counter and wins. Before the window, a
-/// moderator who signed the maximum counter won such a dispute permanently.
-/// Nothing here has code of its own for this: the bound is the ordering rule's
-/// (`op-ordering`, "An op signed ahead of the time leads only until the time
-/// passes it"), and every reader of the rule's first entry inherits it.
+/// receiving it carries the greater counter and wins. Under `ADVANCE_BOUND`,
+/// which the receive window replaced in #165, the lead had no end: an op signed
+/// at the maximum counter was stored and led the order while the clock stayed
+/// below it, so a moderator who signed it won such a dispute permanently.
+/// Nothing here has code of its own for this: the one-hour bound is the
+/// ordering rule's (`op-ordering`, "An op signed ahead of the time leads only
+/// until the time passes it"), and every reader of the rule's first entry
+/// inherits it.
 ///
 /// The condition asks about `first` rather than about every candidate, and the
 /// two differ whenever one target's binding moderations are a **mix** of ops

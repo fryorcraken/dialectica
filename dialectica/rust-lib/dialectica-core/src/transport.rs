@@ -472,8 +472,9 @@ pub struct Admitted {
 ///
 /// The window is the one judgement here on a field's value. It asks how an op's
 /// counter stands against this peer's time at this moment, and it is not a
-/// judgement of authority. Its reasoning is `op-ordering`'s, and
-/// [`crate::arrival::RECEIVE_WINDOW_MS`] carries it.
+/// judgement of authority. Its rule is `op-ordering`'s. Its reasoning is in
+/// [`crate::arrival::RECEIVE_WINDOW_MS`]'s docs and in the archived
+/// `time-pegged-clock` change's `design.md`, Decisions 1 and 11.
 ///
 /// # `now_ms` is this peer's own current time, and nothing the message carries
 ///
