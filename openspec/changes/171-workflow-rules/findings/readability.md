@@ -339,3 +339,171 @@ and `not on neighbouring ones` across `.claude/agents/`, `CLAUDE.md` and
 `README.md:241` ("never touch the same line") is literally true and is listed
 as kept in `proposal.md:512-514`. `README.md:172` omits the `closer`'s Step 2
 push, but "pushed by two agents only" still holds.
+
+## Re-review `9dc235c..34fd428`
+
+Dimension: **readability only**. Read: `git log --oneline 9dc235c..34fd428`;
+`git diff 9dc235c..34fd428` for `RUNNER.md`, `closer.md`, `README.md` and
+`dev-writer.md`; `RUNNER.md` in full at HEAD; `closer.md:200-330`;
+`README.md:92-251` and `:436-455`; `spec-writer.md:38-57`;
+`dev-writer.md:150-219`; `proposal.md:340-489` and `:590-886`;
+`design.md:958-1014`; `tasks.md:180-289`. Every command quoted was run in this
+tree.
+
+- [ ] **`dev-writer`** — `.claude/agents/RUNNER.md:598` — "once the round's
+      commits are on your HEAD" names the wrong commits by its most natural
+      reading. The pre-tick grep needs the **re-reviewers' findings commits**
+      on HEAD. But the round line template three lines up (`:591`) ties a
+      round to its reviewed range, "round 1 `a1b2c3d..e4f5a6b` findings
+      pass", so "the round's commits" reads as that range. Those commits are
+      on HEAD before the round is even dispatched.
+      **Scenario:** all six re-reviewers of a round have handed back, and the
+      runner has not yet picked their findings commits. It reads `:598` as
+      "the reviewed range is on HEAD", which it is, and runs the grep. The
+      grep lists nothing. `:606-608` then says each unlisted lane "has not
+      finished the round … continue that reviewer, or dispatch a fresh one
+      for the lane". So the runner re-dispatches six finished lanes, or
+      continues six agents that have nothing left to do. It fails closed, so
+      nothing unreviewed merges, but a full round is wasted on one phrase.
+      **Measured:** in this tree, `git merge-base --is-ancestor 34fd428 HEAD`
+      succeeds, so this round's range is on HEAD. Yet
+      `git grep -l -F "9dc235c..34fd428" -- openspec/changes/171-workflow-rules/findings/`,
+      run before this file was written, printed nothing.
+      `git grep -n -F "the round's commits" -- .claude/agents/` → `RUNNER.md:598`
+      only. Suggested wording: "once each lane's findings commit is on your
+      HEAD". Severity: low to moderate. The check is new in this range, and
+      this is the one clause that says when to run it.
+
+- [ ] **`dev-writer`** — `.claude/agents/closer.md:291-292` — "so run after
+      the push it would never run for this archive at all" garden-paths into
+      the opposite instruction. With no commas around "run after the push",
+      the reader parses "so run after the push" as an imperative: *run it
+      after the push*. The paragraph means the reverse: *if it were run after
+      the push, it would never run*.
+      **Scenario:** a `closer` skimming Step 3 for what to do reads the bold
+      "before the push" heading, then this sentence, which tells it to "run
+      after the push". The code block and the three-way list below make the
+      right order recoverable. But the sentence exists only to justify the
+      order, and read quickly it contradicts that order. This is the one
+      ordering change the range made to `closer.md`.
+      **Measured:** `git diff 9dc235c..34fd428 -- .claude/agents/closer.md`
+      shows the sentence is new in this range. `closer.md:281-292` has "before
+      the push" twice and "after the push" once, and the once is this clause.
+      Suggested wording: "…and a re-dispatched `closer` skips it, so a check
+      run after the push would never run for this archive at all." Severity:
+      low.
+
+- [ ] **`dev-writer`** — `.claude/agents/dev-writer.md:131-132` — the one
+      sentence this piece is authorised to write in `dev-writer.md`
+      garden-paths, and it says more about its target than the target holds.
+      "When ticks conflict all the same, and who resolves that, is
+      [`spec-writer.md`]'s stage-block paragraph" opens like a subordinate
+      clause ("When ticks conflict all the same, …"), so the reader expects
+      an instruction after the comma. The verb only arrives at "is", nine
+      words later, and turns the whole thing into a noun clause. "All the
+      same" also reads as "identically" as easily as "nonetheless".
+      Separately, `spec-writer.md:49-53` says *when* ticks conflict. It does
+      not say *who resolves* them: it hands that on ("[`RUNNER.md`]'s
+      "Dispatching" says who resolves that").
+      **Scenario:** a `dev-writer` reads that it ticks one row and adds none,
+      then this sentence. It re-parses the sentence, follows the link for
+      "who resolves that", and finds a second pointer instead of the answer.
+      **Measured:** `git diff 9dc235c..34fd428 -- .claude/agents/dev-writer.md`
+      shows this sentence is the whole of the range's edit to the file.
+      `proposal.md:604-606` specifies a pointer to a paragraph "which says
+      when ticks conflict and points on to `RUNNER.md`", which is the more
+      accurate description. Suggested wording: "never adding a row.
+      [`spec-writer.md`](spec-writer.md)'s stage-block paragraph says when
+      ticks conflict anyway, and where to find who resolves them." Severity:
+      low.
+
+- [ ] **`dev-writer`** — `.claude/agents/RUNNER.md:282-319` — the new
+      dirty-tree procedure comes before the paragraph that says when it is
+      needed. So it opens on "a mutating reviewer's does" before the reader
+      has learned that reviewers are the agents whose picks conflict.
+      "Dispatching" now runs: a conflicting cherry-pick goes back to its agent
+      to rebase (`:275-280`); a dirty tree cannot rebase, then four steps
+      (`:282-310`); and only then "The review round meets that conflict every
+      time" (`:312-319`). That last paragraph is the one that makes the
+      procedure routine rather than rare. Its "that conflict" now reaches back
+      past the 29-line procedure to `:275`.
+      **Scenario:** a runner meets its first review-round pick conflict and
+      reads the section in order. It sees the dirty-tree case as an edge case
+      about some mutating reviewer. Only on reading on does it learn that
+      every pick after the first in every review round hits it, and that
+      reviewers are the agents with dirty trees. `design.md:960-961` gives
+      the reasoning in the other order: "The conflict rule above sends the
+      review round's ticks back to their agents to rebase, and a mutating
+      reviewer cannot".
+      **Measured:** `git diff 9dc235c..34fd428 -- .claude/agents/RUNNER.md`
+      shows `:282-310` inserted between the two paragraphs that were adjacent
+      at `9dc235c`. Suggested fix: move `:312-319` up to follow `:280`, so the
+      procedure follows the paragraph that explains when it is needed. No
+      wording changes. Severity: low. This is an ordering fix, not a missing
+      rule.
+
+**The four round-1 fixes hold.** `git grep -n -i -e "things come back" -e "four
+things" -e "five things" -e "four returns" -e "five returns" -- .claude/agents/`
+prints nothing. `RUNNER.md:647-650` gives the returns as examples and says how to
+route an unnamed one. `:674-677` widens "An unticked box" to stage rows, and
+`:694-697` has the refused push untick the row and record a round.
+`:707-709` is the `BLOCKED` entry. `design.md:844` is the Decisions entry.
+`proposal.md` has none of "four returns", "every return" or "reported as
+before", and `tasks.md:191` and `:242` record the supersessions. `RUNNER.md:164`
+and `:183-184` no longer give the cherry-pick for the `dev-writer` or the
+`closer`. `dev-writer.md:131` no longer says ticks "do not conflict", though see
+the third box above for how its replacement reads.
+
+**Stated once: clean apart from the ordering box.** Each of the three rules
+this range added lives in one place. The returns-as-examples rule is in "The
+`closer`, and what comes back". The pre-tick check is in step 3, with a
+pointer-only row in "What you read" (`:81`). The dirty-tree rebase is in
+"Dispatching". "What a runner does", "What a runner commits" and "Dispatching"
+do not overlap in substance. "What a runner does" lists the runner's jobs and
+points to "Dispatching" for the sequence. "What a runner commits" says which of
+those produce content. "Dispatching" holds the sequence. The new "An unticked
+box" entry points to "What a runner commits" rather than restating it, and step
+3's "continue that reviewer, or dispatch a fresh one" covers a different
+trigger, a missing re-review record rather than a missing tick. The parenthetical
+"(cherry-pick, or fast-forward where "Dispatching" says)" now appears at
+`RUNNER.md:19-20`, `:363` and `:444`, and at `README.md:131`. Each is a pointer,
+not a restatement.
+
+**Pointers: clean.** Each pointer the range added lands on a heading that
+exists and says what it claims: `RUNNER.md:81` ("step 3 of 'From the
+`dev-writer`'s hand-back to the merge'"), `:183-184`, `:363` and `:656`
+("Dispatching"), `:564` ("below" → `:595`), `:605` ("How many at once" → the
+table at `:369-373`, which names every findings file), `:676` ("What a runner
+commits"), and `:677` ("step 3"). Also `closer.md:236` ("check below" →
+`:281`), `README.md:131`, `:173` and `:189`, and `design.md:844`. The one
+exception is `dev-writer.md:132`, which is the third box above.
+
+**Retraction sweep: clean against the proposal.** Commands:
+`git grep -n -i -F "cherry-pick"`, `-F "rebase"`, the count phrases above,
+`-e "neighbour" -e "adjacent" -e "not conflict" -e "n't conflict" -e "same line"`
+and `-e "writes no file" -e "no file" -e "only if it has a finding" -e "writes
+nothing" -e "clean re-review" -e "finds nothing"`, each `-- .claude/agents/`.
+- **"The dev-writer's commits are cherry-picked"** survives only in
+  `dev-writer.md:173` and `:203`, and in `:187` ("the runner's cherry-pick"),
+  which `proposal.md:779-782` and `:608` keep on purpose ("no other
+  `dev-writer.md` text is edited"). The proposal names only the `:203`
+  sentence, so a later sweep will find `:173` again and have to reach the
+  same conclusion. That is a note, not a box. Every other hit is true of the
+  agent it addresses (reviewers, `tester`, `spec-writer`), is generic, or is
+  one of the kept README lines (`:120`, `:165`, `:170`, `:242`, and `:185`,
+  which now names the fast-forward exceptions).
+- **"The closer rebases":** every hit is the runner's prohibition (`:13`,
+  `:273`), the agent-side rebase of its own local branch (`:277-303`), or the
+  conflict resolver told not to rebase (`:682`).
+- **"A clean re-review writes no file":** no hit. `:555` says the reverse.
+- **"Four things" and "Five things":** no hit.
+- **"Neighbouring lines don't conflict":** only the kept `README.md:242-243`.
+  `RUNNER.md:314-316` and `spec-writer.md:49-52` say the reverse, and
+  `closer.md:143` is about a squash merge, which is a different subject.
+
+Stylistic only, no box: `README.md:99` ("…are brought onto the piece forks
+from a HEAD…") and `:141` ("brings its commits on from that") read awkwardly
+after the substitution. Several range-added lines run past the file's wrap
+width (`README.md:99`, `:141`, `:173`; `RUNNER.md:612`). `RUNNER.md:675-676`
+"goes back to that agent, continued to tick it" is compressed but parses in
+context.
