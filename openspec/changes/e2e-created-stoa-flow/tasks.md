@@ -25,7 +25,7 @@
 - [x] review: readability — `code-reviewer`
 - [ ] review: architecture — `code-reviewer`
 - [ ] review: spec-test — `spec-test-reviewer`
-- [ ] review: design — `design-reviewer`
+- [x] review: design — `design-reviewer`
 - [ ] findings all ticked, `findings/` deleted — `closer`
 - [ ] `openspec validate --strict`, then `archive` — `closer`
 - [ ] CI green, title/body checked, PR merged — `closer`
