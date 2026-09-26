@@ -20,7 +20,7 @@
 - [x] review: spec-test — `spec-test-reviewer`
 - [x] review: design — `design-reviewer`
 - [ ] re-review: every commit after the review round — runner
-      round 1 `c222c37..9dc235c` findings passes, owner-authorised scope (closer merge-not-rebase, runner-commit rule), spec callbacks — all six lanes (Opus 5.5, the strongest): closer.md Step 2 rewritten, new RUNNER.md section, large proposal.md and design.md changes, force-push and merge rules are security-relevant
+      round 1 `c222c37..9dc235c` findings passes, owner-authorised scope (closer merge-not-rebase, runner-commit rule), spec callbacks — all six lanes, sized for the strongest model: closer.md Step 2 rewritten, new RUNNER.md section, large proposal.md and design.md changes, force-push and merge rules are security-relevant. Correction: no model override was passed, so all six ran on Sonnet 5 (role default). design, spec-test and architecture accepted on Sonnet — decision records, contract and file placement, each re-ran its checkable claims. correctness and readability parked on banned shell shapes and were stopped; they and security re-run on Opus 5.5.
 - [ ] findings all ticked, `findings/` deleted — `closer`
 - [ ] `openspec validate --strict`, then `archive` — `closer`
 - [ ] CI green, title/body checked, PR merged — `closer`
