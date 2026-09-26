@@ -78,6 +78,7 @@ You read exactly enough to decide the next dispatch:
 | `openspec/changes/<name>/tasks.md` — the `## Stages` block (once the `closer` has archived: `openspec/changes/archive/<date>-<name>/`, see "Rebuild the state") | which stage is next, and whether anyone is on it |
 | `ls openspec/changes/<name>/findings/` — **the filenames** (once the `closer` has archived: `openspec/changes/archive/<date>-<name>/`, see "Rebuild the state") | whether a reviewer has reported, and which dimension |
 | `grep -rn "^- \[ \]"` over `findings/` | whether anything is unanswered, as a count |
+| `git diff --name-only <review> HEAD` — **file names only** — and `git diff <review> HEAD --` over `tasks.md` | before you write a round 1 skipped because nothing landed: whether anything but `findings/` and flipped boxes changed since the review round (step 3 of "From the `dev-writer`'s hand-back to the merge") |
 | `git grep -n -F -e "] re-review: every commit" -e "      round " -e "] findings all ticked"` over `tasks.md` — **the re-review row, its round lines and the next row** | whether every line between the re-review row and the next row is a round line, and whether any round number repeats (step 3 of "From the `dev-writer`'s hand-back to the merge") |
 | ``git grep -l -F -e '## Re-review round <n> `<range>`' -e '**re-review round <n> `<range>`: no findings**'`` over `findings/` — **file names only** | whether each lane of a re-review round left its record (step 3 of "From the `dev-writer`'s hand-back to the merge") |
 | the `closer`'s report | whether the piece closed, or what stopped it |
@@ -607,9 +608,24 @@ line's number changes only to repair a repeat (the number check below). A round
 you decide to skip gets a line too, with its reason — a skip is a decision, and
 an unrecorded one looks exactly like a forgotten one.
 **The row is never struck.** When nothing that merges lands after the review
-round at all, it still gets round 1, with both ends of its range at your HEAD
-when you write the line (``round 1 `<sha>..<sha>` ``), marked skipped because
-nothing landed, and then the tick: every tick follows at least one round line.
+round at all, it still gets round 1, marked skipped because nothing landed, and
+then the tick: every tick follows at least one round line. Its range runs from
+the commit the review round read — the HEAD you dispatched the review round
+from, where any round 1 starts — to your HEAD: ``round 1 `<review>..<HEAD>` ``.
+Before you write it, run each of these:
+
+```
+git diff --name-only <review> HEAD
+git diff <review> HEAD -- <change folder>/tasks.md
+```
+
+The first must list nothing outside the change folder's `findings/` and
+`tasks.md`, and the second must show only boxes flipped. Any other path, or any
+other change to `tasks.md`, means a commit that needs review is in the range:
+the round is not skipped because nothing landed, and its line takes the
+ordinary form, naming what landed, sized as above. A range with both ends at
+your HEAD would hold nothing, so a commit misread as tracking would lie in no
+round's range.
 **A lane you run
 again over a range it already had gets a line of its own** — a new number, one
 more than the highest under the row, the same range, the lanes it re-runs, and
@@ -653,9 +669,17 @@ the `closer`'s first row. Do not tick unless all three hold:
   line outside the two rows, such as a wrapped line in the implementation
   checklist, is not a round line.
 - **At least one round line stands between them.** The two rows on adjacent
-  line numbers mean the line is not written yet: write it, as "Record the call"
-  says for a piece where nothing landed. A listing that lacks either row means
-  the command was mistyped, or run on a file with no stage block.
+  line numbers mean no round line is on your HEAD: write what is missing. Each
+  round that ran gets its line back, with the number, range and lanes your
+  report recorded, and the forms check then covers it like any other round.
+  Only where no round ran is it the skipped round 1 of "Record the call", and
+  only if that paragraph's check passes. Where you cannot tell whether a round
+  ran, such as after your report is lost, the check decides: a range it fails
+  gets a round sized as above. **Never repair a missing line with the
+  nothing-landed form over a range holding a commit that needs review**: the
+  forms check skips a round marked skipped, so the round that ran would never
+  be checked. A listing that lacks either row means the command was mistyped,
+  or run on a file with no stage block.
 - **No number repeats.** Order and gaps do not matter. Repair each line whose
   number a line above it already carries by giving it one more than the
   highest under the row; a lane briefed from it runs again under the new

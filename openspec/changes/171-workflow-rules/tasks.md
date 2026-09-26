@@ -554,3 +554,37 @@ under `./tmp/` (since deleted), before any claim about its output was written.
       its outcome.
 - [x] 18.8 The sweep in that box's item 13 returns nothing.
 - [x] 18.9 `openspec validate 171-workflow-rules --strict` passes.
+
+### 19. After the `spec-writer`'s nothing-landed range and check (`2bf65c8`)
+
+Supersedes 18.2's skipped first line, whose range had both ends at the
+runner's HEAD. Follows `proposal.md` as `2bf65c8` left it, and the list for
+the `dev-writer` in the outcome under `findings/security.md`'s box for the
+eleventh re-review. The check's two commands were run on this tree before
+any claim about their output was written.
+
+- [x] 19.1 `RUNNER.md` "Record the call": the nothing-landed line's range runs
+      from the commit the review round read to the runner's HEAD, and both
+      `git diff` commands run before the line is written; any other path, or
+      any other `tasks.md` change, gives the line the ordinary form. Verify:
+      `git grep -n -F "sha>..<sha" -- .claude/agents` returns nothing.
+- [x] 19.2 `RUNNER.md`'s number check, the "at least one" bullet: each
+      re-review that ran gets its line back from the report; the
+      nothing-landed form only where none ran and its check passes, never
+      over a range holding
+      a commit that needs review. Verify: `git grep -n -i -F -e "lost" -e
+      "gets its line back" -- .claude/agents/RUNNER.md` returns the new bullet
+      and the unrelated "evidence was lost" in "Dispatching".
+- [x] 19.3 `RUNNER.md` "What you read": a row for the two commands.
+- [x] 19.4 `design.md`: the stage-block summary; a Decision for the
+      nothing-landed line with its measurements and three rejected
+      alternatives; the number check's "at least one" bullet; "What it still
+      cannot see"; "What else was considered"; both Risks entries. Verify:
+      `git diff --name-only c222c37 e7e2bbdd` lists the six findings files and
+      `tasks.md`, `c222c37 ae59b43c` adds `proposal.md`, and
+      `ae59b43c ae59b43c` lists nothing.
+- [x] 19.5 PR #174's body: step 3, the `design.md` summary, and the
+      standing-test and `closer`-side follow-ups.
+- [x] 19.6 `findings/readability.md`'s `dev-writer` box for the eleventh
+      re-review flipped with its outcome.
+- [x] 19.7 `openspec validate 171-workflow-rules --strict` passes.

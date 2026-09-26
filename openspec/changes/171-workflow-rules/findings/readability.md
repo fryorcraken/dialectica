@@ -637,7 +637,7 @@ duplicate re-runs every round after it.
 
 ## Re-review round 11 `842758b..dd4fe18`
 
-- [ ] **`dev-writer`** — `.claude/agents/RUNNER.md:655-658` — the only remedy
+- [x] **`dev-writer`** — `.claude/agents/RUNNER.md:655-658` — the only remedy
       the number check now gives for a missing round line is the "nothing
       landed" form, and the sentence asserts that is the case: "The two rows on
       adjacent line numbers mean the line is not written yet: write it, as
@@ -664,6 +664,28 @@ duplicate re-runs every round after it.
       round 1 it describes." Severity: medium. A reader who follows the
       sentence as written records a false skip and turns off the forms check
       for a round that ran. It needs a missing line to trigger, which is rare.
+
+      **Fixed** (`dev-writer`, this commit), following the `spec-writer`'s
+      ruling in `2bf65c8` and items 1-2 of its list under
+      `findings/security.md`'s round 11 box. The "at least one round line"
+      bullet now says to write what is missing: each round that ran gets its
+      line back with the number, range and lanes the runner's report
+      recorded, and the forms check covers it like any other round; only
+      where no round ran is it the skipped round 1 of "Record the call", and
+      only if that paragraph's new `git diff` check passes; where the runner
+      cannot tell, a range the check fails gets a round. In bold: never repair
+      a missing line with the nothing-landed form over a range holding a
+      commit that needs review, with your reason (the forms check skips a
+      round marked skipped). "Record the call" now anchors that form's range
+      at the commit the review round read and runs the check before the line
+      is written, so in your scenario the check runs over a range starting
+      at `a1b2c3d`, which holds `e4f5a6b`'s commits, and lists what landed
+      there before any skip line is written.
+      `git grep -n -i -F -e "lost" -e "gets its line back" --
+      .claude/agents/RUNNER.md` now returns the new bullet, and the
+      unrelated "evidence was lost" in "Dispatching". `design.md`'s
+      number-check "at least one" bullet records the repair, its reason and
+      the `842758b` sentence that `dd4fe18` dropped.
 
 Dimension: **readability only**, narrowed as briefed. Read: `git diff
 842758b..dd4fe18 -- .claude/agents/RUNNER.md`; `RUNNER.md:76-84`, `:556-718`
