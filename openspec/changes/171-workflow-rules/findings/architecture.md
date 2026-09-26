@@ -63,7 +63,7 @@ source issues (`gh issue view 171|170|169|133`), and against open PR #132
       of that file changes" could point to the proposal's Impact entry for
       why, so the next reader of `design.md` alone does not raise this again.
 
-- [ ] **`dev-writer`** — `.claude/agents/RUNNER.md:382` — a fresh, avoidable
+- [x] **`dev-writer`** — `.claude/agents/RUNNER.md:382` — a fresh, avoidable
       restatement of the review-round size, contradicting this piece's own
       stated principle ("Each rule is stated once. Where a second file needs a
       rule, it points to the first one.") and creating a specific liability for
@@ -90,7 +90,19 @@ source issues (`gh issue view 171|170|169|133`), and against open PR #132
       at (old-file) lines 210, 257-305, none of which include the review-round
       sequence this piece adds at line ~347 onward.
 
-- [ ] **owner** — `.claude/agents/RUNNER.md` "What a runner does" — commit
+      **Fixed** (this commit). Step 2 now reads "**2. The `tester`, then the
+      review round**, sized as "How many at once" sets out." — the pointer
+      alone. The same sweep found a second count this piece had added, in
+      step 3's sizing bullet ("A rewrite needs all six again"), now "the full
+      set again", #171's own wording. Measured after the edit:
+      `git grep -n -e "six" -- .claude/agents/RUNNER.md` returns four lines,
+      and `git grep -n -e "six" origin/main -- .claude/agents/RUNNER.md`
+      returns the same four sentences, so every remaining count predates this
+      piece and is #132's to reconcile. The new review-round conflict
+      paragraph in "Dispatching" was written without a count for the same
+      reason ("every review pick after the first stops").
+
+- [x] **owner** — `.claude/agents/RUNNER.md` "What a runner does" — commit
       `d805fe4` set a precedent (the runner itself edited `tester.md`,
       `closer.md` and `RUNNER.md` on direct owner instruction, because the
       dev-writer's attempt at the same edit was refused by the permission
@@ -117,6 +129,22 @@ source issues (`gh issue view 171|170|169|133`), and against open PR #132
       `.claude/agents/RUNNER.md` itself; `git grep -n "does not write the
       work\|You do not write" .claude/agents/RUNNER.md` returns only line 11,
       unqualified by any owner-instruction exception.
+
+      **Fixed** (this commit), on the owner's rulings, which `proposal.md`
+      records: the owner took this into the piece and ruled "A runner always
+      delegates" and "Agents tick their own". The answer is the opposite of a
+      standing exception. `RUNNER.md` gains "What a runner commits" under
+      "What a runner does": the runner's own content is the re-review row's
+      record lines, tick and untick, and nothing else; bringing an agent's
+      commits on (cherry-pick or fast-forward) adds none; every agent ticks
+      its own row; and everything else, role-file text and another agent's
+      tick included, is work the runner delegates. It names the finding's
+      scenario directly: an edit the owner asks for in session means
+      dispatching the agent whose file it is, and an agent refused an edit it
+      was briefed to make is reported to the owner, not made by the runner.
+      "You do not write the work — not even one small edit…" stays, with no
+      exception. `d805fe4` and the piece's other pre-ruling runner commits
+      stand as they are, per the proposal.
 
 ## What was checked and found sound
 

@@ -45,8 +45,12 @@ follow what each gives you — the schema carries the format rules.
 ## You also open `tasks.md` with the stage block
 
 Write it once, unticked, before anyone else touches the file. Every later agent
-flips exactly one `[ ]` to `[x]`; nobody adds a row. That is what keeps their
-cherry-picks clean — git conflicts on the same line, not on neighbouring ones.
+flips exactly one `[ ]` to `[x]`; nobody adds a row. An agent forked after the
+previous tick reached the runner's HEAD cherry-picks cleanly. Ticks on adjacent
+rows by agents forked from the same HEAD — the review round — conflict when
+picked one after another, because git conflicts on neighbouring changed lines as
+well as on the same line; [`RUNNER.md`](RUNNER.md)'s "Dispatching" says who
+resolves that.
 
 ```markdown
 ## Stages

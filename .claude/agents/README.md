@@ -128,13 +128,13 @@ says so** rather than choosing either fallback.
 
 | Branch | Worktree | Whose | Holds |
 |---|---|---|---|
-| `piece/<name>` | the runner's | the runner, and the PR | **the** task branch, and the only one ever pushed. Work reaches it two ways: the runner cherry-picks every agent's commits onto its local copy, and the `dev-writer` and `closer` push a refspec to the remote copy |
-| `worktree-agent-<id>` | one per dispatch | one agent | **local only, and named by the harness** — whatever that agent committed, cherry-picked onto the piece and never pushed |
+| `piece/<name>` | the runner's | the runner, and the PR | **the** task branch, and the only one ever pushed. Work reaches it two ways: the runner brings every agent's commits onto its local copy — a cherry-pick, or a fast-forward for the `closer` and a conflict resolver, as [`RUNNER.md`](RUNNER.md)'s "Dispatching" says — and the `dev-writer` and `closer` push a refspec to the remote copy |
+| `worktree-agent-<id>` | one per dispatch | one agent | **local only, and named by the harness** — whatever that agent committed, brought onto the piece and never pushed |
 | `main` | — | nobody | **no agent ever pushes here.** It takes commits through a PR only |
 
 **Every dispatched agent gets its own worktree and its own branch**, cut from the
 runner's HEAD. No agent stands in the piece's tree, so every agent's commits are
-cherry-picked onto it — writers exactly as reviewers.
+brought onto it by the runner — writers exactly as reviewers.
 
 **The branch name is the harness's, not the runner's.** There is no
 `review/<name>/<dimension>` to predict, so an agent reports the name it actually
@@ -182,7 +182,9 @@ being a bookkeeping commit; it is not, and it goes onto the piece branch like
 everything else.
 
 Cherry-pick rather than merge, so the task branch reads as a flat sequence rather
-than six merge commits carrying six branches.
+than six merge commits carrying six branches. The exception is a branch carrying
+a merge of `main` — the `closer`'s, or a conflict resolver's — which the runner
+fast-forwards to instead; [`RUNNER.md`](RUNNER.md)'s "Dispatching" says why.
 
 **Never `git add -A`** — commit named paths. Two reasons, and they are not the
 same rule:

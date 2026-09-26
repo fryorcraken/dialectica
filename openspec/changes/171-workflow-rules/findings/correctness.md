@@ -7,7 +7,7 @@ review; a red CI run after archiving, and a second red run) against the
 literal text of the changed role files, and ran every command the new text
 gives against this tree.
 
-- [ ] **`dev-writer`** — `.claude/agents/RUNNER.md:358` — the `NO SPEC:` marker
+- [x] **`dev-writer`** — `.claude/agents/RUNNER.md:358` — the `NO SPEC:` marker
       grep the new Step 1 tells the runner to hand the `spec-writer` is
       unscoped, and this tree already returns heavy noise from it.
       **Scenario:** a future piece's `dev-writer` hand-back names one new
@@ -35,7 +35,24 @@ gives against this tree.
       SPEC:` code/test markers in `dialectica/` and `dialectica-ui/`. The
       real markers are a small minority of the output.
 
-- [ ] **`dev-writer`** — `.claude/agents/RUNNER.md:376-378` — "escalate only
+      **Fixed** (this commit). Step 1 now scopes by the piece's own diff
+      rather than by path: `git diff --name-only -G "NO SPEC:"
+      origin/main...HEAD` lists the files where this piece added or removed a
+      marker line, and `git grep -n "NO SPEC:"` over those files shows each
+      one. A path scope was the first option and was dropped: scoped to
+      `dialectica dialectica-ui`, `git grep -c -F "NO SPEC:"` still returns
+      24 files of markers already on `main`, and a path list is one more
+      hand-maintained list. Measured: on #165's squash commit,
+      `git diff --name-only -G "NO SPEC:" 0177eb11^ 0177eb11` returns
+      exactly `authoring.rs` and `transport.rs`, the two files whose diff
+      touches a marker line, and `git grep -n "NO SPEC:" 0177eb11 --` those
+      two files returns four lines. Over this piece's own range it returns
+      only this piece's prose files, which is the honest answer for a piece
+      whose subject is the mechanism. `git diff` without `-U0` is not
+      offered: `-G` selects files, not hunks, so the patch form printed 47 KB
+      for the same commit.
+
+- [x] **`dev-writer`** — `.claude/agents/RUNNER.md:376-378` — "escalate only
       what it returns as a product decision" names a signal the `spec-writer`
       is never told to produce.
       **Scenario:** a `NO SPEC:` marker is routed to a fresh `spec-writer` per
@@ -63,6 +80,19 @@ gives against this tree.
       product decision" phrase with the same missing mechanism — so the gap
       predates this diff's wording, but implementing #169 was this piece's
       job, and closing that gap was in scope for it.
+
+      **Fixed** (this commit), in the file the runner reads, since
+      `spec-writer.md` is outside this piece's authorisation beyond its one
+      corrected sentence. Step 1 now says the `spec-writer`'s own file gives
+      it no such category, so the runner's brief asks for it: name which
+      markers, if any, neither the issue nor the specs settle, so that the
+      choice is the owner's. A hand-back that names none has decided them
+      all. That gives the runner something observable to act on, and the
+      signal now exists because the brief creates it. Measured after the
+      edit: `git grep -n -i "product decision" -- .claude/agents` still
+      returns only `RUNNER.md`, which is the point — the rule and the request
+      that produces its input are in the one file whose reader sends the
+      brief.
 
 ## Areas checked and clean
 

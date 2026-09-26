@@ -19,7 +19,8 @@ goes back to the runner with the evidence attached.
 
 1. **Confirm the piece is actually finished** — the findings gate, and the
    stage block.
-2. **Check the branch is not stale** against current `main`.
+2. **Check the branch is not stale** against current `main`, merge `main` in if
+   it is, and stop on a conflict.
 3. **Archive**, as one more commit on the piece branch.
 4. **Watch CI to green.**
 5. **Ensure the PR's title and body are up to date** and matches content, update them if needed.
@@ -79,11 +80,12 @@ git ls-files -- "openspec/changes/<name>/tasks.md" "openspec/changes/archive/???
 ```
 
 On a first dispatch that prints `openspec/changes/<name>/tasks.md`. On a
-re-dispatch after a red run, an earlier `closer` has already archived the
-change, and it prints `openspec/changes/archive/<date>-<name>/tasks.md`: run
-both gates in that folder instead. Step 3 of [`RUNNER.md`](RUNNER.md)'s "From
-the `dev-writer`'s hand-back to the merge" says why the stage block and any
-re-review findings are there. An archived folder with no
+re-dispatch after an earlier `closer` archived the change — it came back with a
+red run, or with an archive that changed `openspec/specs/` — it prints
+`openspec/changes/archive/<date>-<name>/tasks.md`: run both gates in that
+folder instead. [`RUNNER.md`](RUNNER.md)'s "From the
+`dev-writer`'s hand-back to the merge", in its item 3, says why the stage block
+and any re-review findings are there. An archived folder with no
 `findings/` means the re-review raised none, since the earlier `closer` deleted
 it. **More than one path back, or none**, stop and report what came back — you
 cannot tell which block is the piece's. More than one most likely means
@@ -147,71 +149,83 @@ git diff origin/main origin/piece/<name> --stat
 
 **The files touched must be the files the PR claims.** Deletions in files
 unrelated to the change are the signal, and they are the only signal. The fix
-is a rebase onto current `main`, and **it is yours** — you have just read the
-diff, which is what a conflict needs to resolve.
+is to merge current `main` into the branch, and **it is yours** — unless the
+merge stops on a conflict, which is not (below).
 
 `main`'s protection has `strict: true` on its required checks, so GitHub will
 refuse a merge from a branch that is behind — but that refusal is about the
 *head commit*, not about what the diff contains, and it arrives at merge time
 rather than before you have spent a CI run. Check the diff first.
 
-**Rebase the moment you see `BEHIND` — do not wait for the run to finish.**
-`gh pr view <n> --json mergeStateStatus` says so before CI does. A run on a
-branch that is behind is a run whose result cannot be merged: the rebase
-rewrites the head commit and CI starts again from the top, so everything after
-the rebase point was measured against a tree that will not be the one merged.
-Waiting it out spends a full run to learn what one field already said.
+**Merge `main` the moment you see `BEHIND` — do not wait for the run to
+finish.** `gh pr view <n> --json mergeStateStatus` says so before CI does. A
+run on a branch that is behind is a run whose result cannot be merged: the
+merge makes a new head commit and CI starts again from the top, so the run in
+flight was measured against a tree that will not be the one merged. Waiting it
+out spends a full run to learn what one field already said.
 
 **You are on `worktree-agent-<id>`, not `piece/<name>`**, and you cannot check the
 piece branch out — git refuses a branch checked out in another worktree. So
-rebase the branch you are on, which carries the piece's commits, and push it to
-the remote piece ref by refspec:
+merge into the branch you are on, which carries the piece's commits, and push it
+to the remote piece ref by refspec:
 
 ```
 git fetch origin
-git rebase origin/main
-git push --force-with-lease origin HEAD:refs/heads/piece/<name>
+git merge origin/main
+git push origin HEAD:refs/heads/piece/<name>
 ```
 
-**`--force-with-lease`, never `--force`.** It refuses if the remote moved since
-your last fetch, which is the case where someone else's commit is about to be
-destroyed.
+**No force, ever.** A merge only adds commits, so nothing on the remote needs
+overwriting. If the push is refused, the remote piece ref holds a commit your
+branch does not: stop and report rather than force it.
 
-**A conflict is yours to resolve, and it is the one thing here that can lose
-work silently.** You have read the diff, which is what resolving needs. Two
-rules while you are in it: take neither side wholesale — a conflict means both
-commits changed the same lines on purpose — and when the conflict is in a file
-your piece does not touch, stop and report rather than guess, because that is
-the signal the branch has picked up something that is not yours. `git rebase
---abort` returns the branch exactly as it was, and costs nothing.
+**A conflict is not yours to resolve.** A resolution is new content, written
+after the review round, by an agent that has not read the change. When the
+merge stops on one, list the conflicting paths, then abort:
+
+```
+git diff --name-only --diff-filter=U
+git merge --abort
+```
+
+`git merge --abort` puts the branch back on the commit it was on before the
+merge. Report the paths the first command printed, and return. The runner
+routes the conflict to a writer, whose resolution is reviewed before a `closer`
+is dispatched again — [`RUNNER.md`](RUNNER.md)'s "The `closer`, and what comes
+back" says how.
 
 Commit signing is required on `main` here, and **a signing failure is a
 stop-and-ask, never something to work around** — do not reach for
-`--no-gpg-sign` or set `commit.gpgsign false` to get a rebase through.
+`--no-gpg-sign` or set `commit.gpgsign false` to get the merge of `main`
+through.
 
-After the rebase, come back to the diff check above — the tree changed, so the
-answer can have changed with it. **Then carry on from wherever you were**,
-which is not always the same place: on the forward pass that is **Step 3, the
-archive**, because the archive commit has to be in the tree CI tests; if you
-got here from Step 4 having found the branch behind after archiving, it is
-Step 4 against the new run. **Never skip Step 3 on the way out of a rebase** —
-merging without it puts code on `main` whose contract was never promoted,
-which is the split this whole ordering exists to prevent.
+After the merge of `main`, come back to the diff check above — the tree
+changed, so the answer can have changed with it. **Then carry on from wherever
+you were**, which is not always the same place: on the forward pass that is
+**Step 3, the archive**, because the archive commit has to be in the tree CI
+tests; if you got here from Step 4 having found the branch behind after
+archiving, it is Step 4 against the new run. **Never skip Step 3 on the way out
+of a merge of `main`** — merging the PR without it puts code on `main` whose
+contract was never promoted, which is the split this whole ordering exists to
+prevent.
 
-**After the merge the same command gives a false alarm, and it is the loud
-one.** `git diff origin/main HEAD --stat` on a correctly merged branch showed
+**After the merge of `main` the same command gives a false alarm, and it is the
+loud one.** `git diff origin/main HEAD --stat` on a correctly merged branch showed
 6,871 deletions, because `origin/main` had moved on again and the diff was
 reporting what `main` has and the branch does not. Name the commit you merged
 rather than the moving branch: `git diff <merged-sha> HEAD --stat`.
 
 ## Step 3 — archiving
 
-**On a re-dispatch after a red run, the archive is already done.** Step 1 found
-the change under `openspec/changes/archive/`, so do not run `openspec archive`
-again — there is no live change for it to find. This step's commit and push
-still apply: if Step 1 deleted a re-review's `findings/` from the archived
-folder, commit that deletion with named paths and push it as below, so the run
-you watch in Step 4 includes it. Then go on to Step 4.
+**If Step 1 found the change under `openspec/changes/archive/`, the archive is
+already done**, by an earlier `closer`. Do not run `openspec archive` again —
+there is no live change for it to find. If Step 1 deleted a re-review's
+`findings/` from the archived folder, commit that deletion with named paths.
+**Then push HEAD as below whether or not you deleted anything**: your tree
+carries every commit the runner brought onto the piece since the last push — a
+fix, a conflict resolution, the runner's record lines and tick — and the run you
+watch in Step 4 must include them. Skip the `openspec/specs/` check at the end
+of this step, since this run made no archive commit, and go on to Step 4.
 
 **Read [`docs/OPENSPEC-ARCHIVE.md`](../../docs/OPENSPEC-ARCHIVE.md) in full
 before you run anything.** Most of this step's traps are there and none of them
@@ -271,12 +285,25 @@ This push must happen before Step 4: CI runs on the
 PR, so the archive has to be on the remote for the run you watch to be the run
 that tests what you are merging.
 
+**After the push, if this run made the archive commit, check whether it changed
+the live contract.** With the archive commit still at HEAD:
+
+```
+git diff --name-only HEAD^ HEAD -- openspec/specs/
+```
+
+Any file listed means the archive merged the change's spec delta into
+`openspec/specs/`: content on the piece that no reviewer has read in that form.
+**Stop before Step 4** — report the archive commit and the files listed, and
+return. The runner has it reviewed and dispatches a `closer` again, which finds
+the change archived. Nothing listed: carry on to Step 4.
+
 ## Step 4 — watching CI
 
 **First, confirm the branch is not behind** — `gh pr view <n> --json
-mergeStateStatus`. `BEHIND` means stop and report now rather than watch a run
-whose result cannot be merged; see Step 2. Watching comes after that field is
-clean.
+mergeStateStatus`. `BEHIND` means merge `main` now, as Step 2 sets out, rather
+than watch a run whose result cannot be merged. Watching comes after that field
+is clean.
 
 Then get the run for **your commit**, not for the branch:
 
@@ -404,9 +431,9 @@ Each of these is here because the cheap version of it is tempting:
   deletes the only evidence.
 - **Re-open or re-argue a finding.** A **rejected** outcome you find
   unconvincing is a sentence in your report, not an edit to a reviewer's file.
-- **Force-push for any reason other than the rebase in Step 2**, which is
-  `--force-with-lease` onto current `main` and nothing else. You never
-  force-push to reshape history, drop a commit, or tidy a branch.
+- **Force-push, for any reason.** Step 2 merges `main` rather than rebasing
+  onto it, so nothing here ever needs history rewritten.
+- **Resolve a conflict.** Step 2 says what to do instead.
 - **Push to `main`.** Not the archive, not anything. `main` takes commits
   through a PR only, and `enforce_admins` is on, so a direct push is rejected
   with `GH006`. The archive rides the piece's PR.
@@ -420,14 +447,18 @@ The runner needs to know the piece is closed, or what stopped you. Either way:
 the PR number and its merge commit, the run you watched, the archive commit,
 and — where you stopped — the file or the log line that stopped you, by path,
 not paraphrased. A summary of a failure arrives without the evidence that
-backed it, and the runner has to go and read it anyway.
+backed it, and the runner has to go and read it anyway. Where a merge of `main`
+stopped on a conflict, that is the paths `git diff --name-only --diff-filter=U`
+printed; where the archive changed `openspec/specs/`, the archive commit and the
+files the check listed.
 
-**Then return. Do not wait for what you reported to be fixed.** A red run or an
-unticked box ends your turn: the fix is a dispatch you do not make, and it lands
-on the branch as commits you would have to re-check from Step 1 anyway. A closer
-that reports and then keeps waiting is a stalled agent that looks like a working
-one — it holds a row in `ListAgents`, which is the runner's evidence that the
-piece is being worked, so the piece stops rather than moving on. The runner
-dispatches a fresh `closer` once the fix has landed and been through the
-re-review step in [`RUNNER.md`](RUNNER.md)'s "From the `dev-writer`'s hand-back
-to the merge".
+**Then return. Do not wait for what you reported to be fixed.** A red run, an
+unticked box, a conflict, or an archive commit that changed `openspec/specs/`
+ends your turn: what follows is a dispatch or a review you do not make, and it
+lands on the branch as commits you would have to re-check from Step 1 anyway. A
+closer that reports and then keeps waiting is a stalled agent that looks like a
+working one — it holds a row in `ListAgents`, which is the runner's evidence
+that the piece is being worked, so the piece stops rather than moving on. The
+runner dispatches a fresh `closer` once what you reported has been dealt with
+and been through the re-review step in [`RUNNER.md`](RUNNER.md)'s "From the
+`dev-writer`'s hand-back to the merge".

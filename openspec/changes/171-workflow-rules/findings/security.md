@@ -7,7 +7,7 @@ source-code diff exists on this piece.
 
 ## Findings
 
-- [ ] **`owner`** — `.claude/agents/closer.md` Step 2 (rebase) and Step 3
+- [x] **`owner`** — `.claude/agents/closer.md` Step 2 (rebase) and Step 3
       (archive), unchanged by this diff — the closer's own rebase-conflict
       resolution, and the archive commit that merges a spec delta into the
       live contract, reach `main` with no review step at all, and this piece
@@ -36,6 +36,30 @@ source-code diff exists on this piece.
       rebase half; I'm recording it because the task asked this dimension to
       check it, the archive-commit half is not yet named anywhere, and only
       the owner can authorise the `.claude/` edit that would close it.
+
+      **Fixed** (this commit). The owner took this into the piece, choosing
+      to merge `main` rather than rebase, and to stop when specs change;
+      `proposal.md` records both. Both halves are now closed:
+      - **The conflict resolution.** `closer.md` Step 2 merges `origin/main`
+        and pushes by refspec with no force; `--force-with-lease` and its
+        paragraph are gone, and "What you never do" forbids force-pushing for
+        any reason and resolving a conflict. On a conflict the `closer` runs
+        `git diff --name-only --diff-filter=U`, then `git merge --abort`,
+        reports the paths and returns. `RUNNER.md` routes the conflict to a
+        writer, which resolves it in a merge of `origin/main` on its own
+        branch; the runner fast-forwards to that branch, and step 3 reviews
+        the resolution, the brief naming `git show --remerge-diff <sha>`.
+        Measured with git 2.55.0 in a scratch repository: the first command
+        printed exactly the conflicting file; `--abort` put HEAD back on the
+        pre-merge commit; and `--remerge-diff` on the resolved merge showed
+        only the conflict markers replaced by the resolution.
+      - **The archive commit.** After Step 3's push, a `closer` that made the
+        archive commit in that run runs `git diff --name-only HEAD^ HEAD --
+        openspec/specs/`, and any file listed stops it before Step 4. It
+        returns, and `RUNNER.md` step 3 lists that archive commit as needing
+        review. Measured: on `2bda577f` (#181, which changed two specs) the
+        command lists `feed-view/spec.md` and `stoa-navigation-view/spec.md`;
+        on this tree's HEAD it lists nothing.
 
 - [ ] **`dev-writer`** — `.claude/agents/RUNNER.md`, "From the `dev-writer`'s
       hand-back to the merge", step 3, bullet under "The brief" — "A clean

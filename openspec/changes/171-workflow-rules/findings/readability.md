@@ -42,7 +42,7 @@ verbatim.
       says), so it does not require the closer.md Step 1 edit that would be
       out of this piece's authorised scope.
 
-- [ ] **`dev-writer`** — `.claude/agents/closer.md:84` — the cross-reference
+- [x] **`dev-writer`** — `.claude/agents/closer.md:84` — the cross-reference
       "Step 3 of [`RUNNER.md`](RUNNER.md)'s 'From the `dev-writer`'s hand-back
       to the merge'" overloads "Step 3" with a name `closer.md` already gives
       to one of its own six top-level steps.
@@ -65,6 +65,14 @@ verbatim.
       lower-case "step 3" in closer.md's own cross-reference, matching how
       RUNNER.md refers to itself, or name the section instead of the number
       ("'From the `dev-writer`'s hand-back to the merge', item 3").
+
+      **Fixed** (this commit), with the second suggestion: `closer.md` Step 1
+      now reads "[`RUNNER.md`](RUNNER.md)'s "From the `dev-writer`'s
+      hand-back to the merge", in its item 3, says why…", naming the section
+      first and calling the number an item. Measured after the edit:
+      `git grep -n -F "Step 3 of" -- .claude/agents` returns nothing. The
+      other `closer.md` references this pass adds to `RUNNER.md` name a
+      section ("The `closer`, and what comes back") rather than a number.
 
 ## What is clean
 
