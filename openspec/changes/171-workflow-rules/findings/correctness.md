@@ -1174,3 +1174,93 @@ Below the box threshold, in prose only:
   once every line is listed. Because the first bullet sends the runner to
   "list again" after putting the line into form, the repeat then shows, so
   this fails closed. Low.
+
+## Re-review round 12 `dd4fe18..1380d50`
+
+- [ ] **`spec-writer`** — `proposal.md:223-226`, mirrored at `RUNNER.md:612-614`
+      and `RUNNER.md:676-678` — `<review>` is defined only as "the HEAD the
+      runner dispatched the review round from", which is a memory of a
+      dispatch. `RUNNER.md:98-99` says that memory "does not survive a
+      compaction and was never the source of truth", and nothing in
+      `tasks.md` records it: the review rows and the re-review row carry no
+      sha until a round line is written. The one git-derived way to recover
+      it, the parent of the review round's first findings commit, appears
+      in two places, and neither is a rule. `proposal.md:225-227` gives it
+      as this piece's own illustration. `proposal.md` "The nothing-landed
+      check's `<review>` is runner input" and `design.md` Risks give it as
+      what a *second reader* compares against. `RUNNER.md` never gives it,
+      and `RUNNER.md:92-94` tells the
+      runner to point at `design.md` and `proposal.md` rather than read them.
+      So the lost-report branch this range adds ("Where you cannot tell
+      whether a round ran, such as after your report is lost, the check
+      decides") sends the runner to a check whose one input is the thing it
+      has lost. A runner following the text is stuck there, or supplies a
+      `<review>` of its own.
+      **Scenario:** a runner dispatches the review round from `R`
+      (`c222c37`), the findings land, the rows are ticked (`e7e2bbdd`), a
+      writer pass lands `ae59b43c` touching `proposal.md`, and the session
+      compacts. The fresh session rebuilds state as `RUNNER.md:96-121` says,
+      finds the re-review row with no round line beneath it, and reaches
+      the "at least one round line" bullet. It cannot tell whether a round
+      ran, so the check decides, but it has no `R`. The `<HEAD>` in the same
+      range is its own HEAD, and "the HEAD you dispatched from" reads as a
+      HEAD too, so the ready value is `ae59b43c`.
+      `git diff --name-only ae59b43c ae59b43c` prints nothing. The check
+      passes, it writes ``round 1 `ae59b43c..ae59b43c` `` skipped because
+      nothing landed, and it ticks. That is the empty range this change
+      exists to remove, reached by following the text rather than breaking
+      it. With the true `R` the same run fails: measured on this tree,
+      `git diff --name-only c222c37 ae59b43c` lists `proposal.md` beside
+      the six findings files and `tasks.md`. A later-than-true `<review>`
+      fails open, as `design.md` Risks itself says. But Risks files it with a
+      runner who "breaks a stated rule", and this runner breaks none: the
+      text never gave it a way to comply.
+      **Measured:** the recovery exists and needs no memory.
+      `git log --oneline --diff-filter=A -- openspec/changes/171-workflow-rules/findings/`
+      lists `f94f7b8d` as its oldest entry (the design review), and
+      `git log --oneline -1 f94f7b8d~1` gives `c222c37b`, the true `R`.
+      **Possible fix, for the spec-writer to choose:** give the runner the
+      recovery in the contract, and have `RUNNER.md` state it where
+      `<review>` is defined: the parent of the oldest commit adding a file
+      under the change's `findings/`. Or record `R` when the review round is
+      dispatched, for example on the re-review row, so that it is state in
+      `tasks.md` and not a memory. `RUNNER.md` follows either.
+      **Severity:** medium. It fails open on the recovery path the range
+      introduces, and it reproduces the defect the range closes.
+
+Read `2bf65c8` (`proposal.md`) and `1380d50` (`RUNNER.md` "What you read",
+"Record the call", the "at least one round line" bullet, and `design.md`'s new
+entry, Risks and the "What it still cannot see" paragraph) literally, as a
+runner would, and measured both check commands on this piece's history:
+
+- `git diff --name-only c222c37 e7e2bbdd` lists the six findings files and
+  `tasks.md`, and the `tasks.md` diff over the same range is exactly the six
+  review-row flips from `[ ]` to `[x]`. So the check passes and a skipped
+  round 1 is right, since nothing that merges landed.
+- `git diff --name-only c222c37 ae59b43c` adds `proposal.md`, so the check
+  fails and an ordinary round is owed, which is also right.
+- `git diff --name-only ae59b43c ae59b43c` prints nothing. The old both-ends
+  form would have passed over a branch holding the `proposal.md` commit.
+
+Given the right `<review>`, both commands decide correctly in all three cases.
+The repair ordering in the "at least one round line" bullet is also sound: a
+round that ran is put back as that round, the skipped form is used only where
+no round ran and the check passes, and a failed check means a round. That
+ordering fails closed.
+
+Below the box threshold, in prose only:
+
+- **A clean merge of `main` after the review round fails the check.**
+  `git diff <review> HEAD` compares trees, so `main`'s own paths are listed
+  and the runner owes a round for them. That fails closed, and it costs one
+  round the runner could size as a skip with a reason. Low.
+- **"Only boxes flipped" passes a flipped implementation-checklist box in
+  `tasks.md`.** A writer who ticks a checklist box has also changed a path
+  the first command lists, so the pair still fails closed. Low.
+- **A lost report where rounds did run.** The check fails over
+  `<review>..HEAD`, so the runner re-reviews everything since the review
+  round as a new round 1. Its range ends at a HEAD that already holds the
+  earlier rounds' findings commits, so it cannot equal a lost round's range,
+  and the forms check cannot pass on an old record. This fails closed. The
+  cost is a full re-review, where the ranges in the findings headings could
+  have rebuilt the lost lines. Low.
