@@ -1209,3 +1209,90 @@ and nothing else under `.claude/`, and the `RUNNER.md` hunks are the tick
 paragraph and one "What you read" row, both within #171's re-review mechanism.
 Nothing in the range adds a route to `main`, a force, `--admin`, or a way to
 tick the re-review row that was not there before.
+
+## Re-review round 11 `842758b..dd4fe18`
+
+- [ ] **`spec-writer`** (then `dev-writer` for `RUNNER.md:609-612` and
+      `design.md:106-109`) — `proposal.md:216-221` — the nothing-landed round 1
+      is written ``round 1 `<HEAD>..<HEAD>` ``, a range empty by construction,
+      so the one line that asserts "nothing landed" records no evidence for it
+      and hides a wrong call permanently. Every other round line's range starts
+      where review last ended (this piece's round 1 is `c222c37..9dc235c`), so
+      `git log`/`git diff --stat` over it shows what the line's decision
+      covered, and the ranges chain from the review round to HEAD. `HEAD..HEAD`
+      breaks the chain at its first link.
+      **Scenario:** the review round returns all findings answered by
+      rejection; the `dev-writer`'s pass ticks the boxes and adds one paragraph
+      to `design.md` explaining why (a commit that "does need review",
+      `RUNNER.md:540`). The runner reads the hand-back as tracking-only and
+      writes ``round 1 `H..H` `` skipped because nothing landed, `H` being its
+      HEAD with that commit already on it. Number check: both rows listed, one
+      round line, no gap, no repeat. Forms check: none, the round is skipped
+      (`RUNNER.md:673-674`). Tick; `closer.md` Step 1 sees every row ticked. If
+      a red-CI fix `C` lands later, round 2 is `H..C`, so the `design.md`
+      commit lies inside no round's range at any point, and neither the
+      runner's checks nor the deferred `closer`-side second reader (which
+      matches lines to findings and has no findings to match for a skip) can
+      see it. With a range anchored at the commit the review round read,
+      ``round 1 `<base>..H` ``, the same misjudgement leaves `design.md` in the
+      range's `--stat` for the runner and any later reader, and later rounds
+      chain from `<base>`.
+      **Fix:** anchor the nothing-landed line's range at the commit the review
+      round read, ending at HEAD, and say in the rule that a skip of this kind
+      is valid only when that range changes nothing outside `findings/` and the
+      stage block. `proposal.md` records no reason for `HEAD..HEAD`
+      (`git grep -n -F "both ends"` finds only the three statements of the
+      rule), so no recorded decision is reversed.
+      **Severity:** medium. Reaching it takes a runner's misjudgement rather
+      than a skipped step, but the form chosen removes the one record that
+      would expose the misjudgement, on the path this round's brief asks
+      about.
+
+Security only, on Opus, narrowed to the three questions in the brief. No
+mutation: the change is prose. Read `git diff 842758b..dd4fe18` of
+`RUNNER.md`, `proposal.md` and `design.md` in full, `RUNNER.md:510-716`,
+`closer.md:170-209`, `spec-writer.md:45-90`, `README.md:228-256`, and re-ran
+the new number check on this tree: row at `tasks.md:24`, round lines `:25-35`
+carrying 1 to 11 once each, next row at `:36`.
+
+**Upward repair: clean.** A raised number is one more than the highest under
+the row, which no line has carried, so no brief gave it and no record carries
+it; the raised line's forms check therefore lists nothing until its lanes run
+again. That makes the repair fail-closed by construction, whichever of the two
+colliding lines was the wrong one: lines are only added below the last, so the
+repeat is always the lower line, and the upper line keeps its forms and its own
+lanes' records. The templated-re-run case (same range) stays closed because
+the upper line excuses the re-run lane only by position, and the raised line
+below it now really does run it. A duplicate with a different range leaves an
+orphan record under the old number that no line's forms can ever match, since
+no future line takes a used number.
+
+**Gap-tolerant uniqueness: clean, given its stated precondition.** A gap is
+harmless for exactly the reason given (no line, no brief, no record) as long as
+no line is removed and no number lowered. The row bracket closes the round-10
+spec-test hole: a four-space or tab line, or a wrapped continuation, shows as a
+missing line number between the rows and blocks the tick. Low, prose only:
+`-F "      round "` is a substring match, so a line indented by seven or more
+spaces is listed as a round line and "exactly six" is not what the check
+enforces. It fails safe, since the forms are still copied from that one listed
+line. Also low: an implementation-checklist line quoting the re-review row's
+text would add a second match for the row pattern, which confuses the listing
+but can only stop a tick, never cause one.
+
+**Residuals: honestly recorded.** Both documents' "What it still cannot see"
+name the removed line and the lowered number, say each lists clean, and say
+each breaks a stated rule (`proposal.md:386-401`, `design.md:678-687`); the
+Risks and the `closer`-side follow-up both say the second reader cannot see
+them either. One framing is generous, low, prose only: "reaching either takes
+a runner breaking a rule" reads as deliberate. A round line can also be lost to
+a mis-resolved conflict in `tasks.md`, which `spec-writer.md:49-53` says
+adjacent-row cherry-picks produce, and the consecutive rule this round removes
+would have shown that loss as a gap, where the new one lists it clean. The
+trade is recorded in `design.md`'s rejected alternative ("It keeps lost-line
+detection"), so the loss of detection is on the record, only not in the
+residual's own sentence.
+
+Scope: `git diff --stat 842758b..dd4fe18` touches `.claude/agents/RUNNER.md`
+and nothing else under `.claude/`, and its hunks are the "What you read" row,
+"Record the call" and the tick paragraph, all within #171's re-review
+mechanism. Nothing in the range adds a route to `main`, a force or `--admin`.
