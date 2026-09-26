@@ -33,8 +33,10 @@ Three constraints shape the approach:
 - What the runner commits is stated once, as the owner ruled it.
 - `closer.md` names `--admin` and branch-protection changes as forbidden.
 - `.claude/agents/README.md`'s `settings.json` paragraph is back to its pre-#119
-  wording. The only other change in that file is its branch section's account
-  of how work reaches `piece/<name>`, which points to `RUNNER.md`. Its
+  wording. Its other changes are the branch section's account of how work
+  reaches `piece/<name>`, which points to `RUNNER.md`, and the four passages
+  outside that section that named the cherry-pick as every agent's route,
+  which say "brought onto" or "bringing onto" the piece instead. Its
   stage-block section does not change; `proposal.md`'s Impact entry for
   `README.md` says why "one row per stage, then three rows the `closer` owns"
   still holds.
@@ -818,7 +820,9 @@ passage that gave the route for a `dev-writer`'s commits now says
 fast-forward or points to "Dispatching": the per-agent sequence, the
 already-pushed paragraph, "How many at once", the red-run fixer, and both
 sentences in "One piece is one PR". `README.md`'s branch section says the
-`dev-writer` pushes on every pass.
+`dev-writer` pushes on every pass. Passages in `RUNNER.md` and `README.md` about
+every agent's commits say "brought onto" the piece rather than naming either
+route, since a reviewer is still cherry-picked and a `dev-writer` never is.
 `dev-writer.md`'s "The runner cherry-picks your commits" is left as it is:
 bringing its passes on is the runner's step, stated in `RUNNER.md`, and
 changes nothing the `dev-writer` does (`proposal.md`, "Out of scope").

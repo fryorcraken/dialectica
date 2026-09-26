@@ -297,3 +297,24 @@ their output was written.
       `grep -rc "^- \[ \]" openspec/changes/171-workflow-rules/findings/`
       is zero for every file.
 - [x] 10.11 `openspec validate 171-workflow-rules --strict` passes.
+
+### 11. After the `spec-writer`'s ruling on `8cef5d1` (`6354aa8`)
+
+Wording only: each edit changes the words naming the route an agent's commits
+take, and adds no rule.
+
+- [x] 11.1 `RUNNER.md`, closing "No `worktree-agent-<id>` ever appears on the
+      remote": the runner brings each agent branch onto its HEAD, not
+      fast-forwards to it.
+- [x] 11.2 `README.md`: "One writer at a time", the harness-named branch
+      sentence in the branch section, the sample `dev-writer` findings brief,
+      "What the agent's own branch means for getting work back" and "Who
+      removes the agent's tree" say "brought onto" or "bringing onto" the
+      piece. The reviewer's tree "once its work is cherry-picked", "a commit
+      cherry-picked rather than merged", "never by cherry-pick" and
+      "concurrent cherry-picks never" are unchanged. Verify:
+      `git grep -n -F "cherry-pick" -- .claude/agents/README.md` returns only
+      those four and the branch table row.
+- [x] 11.3 `design.md`: the Goals line on `README.md` and the fast-forward
+      entry name these passages.
+- [x] 11.4 `openspec validate 171-workflow-rules --strict` passes.

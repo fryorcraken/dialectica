@@ -180,7 +180,7 @@ there is the same failure as a reviewer branch reaching it, renamed. That is a
 rule about the *ref name*, not about who may push: the `dev-writer` and `closer`
 both push their tip **to `refs/heads/piece/<name>`**, which creates no agent
 branch on the remote. Agent branches are named by the harness rather than by you,
-so you learn each one from the agent's report and fast-forward to it, as
+so you learn each one from the agent's report and bring it onto your HEAD, as
 "Dispatching" says.
 
 **Do not rename or re-point a branch with an open PR.** A PR's head ref is

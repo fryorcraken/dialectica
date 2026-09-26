@@ -96,7 +96,7 @@ honours it.
 one of each, **one in total**. Each gets its own worktree, so this is not about
 sharing a tree; it is about what the *next* agent forks from. Every dispatch is
 cut from the runner's HEAD, so a second writer launched before the first's
-commits are cherry-picked forks from a HEAD that does not contain them, and the
+commits are brought onto the piece forks from a HEAD that does not contain them, and the
 two diverge silently. Two further reasons, neither of which surfaces as a git
 conflict either:
 
@@ -138,7 +138,7 @@ brought onto it by the runner — writers exactly as reviewers.
 
 **The branch name is the harness's, not the runner's.** There is no
 `review/<name>/<dimension>` to predict, so an agent reports the name it actually
-landed on (`git rev-parse --abbrev-ref HEAD`) and the runner picks from that. A
+landed on (`git rev-parse --abbrev-ref HEAD`) and the runner brings its commits on from that. A
 name nobody recorded is work nobody can find.
 
 **The PR is opened on `piece/<name>` and nothing else. Whichever ref it is opened
@@ -313,7 +313,7 @@ is dispatched with `isolation: "worktree"` and arrives in a correct tree already
 > Act on the findings for `dev-writer` in
 > `openspec/changes/wire-request-envelope/findings/`. Piece branch
 > `piece/wire-request`. Commit to your own branch and say what it is called, so
-> the work can be cherry-picked onto the piece.
+> the work can be brought onto the piece.
 
 **Keep `git -C <worktree>` and `EnterWorktree` out of the briefs** — an agent
 already in the right place needs neither, and a brief carrying them sends it
@@ -376,7 +376,7 @@ settings belong in `settings.local.json`, which stays ignored.
 #### What the agent's own branch means for getting work back
 
 The agent lands on a harness-named branch, `worktree-agent-<id>` — **not** the
-piece branch. So commits still need a cherry-pick onto `piece/<name>`, exactly
+piece branch. So commits still need bringing onto `piece/<name>`, exactly
 the step reviewers already perform for findings, with one difference worth
 noticing: the branch name is assigned by the harness rather than being the
 `review/<name>/<dimension>` the runner chose, so **read it rather than assuming
@@ -414,7 +414,7 @@ than a red one, because the row gets ticked either way.
 **An agent cannot remove its own worktree, because it is standing in it.** `git
 worktree remove` refuses the directory you are in, so **tree removal belongs to
 the runner.** An agent's last act is to report its branch name and that its tree
-is ready to prune; the runner removes it after cherry-picking the work off.
+is ready to prune; the runner removes it after bringing the work onto the piece.
 
 **The reason the runner keeps a tree is that it may still need reading**: to
 re-check a finding against the exact tree that produced it, to compare two
