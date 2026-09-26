@@ -133,6 +133,8 @@ another file.
     ```
 
     Either way, the reviewer's file names the range once the round is done.
+    The heading and the box carry the range exactly as the brief gives it,
+    since the check before the tick is a fixed-string search for that string.
     The reviewer writes and commits that box itself, as it would a finding.
     It is the reviewer's own record that the round ran: a re-reviewer's stage
     row is already ticked, so without the box a clean round leaves nothing
@@ -331,7 +333,10 @@ another file.
     with no round ever sized for it. Then the `closer` pushes:
     - **Push refused:** it stops and reports the refusal **and the check's
       result**, the files it listed or that it listed none. `closer.md`'s
-      "Your report" asks for both.
+      "Your report" asks for both. `closer.md` handles a refused push in
+      Step 3 once, for both kinds of run, so it asks for the check's result
+      only if this run made the archive commit: a re-dispatched `closer` runs
+      no check (below) and reports the refusal alone.
     - **Push accepted, and the check listed any file:** it stops before
       Step 4, reports the archive commit and the files, and returns.
     - **Push accepted, and the check listed nothing:** it carries on.
@@ -345,7 +350,10 @@ another file.
     Step 3 rules for a re-dispatch above. **The check applies only to an
     archive commit the `closer` made in the same run.** A re-dispatched
     `closer` makes none, so it skips the check: its HEAD is whatever the runner
-    brought onto the piece last, which step 3 has already reviewed.
+    brought onto the piece last, which step 3 has already reviewed. Step 3's
+    re-dispatch paragraph in `closer.md` names the check it skips as the one
+    below it, since the check no longer sits at the end of the step; the skip
+    itself is unchanged.
   - **A re-dispatched `closer` pushes its HEAD at Step 3 whether or not it
     deleted anything.** Its tree carries every commit the runner brought onto
     the piece since the last push: a fix, a conflict resolution, the runner's
@@ -381,7 +389,16 @@ another file.
     the commit's parent. `RUNNER.md`'s "One piece is one PR" bullet on
     bringing the `dev-writer`'s pushed commits onto the runner's HEAD says
     so too, pointing to "Dispatching": it said "you cherry-pick", which
-    this rule contradicts. If a
+    this rule contradicts. `RUNNER.md`'s other sentences that give the
+    cherry-pick as the route for an agent's commits in general say
+    "brought onto the piece" or "bringing onto the piece" instead, which
+    covers both routes: the sample `dev-writer` findings brief in
+    "Dispatching", and "What you must still ask for is the branch name".
+    So does the sentence closing "No `worktree-agent-<id>` ever appears on
+    the remote", which is about every agent branch: it says the runner
+    brings each one onto its HEAD as "Dispatching" says, not that it
+    fast-forwards to each, since most agents' branches are still
+    cherry-picked. If a
     fast-forward refuses, the runner stops and reports, and takes neither of
     the hints git prints with the refusal: `git merge --no-ff` would make a
     merge commit that is the runner's own content, and `git rebase` rewrites
@@ -431,7 +448,32 @@ another file.
     complete. The same section's two other statements of the old route,
     the `worktree-agent-<id>` row's "cherry-picked onto the piece" and "every
     agent's commits are cherry-picked onto it", say "brought onto" instead,
-    so the section does not contradict its own pointer.
+    so the section does not contradict its own pointer. So does its
+    sentence on the harness-named branch, "the runner picks from that",
+    which becomes "the runner brings its commits on from that".
+  - **`README.md`'s other statements of the old route change the same way.**
+    Four passages outside the branch section say an agent's commits are
+    cherry-picked onto the piece, which is false for every `dev-writer`
+    pass under the fast-forward rule above:
+    - "One writer at a time", on a second writer launched "before the
+      first's commits are cherry-picked";
+    - the sample `dev-writer` findings brief in "Handing over between
+      agents", "so the work can be cherry-picked onto the piece", which
+      `RUNNER.md`'s copy of the same brief no longer says;
+    - "What the agent's own branch means for getting work back", "commits
+      still need a cherry-pick onto `piece/<name>`";
+    - "Who removes the agent's tree", "after cherry-picking the work off".
+
+    This is the same case as the `dev-writer.md` clause under "What the
+    runner commits" below: left as they are, they contradict `RUNNER.md` in
+    this piece, and correcting them adds no rule. Each changes only the words
+    that name the route, to "brought onto" or "bringing onto" the piece.
+    Sentences that are true of a cherry-pick stay: the reviewer's tree
+    removed "once its work is cherry-picked" (reviewers are cherry-picked),
+    the orphan-branch check's "a commit cherry-picked rather than merged",
+    and the stage-block section's "concurrent cherry-picks never touch the
+    same line", which is literally true and is left to the follow-up in
+    "Out of scope".
 - **What the runner commits (owner-authorised, from
   `findings/architecture.md`'s third finding; ruled by the owner: "A runner
   always delegates" and "Agents tick their own").** `RUNNER.md`'s "What a
@@ -509,7 +551,14 @@ another file.
     (the reason `CLAUDE.md` bans a bare `git stash`), when it cannot
     re-apply it. The `dev-writer` measures the sequence in a scratch
     repository before writing its commands into `RUNNER.md`, as it has every
-    other command in this piece. `RUNNER.md` names no signing flag: while
+    other command in this piece. The commands it measured end to end are
+    these: for step 1, `mkdir -p tmp` and then
+    `git diff --binary --output=tmp/uncommitted.patch HEAD`, since `git diff`
+    does not create the directory; for step 2,
+    `git restore --source=HEAD --staged --worktree -- .`; and for step 4, a
+    plain `git apply tmp/uncommitted.patch`. The changes come back unstaged
+    whether or not they were staged before, and the patch file stays in
+    `tmp/` either way. `RUNNER.md` names no signing flag: while
     signing is off the runner's message adds `--no-gpg-sign` to the rebase,
     as every brief does, since the correctness re-reviewer's
     `git rebase --continue` hung on the signing prompt. The durable home for
@@ -721,8 +770,8 @@ another file.
   after that round is left to the runner's judgement.
 - **Anything else under `.claude/`.** That means `settings.json`, hooks, and
   rewording in any role file beyond what these four issues, the
-  owner-authorised additions and the `spec-writer.md` and `dev-writer.md`
-  corrections above ask for. The writer and reviewer role files
+  owner-authorised additions and the `spec-writer.md`, `dev-writer.md` and
+  `README.md` corrections above ask for. The writer and reviewer role files
   are not edited for the `closer`'s commits: a conflict resolver and a
   re-reviewer of an archive commit get what differs in the runner's brief, as
   every re-reviewer does. Nor are they edited for a mutating reviewer's
@@ -795,8 +844,9 @@ None. This change edits agent instructions and no system behaviour, so
   uncommitted changes saves and re-applies them around its rebase;
   owner-authorised), the "One
   piece is one PR" bullet that said the runner cherry-picks the
-  `dev-writer`'s pushed commits (owner-authorised, with the fast-forward
-  rule), and where "What you read" and "Rebuild the state" find
+  `dev-writer`'s pushed commits, and the sentences that gave the cherry-pick
+  as the route for an agent's commits in general (owner-authorised, with the
+  fast-forward rule), and where "What you read" and "Rebuild the state" find
   the stage block once the change is archived (#171).
 - `.claude/agents/spec-writer.md`: the stage-block template (#171); and the
   one sentence above it claiming ticks on neighbouring rows cannot conflict,
@@ -824,7 +874,10 @@ None. This change edits agent instructions and no system behaviour, so
   and "must not remove" narrowed to open markers (#169, owner-authorised).
 - `.claude/agents/README.md`: one paragraph (#133); and, owner-authorised, the
   branch section's account of how work reaches `piece/<name>`, which points
-  to `RUNNER.md`. Nothing in its stage-block section changes. "Each agent
+  to `RUNNER.md`; and the four passages outside that section naming the
+  cherry-pick as the route for any agent's commits, which say "brought onto"
+  or "bringing onto" instead (following from the fast-forward rule, as the
+  `dev-writer.md` clause does). Nothing in its stage-block section changes. "Each agent
   flips its own row" stands, as the owner ruled. "One row per stage, then
   three rows the `closer` owns" also stays: the re-review row is one more
   row before the `closer`'s three, so the sentence still holds.
