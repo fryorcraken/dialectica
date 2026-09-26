@@ -78,6 +78,7 @@ You read exactly enough to decide the next dispatch:
 | `openspec/changes/<name>/tasks.md` — the `## Stages` block (once the `closer` has archived: `openspec/changes/archive/<date>-<name>/`, see "Rebuild the state") | which stage is next, and whether anyone is on it |
 | `ls openspec/changes/<name>/findings/` — **the filenames** (once the `closer` has archived: `openspec/changes/archive/<date>-<name>/`, see "Rebuild the state") | whether a reviewer has reported, and which dimension |
 | `grep -rn "^- \[ \]"` over `findings/` | whether anything is unanswered, as a count |
+| `git grep -n -F "      round "` over `tasks.md` — **the round lines** | whether the round numbers under the re-review row run 1, 2, 3 … once each (step 3 of "From the `dev-writer`'s hand-back to the merge") |
 | ``git grep -l -F -e '## Re-review round <n> `<range>`' -e '**re-review round <n> `<range>`: no findings**'`` over `findings/` — **file names only** | whether each lane of a re-review round left its record (step 3 of "From the `dev-writer`'s hand-back to the merge") |
 | the `closer`'s report | whether the piece closed, or what stopped it |
 
@@ -623,12 +624,35 @@ which the range alone cannot:
 ```
 
 **Tick the row when no commit that merges is unreviewed** — and before you
-tick it, check that every lane of every round the tick closes left its own
-record. A round the tick closes is one recorded since the row was last ticked
-and not marked skipped. For each, once every lane's findings commit is on your
-HEAD, run, with ``round <n> `<range>` `` copied from that round's own line as
-the brief's was, not typed, and in single quotes because both patterns hold
-backticks, which a shell expands inside double quotes:
+tick it, run two checks on your HEAD. **First, the number check**: list the
+round lines in the stage block as it now stands.
+
+```
+git grep -n -F "      round " -- <change folder>/tasks.md
+```
+
+The six spaces are a round line's indent under the row. The lines it prints
+directly under the re-review row must carry 1, 2, 3 … in the order they stand,
+each number once; a line elsewhere in the file that starts the same way, such
+as a wrapped line in the implementation checklist, is not a round line, and the
+line numbers show which lines stand under the row. A number that repeats or one
+that is skipped means a line is wrong, and you do not tick. Put the line right:
+a line with the wrong number gets the number it should carry, and a round whose
+line was lost gets its line back. A lane briefed from a line whose number
+changes runs again under the new number, with forms copied from the corrected
+line, since a record written under a repeated number cannot be told from the
+earlier run's. An empty listing means the command was mistyped, not that there
+are no rounds: every tick follows at least one round line. A re-run's line
+templated from the previous one with its number unchanged is why this check
+exists: the copy rule below carries that number into the brief and the forms
+check, so all three agree and only this listing shows the number twice.
+
+**Then the forms check**: every lane of every round the tick closes left its
+own record. A round the tick closes is one recorded since the row was last
+ticked and not marked skipped. For each, once every lane's findings commit is
+on your HEAD, run, with ``round <n> `<range>` `` copied from that round's own
+line as the brief's was, not typed, and in single quotes because both patterns
+hold backticks, which a shell expands inside double quotes:
 
 ```
 git grep -l -F -e '## Re-review round <n> `<range>`' -e '**re-review round <n> `<range>`: no findings**' -- <change folder>/findings/

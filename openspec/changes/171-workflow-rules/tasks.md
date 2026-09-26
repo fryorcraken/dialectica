@@ -475,3 +475,39 @@ only. No `.claude/` file changes, and no findings box is touched.
 - [x] 16.5 PR #174's body: the `closer`-side follow-up names the
       unique-and-consecutive number criterion.
 - [x] 16.6 `openspec validate 171-workflow-rules --strict` passes.
+
+### 17. After the `spec-writer`'s number check (`328c192`)
+
+Follows `proposal.md`'s two pre-tick bullets, standing-test entry and
+`closer`-side follow-up as `328c192` left them, and the list for the
+`dev-writer` in `findings/security.md`'s re-review round 9 box. No findings
+box is touched. The number check was run on this tree, and on copies of the
+stage block under `./tmp/` (since deleted), before any claim about its output
+was written.
+
+- [x] 17.1 `RUNNER.md`'s tick paragraph: the number check, its command in a
+      code block, ahead of the forms check, with its rule (a repeat or skip
+      means no tick, the line is put right, a lane briefed from a renumbered
+      line runs again, an empty listing means a mistyped command, only lines
+      directly under the row count) and one sentence of reason. "Record the
+      call" unchanged. Verify: `git grep -n -F "number check" --
+      .claude/agents` returns the tick paragraph only.
+- [x] 17.2 `RUNNER.md` "What you read": a row for the number check over
+      `tasks.md`.
+- [x] 17.3 `design.md`: a Decision for the number check beside the copy
+      rule, with its measurements and the round-8 routing as a rejected
+      alternative; the "one more than the highest" rejection argued from
+      "the next number" in "Record the call"; "What it still cannot see"
+      split into the wrong-line case (a second reader only), the wrong number
+      (the number check sees it) and a re-run given no line (neither check
+      sees it); "What else was considered"'s residual. Verify:
+      `git grep -n -e "adds no check" -e "repeating an earlier line" --
+      openspec/changes/171-workflow-rules/design.md` returns nothing.
+- [x] 17.4 `design.md` Risks: the standing-test entry lists the number
+      check's command and its fail-closed case, and its residuals match
+      `proposal.md`'s; "Only the runner runs the pre-tick checks" covers
+      both checks.
+- [x] 17.5 PR #174's body: step 3 names the number check first; the
+      standing-test follow-up and the `closer`-side follow-up match
+      `proposal.md`.
+- [x] 17.6 `openspec validate 171-workflow-rules --strict` passes.
