@@ -297,3 +297,50 @@ moved `RUNNER.md` passage, including the one exception (an incoming commit
 adding a file at the untracked path). The reclassified Risks name commands
 that are in the role files as quoted. `closer.md`'s "Then return" now names
 `BLOCKED` among its stops, which agrees with the "returns as examples" entry.
+
+## Re-review round 5 `dc1390a..d1c8726`
+
+- [x] **re-review round 5 `dc1390a..d1c8726`: no findings** — read the range's diff of `RUNNER.md`, `design.md` and `proposal.md`, `findings/security.md`'s round 3 box and outcome text, and `RUNNER.md:238-321`'s cherry-pick-conflict and rebase passages; clean
+
+**The restated rule takes the recorded decision, word for word.** The
+`design.md` bullet (`:391-401`) and `RUNNER.md:604-612` differ only in person
+("however the lane is run again" against "however you run it again"); every
+other clause is identical, including the `SendMessage` message giving "the new
+line's two forms whole, as a brief does", the carve-out list "finishing a round
+it has not yet recorded, such as after a stall, committing, or rebasing", and
+"Its record, once committed, is the round's own". `RUNNER.md`'s added sentence
+"A continued run needs the new number as much as a fresh one …" is the new
+`design.md` paragraph's reason in brief, and `proposal.md:183-203` carries the
+same text. The pre-tick check's two word changes ("the round ran", "a later
+round ran again") match `design.md:414-415`; the summary at `design.md:103-104`
+and "What breaks without the number" (`:513-515`) now say "fresh or continued".
+`git grep` for "dispatched again", "re-dispatch" and "not a new dispatch"
+across the role files, `design.md` and `proposal.md` finds none keyed to a
+review lane except the new paragraph's account of the old rule, so the sweep is
+complete.
+
+**The rebase reasoning is consistent with the contract.** `proposal.md` states
+the rule keyed on "adds no review to a record already committed" and names
+rebasing, without saying why rebasing needed naming; `design.md:452-457`
+supplies the reason from `findings/security.md`'s outcome text. The two agree:
+the proposal's key is not "has not yet committed", so the rebase case is
+covered by the key itself and the design paragraph only explains why the
+security reviewer's suggested key would not have covered it. The scenario it
+cites matches the flow elsewhere in this piece: reviewers are still
+cherry-picked (`design.md:926`), and a conflicting cherry-pick sends the agent
+back to rebase its own branch via `SendMessage` (`RUNNER.md:275-279`,
+`design.md:1039-1045`) after its record is committed.
+
+Below medium, unboxed:
+
+- In the restated sentence, "such as after a stall" sits inside the
+  three-item list, so "finishing a round it has not yet recorded, such as after
+  a stall, committing, or rebasing" can be read as three examples of a stall.
+  `design.md:453` gives the same list without the aside and reads cleanly.
+- The new Rejected bullet names what ruled forbidding continuation out but not
+  what the chosen rule costs: every continuation for more review now needs a
+  round line and a message carrying both forms whole, which is the runner's
+  cheapest step made slightly less cheap.
+- `proposal.md` says "a later line ran again" where `RUNNER.md` and
+  `design.md` say "a later round ran again". Pre-existing wording, same
+  meaning.
