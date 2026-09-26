@@ -132,7 +132,7 @@ the next push.
 
 ### 4. `create.yaml` goes red when the key block outlives the key
 
-- [ ] 4.1 Break (design.md D6): `keyBlockLoader` also active in the key-held
+- [x] 4.1 Break (design.md D6): `keyBlockLoader` also active in the key-held
       state, and `heldKey()` carrying `refusal: ""`, pushed alone. Predicted:
       `sitometres create spec` red on "the key is held, so a Stoa is offered
       and a key is not", both `not_text:` selectors naming what they still
@@ -158,7 +158,12 @@ the next push.
       passed, 3 failed, the three named above (CI's Qt is 6.8.3, and the
       local prediction was made on 6.10.3). `Lint`, `UI spec validation`,
       `Rust core tests` and `Build LGX` green
-- [ ] 4.2 Revert pushed; both workflows green on it
+- [x] 4.2 Revert pushed; both workflows green on it. **Observed, on head
+      `3d7d45c`** (the revert `d996fb1` plus the 4.1 record): UI tests
+      https://github.com/fryorcraken/dialectica/actions/runs/36215199269 green
+      in all five jobs; CI
+      https://github.com/fryorcraken/dialectica/actions/runs/36215199261 green
+      in every job
 
 ### 5. `feed.yaml` goes red when an empty read renders as a failure
 
