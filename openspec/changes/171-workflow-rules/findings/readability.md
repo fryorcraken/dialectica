@@ -849,3 +849,70 @@ Stylistic only, no box:
   the check never sees them. Only the lost-line repair after a red-CI round
   can meet them, and there it fails toward an extra round. That belongs to
   the correctness lane, not readability.
+
+## Re-review round 13 `1380d50..c3bda2b`
+
+- [x] **re-review round 13 `1380d50..c3bda2b`: no findings** — read `git diff 1380d50...c3bda2b -- .claude/agents/RUNNER.md`, `RUNNER.md:520-734` at HEAD and its "What you read" row `:81`, and ran the derivation on this tree; clean
+
+Dimension: **readability only**, narrowed as briefed. Every command quoted was
+run in this tree.
+
+**The round-12 box is fixed.** `<review>` no longer depends on memory.
+`RUNNER.md:615-627` says to read it from the repository "even when your report
+still holds it", gives the command in a code block, says which line and field
+to read, and says what an empty listing means. The repair bullet (`:692-695`)
+runs the check "over a range from the `<review>` you read as 'Record the call'
+says, not from a HEAD you remember or can see". That closes the scenario in my
+box: a runner after a compaction no longer guesses the dev-writer's hand-back
+HEAD. `git log --diff-filter=A --format="%h %p %s" --
+openspec/changes/171-workflow-rules/findings/` prints three lines here. The
+last is `f94f7b8d c222c37b`, so the second field is `c222c37b`, which is the
+review commit `proposal.md` and `design.md` name. The first line's parent is
+`a284e514`, so the text's "the last line, not the first" is the instruction
+that matters.
+
+**Stated once: clean.** `git grep -n -F -e "diff-filter" -e "parent of" -e
+"commit the review round read" -e "no-renames" -e "dispatched the review round"
+-- .claude/agents/ CLAUDE.md docs/` finds the derivation command only at
+`RUNNER.md:619` and in the "What you read" row at `:81`. That row names each
+command and points to step 3, which is how it treats the two `git diff`
+commands too. The `closer.md` and `docs/OPENSPEC-ARCHIVE.md` hits are different
+commands with different jobs. The repair bullet points to "Record the call" and
+does not restate the command. "Rebuild the state" does not restate it either.
+
+**One procedure, top to bottom: clean.** "Record the call" gives the steps in
+the order a runner does them. First the line's form and number. Then the
+nothing-landed case and its range, ``round 1 `<review>..<HEAD>` ``. Then how to
+read `<review>`, with the pathspec, last-line and empty-listing caveats right
+after the command they qualify. Then "Before you write the line", the two
+checks, what they must show, why the first carries `--no-renames`, and what a
+failure means. Then the re-run rule and the sample. The "What you read" row
+lists the three commands in the same order. A runner following the text writes
+the skipped line only after it has derived `<review>` and both checks have
+passed.
+
+Stylistic only, no box:
+- `RUNNER.md:612-616`: the definition still says `<review>` is "the HEAD you
+  dispatched the review round from", and the next sentence says never to read
+  it from memory. The derivation wins, and it says so, so no one would act
+  wrongly. It would read more cleanly if the definition said what `<review>` is
+  and left the "how" to the command.
+- `RUNNER.md:624-625`: the reason for "the last line, not the first" is "every
+  later round's findings files are adds too". On this tree the newer adds are
+  the review round's own lanes landing in separate commits. The spec-test file
+  is the newest add, and it came from the review round. Re-review rounds mostly
+  append to files that already exist. The instruction is right, but the reason
+  given is not the main one. "the review round's lanes land in several commits,
+  and a later lane's first file is an add too" would match what the log shows.
+- `RUNNER.md:642-644`: "A range with both ends at your HEAD would hold nothing…"
+  justifies starting the range at `<review>`. It now sits about 25 lines below
+  that range, after the `--no-renames` reason and the failure outcome, and the
+  source breaks it mid-sentence ("A\nrange with both ends at\nyour HEAD"). It
+  would sit better straight after ``round 1 `<review>..<HEAD>` `` at `:614`.
+- `RUNNER.md:613-616`: "where any round 1 starts" covers an ordinary round 1
+  too, but "never from memory" sits inside the nothing-landed passage. A runner
+  writing an ordinary round-1 line may not see that the derivation applies to
+  it. Nothing breaks: an ordinary round lists what landed, and its reviewers
+  read that range.
+- `RUNNER.md:695` runs past the file's wrap width. `:644-645` still has no
+  blank line before "**A lane you run again**", as noted in round 12.
