@@ -111,3 +111,107 @@ holds only the one finding below plus a clean bill for everything else.
 No other readability defects found. I did not review correctness, security or
 architecture — those are separate reviewer dimensions per this piece's
 `tasks.md`.
+
+## Re-review of the findings-round commits
+
+Dimension: **readability only**, per `tasks.md`'s "Re-review of the
+findings-round commits" row for `code-reviewer`/readability. I read issue #166
+(`gh issue view 166 --json body,comments`) again, including the owner's
+decision comment of 2026-09-25
+(https://github.com/fryorcraken/dialectica/issues/166#issuecomment-5832956024),
+which settles item 2: a malformed `index` is refused with an error that names
+`index`, and leaving the message unspecified is ruled out.
+
+Scope was `git diff 19667a04...HEAD` (three dots), restricted to the four
+commits `tasks.md` names for this row: `b55d164` (`thread-read` delta's
+`MUST`→`SHALL`, and the new `feed-read` boundary paragraph added directly to
+the live `openspec/specs/identity-onboarding/spec.md` Purpose), `9e550eb`
+(`design.md` D1, D2 and D5 rewritten as measured), `70bef05` (the `wire.rs`
+fixture refactor extracting `a_thread_post_with_clock`), and `4e2b8c0`
+(rustfmt of the one drifted call). I also read `tasks.md`'s re-review section
+itself.
+
+**My own earlier finding.** The one finding I raised in the first round (the
+two stray `MUST`s in `thread-read`'s place-rule paragraph) was answered in
+`b55d164`: both are now `SHALL`, confirmed by `git diff 19667a04...HEAD --
+openspec/changes/position-and-index/specs/thread-read/spec.md` — the diff
+touches exactly those two words, nothing else in the paragraph moved. The
+requirement now uses one modal throughout, matching the rest of the file's
+per-requirement convention. Correctly resolved.
+
+**Claims checked by running rather than reading, this round:**
+
+- The new `identity-onboarding` Purpose paragraph names *A malformed `index`
+  in a keep request is refused with a message naming `index`* — that heading
+  exists verbatim in `openspec/changes/position-and-index/specs/identity-onboarding/spec.md:3`
+  (`git grep -n`). It also claims `feed-read` "requires its message to name the
+  field" for `page`/`perPage` — confirmed at `openspec/specs/feed-read/spec.md:555`
+  ("A `page` or `perPage` that is … MUST be refused with the error shape. The
+  message MUST name the field.").
+- `proposal.md`'s claim that this edit had to go directly against the live
+  spec because "a delta cannot change a Purpose": the change's own delta,
+  `openspec/changes/position-and-index/specs/identity-onboarding/spec.md`,
+  opens directly on `## ADDED Requirements` with no `## Purpose` section at
+  all, consistent with that constraint. `openspec validate --strict
+  position-and-index` passes with the boundary paragraph in place.
+- `design.md` D1's rewritten claim that dropping `{field}` from `parse_index`'s
+  non-integer arm (`"{field} must be a non-negative integer …"`, `wire.rs:1826`)
+  turns both `each_malformed_kind_of_index_is_refused_by_name` and
+  `malformed_pagination_fields_are_refused_by_name` red "first on `-1`": `-1`
+  is indeed the first entry of `MALFORMED_INDEXES` (`wire.rs:5076`), and `-1`,
+  `1.5`, `0.0` and `1e2` all reach that arm via `as_u64() == None` while
+  `"two"`, `[]` and `true` reach the wrong-type arm instead — read from
+  `parse_index` directly. The claim that this also turns
+  `the_largest_page_index_is_an_empty_page_and_one_larger_is_refused_by_name`
+  red checks out too: that test's "one larger" value is `usize::MAX + 1` =
+  2^64, which the *first* round's readability review already confirmed lands
+  on `as_u64() == None` (not the unreachable `try_from` arm) — the same arm.
+  All three test names cited exist (`git grep -n`).
+- Cross-checked `4e2b8c0f`'s claim that the remaining `cargo fmt --check`
+  drift (`identity.rs`, two more `wire.rs` hunks) "predates this piece and is
+  left alone": ran `cargo fmt --manifest-path dialectica/rust-lib/Cargo.toml
+  --check -p dialectica -p dialectica-core` myself and got exactly those four
+  hunks (two in `identity.rs`, two more in `wire.rs` beyond the one this piece
+  fixed). `identity.rs` has zero diff against `origin/main` anywhere in this
+  piece, and `git blame` on the pre-existing `wire.rs` drift lines attributes
+  them to `93f1ac3f` (#153), dated before this piece's first commit. Claim
+  holds.
+- `design.md` D5's new "fixture's replies carry explicit ascending clocks"
+  paragraph claims `a_thread_post_with_clock` is "the one constructor for
+  fixture posts". `grep -n "a_thread_post("` shows every thread fixture in
+  `wire.rs` (including `a_thread_log_with_shared_authors` and the
+  hidden-reply fixture) funnels through `a_thread_post`, which now delegates
+  to `a_thread_post_with_clock`. Other `OpKind::Post {` literals do exist
+  elsewhere in the file, but they belong to unrelated fixtures (feed reads,
+  `get_stoa`, etc.), so the claim is correctly scoped, not overbroad.
+- The `1889eaf` and `70bef05` commit messages, cited by `design.md` as where
+  "both arms were measured by mutation" and where "every mutation `design.md`
+  names was re-run" respectively, do contain exactly those claims in their own
+  text (`git log -1 --format=%B`), matching what `design.md` now says.
+
+**One limitation to report.** I attempted to independently re-run the `{field}`-
+drop mutation on `parse_index`'s non-integer arm myself (the highest-value
+check available for a claim this central), after confirming I am standing in
+my own worktree (`pwd` → `.claude/worktrees/agent-a2f9b82c4d36fa469`,
+`git rev-parse --abbrev-ref HEAD` → `worktree-agent-a2f9b82c4d36fa469`, not
+`piece/166-position-and-index` and not the repo root). Two `Edit` attempts on
+`dialectica/rust-lib/dialectica-core/src/wire.rs` — including a minimal
+one-line change — were both denied by the harness's own auto-mode classifier
+("Modify Shared Resources"), independent of the edit's content. Per that
+denial's own instructions I did not pursue a workaround. I therefore rely on
+the self-reported mutation evidence in the `1889eaf` and `70bef05` commit
+messages plus the static checks above, rather than a mutation I ran myself.
+`cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p dialectica -p
+dialectica-core` does pass green (1185 tests) on the unmutated tree, confirmed
+this session.
+
+**No new readability findings.** The prose added in this round (the `identity-
+onboarding` boundary paragraph, the `design.md` D1/D2/D5 rewrites, the doc
+comments on `a_thread_post_with_clock`) is accurate against the code, mirrors
+the established "decline to restate, say so in the Purpose" convention
+`docs/OPENSPEC-ARCHIVE.md` documents for `op-ordering`/`op-format`, and every
+checkable claim in it held up. The `wire.rs` refactor (`70bef05`) is a clean
+extraction with a doc comment that earns its place (explains *why* the clock
+became a parameter, not what the code already shows), and the `4e2b8c0f`
+formatting commit is exactly what it claims to be. `tasks.md`'s re-review
+section itself is clear and accurately scoped.
