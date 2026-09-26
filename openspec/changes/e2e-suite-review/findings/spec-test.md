@@ -213,3 +213,129 @@ cherry-picking a same-path "add" onto a branch that already has that file
 should be. Only this findings file is committed here. The runner should tick
 the `review: spec-test` row on `piece/134-e2e-suite-review` directly when it
 picks up this commit.
+
+## Round 2 (HEAD 532794e)
+
+This piece gained `specs/view-navigation/spec.md` (two ADDED requirements
+answering the round-1 finding above) and matching tests in
+`tst_e2e_handles.qml`. I re-read both, ran `tst_e2e_handles.qml`,
+`tst_adjudicate_ui_run.sh` and the new `tst_workflow_run_bodies.sh` as
+committed (all green), and traced every new assertion against the two new
+requirements' scenario text.
+
+### Findings
+
+- [ ] **`tester`** — `test_a_paste_refused_as_not_a_stoa_reference_leaves_the_list_rendered`
+      (`tst_e2e_handles.qml`) checks `main.screenShown === "list"` and nothing
+      else, where its sibling test added in the same commit
+      (`test_the_view_opens_on_the_list_whatever_core_answers`) makes the
+      opposite choice for the mirror-image requirement, and says why in its
+      own comment: "checking only the string would miss a binding typo on one
+      of the OTHER screens — one that left it visible under a string it does
+      not actually match still passes a check that reads only `screenShown`."
+      That reasoning applies identically to the second requirement's own
+      "AND the preview is not rendered" clause, and the fix the file already
+      built for it — `makeStandaloneMain` plus
+      `verifyOnlyTheListIsRendered`/an equivalent per-screen `visible` check —
+      is not structurally blocked here: `makeMain`'s TestCase-parenting only
+      breaks a `visible` read, not the `findChild(main, "stoaList")` /
+      `.pasted` / `.preview()` calls this test already makes, so the test
+      could switch to the standalone helper the same way its sibling did.
+      **Scenario:** a future change gives `joinScreen` (or `feed`, `thread`,
+      `moderation`) a `visible` binding that is not exactly
+      `root.screenShown === "join"` — say a typo'd `"list"`, or a stray `||`
+      that also shows it while previewing something else — so the join/preview
+      screen renders on top of, or alongside, the list after a refused paste.
+      `main.screenShown` is untouched by that bug and still reads `"list"`;
+      this test passes; the requirement's second clause ("the preview is not
+      rendered") is silently unenforced by the one test written for it.
+      **Measured:** by reading and tracing `makeMain`/`makeStandaloneMain`'s
+      own doc comments (lines 62–78) against the two tests' bodies (lines
+      153–192 vs. 199–222) — no QML mutation was run for this, since
+      `Main.qml` is this round's explicit no-read boundary and the gap is
+      visible from the test file alone.
+
+- [ ] **`tester`** — `mainAreaScreens: ["stoaList", "joinScreen", "feed",
+      "thread", "moderation"]` (`tst_e2e_handles.qml`) is a hand-maintained
+      enumeration standing in for "every main-area screen `Main.qml` mounts,"
+      and nothing ties it to that set structurally — it is exactly the
+      "hand-maintained sweep lists go stale silently" shape this repo's own
+      `CLAUDE.md` names twice elsewhere (`every_request_taking_method()`, the
+      QML-name-collision gate's now-abandoned five-name list), and the
+      contrast is inside this same diff: `tst_workflow_run_bodies.sh`,
+      committed alongside it, explicitly rejects a listed set of workflow
+      files for this exact reason ("Globbed rather than listed, so a third
+      workflow is covered the day it lands"), while `mainAreaScreens` is typed
+      out by hand with no comment weighing the alternative.
+      **Scenario:** a future screen (a settings screen, a second onboarding
+      step) is added to `Main.qml`'s main area and is not added to this list.
+      `verifyOnlyTheListIsRendered` — the one check in this file capable of
+      seeing "no other main-area screen is rendered" — never looks at it, so
+      both new tests keep passing green even if that screen is visible at the
+      same time as the list or the join/preview screen, which is exactly the
+      requirement's own "no other main-area screen is rendered" and "the
+      preview is not rendered" clauses being violated.
+      **Measured:** by reading; not run against `Main.qml`; I cannot confirm
+      or rule out that the list is currently complete without reading the
+      implementation this round excludes. Flagged as a structural risk in the
+      test regardless of whether the list happens to be accurate today.
+
+### Checked and clean
+
+- **Both `view-navigation` requirements have tests that can fail for the
+  reason named.** All four combinations `test_the_view_opens_on_the_list_whatever_core_answers`
+  needs to distinguish from a hardcoded/degenerate implementation (empty
+  listing, failed listing, no bridge, and the fourth — a failed master-key
+  query over an empty listing — pinned in `tst_stoa_screens.qml`'s
+  `test_the_view_supplies_no_stoa_of_its_own_before_one_is_chosen`, confirmed
+  by reading that its fake bridge omits `get_master_key` and `bridgeFor`
+  answers an unlisted method with the error shape) are covered, and the
+  helper asserts both `screenShown` and each other screen's own `visible`, so
+  it can fail on either half of the requirement's AND clause. Both new
+  `pasted` cases (plain text; JSON with `stoa` and no `genesis`) match the
+  requirement's two scenarios verbatim.
+- **`join.yaml`'s two matching steps ("it starts on the Stoa list", "it is
+  refused and the list is still up") already existed pre-delta** and need no
+  new e2e step: they check exactly the two behaviours the delta now
+  contracts, at the one layer (`join.yaml`) that can see the cross-process
+  wiring `tst_e2e_handles.qml` structurally cannot. No coverage gap between
+  layers.
+- **Ran, not just read:** `sh dialectica-ui/tests/run-qml-tests.sh
+  dialectica-ui/tests/tst_e2e_handles.qml` (8 passed, 0 failed), `sh
+  dialectica-ui/tests/tst_adjudicate_ui_run.sh` (every case, including the
+  three new NO-SPEC-marked cases, `ok`), `sh
+  dialectica-ui/tests/tst_workflow_run_bodies.sh` (all `ok`) — all as
+  committed, no mutation. `Main.qml`, `DStoaListScreen.qml`,
+  `adjudicate-ui-run.sh` and the workflow files' own logic were not read or
+  mutated this round, per this round's explicit boundary; mutation sampling
+  (part 2) for the two new requirements has no legal target left once those
+  files are excluded, since both requirements are about exactly those two
+  files' behaviour. The self-contained shell fixtures above (each file
+  carries its own positive/negative cases and runs the real `jq`/`yq`
+  against them) are the only mutation-shaped verification available within
+  the boundary, and they distinguish correctly.
+- **`NO SPEC` markers (`tst_adjudicate_ui_run.sh:117` and `:132`) are placed
+  and worded truthfully.** Both describe adjudicator/CI-tooling behaviour
+  (what a missing report's message says; whether a spec with no `steps:`
+  list aborts or is reported) that no `view-navigation` or
+  `stoa-navigation-view` scenario could ever cover — these are properties of
+  the CI script, not the app — so marking them as spec-silent is accurate
+  rather than a hedge. Their test cases (`adjudicate none 2`;
+  `adjudicate ... 'app: dialectica_ui'`; `adjudicate ... 'steps: 2'`;
+  `adjudicate ... 'steps: ['`) each isolate the property the comment names,
+  and all pass as committed. `tst_workflow_run_bodies.sh` carries no `NO
+  SPEC` marker and needs none for the same reason — it pins a security
+  hardening choice (no `${{ }}` splice into a `run:` body) unrelated to any
+  app-behaviour scenario, consistent with `tst_ui_tool_pins.sh` and
+  `tst_scaffold_values_unchanged.sh` going unmarked for the same reason in
+  round 1.
+- **Spec soundness.** The two ADDED requirements do not contradict the
+  existing `view-navigation` requirements read in full alongside them:
+  "Exactly one screen is shown, and the selection has one source" already
+  requires exactly one main-area screen at any reachable state, and the new
+  requirements narrow *which* screen for two specific states without
+  conflicting; "The view holds no Stoa of its own..." already requires no
+  feed before a Stoa is chosen, consistent with "opens on the list." `openspec
+  validate e2e-suite-review --strict` passes. Part 4 (moved requirements)
+  still does not apply — the delta is purely `## ADDED Requirements`, nothing
+  removed from another capability.
