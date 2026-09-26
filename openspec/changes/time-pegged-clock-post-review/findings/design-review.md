@@ -179,3 +179,71 @@ or the issue.
 -p dialectica -p dialectica-core` passes in full (1180 + 30 + 0 dialectica-core
 tests, 0 dialectica tests, 0 doc-tests). `nix build ./dialectica#lgx` from the
 tree root succeeds. `tasks.md` is not ticked by me, per dispatch.
+
+## Re-review of e03230e..HEAD
+
+Read the owner's decision comment on issue #162 first (per dispatch); its
+first line is: "**Decision (owner, 2026-09-25): peg the Lamport counter to
+wall-clock time, as SDS does (LIP-109, `logos-lips/docs/anoncomms/raw/sds.md`,
+lines 148-155 and 184-192).**" It supersedes the issue body's "What this
+needs" where the two disagree, and both are silent on this range's actual
+content — the range is entirely the `dev-writer`'s and `spec-writer`'s
+response to the three prior findings ticked above (architecture's Decision 1
+finding, correctness's "permanently" finding, readability's two line-wrap
+findings) plus the six regular-review doc-comment fixes to `moderation.rs`,
+`op.rs` and `revision.rs`.
+
+This range does two things Decision 11 (`design.md:353-420`) newly claims:
+adds two forward-pointer notes to the archived
+`2026-09-25-time-pegged-clock/design.md` (after Decision 3's "What pins it"
+and after Decision 10's last paragraph), and renames the ambiguous "Before the
+window" phrase to `ADVANCE_BOUND` in both `revision.rs:300` and
+`moderation.rs:437`. I checked both against the code and against each other.
+
+**The two archived notes say what Decision 11 says they say, and land where
+Decision 11 says.** `git grep -n -F -e "time-pegged-clock-post-review" --
+openspec/changes/archive/2026-09-25-time-pegged-clock` returns exactly two
+lines, at `design.md:137` (Decision 3) and `design.md:275` (Decision 10) —
+matching Decision 11's own "How to check them" and matching
+`git diff origin/main...HEAD --stat -- openspec/changes/archive/`, which shows
+only that one file, 8 insertions, nothing else touched. Both notes are headed
+`*Added by a later change:*`, sit directly after the paragraph they correct,
+and name Decision 11 by number, exactly as Decision 11 describes.
+
+**The `ADVANCE_BOUND` rewording is identical at both sites and is not a new
+claim.** `moderation.rs:437-440` and `revision.rs:300-304` now read the same
+sentence ("Under `ADVANCE_BOUND`, which the receive window replaced in #165,
+the lead had no end: an op signed at the maximum counter was stored and led
+the order while the clock stayed below it, so [it] was ... permanently"), and
+Decision 11 states they were made to agree. `git grep -n -F -e "permanently"
+dialectica/rust-lib/dialectica-core/src` finds no other unqualified
+"permanently" near a bound claim that this pass should have caught and did
+not — the other ten hits are each about an unrelated store-corruption or
+moderation-durability claim, not this one.
+
+**Decision 1's withdrawal of the no-edit rule is accurate, not merely
+asserted.** Decision 1 now says "no document in this repo forbids editing an
+archived change." `git grep -n -i -F -e "not edited" -e "never edit" -e
+"immutable" docs/OPENSPEC-ARCHIVE.md` returns nothing, so the claim holds
+against the one doc that would state such a rule if it existed anywhere. The
+scope note for this dispatch says the same rule "came from the runner's own
+earlier brief, not from any repo document" — consistent with what `git grep`
+finds (or rather does not find).
+
+**`design.md`, `proposal.md` and `tasks.md` agree with each other about the
+archive edit.** `design.md`'s Context ("Neither is extended with the
+reasoning this change carries (Decision 1). The archived design gains only
+two labelled forward pointers to corrections made here (Decision 11)"),
+`proposal.md`'s Impact ("two labelled notes, one under each of archived
+Decisions 3 and 10") and `tasks.md` 1.2 ("Its only edit is the two forward
+pointers of 4.5") all describe the same two-note edit and nothing more. None
+still claims the archive folder is unedited.
+
+**No decision in this range contradicts the code.** `cargo test` (1180 + 30
+passed, 0 failed) and `nix build ./dialectica#lgx` both succeeded on this
+tree, and the diff is comments only, matching `proposal.md`'s Impact
+statement ("Code: comments only. Wire API and test logic: none.").
+
+No findings. The prior findings this range closes were already correctly
+argued and fixed; nothing this range added is undocumented, misdescribed, or
+in tension with the issue, the archived design, or the code.
