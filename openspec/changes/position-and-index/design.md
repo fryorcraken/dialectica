@@ -262,7 +262,7 @@ the delta's heading exactly.
 
 **What this costs.** The boundary is asymmetric. The architecture finding's
 scenario starts with a reader in `feed-read` who changes what counts as a
-malformed `page`, and that reader gets no pointer to `index`. Two things narrow
+malformed `page`, and that reader gets no pointer to `index`. One thing narrows
 the gap without closing it. While both fields share `parse_index` (D1), a code
 change that stops refusing one of `MALFORMED_INDEXES`' kinds, or drops the name,
 reaches `index` too, and `each_malformed_kind_of_index_is_refused_by_name` goes

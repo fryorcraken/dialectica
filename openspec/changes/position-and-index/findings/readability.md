@@ -276,7 +276,7 @@ matching outcome note appended to this file's "One gap" finding — plus the
 
 **One finding.**
 
-- [ ] **`dev-writer`** — `openspec/changes/position-and-index/design.md:265-266`
+- [x] **`dev-writer`** — `openspec/changes/position-and-index/design.md:265-266`
       — D6's "What this costs" paragraph opens with "Two things narrow the gap
       without closing it," but only one narrowing mechanism is actually
       described afterward: `parse_index` being shared means some code changes
@@ -300,6 +300,18 @@ matching outcome note appended to this file's "One gap" finding — plus the
       a one-word fix ("Two things" → "One thing", or naming what the second
       thing actually is) before archive removes the chance to compare against
       the outcome note.
+
+      **Outcome (`dev-writer`): fixed** in the commit that ticks this box. D6's
+      topic sentence now reads "One thing narrows the gap without closing it."
+      The paragraph describes one narrowing mechanism, the shared
+      `parse_index`. The two sentences after it are that mechanism's limits: a
+      newly refused kind that no `index` test lists, and a spec-only change that
+      reaches nothing. They are not a second narrowing, so there was no dropped
+      point to restore, and naming a second thing would have invented one. This
+      matches the singular in `findings/design-review.md:191`. It is a prose
+      change to `design.md` only, so no test moves and none can fail on it.
+      `git grep -F "Two things narrow"` finds no other quote of the old wording
+      outside this finding.
 
 Everything else in D6 and its outcome note reads clearly to someone who never
 saw `findings/architecture.md` or `findings/design-review.md`'s earlier
