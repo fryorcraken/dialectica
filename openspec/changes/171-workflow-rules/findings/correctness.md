@@ -682,3 +682,76 @@ Below the box threshold, in prose only:
 - `RUNNER.md` does not say that a round line may carry its own check. The
   round 1 and 2 annotations still work, because they sit on the line the
   runner reads before it runs the check, and they only apply to this piece.
+
+## Re-review round 7 `6d43cda..d1d2165`
+
+- [x] **re-review round 7 `6d43cda..d1d2165`: no findings** — read `RUNNER.md`'s tick paragraph (626-648) literally against `tasks.md`'s round lines 1-7, ran every round's check at `077d8be`, and read `16958b3` and `d1d2165` in `proposal.md` and `design.md`; clean
+
+I followed the tick paragraph as a runner would. The re-review row has never
+been ticked (`git log -G 'x\] re-review: every commit'` over `tasks.md` returns
+nothing), so the tick closes all seven rounds, none of them marked skipped. For
+each round I copied ``round <n> `<range>` `` from the start of its line into the
+command in single quotes:
+
+| Round | Forms copied from the line | Listed | Lanes the line ran | Verdict |
+|---|---|---|---|---|
+| 1 | numbered, `c222c37..9dc235c` | nothing | six | fails closed (see below) |
+| 1 | the line's own un-numbered check | all six files | six | passes |
+| 2 | numbered, `9dc235c..34fd428` | nothing | six | fails closed (see below) |
+| 2 | the line's own un-numbered check | all six files | six | passes |
+| 3 | `34fd428..dc1390a` | architecture, correctness, design-review, security, spec-test | six, readability re-run by 4 | passes by the exception clause |
+| 4 | `34fd428..dc1390a` | readability | readability | passes |
+| 5 | `dc1390a..d1c8726` | correctness, design-review, security, spec-test | those four | passes |
+| 6 | `d1c8726..6d43cda` | design-review, spec-test | those two | passes |
+| 7 | `6d43cda..d1d2165` | nothing (before any lane of this round committed) | four | correctly withholds the tick |
+
+A runner following the text therefore ticks correctly. It ticks once round 7's
+four lanes have committed and not before. It never ticks early on any round. The
+copy rule is also what makes round 4 come out right: typed with round 3's
+number, readability would have had to be excepted by hand. The paragraph's
+substitution is unambiguous, because every round line from 3 on starts with
+exactly ``round <n> `<range>` ``, character for character, which is the
+substring both patterns carry.
+
+The measurements `proposal.md` and `design.md` cite reproduce at this HEAD.
+Round 3's forms list five files (every lane's but readability). Round 4's list
+readability alone. Round 5's include `spec-test.md` and `design-review.md`, so
+a round 6 check copied from round 5's line would pass on round 5's records.
+
+Below the box threshold, in prose only:
+
+- **Rounds 1 and 2 under the literal text.** `RUNNER.md` says to copy
+  ``round <n> `<range>` `` from the line, and for these two rounds that gives
+  numbered forms nobody was briefed with. Those forms list nothing, so the
+  paragraph says "do not tick". The failure is closed rather than open. Each of
+  the two lines names its own check, and those checks list all six files. The
+  annotation sits on exactly the text the runner is told to copy from, so a
+  runner cannot reach the copy step without reading it. This is the same point
+  as the round-5 prose above and only applies to this piece. Low.
+- **The optional sentence (`RUNNER.md:641-643`) on its own.** It is correct but
+  incomplete when read alone:
+  - It states the match but not the consequence: the lane's file is then
+    listed, and the runner ticks before the re-run has written anything. A
+    reader has to take that from the previous sentence, "It must list…".
+  - The subject is too broad. "A number typed from memory" matches the rejected
+    record only when it is the wrong number. A number remembered correctly is
+    harmless. The "such as" clause carries the real case.
+  - "The earlier line's" needs "for a lane run again" to find its referent. The
+    sentence does supply that, so it resolves.
+  - "Rejected run" has its antecedent at `RUNNER.md:613`, which says the same
+    thing for continued runs: "the check below would pass on it before the
+    continuation had done anything".
+
+  So the sentence adds the fresh-dispatch case to a reason already stated. It
+  can be understood without its neighbours, but only just. One possible
+  wording: "Typed from memory, the earlier line's number for a lane run again
+  matches the rejected run's record whenever that run left one, and the check
+  passes before the re-run has written anything." That is a readability
+  preference, not a defect, and no outcome changes. Low.
+- **Two words for the same thing.** `proposal.md`'s wrong-line example says "a
+  round 6 check run with round 5's start", and `design.md` says "round 5's
+  forms". "Start" is the piece's own term for the ``round <n> `<range>` ``
+  prefix of a line (`RUNNER.md:600`, and design's "whose only fixed part is
+  their start"). A reader could still take it as the range's start SHA, which
+  would give `dc1390a..6d43cda`, a form that fails closed and so disproves the
+  example. The design wording is the unambiguous one. Low.
