@@ -789,3 +789,109 @@ Opus runs. The annotation lives on the runner's own line and binds only rounds
 1 and 2, so it cannot be reused for a later round. If the owner wants the line
 to be self-sufficient, it could name `security.md:230`, or `5961903`, as the
 accepted record; nobody needs to act for the check to be sound.
+
+## Re-review round 8 `6d43cda..d1d2165`
+
+- [ ] **`spec-writer`** — `proposal.md:906-920` and `:928-962` — the residual
+      the copy rule leaves is recorded as "a runner copying from the wrong
+      line", but a stale number written **on the line itself** is also left,
+      and the `closer`-side follow-up it is routed to cannot see it.
+      The copy rule moves the source of truth for the number from the
+      runner's memory to the round line. It does not check the line. A runner
+      that writes a re-run's line by taking the previous line as a template
+      and leaving the number unchanged has made the old number the correct
+      copy. That slip is the one the copy rule invites. The brief, the
+      reviewer's heading and the check all then carry the old number, and
+      they agree. So the check passes on the rejected run's record, whenever
+      that run left one, before the re-run has written anything. This is the
+      stale-number fail-open that `16958b3` was written to close. It
+      re-enters one step earlier.
+      **Scenario:** round 3 `34fd428..dc1390a` security is not accepted.
+      The runner writes the re-run line as
+      ``round 3 `34fd428..dc1390a` security re-run on Opus``, which duplicates
+      line 27's number, and the brief is copied from it. The check copied from
+      that line lists `security.md` at once.
+      **Measured** at this worktree's HEAD (`9e6dde2f`):
+      `git grep -l -F -e '## Re-review round 3 `34fd428..dc1390a`' -e '**re-review round 3 `34fd428..dc1390a`: no findings**' HEAD -- openspec/changes/171-workflow-rules/findings/`
+      lists `architecture.md`, `correctness.md`, `design-review.md`,
+      `security.md` and `spec-test.md`. Every one is from the first run, so
+      a re-run of any of those five lanes under a duplicated `round 3` line
+      is ticked with nothing written.
+      **Why the routing does not cover it:** the follow-up's "What a
+      `closer`-side check would do" (`:943-945`) matches "each round line
+      … by the same two forms". It derives the forms from the lines, so it
+      passes on a duplicated number exactly as the runner's check does. The
+      one thing that catches this is a check that two round lines never share
+      a number, and that the numbers run 1, 2, 3 in order. It is cheap
+      because the line's start is its one fixed part. Nothing in
+      `RUNNER.md:600-601` ("numbered from 1 in the order you write the
+      lines") enforces this, and neither does the follow-up.
+      **Ask:** in "What it still cannot see" (`:263-280`) and in the Risks
+      bullet at `:906-920`, record a duplicated or stale number on the line as
+      a separate residual from copying from the wrong line. Add "round
+      numbers under the row are unique and consecutive" to the follow-up's
+      "What a `closer`-side check would do" or "For the issue to settle".
+      `design.md`'s matching passages then follow: "What it still cannot see",
+      `:504-515`; the Risks paragraph, `:1303-1317`; and the
+      "[Only the runner runs the pre-tick check.]" Risk.
+      **Severity:** medium. The gate fails open on an ordinary templating
+      slip, the proposal says the residual is fully routed when it is not,
+      and the check this piece defers to the owner would be designed without
+      it.
+
+Security only, on Opus, narrowed to `16958b3` and `d1d2165`. I read `git diff
+6d43cda..d1d2165` over `RUNNER.md`, `proposal.md` and `design.md` in full,
+`RUNNER.md:560-668`, `proposal.md:170-264` and `:925-962`, the round lines in
+`tasks.md:24-32` and issue #171. There was no mutation, because the change is
+prose. I re-ran the design's measurements:
+
+- round 5's forms at `c3d697e9` list `correctness.md`, `design-review.md`,
+  `security.md` and `spec-test.md`. That includes the two lanes round 6 ran, so
+  the "wrong line" example holds.
+- round 3's forms at HEAD list the five files named in the box above.
+- round 7's forms at HEAD list `correctness.md`, `design-review.md` and
+  `spec-test.md`, with no `security.md`. The stalled round-7 security run
+  wrote nothing, which is why this round exists, and a round 7 check could not
+  have ticked over it.
+
+**Question 1: does the copy rule close the stale-number case?** For the case
+the round-5 box measured, yes: a number recalled from memory while the line
+carries the right one. The brief and the check now read the same line, so a
+correct line makes them agree by construction. The wrong-line residual is
+recorded honestly, with a real measurement, and the `closer`-side follow-up
+would catch it, because it derives each round's forms from that round's own
+line. The stale number on the line itself is not covered. That is the box.
+
+**Question 2: does the clause add a new way for a round to count as done?**
+No. The clause only fixes where the check's number and range come from, and
+every disagreement it can create fails closed:
+
+- A brief typed wrong while the line is right: the reviewer writes forms the
+  copied check does not search, the lane is not listed, and the row stays
+  unticked.
+- A line edited after the brief went out: the same thing happens.
+- Rounds 1 and 2: their lines each embed their own un-numbered check, and the
+  proposal now says those forms are not copied from the line's numbered start.
+  Round 1's command still passes on the rejected Sonnet box alone for
+  `security`. Round 5's prose covered that, and the line now says which record
+  is accepted.
+
+The Fail-open count went from four to three, with the stale-number case moved
+to its own bullet, and `design.md`'s "three fail-open cases" matches that. The
+only role-file edit is the `RUNNER.md` clause, and the "What you read" row at
+`RUNNER.md:81` points to it rather than restating it. Nothing under `.claude/`
+beyond that changed in the range.
+
+**Low, prose only:**
+
+- *"as the brief's was".* `RUNNER.md:629-630` reads "copied from that round's
+  own line as the brief's was". That is a comparison, but a quick reader could
+  take the brief as the source. If a runner copies from a brief that carried a
+  stale number, the check matches the rejected run's record and fails open.
+  The design and proposal say "as the brief's are [copied from the line]",
+  which is clearer. "copied from that round's own line, as the brief's forms
+  were" would remove the doubt.
+- *"Copied" is still typed.* For an agent, a copy is re-emitted text, so the
+  rule changes where the number is read from, not how it is produced. That is
+  the right mitigation for a number recalled from memory, and the residual
+  sits with the follow-up. Nobody needs to act on this.
