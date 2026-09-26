@@ -954,3 +954,103 @@ beyond that changed in the range.
   rule changes where the number is read from, not how it is produced. That is
   the right mitigation for a number recalled from memory, and the residual
   sits with the follow-up. Nobody needs to act on this.
+
+## Re-review round 9 `d1d2165..c4b1df5`
+
+- [ ] **`spec-writer`** — `proposal.md:284-293` and `design.md:503-514`,
+      `:540-546` — the repeated-number residual is routed on the claim that
+      "only a second reader of the round lines can" see it, and the
+      `RUNNER.md` rejection argues that any runner-side measure "adds no
+      check" and that the slip "stays in the class … a runner that skips the
+      check". Neither holds for a number check at the tick, which is one
+      command the fix itself ran, so a runner-side closure within this
+      piece's scope is neither taken nor recorded as rejected.
+      **Scenario:** the round-8 box's. Round 3 security is not accepted; the
+      runner templates the re-run line from line 27 and leaves `round 3`.
+      It then does everything `RUNNER.md:625-648` asks: copies the forms
+      from that line, runs the pre-tick check, sees `security.md` listed,
+      and ticks. This runner did not skip the check; it ran it faithfully
+      and it passed. So the slip is not in the "skips the check" class,
+      which is a runner omitting a step. It is a runner following every
+      step and still failing open, which is the class the pre-tick check
+      and the copy rule were each adopted to close, and both of those are
+      likewise "applied by the same runner whose slip they target".
+      **Measured:** at this tree's HEAD,
+      `git grep -n -F "      round " -- openspec/changes/171-workflow-rules/tasks.md`
+      prints the nine round lines, `tasks.md:25-33`, carrying 1 to 9 once
+      each, and nothing else. `0fbebed` used the same command to measure
+      "eight lines numbered 1 to 8, once each" at `291499c7`. With a
+      duplicated `round 3` line that output shows `round 3` twice. So the
+      runner can see the repeated number itself, before it ticks, with no
+      parser and no fixed format beyond the line's start, which
+      `proposal.md:976-978` already says is enough for the number check.
+      The earlier "Rejected: a mechanical guard" (`design.md:497-502`)
+      does not cover it: its objection is parsing the rest of the line,
+      which this does not do. The forms check at the same HEAD
+      (`'## Re-review round 3 ...'` and the verdict form) still lists
+      `architecture.md`, `correctness.md`, `design-review.md`,
+      `security.md` and `spec-test.md`, so the fail-open the round-8 box
+      rated medium is unchanged in the operative gate until an owner
+      follow-up with no issue number lands.
+      **This does not reopen the round-8 box.** That box asked only to
+      record and route, and `0fbebed`/`c4b1df5` did both, in every place it
+      named (checked below). The defect is new in this range: the decision
+      record's reasoning for not doing more.
+      **Ask:** either add the number check to the pre-tick step in
+      `RUNNER.md` (the round numbers under the row run 1, 2, 3 once each,
+      checked with the one `git grep -n -F` above before ticking), which is
+      within #171's re-review mechanism; or keep the rejection and correct
+      it. "Only a second reader can see them" becomes true of the wrong-line
+      case only, the Rejected entry drops "adds no check" and "stays in the
+      class … skips the check", and it records why a runner-side number
+      check at the tick is not taken.
+      **Severity:** medium. The outcome is the round-8 box's, a lane's
+      re-run ticked on the rejected run's record, now reached by a faithful
+      runner. The record that keeps it open would stop the next reader from
+      adding a check the piece's own precedent says is worth adding.
+
+Security only, on Opus, narrowed to the round-8 box and `0fbebed`,
+`c4b1df5`. I read `git show` of both in full, `RUNNER.md:585-660`,
+`design.md:470-590`, the round lines in `tasks.md:24-33`, and PR #174's body.
+No mutation: the change is prose.
+
+**Is the round-8 box honestly closed?** Yes, against what it asked. Every
+place that box named now carries the repeated number as a separate residual:
+`proposal.md`'s "What it still cannot see" (`:271-293`), the standing-test
+bullet (`:936-945`), the follow-up's gap and "would do" (`:963-979`); in
+`design.md`, "What it still cannot see" (`:525-546`), "What else was
+considered" (`:580-581`), both Risks (`:1347-1353`, `:1363-1374`), and the
+Rejected entry (`:503-514`). The PR body's owner follow-up names the
+unique-and-consecutive criterion. `git grep -n -i -F "wrong line"` over both
+files and `.claude/agents` finds no site that lists the wrong-line residual
+without the repeated number beside it. The re-measurements hold: the round 3
+forms list the same five files, and the follow-up's number check does see a
+repeated number. The box above is about the rejection's reasoning, not
+about whether the residual was routed.
+
+**Low, prose only:**
+
+- *The rejection cites the weaker sentence.* It argues from
+  `RUNNER.md:601`, "numbered from 1 in the order you write the lines".
+  `RUNNER.md:604-605` is stronger and more precise. It says a re-run's line
+  gets "the next number", which is word for word what the rejected clause
+  would add. Citing it would make the "restates" point hold without the
+  n-th-line inference.
+- *The PR body's standing-test follow-up is unchanged.* It still says a
+  stale round number is one that "this piece answers … by having the runner
+  copy the check's round and range from the round's line", with no residual.
+  `proposal.md:936-945` now says the copy rule leaves two residuals. The
+  owner follow-up in the same body carries the number criterion, so the
+  residual is still routed. But the text a project manager lifts into the
+  standing-test issue overstates what the copy rule closes.
+- *A re-run given no line at all.* Neither criterion sees it. A runner that
+  rewrites round 7's line to add "security re-run", instead of writing
+  round 8, keeps the numbers unique and consecutive. Round 7's forms then
+  match the rejected run's record. This predates the range (round 5's "The
+  line after the message") and breaks `RUNNER.md:604`'s rule outright. The
+  new text does not claim to catch it.
+
+Nothing under `.claude/` changed in the range. `git diff d1d2165..c4b1df5
+--stat` touches only `openspec/changes/171-workflow-rules/`. Nothing in it
+adds a route to `main`, a force, `--admin`, or a way for a round to count as
+done that was not there before.
