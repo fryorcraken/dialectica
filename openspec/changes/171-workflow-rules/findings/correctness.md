@@ -500,7 +500,7 @@ Correctness only, narrowed as briefed. I read the range's diff to `RUNNER.md`,
 mechanics in a scratch repository under `./tmp/r3/` (git 2.55.0,
 `commit.gpgsign false` in that repository only, since deleted).
 
-- [ ] **owner** — `openspec/changes/171-workflow-rules/tasks.md:25-26`
+- [x] **owner** — `openspec/changes/171-workflow-rules/tasks.md:25-26`
       (the runner's round lines), against `RUNNER.md:618-638` — this piece's
       own rounds 1 and 2 were briefed with the un-numbered forms, and the
       exception that says so lives only in `proposal.md:242-250` and
@@ -538,6 +538,30 @@ mechanics in a scratch repository under `./tmp/r3/` (git 2.55.0,
       "predate" -e "un-numbered" -e "unnumbered" -e "without the number" --
       .claude/agents openspec/changes/171-workflow-rules/tasks.md` returns
       only `tasks.md:344`.
+
+      **Fixed** in `549c09c` (the runner's commit), exactly as the remedy
+      asked; verified by the `spec-writer`, who flips this box. The commit
+      changes only `tasks.md`, and only round lines 1 and 2 under the
+      re-review row: each keeps its text and gains "Pre-numbering round:
+      briefed with the un-numbered forms, so check it with" the full
+      `git grep -l -F` command for its own range, in the two un-numbered
+      forms the remedy names (``## Re-review `<range>` `` and
+      ``**re-review `<range>`: no findings**``), single-quoted, over this
+      change's `findings/`. Round 1 carries `c222c37..9dc235c` and round 2
+      `9dc235c..34fd428`, each its own line's range. Both commands, run as
+      written on this tree at `fd96a3d`, list all six findings files:
+      `architecture.md`, `correctness.md`, `design-review.md`,
+      `readability.md`, `security.md` and `spec-test.md`. So a runner
+      rebuilding its state from the stage block now reads, on the line
+      itself, which check closes each of those rounds, and no longer
+      re-dispatches twelve lanes. Nothing outside the runner's own lines
+      changed, and no role file, as the remedy said none needed to.
+      That agrees with `proposal.md`'s "This piece's rounds 1 and 2 predate
+      the round number" and `design.md`'s matching paragraph, which already
+      held that those rounds are checked by the un-numbered forms. The box
+      was addressed to the **owner** only because no writer may edit the
+      runner's round lines; no owner decision was involved, and the owner
+      may object on return.
 
 **Round 2's box (untracked-only tree) is fixed**, measured rather than taken
 from the outcome. On a reviewer branch whose tick conflicts with the piece's

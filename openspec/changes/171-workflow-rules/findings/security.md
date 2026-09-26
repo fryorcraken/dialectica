@@ -615,7 +615,7 @@ mutation: the change is prose.
   (`proposal.md:239-241`) and needs the literal round number and range in the
   prose, which the placeholders in quoted forms do not carry.
 
-- [ ] **`spec-writer`** — `proposal.md:186-190`, carried into `RUNNER.md:604-609`
+- [x] **`spec-writer`** — `proposal.md:186-190`, carried into `RUNNER.md:604-609`
       and `design.md:393-397`. "Continuing the same agent with `SendMessage` is
       not a new dispatch and gets no line" also covers continuing an agent
       whose run the runner **did not accept**. That agent has already
@@ -651,6 +651,40 @@ mutation: the change is prose.
       `SendMessage` carve-out covers only continuing an agent that has not yet
       committed its record for the round, such as one stalled before its
       commit or one asked to rebase.
+
+      **Fixed** (`spec-writer`, this commit), as suggested, and as one rule
+      that replaces the old one rather than an exception beside it. The line
+      rule is now keyed to the lane being run again, not to how: a lane run
+      again over a range it already had gets a line of its own whether the
+      runner dispatches a fresh agent or continues the same one with
+      `SendMessage`, and a continuation message gives the new line's two
+      forms whole, as a brief does. Continuing an agent gets no line only
+      when it adds no review to a record already committed: finishing a round
+      it has not yet recorded (such as after a stall), committing, or
+      rebasing. The rebase case needed naming separately from the suggested
+      "has not yet committed its record": a reviewer continued to rebase
+      after its cherry-pick conflicted has committed its record, and its run
+      was accepted, so keying on "committed" alone would give it a line for
+      no review. The pre-tick check now says "every lane the round ran" and
+      exempts "a lane that a later line ran again", where both said
+      "dispatched", so a continued re-run is checked, and exempts the
+      earlier line, exactly as a fresh one does. In the scenario,
+      the continued reviewer is told round 2, so round 1's check skips
+      `security` and round 2's lists `security.md` only once the
+      continuation commits its own round-2 heading or box: a stalled
+      continuation leaves the row unticked. Not chosen: forbidding a
+      continuation of a rejected run and always dispatching fresh. It is also
+      one rule, but it fights the cheapest step the runner reaches for when
+      the defect is "did not read X", and a runner that continued anyway
+      would reopen the hole; numbering the re-run closes it whichever way the
+      lane is run. `proposal.md` carries the rule under the re-review row's
+      line bullet, the exemption, and Impact. For the `dev-writer`:
+      `RUNNER.md:604-609` (the rule, restated by the above),
+      `RUNNER.md:629-631` ("the round dispatched" to "the round ran", and
+      "dispatched again" to "ran again"), and in `design.md` the summary at
+      `:103-104`, the bullet at `:393-397`, the check at `:410-411` (the same
+      two word changes), and "Why the number" or "Rejected", for the
+      continued-run reason and the forbid-continuation alternative.
 
 **Clean in this range, and why** (lower-severity notes included, unboxed).
 

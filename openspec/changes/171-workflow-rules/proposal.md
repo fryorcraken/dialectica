@@ -183,16 +183,24 @@ another file.
     written, and goes on to what landed, the lanes and the model each ran on,
     and why that size. A round the runner skips also gets a line, with the
     reason. These lines are not rows: they carry no box.
-  - **A lane dispatched again over a range it already had gets a line of its
+  - **A lane run again over a range it already had gets a line of its
     own**: the next number, the same range, the lanes it re-runs, and why (a
-    run the runner did not accept, or an agent replaced after a stall).
-    Continuing the same agent with `SendMessage` is not a new dispatch and
-    gets no line. The number is what tells two runs of one lane over one
-    range apart, which the range cannot: on this piece's round 1, the
-    runner did not accept the Sonnet security run and re-ran the lane on
-    Opus, and a search for the range alone is satisfied by the Sonnet run's
-    verdict box (`findings/security.md`, re-review `9dc235c..34fd428`, first
-    box).
+    run the runner did not accept, or an agent replaced after a stall). That
+    holds however the lane is run again: a fresh dispatch, or the same agent
+    continued with `SendMessage`, whose message then gives the new line's
+    two forms whole, as a brief does. Continuing an agent gets no line only
+    when it adds no review to a record already committed: finishing a round
+    it has not yet recorded, such as after a stall, committing, or rebasing.
+    Its record, once committed, is the round's own. The number is what
+    tells two runs of one lane over one range apart, which the range
+    cannot: on this piece's round 1, the runner did not accept the Sonnet
+    security run and re-ran the lane on Opus, and a search for the range
+    alone is satisfied by the Sonnet run's verdict box
+    (`findings/security.md`, re-review `9dc235c..34fd428`, first box). A
+    continued run needs the number as much as a fresh one: the rejected
+    run's record is already committed under the old number, so the check
+    would pass on it before the continuation had done anything
+    (`findings/security.md`, re-review round 3 `34fd428..dc1390a`, box).
   - **The row is never struck.** A round with nothing to review gets its line
     and then a tick.
   - **The runner ticks it when no commit that merges is unreviewed**, and
@@ -209,9 +217,9 @@ another file.
     git grep -l -F -e '## Re-review round <n> `<range>`' -e '**re-review round <n> `<range>`: no findings**' -- <change folder>/findings/
     ```
 
-    It must list the findings file of every lane the round dispatched (the
+    It must list the findings file of every lane the round ran (the
     file names in `RUNNER.md`'s "How many at once"), except a lane that a
-    later line dispatched again over the same range: that line's own check
+    later line ran again over the same range: that line's own check
     covers it. The command prints file names, not findings, so it stays
     within what the runner reads. A lane whose file is not listed has not
     finished the round, however finished its agent looks or whatever its
@@ -883,7 +891,7 @@ another file.
     runner run, before it ticks that row,
     ``git grep -l -F -e '## Re-review round <n> `<range>`' -e '**re-review round <n> `<range>`: no findings**' -- <change folder>/findings/``
     for every round the tick closes, and not tick while the findings file
-    of any lane the round dispatched is missing. That makes the tick rest
+    of any lane the round ran is missing. That makes the tick rest
     on the re-reviewers' own records, but the runner both runs the check
     and ticks the row, so a runner that skips the check goes unnoticed:
     `closer.md` Step 1 checks only that every row but the `closer`'s own is
@@ -1064,7 +1072,8 @@ None. This change edits agent instructions and no system behaviour, so
   diff-scoped marker command and its request for product decisions; step 3's
   re-review brief, including the clean re-reviewer's verdict box and the
   heading naming the round, both in exact forms; round lines numbered, and a
-  line of its own for a lane dispatched again over the same range; the
+  line of its own for a lane run again over the same range, fresh or
+  continued; the
   runner's check before it ticks the re-review row, searching those two
   forms, with its row in "What you read"), "The `closer`, and what comes back" (#171; its returns
   given as examples with no count, including a `BLOCKED` PR and an unticked
