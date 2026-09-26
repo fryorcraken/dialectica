@@ -414,7 +414,8 @@ here, and whom", so the archived sentence is now true of both sites. Its
 contrast with the old code names `ADVANCE_BOUND` rather than saying "before the
 window": review read that phrase as the hour before the time passes the
 counter, which made the paragraph's "permanently" contradict its own "for up to
-an hour". No test can see a doc comment. The behaviour it describes is the
+an hour". `moderation::resolve`'s doc had the same sentence and now has the same
+wording. No test can see a doc comment. The behaviour it describes is the
 ordering rule's and is pinned by `op-ordering`'s scenario "An op signed ahead
 of the time leads only until the time passes it".
 

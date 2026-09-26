@@ -204,6 +204,10 @@ above:
       argument. The readability re-review read it as ambiguous too. It would
       take the same rewording. It is outside this piece's diff, so I have
       reported it and not changed it.
+      **Follow-up (`dev-writer`):** the runner ruled `moderation.rs` in scope,
+      since this PR carries the review of #165's code. Its sentence now names
+      `ADVANCE_BOUND` in the same words, in the commit after the one that
+      ticks this box. Doc comment only.
 
 Nothing else in the `439c192..HEAD` diff drew a correctness finding:
 
