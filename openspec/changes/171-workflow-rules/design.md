@@ -1247,27 +1247,38 @@ no role file.
   They do not fail alike:
   - **fail closed**, the agent stops or reports: a mistyped `ls-files`
     pathspec returns no path or several, and the `closer` stops; a pre-tick
-    pattern with a wrong character lists nothing, and the runner cannot tick;
-    the save with `--binary` dropped writes `Binary files … differ` for a
-    binary change, `git apply` refuses it, and the reviewer reports it — but
-    step 2 has already discarded that change, so the loss is reported, not
-    prevented;
+    pattern with a wrong character that no committed record carries lists
+    nothing, and the runner cannot tick; the save with `--binary` dropped
+    writes `Binary files … differ` for a binary change, `git apply` refuses
+    it, and the reviewer reports it — but step 2 has already discarded that
+    change, so the loss is reported, not prevented;
   - **fail open**, every command exits 0 and the flow carries on: a mistyped
     `openspec/specs/` path lists nothing, and an unreviewed spec change would
     merge; a pre-tick search cut down to the bare range matches it in prose,
     and one cut to a single SHA also matches the previous round's records,
-    so the runner ticks over lanes that never ran; and the save with `HEAD`
-    dropped writes only the unstaged changes, step 2 discards the staged
-    ones, and step 4 applies cleanly with the staged mutation gone
-    (`findings/architecture.md` and `findings/spec-test.md`, re-review
-    `9dc235c..34fd428`, both measured).
+    so the runner ticks over lanes that never ran (`findings/spec-test.md`,
+    re-review `9dc235c..34fd428`, measured); a pre-tick search for a lane run
+    again, typed with the earlier line's round number, matches the earlier
+    run's record over the same range whenever that run left one for the
+    lane, so the runner ticks before the re-run has written anything — the
+    record the line rule's number exists to set aside, as with round 1's
+    Sonnet security box (`findings/spec-test.md`, re-review round 5
+    `dc1390a..d1c8726`, measured at `80c1bcc8` over `34fd428..dc1390a`: the
+    round 3 forms list every lane's file but `readability.md`, and the
+    round 4 forms list `readability.md` alone; the round 3 readability run
+    wrote nothing, so this piece's round 4 would have failed closed under
+    round 3's number, and a lane whose earlier run did write would not);
+    and the save with `HEAD` dropped writes only the unstaged changes, step
+    2 discards the staged ones, and step 4 applies cleanly with the staged
+    mutation gone (`findings/architecture.md` and `findings/spec-test.md`,
+    re-review `9dc235c..34fd428`, both measured).
 
   `RUNNER.md`'s `--ff-only`, `--remerge-diff` and `--cherry-mark` claims
   describe git's own behaviour, and a test of them would mostly re-test git.
   → Deferred to the standing-test follow-up in `proposal.md`'s "Out of
   scope", listed in PR #174's follow-ups in place of the earlier
   pathspec-only one: a script under the `lint` job that extracts each command
-  from the role file and runs it against fixtures, the three fail-open cases
+  from the role file and runs it against fixtures, the four fail-open cases
   first. Not added here: this change adds no tests or CI, and a test holding
   its own copy of a command would not fail when a role file's copy changed.
 - **[Only the runner runs the pre-tick check.]** It makes the re-review row's

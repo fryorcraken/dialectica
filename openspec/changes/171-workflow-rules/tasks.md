@@ -396,3 +396,19 @@ Supersedes 12.2's "a `SendMessage` continuation none". Wording follows
       run needs a number and why the rebase case is named; "Rejected" gains
       forbidding the continuation of a rejected run.
 - [x] 13.4 `openspec validate 171-workflow-rules --strict` passes.
+
+### 14. After the `spec-writer`'s stale-number reclassification (`e2f2729`)
+
+Supersedes 12.7's standing-test Risk wording. Follows `proposal.md`'s
+standing-test entry as `e2f2729` left it; no `.claude/` file changes.
+
+- [x] 14.1 `design.md`'s "The git commands the role files name have no
+      standing test" Risk: the fail-closed pre-tick case narrowed to "a wrong
+      character that no committed record carries"; the fail-open list gains
+      the stale-number case (a re-run's check typed with the earlier line's
+      number matches the earlier run's record over the same range when that
+      run left one for the lane), with its measurement and the round 3
+      readability refinement; "the three fail-open cases first" now four.
+      Verify: `git grep -n -i "three fail" --
+      openspec/changes/171-workflow-rules/design.md` returns nothing.
+- [x] 14.2 `openspec validate 171-workflow-rules --strict` passes.
