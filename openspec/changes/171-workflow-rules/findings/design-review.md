@@ -913,3 +913,61 @@ Below medium, in prose:
   breaks, the tail fails. A reader of `design.md` alone meets a singular end
   eighty lines after an entry arguing there is none. The same gloss, or
   "an end the chain reaches", fixes all four.
+
+## Re-review round 16 `bad7c88..b5ceed2`
+
+- [x] **re-review round 16 `bad7c88..b5ceed2`: no findings** — read `git diff bad7c88 b5ceed2` over `RUNNER.md`, `design.md` and `proposal.md`, `git diff 8de35bf7 b5ceed20 -- design.md` (the six rewordings, each against the sentence it replaced), `RUNNER.md:530-560` and `:640-790` at `b5ceed2`, `design.md:960-1040`, `findings/spec-test.md:1290-1311`, and a sweep of all three files for "skipped with", "or skipped", "chain's end", "chain broken" and "off-by-one"; clean
+
+Below medium, in prose:
+
+- **`RUNNER.md` implements the adopted decision, not a rejected one, and
+  the "Kept" pair is closed.** `:746-747` says both repairs are "sized as
+  above and runs at least one lane; neither is ever marked skipped", with no
+  gate on the nothing-landed commands (the first rejection) and no scoping of
+  "either is sound" to sized lines (the second). `:752-756` replaces the old
+  open "such as" with "Only two commits … a clean merge of `main`, and an
+  archive commit that changed nothing under `openspec/specs/`", matching
+  `:549` and `:553` in the list of commits that need no review. No "or
+  skipped" survives in `RUNNER.md`, `design.md` (bar the quotation at `:994`)
+  or `proposal.md`.
+- **The decision is sound as recorded; one of its reasons lives only in a
+  findings file.** `design.md:1004` states "at least one lane" but not why a
+  sized round needs it. The why is in `findings/spec-test.md:1304-1307`: a
+  round sized to no lanes is a skip in all but name and passes the forms
+  check vacuously, since there is no lane whose file must be listed. That is
+  the sentence that stops the next reader from treating the clause as
+  redundant with "never marked skipped", and the findings folder is deleted
+  by the `closer`. One sentence in the Adopted entry would carry it.
+- **The "Kept" reasoning holds, with a softer spot than it admits.** "A fact
+  about that one commit, not a claim that another round covered something"
+  is the right distinction: the off-by-one's skip reason is produced by the
+  same slip that made the gap, while a merge's cleanliness is observed
+  separately, by the `closer`, which aborts rather than resolves a conflict
+  (`RUNNER.md:857`). But the fact is still unchecked at the tail check, the
+  same as the reason `design.md:975-976` says nothing checks. A writer's
+  conflict resolution is also a merge commit of `main`, and `RUNNER.md:540`
+  says it needs review; nothing in the tail bullet tells the runner how to
+  tell the two apart. The risk is low because the runner dispatched that
+  writer itself. It is uncorrelated with the slip, too. So this is no box, but
+  "It is not the same hole" overstates it: it is the same hole with an
+  independent witness.
+- **None of the six rewordings changes a decision.** Four (`:1029-1030`,
+  `:1053-1054`, `:1056-1058`, `:1965-1966`) swap "the chain's end" for "an
+  end the chain reaches" and read the same under reaching. `:1064-1065`
+  changes the stated consequence from "leave the chain broken" to "the tail
+  check … would list it and fail". The decision is unchanged, and the new
+  consequence is the correct one under the chain rule and agrees with the
+  Kept entry's own `:1021-1022`. `:1993-1995` widens "pass over a commit
+  landed after the last round" to "miss a commit landed after that end",
+  which is what a mistyped command run from any reached end actually does.
+  `proposal.md:1251-1252` still has the older pair ("the chain's end", "after
+  the last round"). The first is covered by its gloss at `:412`, but "the last
+  round" is not, so the two documents now say this sentence differently.
+- **My round-15 notes.** "Every file difference" is taken at `design.md:971`,
+  with a clearer statement of what the argument does not show (ranges, not
+  reads), and the rewording clears the four "chain's end" sites, "pass over"
+  and "chain broken". The reached-end note is unchanged:
+  `design.md:985-986` still says the check "always terminates". That holds
+  only if the runner re-checks from the end it just wrote, and `RUNNER.md`
+  still does not say so. This range neither helps nor worsens it. It costs
+  rounds, not soundness.
