@@ -1348,3 +1348,102 @@ Below the box threshold, in prose only:
   `2259e7ff`, is the spec-test review, which belongs to the review round
   itself and was picked after a tick. The rule is right and its reason is
   imprecise. Low, wording only.
+
+## Re-review round 14 `c3bda2b..e5dcce4`
+
+- [ ] **`spec-writer`** — `proposal.md:394-425`, followed by `RUNNER.md:723-748`
+      — the chain condition has no terminal state for a round line whose range
+      overlaps the chain, so a piece holding one can never tick without
+      breaking "never change an existing line's range". The chain follows "the
+      line whose range starts at" a commit, which assumes one such line, and
+      passes over only a line with the *same* range as one followed. A line
+      whose start lies before the chain point it belongs at, or which shares a
+      start with another line but ends elsewhere, is neither followed nor
+      passed over, whatever is added below it. The bullet then diagnoses it as
+      "some commits lie in no round's range" and says to write a line for "the
+      missing range", but no commit is missing and there is no such range.
+      **Scenario:** on a copy of this stage block, the round 14 line is
+      templated from round 13 with only its end updated:
+      ``round 14 `1380d50..e5dcce4` ``. The listing prints the two rows and
+      fourteen round lines, 1 to 14 once each, so the first three conditions
+      pass. The chain runs c222c37 → 9dc235c → 34fd428 → dc1390a (4 passed
+      over) → d1c8726 → 6d43cda → d1d2165 (8 passed over) → c4b1df5 → 842758b →
+      dd4fe18 → 1380d50 → c3bda2b, then stops, because no line starts at
+      `c3bda2b`. Round 14 is neither followed nor passed over, because its range
+      differs from round 13's. Every commit in `c3bda2b..e5dcce4` is inside
+      round 14's range, so nothing is missing. There are only two repairs. Line
+      15 `c3bda2b..e5dcce4` (sized, or skipped as covered) extends the chain to
+      `e5dcce4`, and round 14 stays neither. Choosing round 14 at `1380d50`
+      instead of round 13 leaves round 13 neither. Either way the condition
+      fails for good. The runner is left with two options, both bad: a piece
+      that cannot close, with the owner away, or editing round 14's range,
+      which is the fail-open move the rule forbids. The same state is reached
+      in two other ways. One is a round 1 whose start is a remembered HEAD
+      earlier than the derived `<review>`. The other is a mid-chain gap
+      repaired with the tail bullet's "record the next round, starting at the
+      chain's end" instead of the gap bullet. On a copy with round 9 written
+      ``round 9 `0fbebed..c4b1df5` ``, the chain stops at `d1d2165`, and the
+      tail check from there also fails (it lists `proposal.md` and `design.md`
+      among others). Taking the tail repair gives ``round 15 `d1d2165..<HEAD>` ``,
+      and rounds 9 to 14 are then permanently neither. The template slip is
+      the start-side twin of the number slip the number check exists for
+      ("a re-run's line templated from the previous one"), and it is at least
+      as likely. **Severity:** medium. The condition fails closed, but the
+      tick is then impossible, and the only way out is to break the rule's own
+      "never". **Needs:** a rule for a line that covers commits already on the
+      chain. For example, a line whose range lies entirely within the span the
+      chain has covered is passed over, and "the line starting at X" becomes
+      the one reaching furthest. Or the gap bullet says to repair every break
+      before the tail check runs, and defines the chain's end only once every
+      line is followed or passed over.
+      **Measured:** listings of `tmp/r14-correctness/chain-overlap.md` and
+      `chain-gap.md` (since deleted; `git grep --no-index`, the number check's
+      three patterns) pass the first three conditions. Walking the chain by hand gives the
+      stops above. `git log` over `d1d2165..c4b1df5` shows `0fbebed` (a
+      `spec-writer` commit) as the one commit the gap copy's round 9 leaves
+      out. For that copy, the gap bullet's own repair, ``round 15
+      `d1d2165..0fbebed` ``, chains 1 … 7, 15, 9 … 14 to `e5dcce4`, which is
+      right.
+
+On this tree the condition gives the right decision. `<review>` derives as
+`c222c37b` (the last line of the derivation is `f94f7b8d c222c37b`). Rounds
+1, 2, 3, 5, 6, 7 and 9 to 14 are followed, and 4 and 8 are passed over as
+repeats of 3 and 7. The chain ends at `e5dcce4`.
+`git diff --no-renames --name-only e5dcce4 HEAD` lists only `tasks.md`, and the
+`tasks.md` diff is the round 14 line added, so the tail is tracking only, with
+the round-line allowance. All four number-check conditions hold. The tick
+still waits on the forms check for round 14, whose five lanes have not yet
+recorded, so not ticking at `015f497` is right. On the off-by-one copy (round 9
+starting at `0fbebed`), the gap bullet's repair is unambiguous for a single
+break. It gives the one extra line above and chains to `e5dcce4`.
+
+Step 2's rule fits the flow, and I found nothing in `RUNNER.md` that
+contradicts it. The first pick of a review round always applies cleanly,
+because the reviewer forked from the runner's HEAD. So with nothing landed,
+its parent is the dispatch HEAD, and the derivation's last line is exactly the
+first picked findings add. Later picks conflict and are rebased by their
+agents onto a HEAD that already holds that add, which does not move it. A
+reviewer's own row tick rides its findings commit, so "commit nothing" leaves
+the runner nothing it has to commit mid-round. A red CI run during the round
+can only be against the `dev-writer`'s pushed tip, because the runner never
+pushes, and step 2 holds that writer back. The `closer` needs every row
+ticked, so it cannot be out during the round. A re-review round needs no such
+hold: a commit landing during one lies after the chain's end, and the tail
+check owes a round for it.
+
+Below the box threshold, in prose only:
+
+- **The gap bullet does not say where the missing range ends.** With several
+  lines neither followed nor passed over (six in the round-9 copy), the gap
+  runs from the chain's end to the start of the unfollowed line nearest it in
+  ancestry. The runner has to work that out. Low.
+- **A skipped line's forms are never checked, and neither is its range.** An
+  existing round line whose range is edited in a later tracking commit shows in
+  the tail's `tasks.md` diff as a round line, which the allowance admits. For
+  an unskipped line, the forms check then fails, because reviewers were briefed
+  with the old range, so this fails closed. For a skipped line, nothing sees
+  it. Reaching it takes breaking "never change an existing line's range". Low.
+- **"A commit they list"** asks the runner to map the tail's paths back to
+  commits. After a `closer` return that holds a merge of `main`, a findings
+  deletion and an archive, the rule does not say whether that is one skipped
+  line or one per commit. Either chains. Low.
