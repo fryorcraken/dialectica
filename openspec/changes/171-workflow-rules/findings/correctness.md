@@ -491,3 +491,114 @@ Verified against the code rather than the outcomes, and clean:
   fails closed. A lane's file cannot hold a round's range before that round
   exists: the range ends at a commit made after every earlier outcome was
   written.
+
+## Re-review round 3 `34fd428..dc1390a`
+
+Correctness only, narrowed as briefed. I read the range's diff to `RUNNER.md`,
+`closer.md` and `dev-writer.md`, then `RUNNER.md`'s "What you read",
+"Dispatching" and step 3 in full as the runner would, and ran the new
+mechanics in a scratch repository under `./tmp/r3/` (git 2.55.0,
+`commit.gpgsign false` in that repository only, since deleted).
+
+- [ ] **owner** — `openspec/changes/171-workflow-rules/tasks.md:25-26`
+      (the runner's round lines), against `RUNNER.md:618-638` — this piece's
+      own rounds 1 and 2 were briefed with the un-numbered forms, and the
+      exception that says so lives only in `proposal.md:242-250` and
+      `design.md:456-462`, which `RUNNER.md:90-92` tells the runner to point
+      at, not read. A runner following `RUNNER.md` literally cannot tick this
+      piece's re-review row.
+      **Scenario:** the row has never been ticked (`tasks.md:24` is `[ ]`),
+      so the next tick closes rounds 1, 2 and 3 ("one recorded since the row
+      was last ticked"). A runner rebuilding its state from the `## Stages`
+      block after a compaction, which is the case the check exists for, runs
+      the numbered command for each round. Round 3 can list its lanes' files
+      once this round's commits land. Rounds 1 and 2 list nothing. `RUNNER.md:634-637`
+      then says: this lane "has not finished the round … continue that
+      reviewer, or dispatch a fresh one for the lane — which gets its own
+      line — and do not tick". That is twelve re-dispatches over two ranges
+      that were reviewed and answered, or a piece that stops. It fails
+      closed, so no unreviewed work merges, but the loop the runner narrowed
+      this round to converge restarts. Nothing in round lines 1 and 2 says
+      which form they were briefed with. Neither does the rest of the stage
+      block. The only on-tree mention outside the contract is `tasks.md:344`,
+      in the `dev-writer`'s checklist, below the block the runner reads.
+      Remedy, and why this is not addressed to a writer: annotate round lines
+      1 and 2 with the forms their briefs used (``## Re-review `<range>` ``
+      and ``**re-review `<range>`: no findings**``). Those lines are the
+      runner's own record ("The record, the tick and the untick are commits
+      you make"), so neither writer may edit them. No role-file change is
+      needed, and whoever makes the annotation flips this box. Severity:
+      medium, because a literal runner does the wrong thing, and it happens
+      only on this piece.
+      **Measured:** on this tree, `git grep -l -F -e '## Re-review round 1
+      `c222c37..9dc235c`' -e '**re-review round 1 `c222c37..9dc235c`: no
+      findings**' -- openspec/changes/171-workflow-rules/findings/` prints
+      nothing, and so does the same command for `round 2 `9dc235c..34fd428``.
+      The un-numbered forms for round 2 list all six files. `git grep -n -i -e
+      "predate" -e "un-numbered" -e "unnumbered" -e "without the number" --
+      .claude/agents openspec/changes/171-workflow-rules/tasks.md` returns
+      only `tasks.md:344`.
+
+**Round 2's box (untracked-only tree) is fixed**, measured rather than taken
+from the outcome. On a reviewer branch whose tick conflicts with the piece's
+adjacent tick, and whose only change was an untracked `probe.txt`, I ran the
+four steps as written. `mkdir -p tmp` and `git diff --binary
+--output=tmp/uncommitted.patch HEAD` exited 0. After the restore, the status was
+`?? probe.txt` / `!! tmp/`. `git rebase piece` stopped on `CONFLICT (content):
+Merge conflict in tasks.md`, and after `add` and `--continue` printed
+`Successfully rebased`. `git apply tmp/uncommitted.patch` exited 128 with
+`error: No valid patches in input (allow with "--allow-empty")`, which is the
+prefix `RUNNER.md:323-324` quotes. `probe.txt` was still in the tree. A staged
+new file came back `?? staged-new.txt` after save, restore and apply, as the
+new sentence says. The paragraph now tells the runner to carry the meaning of
+that refusal in its message, which was the missing piece.
+
+**The round-numbered pre-tick command** works as `RUNNER.md:626` gives it. The
+single quotes pass backticks and `**` through: the command ran here with no
+approval prompt, and it matched both forms. In the scratch repository:
+
+- the round 1 forms listed the files holding a round 1 heading or verdict box;
+- the same file set held `## Re-review round 11 …`, `**re-review round 12 …`,
+  a round 1 box over a longer SHA (`…e4f5a6bf`), and prose citing
+  ``round 2 `a1b2c3d..e4f5a6b` `` without the heading prefix. The round 1
+  command did not list a file on any of those, and the round 2 command
+  listed nothing. The closing backtick in both patterns is what ends the
+  number and the range.
+
+On the re-dispatch, a rejected run's `## Re-review round 1 …` heading did not
+satisfy round 2, and appending the round 2 verdict box made round 2 list
+`security.md`. On this tree, round 3's command printed nothing before any
+lane of this round had committed, so it fails closed.
+
+**A re-dispatch getting its own line** is consistent end to end. The earlier
+round's check exempts a lane a later round re-ran over the same range. That
+round's check needs the lane's file, and the number keeps the rejected run's
+record from satisfying it. A skipped line dispatches nothing, so it cannot
+trigger the exemption.
+
+**`dev-writer.md`'s route words** match `RUNNER.md`. The four sentences now say
+the runner "brings" the commits onto `piece/<name>`, and for a `dev-writer`
+`RUNNER.md:242-245` makes that a fast-forward. `git grep -n -i -F
+"cherry-pick" -- .claude/agents/dev-writer.md` returns only `:158`. That line
+is about commits made directly on `piece/<name>` in the wrong tree, where
+neither route applies, so it is accurate as it stands. The stage-row pointer
+at `:131-132` is also accurate: `spec-writer.md:47-53` says when adjacent
+ticks conflict and points to `RUNNER.md` for who resolves them.
+
+**`closer.md`'s edits** are clean. The Step 3 sentence now parses. "Every stop
+this file names ends your turn" matches every `stop` in the file. The only
+other use, at `:160`, is `git merge` stopping on a conflict, which the next
+paragraph turns into a closer stop.
+
+Below the box threshold, in prose only:
+
+- `RUNNER.md:621-622` runs the check "once every lane's findings commit is on
+  your HEAD". A lane that stalled has no findings commit, so read literally
+  the precondition never holds, the check never runs and the row stays
+  unticked. That is fail-closed, and the following sentences say what to do
+  about a missing lane. `proposal.md:206`'s "once the round's commits are on
+  it" is the looser wording.
+- The heading has a capital `Re-review` and the verdict box a lowercase
+  `re-review`. `-F` without `-i` is case-sensitive, so a reviewer who
+  capitalises the box fails the check and is re-dispatched. That is also
+  fail-closed, and the brief gives the form whole.
