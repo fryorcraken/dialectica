@@ -4,7 +4,15 @@
 
 - [x] spec — `spec-writer` — `proposal.md`; one delta, `specs/view-navigation/spec.md` (two requirements added, from findings/spec-test.md); `skip_specs` dropped
 - [x] design + code — `dev-writer` — design.md written; CLAUDE.md line; both proofs red then green in CI (Implementation 2 and 3); review findings fixed (Implementation 5, design.md D6–D10)
-- [ ] tests — `tester`
+- [x] tests — `tester` — `tst_e2e_handles.qml`: table test for the opening
+      screen (empty listing/no key held, failed listing, no bridge — the
+      fourth case, failed key query, was already pinned in
+      `tst_stoa_screens.qml`) checking both `screenShown` and each mounted
+      screen's own `visible`; table test extending the paste-refusal case to
+      the missing-`genesis` JSON shape. Both proved able to fail by mutation,
+      restored. Settled the `NO SPEC:` marker-count mismatch between
+      `tasks.md` 5.2/`correctness.md` and the file: corrected the wording,
+      the code was already right (findings/correctness.md, tasks.md 5.2)
 - [x] review: correctness — `code-reviewer` — findings/correctness.md: two findings for `dev-writer` (adjudicate-ui-run.sh's missing-report cause, and its uncaught no-steps crash), rest checked clean
 - [x] review: security — `code-reviewer` — findings/security.md: one low-severity finding (unquoted `${{ matrix.spec }}` in ui-tests.yml run: bodies); rest clean
 - [x] review: readability — `code-reviewer`
@@ -146,8 +154,11 @@ Each finding's box, outcome and predicted-versus-observed measurement is in
       before the change and is green after it
 - [x] 5.2 A spec with no, a non-list or an unparseable `steps:` is a reported
       problem, not a jq abort (`correctness.md` 2; design.md D7). Three new
-      `NO SPEC:` cases in `tst_adjudicate_ui_run.sh`, and two mutations
-      measured
+      cases in `tst_adjudicate_ui_run.sh`, under the one `NO SPEC:` marker
+      that `proposal.md`'s markers section already describes as covering all
+      three (not three separate marker lines — checked against the file by
+      `tester`, which found two `NO SPEC:` lines total, not three), and two
+      mutations measured
 - [x] 5.3 No `${{ … }}` in any workflow's `run:` body (`security.md`;
       design.md D8). `tst_workflow_run_bodies.sh` wired into `ui-specs`, red
       against the workflows #164 left and green after

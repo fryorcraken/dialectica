@@ -95,6 +95,18 @@ only — no code). Correctness dimension only.
       `steps: 2` then prints `ok: all 2 steps passed` and exits 0 (predicted
       4); the `if ! expected=$(…)` guard removed turns 2 red (predicted 2).
 
+      **`tester`'s check on "each marked `NO SPEC:`" above:** the file carries
+      two `NO SPEC:` marker lines in total, not three — one above the
+      missing-report case (this finding's other entry) and one above "a spec
+      with no `steps:` list is reported". The second marker's own text
+      explicitly covers the two cases after it, "a `steps:` value that is not
+      a list is refused, not counted" and "a spec that does not parse is
+      reported", which is exactly what `proposal.md`'s "The `NO SPEC:` markers
+      … stay" section describes as the intended shape (one marker, three
+      cases) rather than an omission. `tasks.md` 5.2 read as "three separate
+      marker lines" is corrected there. No marker line is added, and no test
+      case changes; this is a wording clarification only.
+
 ## Checked and clean (no finding filed)
 
 - **The `.steps` step-count guard does not depend on any YAML 1.1/1.2
