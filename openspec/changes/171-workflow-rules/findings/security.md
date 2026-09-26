@@ -586,3 +586,108 @@ notes say, on the paths those findings named.
   would get its resolution in unread. `git show --remerge-diff <merge>` being
   empty is a mechanical check the runner could run without reading content.
   Both lines predate this range, so this is left to the owner.
+
+## Re-review round 3 `34fd428..dc1390a`
+
+Security only, on Opus, narrowed. Read: `git log --oneline 34fd428..dc1390a`;
+`git diff 34fd428..dc1390a -- .claude/agents/` in full (RUNNER, closer,
+dev-writer); `RUNNER.md:500-739`; `proposal.md:1-14` and `:150-268`;
+`design.md:380-485`; the re-review row in `tasks.md:24-27`. Ran the pre-tick
+check three ways on this tree: the un-numbered round 1 forms list all six
+files; the numbered round 2 forms list nothing (fails closed, as `design.md`
+says); the round 3 forms list nothing before this section was written. No
+mutation: the change is prose.
+
+**Round 2's two boxes, checked against the text.**
+
+- *Two runs of one lane.* Closed for a **fresh dispatch**. `RUNNER.md:604-609`
+  gives a re-dispatched lane its own numbered line, `:626` searches
+  ``round <n> `<range>` `` in both forms, and `:630-631` exempts the earlier
+  line's lane, so a rejected run's round-1 box satisfies nothing the round-2
+  re-run must. Round numbers cannot collide by prefix: the pattern holds
+  `round 1 ` and a backtick, which `round 10 ` does not contain. It is **not**
+  closed for the other way of re-running a lane the same text allows, which is
+  the box below.
+- *A range in prose.* Closed. The check searches only the heading and verdict
+  forms (`RUNNER.md:626`), the brief gives both whole and never "such as"
+  (`:574-578`), and a loose heading matches neither. The remaining gap, a later
+  reviewer quoting an earlier round's form whole, is disclosed
+  (`proposal.md:239-241`) and needs the literal round number and range in the
+  prose, which the placeholders in quoted forms do not carry.
+
+- [ ] **`spec-writer`** — `proposal.md:186-190`, carried into `RUNNER.md:604-609`
+      and `design.md:393-397`. "Continuing the same agent with `SendMessage` is
+      not a new dispatch and gets no line" also covers continuing an agent
+      whose run the runner **did not accept**. That agent has already
+      committed its record for the round, so the pre-tick check passes on the
+      rejected run and cannot tell whether the continuation did anything.
+      Round 2's first box comes back by this route.
+      **Scenario:** round 1 `R` dispatches `security`. The reviewer commits
+      ``- [x] **re-review round 1 `R`: no findings** — read the role files``,
+      and the runner brings that commit onto its HEAD. From the hand-back it
+      sees the reviewer never read the handler diff, which is the non-accepting
+      reason in `RUNNER.md`'s own example line (`:614`). The obvious and
+      cheapest step is to continue the same agent with `SendMessage`: "also
+      read the handler diff". By `:607-608` that gets no line. The continued
+      reviewer stalls on a permission prompt, and a stalled agent looks exactly
+      like a finished one (`:637-638`). Before ticking, the runner runs
+      `git grep -l -F -e '## Re-review round 1 `R`' -e '**re-review round 1 `R`: no findings**' -- …/findings/`.
+      It lists `security.md` because of the rejected box, so the row is ticked,
+      and no security reviewer has read the handler diff. A continuation that
+      did finish would write the same form, so the check cannot tell the two
+      cases apart even in principle.
+      **Measured:** from the text, cited above. `git grep -n -F "SendMessage" --
+      .claude/agents/RUNNER.md` shows `:607` as the only rule on continuing an
+      agent within a round. It exempts continuation without asking whether the
+      agent already wrote its record. `:635` ("continue that reviewer") is
+      safe because it applies only when the lane's file is **not** listed, so
+      nothing is recorded yet. Severity: **medium**, for the same reasons as
+      round 2's first box, which this reopens. The precondition is the flow's
+      most frequent failure, the outcome is a re-review the runner judged
+      necessary being skipped, and continuation is a more likely choice than a
+      fresh dispatch whenever the defect is "did not read X", not "wrong model".
+      Possible fix: a run the runner did not accept gets a new numbered line
+      **however** it is re-run, whether continued or dispatched fresh. The
+      `SendMessage` carve-out covers only continuing an agent that has not yet
+      committed its record for the round, such as one stalled before its
+      commit or one asked to rebase.
+
+**Clean in this range, and why** (lower-severity notes included, unboxed).
+
+- **No new path to an unreviewed merge from the other edits.** `closer.md`'s
+  return paragraph now ends the turn on every stop the file names, including
+  `BLOCKED` and "anything else you stopped to report" (`closer.md:482-487`),
+  which narrows what a `closer` may do after reporting. The `closer.md:292`
+  edit is grammar only. The `dev-writer.md` edits change "cherry-picks" to
+  "brings", matching the fast-forward rule, and move no step or permission.
+- **History and protection.** Nothing in the range adds `--force`,
+  `--force-with-lease`, `reset`, `--no-ff`, `--admin`, `--auto` or a push to
+  `main`, and no text relaxes `closer.md`'s protection and ruleset
+  prohibitions. The step 3 list of commits needing no review
+  (`RUNNER.md:527-537`) is unchanged in this range.
+- **The mutating-reviewer rebase note** (`RUNNER.md:318-326`). It says an
+  untracked mutation stays in the tree through the rebase and that an empty
+  patch is not lost evidence. Neither sentence adds a way for a mutation to
+  reach a commit the runner picks. Low: when an incoming commit adds a file at
+  an untracked mutation's path, the rebase stops, and the text does not say
+  what the reviewer should do next. The likely improvisation is deleting the
+  file, which loses evidence but is not a merge path.
+- **A skipped re-run line (low).** `RUNNER.md:630-631` exempts an earlier
+  round's lane when "a later round dispatched again over the same range". A
+  later line for that lane marked *skipped* dispatched nothing, but a careless
+  reading could take its presence as the exemption. That would leave the lane
+  checked by neither round. It needs the runner to record a contradictory
+  line, so it is prose only.
+- **Self-extended authorisation (low, for the owner's attention).**
+  `proposal.md:9-12` now treats the `README.md` and `dev-writer.md` passages
+  naming the cherry-pick as corrections "inside the authorisation", because
+  the owner-authorised fast-forward rule makes them false. The edits
+  themselves are benign wording. The pattern, a writer ruling on its own that
+  a consequence of an authorised rule is also authorised under `.claude/`, is
+  the kind of relay CLAUDE.md's "`.claude/` is the owner's" guards against.
+  Whether the owner accepts it is the owner's call and not a security defect
+  in the text.
+- **The transition for rounds 1 and 2** (`design.md:456-475`). Re-measured:
+  the un-numbered round 1 forms list all six files, and the numbered round 2
+  forms list none, so a runner using the wrong form fails closed and cannot
+  tick.
