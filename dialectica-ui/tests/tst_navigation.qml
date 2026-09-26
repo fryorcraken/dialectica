@@ -573,6 +573,133 @@ TestCase {
         view.destroy()
     }
 
+    // ---- the record reaches the read that opens a screen (#152) -----------
+    //
+    // A screen re-pointed by the navigator gets its Stoa's address and its
+    // founding record from ONE navigator value, through separate bindings.
+    // `FeedScreen` read on the address alone, and when `open()` set `chosen`
+    // the address binding updated before the record's — so the first read of
+    // every open went out with the PREVIOUS record, "" coming from the list,
+    // which the core refuses as "genesis record ended mid-field". Any later
+    // read carried the right one, which is #152's report: an error on entering a
+    // Stoa that "Try reading again" clears. `feed.yaml` in the e2e suite went red
+    // on it, UI tests run 36213442819.
+    //
+    // The existing route tests could not see it: they assert what the
+    // NAVIGATOR holds (`chosen.genesis`) or what the LAST call carried, and a
+    // fake that answers every read alike cannot tell a refused first read from a
+    // good one. This fake answers a read only when the record it carries is the
+    // one the chosen Stoa has, so the screen's own read state is the witness,
+    // and every read is checked rather than the last.
+    readonly property string recordA: "beef"
+
+    function recordCheckingBridge() {
+        var record = spec.recordA
+        return {
+            calls: [],
+            callModule: function (module, method, args) {
+                this.calls.push({ method: method, args: args })
+                if (method === "list_stoas")
+                    return spec.oneStoa
+                if (method === "who_am_i")
+                    return '{"hasIdentity":false,"reason":"none"}'
+                if (method === "get_capabilities")
+                    return '{"canPost":false,"reason":"none"}'
+                if (method === "list_threads" || method === "read_thread") {
+                    var sent = JSON.parse(String(args[0])).genesis
+                    if (sent !== record)
+                        return JSON.stringify({ error: "genesis: this is not the record, got '"
+                                                       + sent + "'" })
+                    return '{"items":[],"page":0,"hasMore":false}'
+                }
+                return '{"error":"no fake reply for ' + method + '"}'
+            }
+        }
+    }
+
+    // Every record `method` carried from call `sinceIndex` on.
+    function recordsSentSince(bridge, method, sinceIndex) {
+        var sent = []
+        for (var i = sinceIndex; i < bridge.calls.length; i++)
+            if (bridge.calls[i].method === method)
+                sent.push(JSON.parse(String(bridge.calls[i].args[0])).genesis)
+        return sent
+    }
+
+    // Each route that lands on a feed for a Stoa the view holds a record for:
+    // from the list, back from a thread, back from moderation. The two returns
+    // matter as much as the open — the feed was re-pointed from "" each time,
+    // so each was the same race.
+    function test_the_feed_is_read_with_the_record_on_every_route_onto_it() {
+        var op = "cc" + "11".repeat(31)
+        var routes = [
+            { label: "opened from the list",
+              go: function (view) { view.open(spec.stoaA, "Nym Research", spec.recordA) } },
+            { label: "back from a thread",
+              go: function (view) {
+                  view.open(spec.stoaA, "Nym Research", spec.recordA)
+                  view.openThread(op)
+                  view.closeThread()
+              } },
+            { label: "back from moderation",
+              go: function (view) {
+                  view.open(spec.stoaA, "Nym Research", spec.recordA)
+                  view.moderateIn(spec.stoaA, "Nym Research", spec.recordA)
+                  view.closeModeration()
+              } }
+        ]
+        for (var i = 0; i < routes.length; i++) {
+            var r = routes[i]
+            var bridge = spec.recordCheckingBridge()
+            Core.bridge = bridge
+            var view = mainComponent.createObject(null, {})
+            var feed = spec.namedAnywhere(view, "feed")[0]
+            var before = bridge.calls.length
+
+            r.go(view)
+
+            compare(view.screenShown, "feed", r.label)
+            compare(feed.readState, "ok",
+                    r.label + ": the feed's read was answered, so it carried the record ("
+                    + feed.failure + ")")
+            // EVERY read, not the last: `view-navigation` forbids sending an
+            // empty record in place of a real one, and a transition that sent
+            // one and then corrected it would pass a check on the last read.
+            var sent = spec.recordsSentSince(bridge, "list_threads", before)
+            verify(sent.length > 0, r.label + ": the feed was read")
+            for (var k = 0; k < sent.length; k++)
+                compare(sent[k], spec.recordA,
+                        r.label + ": read " + (k + 1) + " of " + sent.length
+                        + " carried the record")
+            view.destroy()
+        }
+    }
+
+    // The thread screen is re-pointed the same way, from four bindings on one
+    // `reading` value, and read on its thread id. Opening a thread from a feed
+    // row must read it with the Stoa's record.
+    function test_the_thread_is_read_with_the_record_when_it_is_opened() {
+        var bridge = spec.recordCheckingBridge()
+        Core.bridge = bridge
+        var view = mainComponent.createObject(null, {})
+        var thread = spec.namedAnywhere(view, "thread")[0]
+        view.open(spec.stoaA, "Nym Research", spec.recordA)
+        var before = bridge.calls.length
+
+        view.openThread("cc" + "11".repeat(31))
+
+        compare(view.screenShown, "thread")
+        compare(thread.readState, "ok",
+                "the thread's read was answered, so it carried the record ("
+                + thread.failure + ")")
+        var sent = spec.recordsSentSince(bridge, "read_thread", before)
+        verify(sent.length > 0, "the thread was read")
+        for (var k = 0; k < sent.length; k++)
+            compare(sent[k], spec.recordA,
+                    "read " + (k + 1) + " of " + sent.length + " carried the record")
+        view.destroy()
+    }
+
     // ---- the moderation route --------------------------------------------
 
     // The screen exists so the owner can SEE it, so a route to it is the whole
