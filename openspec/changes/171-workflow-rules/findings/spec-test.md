@@ -1371,3 +1371,123 @@ Read: the `e5dcce4 bad7c88` diff of `proposal.md` and `design.md`,
 `findings/correctness.md` and this file, and issue #171 (open, no comments,
 not updated since before round 14). Nothing under `.claude/agents/`, and no
 `RUNNER.md` hunk.
+
+## Re-review round 16 `bad7c88..b5ceed2`
+
+- [ ] **`spec-writer`** — `proposal.md:423-437` with `:498-500`, `:606-622`
+      and `:1376-1380` (and `design.md:1018-1031`) — "neither is ever marked
+      skipped" is a runner rule nothing checks, and unlike every other
+      unchecked runner rule in this contract it is neither disclosed nor in
+      the second reader's scope. The only thing that separates a forbidden
+      skipped repair from a permitted skipped line is the free-prose reason
+      on the line. The number check reads only the fixed start, the chain
+      treats a skipped line like any other, the tail passes past it, and the
+      forms check skips "a round … marked skipped" (`:500`). The residual
+      list (`:606-615`) names only "a nothing-landed line written without its
+      own check", which is round 1. The `closer`-side check in "Out of scope"
+      (`:1376-1380`) re-runs the check only for "a round 1 marked skipped".
+      Everywhere else a rule the runner can break unseen is listed, as with
+      the lowered number, the review-round rule and the forgotten untick,
+      and routed to that second reader. This one is not, so the follow-up
+      built from "Out of scope" would ship without it. `design.md:975` now
+      says "coverage by a skipped line rests on its reason, which nothing
+      checks". `:1018-1022` then keeps the merge and archive skip as "not the
+      same hole", because its reason is "a fact about that one commit". That
+      holds only for a line whose range is that one commit, and nothing
+      checks the range either. So a repair skipped under the permitted label
+      ("skipped: archive commit, nothing under `openspec/specs/`") passes
+      every check exactly as the forbidden form does.
+      **Scenario:** my round-15 scenario, re-run under the new text on
+      `tmp/r16-spec-test/skipped.md`. That is the stage block with round 13
+      written ``round 13 `a0ce38f1..c3bda2b` ``, rounds 14-16 as at HEAD, and
+      ``round 17 `1380d50..a0ce38f1` skipped: round 13's start was one commit
+      late; its lanes read this range``. The runner breaks the bolded rule,
+      the row still ticks, and `a0ce38f1`'s `proposal.md` change merges
+      unread. **Severity:** medium. This is not a new mechanism gap. The
+      contract's own convention (record the residual, route it to the second
+      reader) was not applied to the rule this round added. **Needs:**
+      record-and-route, not a new runner check. (1) Add one sentence to the
+      "Nor does either check see" list: a line after round 1 marked skipped,
+      whatever its reason, is skipped by the forms check and extends the
+      chain, so a repair written as skipped, or any range labelled a clean
+      merge or archive, passes both checks. (2) Widen the `closer`-side check
+      at `:1376`: for every skipped line other than round 1, `git log
+      --format="%h %p %s" <range>` lists exactly one commit, and that commit
+      is a merge of `main` or an archive commit whose spec diff lists nothing.
+      Optionally, add one clause to `:433-437` saying a skipped line's range
+      is that one commit, since "a line of its own" says so only by
+      implication.
+      **Measured:** the number-check listing
+      (`git grep --no-index -n -F -e "] re-review: every commit" -e "      round " -e "] findings all ticked"`)
+      on `tmp/r16-spec-test/skipped.md` prints the two rows at 4 and 22 and
+      round lines 5-21, which is contiguous. It prints 1 to 17 once each,
+      with 3/4 and 7/8 sharing ranges, as on this tree. The chain by hand
+      from the derived `<review>` `c222c37b` (the derivation's last line is
+      `f94f7b8d c222c37b`): rounds 1-12 reach `1380d50`, round 17 starts there
+      and reaches `a0ce38f1`, round 13 then reaches `c3bda2b`, and 14, 15 and
+      16 reach `e5dcce4`, `bad7c88` and `b5ceed2`. `git diff --no-renames
+      --name-only b5ceed2 HEAD` lists `tasks.md` alone, and that diff is the
+      round 16 line, so the tail passes. The forms check is not run for round
+      17, because the line is marked skipped. So all four number-check
+      conditions and the forms check pass. `git diff --no-renames
+      --name-only 1380d50 a0ce38f1` lists `proposal.md`. `git log
+      --format="%h %p %s" 1380d50..a0ce38f1` lists seven commits, none of
+      them a merge. The one-commit check in (2) would therefore refuse this
+      line.
+
+**Q1: is the round-15 box closed?** Yes, for a runner that follows the text.
+Under `:423-424` the repair has to be a sized round with at least one lane.
+On `tmp/r16-spec-test/sized.md`, where round 17 `1380d50..a0ce38f1` is sized
+with a spec-test lane, the listing and chain come out the same as the
+skipped copy's: rows at 4 and 22, 1-17 unique, and the chain reaches
+`b5ceed2`. The forms check now has to run for round 17, and on this tree
+`git grep -l -F -e '## Re-review round 17 `1380d50..a0ce38f1`' -e '**re-review round 17 `1380d50..a0ce38f1`: no findings**' -- openspec/changes/171-workflow-rules/findings/`
+lists nothing. The runner therefore cannot tick until a lane briefed on
+`1380d50..a0ce38f1` has written a record, and that range's diff holds
+`a0ce38f1`'s `proposal.md` change. "Either line is sound" and
+`design.md`'s "never whether a commit is read" now hold as written. What is
+left is the box above: the prohibition is unchecked and undisclosed. By the
+contract's own standard, a rule broken unseen is acceptable when it is
+recorded and routed, so the missing record is what makes this medium, not
+the absence of a check.
+
+**Q2: the verify commands of `tasks.md` 21.3 and section 22.**
+
+- **21.3:** the derivation's last line is `f94f7b8d c222c37b`, as claimed.
+  The number-check listing on the real `tasks.md` prints the row at 24,
+  round lines 25-40 (1 to 16, unique) and the next row at 41. The chain by
+  hand reaches `9dc235c`, `34fd428`, `dc1390a` (rounds 3 and 4, identical
+  ranges), `d1c8726`, `6d43cda`, `d1d2165` (7 and 8, identical), `c4b1df5`,
+  `842758b`, `dd4fe18`, `1380d50`, `c3bda2b`, `e5dcce4` and `bad7c88`, and
+  round 16 now carries it on to `b5ceed2`. The row's "rounds 1 to 15 through
+  `bad7c88`" was true at `b5ceed2`, where it was written, and HEAD only
+  extends it. **Holds.**
+- **22.1:** `git grep -n -F -e "skipped with its reason" -e "such as a clean merge" -- .claude/agents/`
+  prints nothing, as claimed. This was the only contact with that directory,
+  and it returned no lines. It pins only that the old wording is gone, not
+  that the new rule is there. For a verify step that is weak, but it is
+  the implementation reviewers' job to judge, so it gets no box.
+- **22.2:** `git grep -n -F -e "chain's end" -e "chain broken" -- openspec/changes/171-workflow-rules/design.md`
+  prints nothing, as claimed. **One miscount:** the row says "the chain's
+  end" was reworded "at its five sites". The same grep at `bad7c88` prints
+  five lines, but only four are "chain's end" (`:1006`, `:1009`, `:1916`,
+  `:1944`). The fifth is "chain broken" (`:1016`), which the row counts
+  separately. Low, prose only.
+
+Below the box threshold, in prose only:
+
+- **`proposal.md:1250-1252` was not carried along with `design.md:1993`.**
+  `design.md`'s copy of the fail-open preamble now says the mistyped
+  commands "also let it miss a commit landed after that end". The proposal
+  still says "from the chain's end, so the three that mistype them also let
+  it pass over a commit landed after the last round". "The chain's end" is
+  defined at `:411-412`, so that half is fine. But "after the last round"
+  is the pre-round-15 model, in which the tail ran from the last line, and
+  "pass over" is the verb round 15 removed from the chain. Low.
+
+Read: the `bad7c88 b5ceed2` diff of `proposal.md`, `design.md` and
+`tasks.md`, `proposal.md:300-640` and `:1230-1270` and `:1360-1404`,
+`design.md:1015-1034`, `tasks.md:1-48`, this file's round-15 section, and
+issue #171 (open, no comments, `updatedAt` 2026-09-25, unchanged since round
+15). Nothing under `.claude/agents/` was read. The 22.1 grep over it
+returned no lines. No `RUNNER.md` hunk was read.
