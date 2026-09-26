@@ -210,3 +210,43 @@ Confirmed real, and already disclosed in `proposal.md`'s "Overlap with open PR
    the disclosed overlaps (1 and 2) are inherent to two PRs legitimately
    proposing changes to the same few lines, not something a different design
    in this piece would have avoided.
+
+## Re-review round 1 (`c222c37..9dc235c`)
+
+- [x] **re-review `c222c37..9dc235c`: no findings** — re-read the full diff of
+      `.claude/agents/RUNNER.md`, `closer.md` and `spec-writer.md`, and
+      `proposal.md`/`design.md`'s new sections, over this range. Confirmed the
+      fix for my own owner-taken finding above: `RUNNER.md` gained "What a
+      runner commits" stating the runner's own content is the re-review row
+      alone, that bringing an agent's commits on (cherry-pick or
+      fast-forward) adds none, that every agent ticks its own row, and that
+      everything else is delegated — matching the owner's rulings "A runner
+      always delegates" and "Agents tick their own" as recorded verbatim in
+      `proposal.md:46` and `design.md:766`, with no standing exception carved
+      for the `d805fe4` precedent. Traced the three composed rules for
+      termination without a forbidden move: a cherry-pick conflict on a
+      review-round tick sends the agent back to rebase its own (never pushed)
+      branch and the runner retries the pick; a refused fast-forward or a
+      refused push stops the runner and escalates to the owner rather than
+      resetting, forcing or `--no-ff`-merging; and a conflict merging `main`
+      has the `closer` abort (`git merge --abort`, no commit left behind) and
+      report paths, a writer resolve it as its own merge commit the runner
+      fast-forwards to, and a fresh `closer` find `main` already merged
+      (`git merge origin/main` becomes a no-op) and push everything —
+      including work the runner only ever held locally — to
+      `origin/piece/<name>` for the first time at Step 2. Checked the
+      `findings/` deletion's move to the start of Step 3 against both the
+      first-dispatch path (`closer.md`'s "otherwise" branch: delete, then
+      archive, both in one commit) and the already-archived re-dispatch path
+      (delete only if a re-review left a `findings/` behind, commit named
+      paths, then push unconditionally) — neither leaves a staged deletion
+      sitting through Step 2's merge, which is the bug this move fixes.
+      Read the "Out of scope" entry on one file per stage row: it is written
+      as a self-contained brief (the conflict, why per-file removes it, who
+      reads the block and would change, what the issue needs to settle, and
+      what was offered and not chosen), ready to lift into a filed issue as
+      the proposal claims. Checked PR #132 (`gh pr view 132`, `gh pr diff
+      132`): still `OPEN`, `piece/review-tiering`, last updated
+      2026-09-21T01:23:45Z — unchanged since the proposal's overlap section
+      was written, so its four-file overlap description still holds. No new
+      finding.
