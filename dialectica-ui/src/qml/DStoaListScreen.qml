@@ -159,7 +159,7 @@ ScreenFrame {
         // `encrypted` is carried only as a boolean. Anything else — absent,
         // "false", 0 — is `null`, which renders NO claim about protection
         // either way: the spec forbids a claim the reply did not make.
-        return { state: "held", publicKey: publicKey,
+        return { state: "held", publicKey: publicKey, refusal: "",
                  encrypted: typeof encrypted === "boolean" ? encrypted : null }
     }
 
@@ -765,7 +765,7 @@ ScreenFrame {
     // strings are copy.json `homeMachineKey`, verbatim.
     Loader {
         objectName: "keyBlockLoader"
-        active: screen.machineKey.state === "none"
+        active: screen.machineKey.state === "none" || screen.machineKey.state === "held"
         Layout.fillWidth: true
 
         sourceComponent: Rectangle {
