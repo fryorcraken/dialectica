@@ -165,3 +165,112 @@ claim in `design.md`/`tasks.md`.
 Findings: 1 for `spec-writer`, 1 for `dev-writer`. Both are non-blocking
 (discoverability / minor duplication), not correctness or security defects —
 those dimensions are other reviewers' rows.
+
+## Re-review of the findings-round commits
+
+Dimension: **architecture only**, as before. Read issue #166 and the owner's
+decision comment of 2026-09-25
+(https://github.com/fryorcraken/dialectica/issues/166#issuecomment-5832956024),
+which settles item 2 and rules out leaving the message unspecified. Scoped to
+`git diff 19667a04...HEAD`, against the three items named for this dimension in
+`tasks.md`'s "Re-review of the findings-round commits" section: the live-spec
+edit in `b55d164`, the test-helper restructuring in `70bef05`, and how the two
+findings above were answered. `9e550eb` (design.md) and `4e2b8c0` (rustfmt) are
+not architecture's rows in that section and are not re-reviewed here beyond
+confirming no production code changed.
+
+### 1. The live-spec edit (`identity-onboarding` Purpose)
+
+Checked directly rather than by reasoning about `openspec`'s documented
+behaviour: ran a real `openspec archive position-and-index -y` in this
+worktree, inspected the result, then discarded it
+(`git checkout -- openspec/specs/... openspec/changes/position-and-index/`,
+`rm -rf openspec/changes/archive/2026-09-26-position-and-index`) and confirmed
+`git status` was clean again before continuing.
+
+- **Survives archive intact.** The new Purpose paragraph — "A keep request's
+  `index` is refused by name in parallel with `feed-read`, not by it..." — came
+  through byte-for-byte unchanged. Archive only appends the delta's `## ADDED
+  Requirements` into the target's `## Requirements`; it never touches `##
+  Purpose`, so a Purpose edit made directly (the only way to edit one, since a
+  delta can't) cannot be disturbed by the merge step. The requirement title the
+  paragraph cites in italics — "A malformed `index` in a keep request is
+  refused with a message naming `index`" — matches the delta's actual heading
+  character-for-character, so after archive the citation names a requirement
+  that is now really there, in the same file, not a hopeful forward reference.
+- **Citing the ADDED requirement by name before it's promoted is not a
+  problem.** `openspec validate --strict position-and-index` passes clean on
+  the current, unarchived tree — the tool does not parse or check prose
+  citations of requirement titles, so the forward reference (the cited title
+  exists nowhere yet in this file's own `## Requirements`) is invisible to
+  validation. And per `docs/OPENSPEC-ARCHIVE.md` ("Archiving before the merge
+  rather than after is deliberate"), the closer runs `archive` in the same PR,
+  before CI's final gate and before the merge — so the forward-reference state
+  is never what lands on `main` or what CI's last run sees; it exists only
+  during review of an in-flight branch, which is the state every other
+  ADDED-but-not-yet-archived requirement in this repo is already in.
+- **The decision not to add a reciprocal note to `feed-read`'s Purpose holds
+  up.** Read `feed-read`'s Purpose: its "Five boundaries are named rather than
+  restated" list names capabilities `feed-read` itself relies on for a rule
+  (`thread-read`, `op-ordering`, `moderation-resolution`, `post-revision`,
+  `generated-names`) — dependencies, not dependents. `identity-onboarding`
+  depends on nothing `feed-read` owns; the two only share an implementation
+  detail, `parse_index` (D1 in `design.md`), which neither capability's spec
+  is about. Adding a line to `feed-read` naming `identity-onboarding` would
+  break that list's own pattern (capabilities it relies on) rather than extend
+  it. This matches `op-ordering`'s asymmetric precedent that
+  `docs/OPENSPEC-ARCHIVE.md` cites approvingly: the dependent names the
+  dependency-like relationship, not the other way round.
+
+No finding. This is confirmed clean, not merely re-asserted.
+
+### 2. The test-helper restructuring (`a_thread_post_with_clock`, `70bef05`)
+
+Read the current code (`wire.rs:8556-8592` for the two functions,
+`wire.rs:9351-9367` for the call site). `a_thread_post` now delegates to
+`a_thread_post_with_clock(author_seed, thread, parent, body, None)`; the
+hidden-reply fixture's `under_root_at` closure calls the same shared function
+with its own per-reply clock instead of hand-writing a second `Op` literal.
+This is exactly the shape my first-round finding asked for, and the doc
+comment's claim — "The one place a fixture post's `Op` literal is written, so
+a field added to `Op` or `OpKind::Post` is added here once" — is true of the
+code as it stands.
+
+Checked that the refactor didn't leave a stray duplicate or overreach its
+scope: `grep -n "OpKind::Post {"` in `wire.rs` still finds roughly a dozen other
+literal constructions, all pre-existing, all outside this fixture family (they
+build ops for other tests' own fixtures, e.g. `OpKind::Moderate`). None of them
+duplicates `a_thread_post`'s shape, so there's nothing left over for this
+change to have folded in — the refactor is scoped to the two call sites that
+actually duplicated one another, not stretched to a repo-wide sweep.
+
+Ran the full suite after staging the SDK symlink
+(`cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p dialectica -p
+dialectica-core`): 1185 passed in `dialectica-core`, 30 in `dialectica`, 0
+failed — consistent with the claim that the refactor changes no behaviour
+(signing is deterministic, so every fixture op id is unchanged).
+
+No finding.
+
+### 3. How the two first-round findings were answered
+
+Checked both "Outcome" write-ups above against the current diff and file
+contents, not taken on trust:
+
+- **`spec-writer`'s outcome** (lines 50–63): the paragraph's placement (a
+  separate paragraph after "Boundary with other capabilities" rather than a
+  fourth bullet in that list), its wording, and its survival through archive
+  all match what the outcome claims — independently re-derived above rather
+  than re-read. The separate-paragraph placement is the right call: the
+  existing boundary list names capabilities this one restates nothing from,
+  while the new paragraph names a capability this one runs a rule in parallel
+  with — a different relationship, and conflating the two into one list would
+  have obscured which was which.
+- **`dev-writer`'s outcome** (lines 98–126): the structural claim — "the one
+  place a fixture post's `Op` literal is written" — is true of the code (§2
+  above). I did not re-run the five position mutations myself; that mutation
+  proof is `correctness`/`spec-test`'s re-review row, not architecture's, and
+  re-running it here would duplicate rather than add to their check.
+
+No new architecture findings from this re-review round. Both boxes ticked in
+the first round remain correctly resolved.
