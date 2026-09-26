@@ -171,3 +171,68 @@ only — no code). Correctness dimension only.
   third-party package pinned by SHA, not about dialectica's own code, and this
   piece's design-reviewer/spec-test-reviewer lanes are better placed to check
   it against the pinned tag.
+
+## Round 2 (HEAD 532794e)
+
+Scope: `git diff ee8e145...HEAD` (the fix pass reshaping the adjudicator, the
+workflows and the scripts; the new `install-yq.sh` and
+`tst_workflow_run_bodies.sh`; the `view-navigation` spec delta; the new
+`tst_e2e_handles.qml` cases), read against the whole suite. Correctness
+dimension only.
+
+No new findings. Both round-1 fixes hold, verified by re-running the suites
+rather than by reading the diff alone:
+
+- **The missing-report message now names both causes**
+  (`adjudicate-ui-run.sh:52`), and `tst_adjudicate_ui_run.sh`'s "names a run
+  that never started" / "names a run that was killed" cases pass. Ran
+  `sh dialectica-ui/tests/tst_adjudicate_ui_run.sh`: all cases green.
+- **A spec with no, a non-list, or an unparseable `steps:` is now reported as
+  a problem rather than crashing on jq's own error**
+  (`adjudicate-ui-run.sh:70-92`, guarding the substitution with
+  `if ! expected=$(…); then expected=null; fi` under `set -eu`). Ran the same
+  suite's three new cases ("a spec with no `steps:` list", "a `steps:` value
+  that is not a list", "a spec that does not parse"): all green. Mutation-
+  tested by hand to check the guard is load-bearing and not merely decorative:
+  collapsing the type check and the `if !`-guard into a bare
+  `expected=$(yq '.steps | length' "$spec")` (removing both at once, a
+  stronger mutation than the one `tasks.md` 5.2 records) turned 6 of the added
+  checks red, including "exit 1" on the `steps: 2` case, which now passes
+  clean at `ok: all 2 steps passed`. Mutation restored;
+  `git status --short` confirmed clean before committing this file.
+- **No workflow splices a `${{ … }}` expression into a `run:` body** (the
+  `LGS_VERSION`/`REPORT`/`JUNIT` cargo/adjudicator lines in both workflows now
+  read the value through a job-level `env:` var instead). Ran
+  `sh dialectica-ui/tests/tst_workflow_run_bodies.sh`: reports both `ci.yml`
+  and `ui-tests.yml` clean, and its two synthetic cases (a splice added to a
+  fixture, then moved through `env:`) are correctly flagged/cleared.
+  Confirmed by grep that no `matrix.spec` reference remains inside any `run:`
+  body in `ui-tests.yml` — the surviving splices are all in `name:`, job-level
+  `env:`, and `with:` (artifact naming), which the check correctly leaves
+  alone.
+
+The new `view-navigation` test material was checked against the running code,
+not just the spec text: `Main.qml`'s `screenShown` (lines 103-107) and its
+five main-area screens' `objectName`s (`stoaList`, `joinScreen`, `feed`,
+`thread`, `moderation`, lines 323-469) match `tst_e2e_handles.qml`'s
+`mainAreaScreens` table exactly, and the "no bridge to the core" case
+(`Core.bridge = null`) exercises a real robustness property — `makeStandaloneMain`
+does not crash and still asserts the list alone is rendered. Ran
+`sh dialectica-ui/tests/run-qml-tests.sh dialectica-ui/tests/tst_e2e_handles.qml`:
+8/8 pass, including the two new table tests. Also traced the "failed
+master-key query with an empty listing" case that the new tests' comment says
+is pinned elsewhere (`tst_stoa_screens.qml`'s
+`test_the_view_supplies_no_stoa_of_its_own_before_one_is_chosen`): that test
+never supplies a `get_master_key` reply, and both files' `bridgeFor` default
+an unlisted method to the error shape (`{"error":"no fake reply for …"}`), so
+the claim holds — it is genuinely the error-shape case, not a distinct
+unconfigured-default case.
+
+Checked and clean, no finding: `install-yq.sh` (apt-source-aside procedure
+matches the two workflows' prior inline steps verbatim; `"$@" yq` passes the
+job's package list through correctly); the `REPORT`/`JUNIT` env additions in
+`ui-tests.yml` (job-level `env:` may reference `matrix`, and both are used
+consistently at each of their call sites); the doc-only attribution edits in
+`adjudicate-ui-run.sh`, `require-jq-yq.sh`, `tst_ui_tool_pins.sh`,
+`tst_scaffold_values_unchanged.sh`, and `join.yaml` (each just qualifies a
+`design.md` reference with which change's `design.md`, no code changed).
