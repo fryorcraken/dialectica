@@ -226,7 +226,10 @@ another file.
     commits the `findings/` deletion. The runner sizes a round for the archive
     commit like any other, then re-dispatches the `closer`. That `closer`
     finds the change archived and does not archive again, by the Step 1 and
-    Step 3 rules for a re-dispatch above.
+    Step 3 rules for a re-dispatch above. **The check applies only to an
+    archive commit the `closer` made in the same run.** A re-dispatched
+    `closer` makes none, so it skips the check: its HEAD is whatever the runner
+    brought onto the piece last, which step 3 has already reviewed.
   - **A re-dispatched `closer` pushes its HEAD at Step 3 whether or not it
     deleted anything.** Its tree carries every commit the runner brought onto
     the piece since the last push: a fix, a conflict resolution, the runner's
