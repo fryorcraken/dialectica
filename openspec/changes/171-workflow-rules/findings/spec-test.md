@@ -667,7 +667,7 @@ Below medium, so in prose rather than boxed:
 
 ## Re-review round 10 `c4b1df5..842758b`
 
-- [ ] **`spec-writer`** — `proposal.md:215-218` (the number check) versus
+- [x] **`spec-writer`** — `proposal.md:215-218` (the number check) versus
       `proposal.md:181` (the line rule). The number check needs a round line
       to be indented by six spaces or more, but no rule requires that.
       `:218` says "The six spaces are a round line's indent under the row" as
@@ -703,6 +703,41 @@ Below medium, so in prose rather than boxed:
       appears in the listing. Severity: medium. The check fails open without
       any error, for a line format the contract does not forbid, and the fix
       is one sentence.
+
+      **Fixed** (`spec-writer`, this commit), by both options, since each
+      covers what the other cannot. The line rule now fixes the form: one
+      line, indented by exactly six spaces as `RUNNER.md`'s sample lines
+      are, with nothing but round lines between the row and the next row.
+      And the number check lists the rows as well as the round lines, so a
+      line that breaks the rule shows as a gap:
+      `git grep -n -F -e "] re-review: every commit" -e "      round " -e "] findings all ticked" -- <change folder>/tasks.md`.
+      The round lines' line numbers must run without a gap between the two
+      rows, or the runner does not tick; it puts the line into the form and
+      lists again. The rule alone would still fail open silently when it was
+      broken, and the rows alone would show a gap but give no form to repair
+      it to.
+      Measured, on copies under `./tmp/` searched with `--no-index` (since
+      deleted): your scenario plus a tab-indented line printed the rows at
+      lines 2 and 7 and round lines 3 and 4, so lines 5 and 6 are a gap;
+      the old command printed lines 3 and 4 and nothing to show a line was
+      missed. On this tree at `5745a7de`, the new command prints the row at
+      `tasks.md:24`, rounds 1 to 10 at `:25-34`, and the next row at `:35`;
+      with seven spaces in the round pattern it prints the two rows alone.
+      This lands together with `findings/correctness.md`'s round 10 first
+      box: numbers now only need to be unique, a new line takes one more
+      than the highest under the row, and a repeat is repaired upward.
+      Your prose notes are answered by the same change. Renumbering no
+      longer cascades, because only the repeating line changes. Order is no
+      longer required. A wrapped round line leaves a gap, which fails
+      closed. The follow-up's "reads only the line's start" now says it
+      matches the fixed start, six spaces and `round `. And the fail-closed
+      entry no longer says a mistyped word lists nothing: a pattern that
+      matches no round line leaves a gap between the rows, and one too short
+      lists more lines, not fewer.
+
+      **For the `dev-writer`:** see the list under
+      `findings/correctness.md`'s round 10 first box, which covers both
+      boxes.
 
 Read: `git diff c4b1df5..842758b -- openspec/changes/171-workflow-rules/proposal.md`
 in full; `proposal.md` at HEAD at `:150-380`, `:880-1030` and `:1185-1209`;

@@ -178,13 +178,24 @@ another file.
 
   - **The row is the runner's.** It records the runner's sizing decision, not
     an agent's work. `RUNNER.md` lists it among the runner's own tasks.
-  - **The runner writes one indented line under it per round:** it starts
-    ``round <n> `<range>` ``, numbered from 1 in the order the lines are
-    written, and goes on to what landed, the lanes and the model each ran on,
-    and why that size. A round the runner skips also gets a line, with the
-    reason. These lines are not rows: they carry no box.
+  - **The runner writes one line under it per round.** A round line is a
+    single line indented by exactly six spaces, as `RUNNER.md`'s sample
+    lines are, and nothing but round lines stands between the row and the
+    row after it. It starts ``round <n> `<range>` `` and goes on to what
+    landed, the lanes and the model each ran on, and why that size. A round
+    the runner skips also gets a line, with the reason. These lines are not
+    rows: they carry no box.
+  - **A new line's number is one more than the highest number already under
+    the row**, 1 for the first. Lines are only ever added below the last
+    one, and a line's number changes only to repair a repeat (the number
+    check below), which also raises it to one more than the highest. So no
+    number is ever given twice, and every heading and verdict box a
+    re-reviewer writes carries a number only one line has carried. That is
+    what the numbers are for: they must be unique, not consecutive, and a
+    gap, such as a number typed one too high, is harmless, because a number
+    no line carries is one no brief gave and no record carries.
   - **A lane run again over a range it already had gets a line of its
-    own**: the next number, the same range, the lanes it re-runs, and why (a
+    own**: a new number by the rule above, the same range, the lanes it re-runs, and why (a
     run the runner did not accept, or an agent replaced after a stall). That
     holds however the lane is run again: a fresh dispatch, or the same agent
     continued with `SendMessage`, whose message then gives the new line's
@@ -202,44 +213,89 @@ another file.
     would pass on it before the continuation had done anything
     (`findings/security.md`, re-review round 3 `34fd428..dc1390a`, box).
   - **The row is never struck.** A round with nothing to review gets its line
-    and then a tick.
+    and then a tick. That includes a piece where nothing that merges lands
+    after the review round at all: the runner still writes round 1, with
+    both ends of its range at its own HEAD when it writes the line,
+    ``round 1 `<sha>..<sha>` ``, marked skipped because nothing landed after
+    the review round, and then ticks. So every tick follows at least one
+    round line, which the number check below relies on.
   - **The runner ticks it when no commit that merges is unreviewed**, and
     **unticks it when any commit that needs review lands after the tick**: a
     red-CI fix, a writer's conflict resolution, an archive commit that
     changed `openspec/specs/`, or any other commit step 3 lists. This is the
     only row in the stage block that ever goes from `[x]` back to `[ ]`.
   - **Before it ticks the row, the runner first lists the round lines and
-    checks their numbers.** On its HEAD, in the stage block as it now stands:
+    checks their numbers**, the number check. On its HEAD, in the stage
+    block as it now stands:
 
     ```
-    git grep -n -F "      round " -- <change folder>/tasks.md
+    git grep -n -F -e "] re-review: every commit" -e "      round " -e "] findings all ticked" -- <change folder>/tasks.md
     ```
 
-    The six spaces are a round line's indent under the row. The lines it
-    prints directly under the re-review row must carry 1, 2, 3 … in the
-    order they stand, each number once. A number that repeats or one that is
-    skipped means a line is wrong, and the runner does not tick. It puts the
-    line right: a line with the wrong number gets the number it should
-    carry, and a round whose line was lost gets its line back. A lane
-    briefed from a line whose number changes
-    runs again under the new number, with forms copied from the corrected
-    line: a record written under a repeated number cannot be told from the
-    earlier run's. An empty listing means the command was mistyped, not that
-    there are no rounds, since every tick follows at least one round line.
-    A line elsewhere in the file that starts the same way, such as a wrapped
-    line in the implementation checklist, is not a round line; the line
-    numbers show which lines stand under the row. This is what sees a
-    re-run's line templated from the previous one with its number left
-    unchanged. The copy rule below carries that number into the brief, the
-    reviewer's heading and the forms check, so all three agree and the forms
-    check passes on the earlier run's record; the listing shows the number
-    twice. Measured at `94840b52`: nine lines, `tasks.md:25-33`, carrying 1
-    to 9 once each, and nothing else. On a copy of the stage block in
-    `./tmp/`, searched with `--no-index` because the copy is untracked: with
-    a tenth line templated from the ninth and its number left at 9, the
-    listing shows `round 9` on two lines; with round 7's line deleted, it
-    goes from `round 6` to `round 8` (`findings/security.md`, re-review
-    round 9 `d1d2165..c4b1df5`, box).
+    It prints, each with its line number, the re-review row, the round
+    lines, and the row after them, the `closer`'s first. Three things must
+    hold, and if any does not, the runner does not tick:
+    - **Every line between the two rows is listed**: the round lines' line
+      numbers run without a gap from the one after the re-review row's to
+      the one before the next row's. A line between the rows that the
+      listing leaves out is not in the round-line form, such as a line
+      indented by four spaces or a tab, or a round line wrapped onto a
+      second line. The forms check would copy its forms from a line the
+      number check never read, so a repeated number on it would go unseen.
+      The runner puts the line into the form and lists again. A line
+      elsewhere in the file that matches, such as a wrapped line in the
+      implementation checklist, lies outside the two rows and is not a
+      round line.
+    - **At least one round line stands between them.** The two rows on
+      adjacent line numbers mean no round line has been written yet; every
+      tick follows at least one (the bullet on a row never struck, above),
+      so the runner writes it. A listing that lacks either row means the
+      command was mistyped, or was run on a file that holds no stage block.
+    - **No number repeats.** Order and gaps do not matter; a repeat does,
+      since a record written under a repeated number cannot be told from
+      the earlier line's run over the same range. Each line whose number a
+      line above it already carries is repaired, in turn, by giving it one
+      more than the highest number under the row, and a lane briefed from
+      it runs again under the new number, with forms copied from the
+      repaired line. **The runner never lowers a number**, to close a gap
+      or to repair a repeat: a lowered line can land on a number another
+      line carried, and its forms check then passes on that line's records
+      over the same range. Say the runner writes lines 1 to 6, then
+      ``round 8 `R` `` (correctness and security, 7 typed as 8), then
+      ``round 9 `R` `` for a security re-run because round 8's security run
+      was not accepted. Lowering 8 and 9 to 7 and 8 gives the re-run's line
+      round 8's number over round 8's range, and its forms check lists the
+      rejected run's `security.md` before the re-run has written anything
+      (`findings/correctness.md`, re-review round 10 `c4b1df5..842758b`,
+      first box). Left as written, 6, 8, 9 has no repeat, and round 9's
+      forms match nothing until the re-run writes.
+
+    This is what sees a re-run's line templated from the previous one with
+    its number left unchanged. The copy rule below carries that number into
+    the brief, the reviewer's heading and the forms check, so all three
+    agree and the forms check passes on the earlier run's record; the
+    listing shows the number twice (`findings/security.md`, re-review round
+    9 `d1d2165..c4b1df5`, box). The rows are in the listing so that a
+    malformed line shows as a gap: with the round-line pattern alone, a
+    line the pattern misses leaves the listed numbers looking clean
+    (`findings/spec-test.md`, re-review round 10 `c4b1df5..842758b`, box).
+    Measured:
+    - at `5745a7de` on this tree: the re-review row at `tasks.md:24`, ten
+      round lines at `:25-34` carrying 1 to 10 once each, and the next row
+      at `:35`; with the round pattern given seven spaces, the two rows
+      alone, with ten unlisted lines between them;
+    - on copies of the stage block in `./tmp/`, searched with `--no-index`
+      because the copies are untracked (since deleted): with a four-space
+      and a tab-indented `round 2` line after rounds 1 and 2, the listing
+      prints the rows at lines 2 and 7 and round lines 3 and 4, so lines 5
+      and 6 are a gap, while the round-line pattern alone prints lines 3
+      and 4 and nothing to show a line was missed; with no round line, the
+      rows on lines 2 and 3; and for the lowering scenario above, with
+      `findings/` holding the rejected round 8 security heading and a round
+      8 correctness verdict box, round 9's forms list nothing and round 8's
+      list `correctness.md` and `security.md`; and with a third line
+      templated from the second and its number left at 2, the rows at lines
+      2 and 6 and `round 2` on lines 4 and 5.
   - **Then it checks that every lane of every round the tick closes left its
     own record**, the forms check. A round the tick closes is
     one recorded since the row was last ticked and not marked skipped. For
@@ -253,8 +309,10 @@ another file.
 
     It must list the findings file of every lane the round ran (the
     file names in `RUNNER.md`'s "How many at once"), except a lane that a
-    later line ran again over the same range: that line's own check
-    covers it. The command prints file names, not findings, so it stays
+    line below it in the row ran again over the same range: that line's own
+    check covers it. Below, not higher-numbered: a repaired line keeps its
+    place and takes a higher number than lines under it, so after a repair
+    a line's number does not say where it stands. The command prints file names, not findings, so it stays
     within what the runner reads. A lane whose file is not listed has not
     finished the round, however finished its agent looks or whatever its
     hand-back said: the runner continues that reviewer, or dispatches a
@@ -274,8 +332,8 @@ another file.
       `9dc235c..34fd428`, second box).
     - **The round number is part of both forms.** It separates two runs of
       one lane over one range (the line rule above), and it keeps
-      consecutive rounds apart, which share an endpoint: round N's range
-      ends at the SHA round N+1's starts at.
+      neighbouring rounds apart, which share an endpoint: one round's range
+      ends at the SHA the next one's starts at.
     - **The number and range are copied from the round's line, as the
       brief's are.** The brief's two forms are copied from that line, so the
       check then searches exactly what the reviewer was told to write. A
@@ -322,10 +380,25 @@ another file.
       twice, so a runner that runs both checks does not tick. Neither check
       sees a re-run given no line of its own: a runner that writes the
       re-run into the earlier round's line instead of a new one keeps the
-      numbers unique and consecutive, and that round's forms match the
-      rejected run's record. That breaks the line rule above outright
+      numbers unique, and that round's forms match the rejected run's
+      record. That breaks the line rule above outright
       (`findings/security.md`, re-review round 9 `d1d2165..c4b1df5`, the low
-      note on a re-run given no line).
+      note on a re-run given no line). **Nor does either check see a round
+      line removed from under the row.** The forms check runs only for the
+      lines there, and since a gap in the numbers is harmless, the number
+      check shows nothing wrong, so a removed round's lanes are never
+      checked. It breaks the rule that lines are only ever added, as a
+      re-run given no line breaks the line rule. The number check once read
+      a gap as a lost line, but it could not tell a lost line from a number
+      typed one too high, and the repair it gave for the second, lowering
+      the numbers after it, is the one that fails open (the number check,
+      above). **Nor does either check see a number lowered anyway**, against
+      that bullet's rule: a line lowered onto a number no other line now
+      carries lists once, and its forms check passes on any record left
+      under that number over the same range, as in that bullet's example.
+      The text no longer gives lowering as a
+      repair, so reaching this takes a runner breaking a stated rule, not
+      following one.
   - **This piece's rounds 1 and 2 predate the round number.** Their briefs
     gave ``## Re-review `<range>` `` and
     ``**re-review `<range>`: no findings**``, so the check for those two
@@ -909,7 +982,8 @@ another file.
     and Step 3's `git diff --name-only HEAD^ HEAD -- openspec/specs/`;
   - `RUNNER.md` step 1's `git diff --name-only -G "NO SPEC:" origin/main...HEAD`,
     and step 3's two pre-tick commands, the number check
-    `git grep -n -F "      round " -- <change folder>/tasks.md` and the forms check
+    `git grep -n -F -e "] re-review: every commit" -e "      round " -e "] findings all ticked" -- <change folder>/tasks.md`
+    and the forms check
     ``git grep -l -F -e '## Re-review round <n> `<range>`' -e '**re-review round <n> `<range>`: no findings**' -- <change folder>/findings/``;
   - `RUNNER.md` "Dispatching", the steps for an agent whose tree holds
     uncommitted changes: `mkdir -p tmp`,
@@ -925,9 +999,13 @@ another file.
   - **Fail closed: the agent stops or reports.** A mistyped `ls-files`
     pathspec returns no path or several, and the `closer` stops. A pre-tick
     pattern with a wrong character that no committed record carries lists
-    nothing, and the runner cannot tick. A number-check pattern whose indent
-    is too long, or whose word is mistyped, lists nothing, which the runner
-    reads as a mistyped command, not as no rounds. The save step with `--binary`
+    nothing, and the runner cannot tick. A number-check round pattern that
+    matches no round line, such as one whose indent is too long, lists the
+    two rows with every line between them missing, and the runner cannot
+    tick; a row pattern that matches nothing leaves that row out, which the
+    runner reads as a mistyped command. A round pattern too short, or cut
+    to part of its word, lists more lines, not fewer, and a listed line
+    outside the two rows is not a round line. The save step with `--binary`
     dropped writes `Binary files a/<f> and b/<f> differ` for a binary
     change, and `git apply` then refuses it
     (`error: cannot apply binary patch to '<f>' without full index line`,
@@ -972,14 +1050,19 @@ another file.
     against fixtures stays green whatever the runner types. This piece
     answers it in the pre-tick checks themselves. The forms check's round
     and range are copied from that round's own line (above), which answers
-    a number typed from memory. A line that itself carries a repeated or
-    stale number, such as a re-run's line templated from the previous one
-    with the number left unchanged, passes the forms check, since the copy
-    rule carries that number into the brief and the check alike; the number
+    a number typed from memory. A line that itself carries a repeated
+    number, such as a re-run's line templated from the previous one with
+    the number left unchanged, passes the forms check, since the copy rule
+    carries that number into the brief and the check alike; the number
     check before it lists the number twice, and the runner does not tick.
-    What is left for a second reader is a runner copying the forms from the
-    wrong line, and a runner that skips either check. Both belong to the `closer`-side
-    follow-up below, which is a second reader for them.
+    A line the number check's pattern misses, such as one indented by four
+    spaces, shows as a gap between the two rows it lists, and the runner
+    does not tick either. What is left for a second reader is a runner
+    copying the forms from the wrong line, and a runner that skips either
+    check. Both belong to the `closer`-side follow-up below, which is a
+    second reader for them. A runner that removes a round line or lowers a
+    number breaks a stated rule that neither check, nor that follow-up, can
+    see ("What it still cannot see", above).
 
   Not added here: this change adds no tests or CI (Impact), and a test
   holding its own copy of a command would not fail when a role file's copy
@@ -994,8 +1077,9 @@ another file.
     one stage row not ticked by the agent that did the work. `RUNNER.md`,
     in step 3 of "From the `dev-writer`'s hand-back to the merge", has the
     runner run two checks before it ticks that row. The number check,
-    `git grep -n -F "      round " -- <change folder>/tasks.md`, must show
-    the round lines under the row carrying 1, 2, 3 … once each. The forms
+    `git grep -n -F -e "] re-review: every commit" -e "      round " -e "] findings all ticked" -- <change folder>/tasks.md`,
+    must list every line between the re-review row and the row after it,
+    with at least one there and no number twice. The forms
     check,
     ``git grep -l -F -e '## Re-review round <n> `<range>`' -e '**re-review round <n> `<range>`: no findings**' -- <change folder>/findings/``,
     runs for every round the tick closes, with ``round <n> `<range>` ``
@@ -1006,9 +1090,9 @@ another file.
     a runner that skips either check, or runs the forms check with forms
     copied from the wrong line, goes unnoticed: `closer.md` Step 1 checks
     only that every row but the `closer`'s own is ticked or struck.
-  - **What a `closer`-side check would do:** in Step 1, check that the round
-    numbers under the re-review row are unique and consecutive, 1, 2, 3 in
-    the order the lines stand; and match each round line under the row
+  - **What a `closer`-side check would do:** in Step 1, check that every
+    line under the re-review row is a round line and that no number
+    repeats; and match each round line under the row
     against the findings files, by the same two forms. That is the runner's
     two checks run again by a second reader, which is what they add for a
     runner that skipped one; for a line with a repeated number, the runner's
@@ -1016,10 +1100,11 @@ another file.
     see a repeated number: it derives each round's forms from that round's
     line, so a line repeating an earlier number yields forms the earlier
     run's record satisfies (`findings/security.md`, re-review round 8
-    `6d43cda..d1d2165`, box). The number check reads only the line's start,
-    its one fixed part, so it needs no fixed format for the rest of the
-    line. On this piece's `tasks.md`, at `94840b52`, the nine round lines
-    carry 1 to 9, once each.
+    `6d43cda..d1d2165`, box). The number check matches only the line's
+    fixed start, six spaces and `round `, and the runner reads the number
+    after it, so it needs no fixed format for the rest of the line. On this
+    piece's `tasks.md`, at `5745a7de`, the ten round lines stand between the
+    rows at `:24` and `:35` and carry 1 to 10, once each.
   - **Why it is not a one-line addition.** The `closer` deletes `findings/`
     at the start of Step 3, just before `openspec archive`, so a
     re-dispatched `closer` has files only for the rounds recorded since
@@ -1192,11 +1277,15 @@ None. This change edits agent instructions and no system behaviour, so
 - `.claude/agents/RUNNER.md`: the hand-back sequence (#169, #171; step 1's
   diff-scoped marker command and its request for product decisions; step 3's
   re-review brief, including the clean re-reviewer's verdict box and the
-  heading naming the round, both in exact forms; round lines numbered, and a
+  heading naming the round, both in exact forms; round lines of one fixed
+  indent, each numbered one more than the highest under the row, and a
   line of its own for a lane run again over the same range, fresh or
-  continued; the
+  continued; a line for a piece where nothing lands after the review
+  round; the
   runner's two checks before it ticks the re-review row, one listing the
-  round lines to confirm their numbers run 1, 2, 3 once each, the other
+  row, the round lines and the next row to confirm every line between the
+  rows is listed and no number repeats, with a repeat repaired upward and
+  never by lowering, the other
   searching those two forms with the round and range copied from the
   round's line, with their rows in "What you read"), "The `closer`, and what comes back" (#171; its returns
   given as examples with no count, including a `BLOCKED` PR and an unticked

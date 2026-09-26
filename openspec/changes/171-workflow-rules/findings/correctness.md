@@ -758,7 +758,7 @@ Below the box threshold, in prose only:
 
 ## Re-review round 10 `c4b1df5..842758b`
 
-- [ ] **`spec-writer`** — `proposal.md:221-227`, mirrored at
+- [x] **`spec-writer`** — `proposal.md:221-227`, mirrored at
       `RUNNER.md:638-644` — for a skip, "a line with the wrong number gets
       the number it should carry" lowers numbers, and a lowered number is one
       an earlier line already carried, so the forms check for it can pass on
@@ -799,6 +799,179 @@ Below the box threshold, in prose only:
       the remedy the text gives. Reached by reasoning through the rule: I
       built no fixture tree.
 
+      **Fixed** (`spec-writer`, this commit), at the root rather than by a
+      third patch to the repair. Every record is stamped with its line's
+      number, so what the forms check needs is that no number is given
+      twice, not that the numbers run 1, 2, 3. `proposal.md` now says:
+      - **A new line takes one more than the highest number already under
+        the row**, 1 for the first. Lines are only added below the last,
+        and a line's number changes only to repair a repeat. Numbers must be
+        unique, not consecutive, and a gap is harmless: a number no line
+        carries is one no brief gave and no record carries.
+      - **The number check fails on a repeat, not on a skip or on order.**
+        Each line whose number a line above it already carries is repaired
+        by raising it to one more than the highest under the row, and its
+        lanes run again under the new number. **The runner never lowers a
+        number**, with your scenario as the reason.
+      - **"A lane a later line ran again" now means a line below it in the
+        row.** After a repair a line's number no longer says where it
+        stands, and positional order is what the exception needs.
+      Your second fix option, restoring a lost line or recording "no round
+      ran under 7", would have kept gap detection, but it needs a
+      placeholder line with no range, and it still cannot tell a lost line
+      from a mistyped number. So a removed line is now a residual neither
+      check sees, beside a re-run given no line: it breaks the rule that
+      lines are only added. So is a number lowered anyway, since it lists
+      once. Both are recorded in "What it still cannot see".
+      **Measured**, on copies under `./tmp/` searched with `--no-index`
+      (since deleted). Your scenario: `findings/` held the rejected run's
+      ``## Re-review round 8 `R` `` heading in `security.md`, with a
+      concrete range for `R`, and a round 8 verdict box in
+      `correctness.md`. Round 9's forms listed nothing, and round 8's listed
+      `correctness.md` and `security.md`. So the old repair, lowering the
+      re-run to 8, ticks on the rejected run, and leaving 6, 8, 9 as written
+      holds the tick until the re-run writes. A line templated with its
+      number left at 2 printed `round 2` on two adjacent lines. A mid-row
+      repair, 1, 2, 5, 3, 4, lists each number once.
+      This lands together with `findings/spec-test.md`'s round 10 box (the
+      indent), and the list below covers both.
+
+      **For the `dev-writer`**, one list for both boxes. Your own box below
+      is part of item 2.
+      1. `RUNNER.md` "What you read" (`:81`): the number-check row gets the
+         new command,
+         `git grep -n -F -e "] re-review: every commit" -e "      round " -e "] findings all ticked"`
+         over `tasks.md`. It is for whether every line between the
+         re-review row and the next row is a round line, and whether any
+         round number repeats.
+      2. `RUNNER.md` "Record the call" (`:600-617`):
+         - "One indented line per round … numbered from 1 in the order you
+           write the lines" becomes one line per round, indented by exactly
+           six spaces as in the sample, with nothing else between the row
+           and the next row. Its number is one more than the highest
+           already under the row, 1 for the first. Lines are only added
+           below the last, and a line's number changes only to repair a
+           repeat.
+         - The re-run sentence's "the next number" becomes "a new number,
+           one more than the highest under the row".
+         - Add the case from `proposal.md`'s "The row is never struck":
+           when nothing that merges lands after the review round, the row
+           still gets round 1, both ends of the range at your HEAD
+           (``round 1 `<sha>..<sha>` ``), marked skipped because nothing
+           landed, before the tick. That is your box below.
+         - Optional, from the prose note: "so the check below would pass on
+           it" becomes "the forms check below".
+      3. `RUNNER.md` tick paragraph, the number check (`:626-648`):
+         - The command becomes the one above. Say it prints the re-review
+           row, the round lines and the next row, each with its line
+           number.
+         - Replace "The six spaces are a round line's indent under the row",
+           the "1, 2, 3 … in the order they stand" requirement, the
+           two-case repair and the empty-listing sentence at `:644-645`
+           with the three conditions: every line between the two rows is
+           listed, with no gap in the line numbers, and a missed line is
+           put into the form; at least one round line stands between them,
+           since two rows on adjacent line numbers mean the line is not
+           written yet, and a listing missing either row means a mistyped
+           command; and no number repeats.
+         - The repair: each repeating line below the first gets one more
+           than the highest under the row, and a lane briefed from it runs
+           again, with forms copied from the repaired line. Never lower a
+           number, with one sentence of reason: a lowered line can land on
+           a number another line carried, and its forms check passes on
+           that line's records.
+         - Keep the closing sentence on the templated re-run.
+      4. `RUNNER.md` forms check (`:661-663`): "except a lane a later round
+         ran again over the same range: that round's own check covers it"
+         becomes a line below it in the row, and "that line's own check".
+         Add that after a repair a number does not say where a line stands.
+      5. `design.md`, the stage-block summary (`:101-105`): "numbered in the
+         order the lines are written" becomes one more than the highest.
+         Add the six-space single line, and the round 1 line when nothing
+         lands.
+      6. `design.md`, "The runner's round lines are numbered" (`:391-401`):
+         the same numbering rule, and "the next number" as in item 2.
+         `:416`'s "a later round ran again" as in item 4. `:442`'s
+         "consecutive rounds" becomes "neighbouring rounds", as
+         `proposal.md` now says.
+      7. `design.md`, "Rejected: a clause … one more than the highest"
+         (`:503-513`): this is now the rule, so the entry cannot stay under
+         Rejected. Fold it into the number-check Decision (item 8) as
+         adopted. The reason: numbering by position made the repair for a
+         gap a lowering, and lowering fails open (this box). The rule is
+         now the only thing that fixes a new line's number, not a
+         restatement of "the next number".
+      8. `design.md`, the number-check Decision (`:515-566`):
+         - The command, the three conditions and the upward repair, as in
+           item 3.
+         - Why the numbers need only be unique: every record is stamped
+           with its line's number, and a repeat is the only thing that
+           lets a forms check pass on another line's record.
+         - Why the rows are in the listing: `findings/spec-test.md`'s
+           round 10 box, a line the pattern misses leaving the listed
+           numbers looking clean.
+         - "It reads only the line's start" becomes "It matches only the
+           fixed start, six spaces and `round `".
+         - "It fails closed on a mistyped command" becomes: a round pattern
+           matching no round line leaves a gap between the rows; a missing
+           row means a mistyped command; a pattern too short lists more
+           lines, and those outside the rows are not round lines.
+         - "A lane briefed from a line whose number changes runs again"
+           stays, for the raised number.
+         - Replace the measurement paragraph (`:550-556`) with
+           `proposal.md`'s, at `5745a7de` and on the scratch copies. Drop
+           "with round 7's line deleted, it goes from round 6 straight to
+           round 8" as evidence of what the check sees.
+         - Rejected alternatives:
+           (a) keeping consecutive numbering and repairing a gap by adding
+           a line for the missing number: it keeps lost-line detection but
+           needs a placeholder line with no range, and it still cannot tell
+           a lost line from a mistyped number (this box);
+           (b) fixing the indent in the line rule alone: a broken rule
+           still fails open silently;
+           (c) the rows in the listing alone: the gap shows, but there is
+           no form to repair the line to;
+           (d) a looser pattern for any indent: it misses a wrapped or
+           misspelt line all the same, and shows nothing when it does.
+      9. `design.md`, "What it still cannot see" (`:596-601`): "keeps the
+         numbers unique and consecutive" becomes "unique". Add the two
+         rule-breaking residuals from `proposal.md`: a round line removed
+         from under the row, and a number lowered anyway. Each lists clean.
+      10. `design.md` Risks, the standing-test entry (`:1362-1417`): the
+          number check's command; its fail-closed case as in item 8; and in
+          the stale-number paragraph, "repeated or stale" becomes
+          "repeated". Add the gap sentence and the two rule-breaking
+          residuals, as `proposal.md`'s entry now has them.
+      11. `design.md` Risks, "[Only the runner runs the pre-tick checks.]"
+          (`:1427-1440`): the `closer`-side number criterion becomes every
+          line under the row is a round line and no number repeats,
+          replacing "unique and consecutive, 1, 2, 3 in the order the lines
+          stand".
+      12. PR #174's body:
+          - Step 3's "records the call as a numbered line" says the number
+            is one more than the highest under the row, the line is
+            indented six spaces, and a piece where nothing lands still gets
+            round 1, skipped.
+          - Step 3's number check: the new command; every line between the
+            rows listed, at least one, and no number twice; a repeat raised
+            to one more than the highest with its lanes run again; numbers
+            never lowered; a gap is harmless.
+          - The `design.md` summary bullet on the number check says numbers
+            are unique rather than consecutive, one more than the highest
+            is adopted rather than rejected, the repair is upward, and the
+            rows bracket the listing.
+          - The standing-test follow-up: the number check's command; its
+            fail-closed sentence as in item 8; the gap sentence and the
+            rule-breaking residuals.
+          - The `closer`-side follow-up: "confirms the numbers under the
+            row run 1, 2, 3 … once each" and "unique and consecutive, 1,
+            2, 3 in the order the lines stand" become every line under the
+            row listed and no number repeated. "Reads only the line's
+            start" becomes "matches only the line's fixed start".
+      13. Check that no copy of the old wording is left:
+          `git grep -n -e "in the order you write" -e "next number" -e "unique and consecutive" -e "gets its line back" -e "number it should" -- .claude/agents openspec/changes/171-workflow-rules/design.md`
+          should return nothing once items 1 to 11 land.
+
 - [ ] **`dev-writer`** — `RUNNER.md:644-645` — "An empty listing means the
       command was mistyped, not that there are no rounds: every tick follows
       at least one round line" is false for a piece where nothing lands after
@@ -827,6 +1000,24 @@ Below the box threshold, in prose only:
       piece, the box is theirs.
       **Severity:** medium. It fails closed, but the runner misdiagnoses the
       cause, and the text has no rule that lets a correct piece close.
+
+      **Contract confirmed** (`spec-writer`; the box stays open for the
+      `dev-writer`). "A round with nothing to review" does cover this case,
+      and `proposal.md`'s "The row is never struck" now says so in terms.
+      When nothing that merges lands after the review round, the runner
+      still writes round 1, with both ends of its range at its own HEAD when
+      it writes the line (``round 1 `<sha>..<sha>` ``), marked skipped
+      because nothing landed, and then ticks. So every tick follows at least
+      one round line. The number check's empty case changed too, with the
+      `findings/spec-test.md` round 10 fix: the listing now prints the row
+      and the next row. Two rows on adjacent line numbers mean the line is
+      not written yet, and the runner writes it. A listing missing either
+      row means a mistyped command.
+      The `RUNNER.md` sentence to replace is `:644-645`: "An empty listing
+      means the command was mistyped, not that there are no rounds: every
+      tick follows at least one round line." The line itself goes into
+      "Record the call" (`:600-617`). Both are items 2 and 3 of the list in
+      the box above.
 
 **Tick paragraph, applied to this tree.** At `b5c3786b`, `git grep -n -F "      round " -- openspec/changes/171-workflow-rules/tasks.md`
 lists `tasks.md:25-34`. Those are the ten lines directly under the row at
