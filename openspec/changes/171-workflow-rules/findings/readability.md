@@ -916,3 +916,80 @@ Stylistic only, no box:
   read that range.
 - `RUNNER.md:695` runs past the file's wrap width. `:644-645` still has no
   blank line before "**A lane you run again**", as noted in round 12.
+
+## Re-review round 14 `c3bda2b..e5dcce4`
+
+- [ ] **`spec-writer`** — `RUNNER.md:723-738` — the chain condition assumes
+      no two unmatched lines share a start, and says nothing when they do.
+      "Then each time the line starting where the last line you followed ends"
+      names one line. "Pass over" covers only a line with the *same* range. A
+      line that shares a start but has a different end is neither followed nor
+      passed over. So is one that starts inside a range already followed. The
+      text then calls it "a gap" and says to "Write a line for the missing
+      range". No such range exists, and none can be computed.
+      **Scenario:** round 5 is `A..C`, security only. More commits land. The
+      runner re-runs security over the wider `A..D` as round 6, next to a round
+      6 for the other lanes over `C..D`. Or it templates round 6 from round 5's
+      line and edits only the end, as `A..D`. Nothing in the file forbids
+      either. Rounds 5 and 6 both start at `A`. Whichever one the runner
+      follows, the other is left over. The runner is told commits lie in no
+      round's range, which is false, since `A..D` covers them. It is then told
+      to write a line for a range it cannot name. It will write a spurious round
+      or stall before the tick. Medium: the reader acts wrongly, but toward
+      extra work, never toward an unreviewed commit. Two fixes would work. The
+      condition could say what a superset or overlapping line means: it counts
+      as followed, and the chain continues from the furthest end. Or "Record the
+      call" could forbid such a line: every range starts at `<review>` or at an
+      earlier line's end, and never widens one. That second fix would move the
+      rule, so it is the spec-writer's call.
+
+Dimension: **readability only**, narrowed as briefed. I read
+`git diff c3bda2b..e5dcce4 -- .claude/agents/RUNNER.md` and `RUNNER.md:500-799`
+at HEAD. I also ran the chain by hand on this tree's `tasks.md:24-39`, starting
+from `<review>` = `c222c37`. Rounds 1-3 and 5-7 follow, and rounds 9-14 follow.
+Rounds 4 and 8 carry the same range as rounds 3 and 7, so the runner passes
+over them. The chain ends at `e5dcce4`, which is HEAD's parent, and HEAD adds
+only the round 14 line. On the shapes this piece has produced, the condition is
+followable as written.
+
+**Stated once: clean.** The landing rule is stated once, at step 2
+(`:519-531`). "Record the call" (`:636-637`) points back to it and gives the
+consequence without restating it. The chain condition is stated once, at
+`:723-748`. The "What you read" row (`:82`) names what the command is for and
+points to step 3, the same way it treats the other conditions. Follow from
+`<review>`, pass over re-runs, repair a gap, check the tail: each of the four
+moves is stated, in that order, in one bullet with two sub-bullets. Apart from
+the box above, a runner can follow them.
+
+**One procedure: still one, with seams.** The tick paragraph still runs in
+order: number check, four conditions, then forms check. The fourth condition is
+the only one whose repair can send the runner out to dispatch a round, not just
+edit a line. Its tail branch says "record the next round" and stops there. It
+does not say the tick waits for that round, or that the check runs again
+afterwards. The top line ("Tick the row when no commit that merges is
+unreviewed") and the forms check's "do not tick" make that plain enough. I
+record it here and do not box it.
+
+Stylistic only, no box:
+- `RUNNER.md:750-753`: "is why this check reads the numbers" justifies the
+  third condition, but it now comes after the fourth. A reader has to skip back
+  over the chain bullet to see what it explains. It would sit better at the end
+  of the "No number repeats" bullet.
+- `RUNNER.md:724`: "each one's fixed start" is used nowhere else in the file. It
+  means the ``round <n> `<range>` `` prefix. Saying "the range at the start of
+  each line" would need no inference.
+- `RUNNER.md:728-729`: "the derivation prints more characters than a line may
+  carry" suggests a length limit on a line's SHAs. Nothing sets one: the sample
+  just uses seven. The prefix rule is right in both directions, so the reason
+  adds nothing and could be cut.
+- `RUNNER.md:744-748`: "A commit they list" — the two `git diff` commands list
+  paths and hunks, not commits. A runner needs `git log <end>..HEAD` to find the
+  commit. The text also leaves open whether a clean merge of `main` before a
+  red-CI fix gets its own skipped line or goes into the round's range. Both are
+  safe, since the second only over-reviews.
+- `RUNNER.md:530` runs past the file's wrap width ("…every round's range.
+  Holding the writer back, not only its commits, matters because a").
+- `RUNNER.md:519-525`: the rule says "the review round", the defined term for
+  the first round. A reader could wonder whether re-review rounds also hold the
+  piece still. They do not need to, because the tail check catches anything
+  that lands during one. If the rule over-applies, the only cost is waiting.
