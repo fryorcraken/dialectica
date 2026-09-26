@@ -374,10 +374,9 @@ which is the step they had no reason to take. **Accepting the gap and saying so
 here.** *Rejected*: it records the gap where the affected reader will not see
 it, and the fix is two short paragraphs.
 
-*How to check them:* no test can see a Markdown file. The pointers are found
-with `git grep -n -F -e "time-pegged-clock-post-review" --
-openspec/changes/archive/2026-09-25-time-pegged-clock`, which returns one line
-under each of archived Decisions 3 and 10.
+*How to check them:* no test can see a Markdown file. This command finds the
+pointers, returning one line under each of archived Decisions 3 and 10:
+`git grep -n -F -e "time-pegged-clock-post-review" -- openspec/changes/archive/2026-09-25-time-pegged-clock`
 
 **Archived Decision 3, "What pins it", understates its own coverage.** It says
 the second `op-ordering` scenario, "A counter taken from the clock leaves the

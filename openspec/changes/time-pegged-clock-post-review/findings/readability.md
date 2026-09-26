@@ -265,7 +265,7 @@ reference, no unclear antecedent.
 
 One new line-wrap defect, the same class as the two fixed last pass:
 
-- [ ] **`dev-writer`** — `openspec/changes/time-pegged-clock-post-review/design.md:378-379`
+- [x] **`dev-writer`** — `openspec/changes/time-pegged-clock-post-review/design.md:378-379`
       — the new "How to check them" paragraph under Decision 11 wraps an
       inline code span for a shell command across a line break, splitting it
       at the worst point: right after the `--` that separates the `git grep`
@@ -297,6 +297,10 @@ One new line-wrap defect, the same class as the two fixed last pass:
       matching how every other long command citation in this file is
       handled), or shorten the prose before it so the command fits without
       splitting.
+      **Fixed** in the commit that ticks this box: the paragraph now says what
+      the command returns first, and the whole `git grep …` span sits alone
+      on its own line (past 80 columns), so no line break falls inside it.
+      Prose only; no test can see it, as the paragraph itself says.
 
 ### Build/test results (re-review of e03230e..HEAD)
 
