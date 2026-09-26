@@ -144,6 +144,126 @@ Scope actually reviewed: `git diff c222c37..9dc235c -- openspec/changes/171-work
       own behaviour, and the entry says a test of them would mostly re-test
       git. No test is added in this piece, for the reasons the entry gives.
 
+## Re-review `9dc235c..34fd428`
+
+Scope actually reviewed: `proposal.md` in full at `34fd428`, and specific
+strings in it at `9dc235c` via `git grep -n -F <rev>` (the full range diff
+was too long to display, so the per-string comparisons below stand in for it);
+`tasks.md` and `.openspec.yaml` in full; `git diff 9dc235c..34fd428 --stat`
+(stat only: no test file in the range); issues #171, #170, #169, #133 read
+fresh with `gh issue view`. No file under `.claude/agents/`, no `design.md`,
+and no other findings file was read. The only findings content touched was
+`git grep -l` file-name output over `findings/`, used in the measurement in the
+third box.
+
+Round 1's two boxes are verified as fixed. `proposal.md:708-730` ("A standing
+test for the git commands the role files name") names the Step 1 pathspec, the
+`openspec/specs/` check, `--ff-only`, `--remerge-diff`, `--cherry-mark`, the
+`NO SPEC:` command and the pre-tick grep. `tasks.md:11-17`'s struck tester row
+no longer says there is no executable behaviour, and points to that entry.
+
+- [ ] **`spec-writer`** — `proposal.md:779-782` versus `proposal.md:454-470`:
+      `dev-writer.md`'s "The runner cherry-picks your commits onto its own
+      local `piece/<name>` afterwards" is kept, while this range corrects
+      `README.md`'s four passages because they state the same route.
+      **Scenario:** at `9dc235c` the fast-forward covered only "the
+      `dev-writer`'s first pass" (`9dc235c` `proposal.md:334`, and `:575`
+      "bringing its first pass on by fast-forward"), so the sentence was still
+      true of every findings pass. This range widens the fast-forward to
+      "every `dev-writer` pass, not only the first" (`:372-379`), so the
+      sentence is now false on every pass. In the same range, `:454-470`
+      corrects four `README.md` passages on exactly that ground: each "say[s]
+      an agent's commits are cherry-picked onto the piece, which is false for
+      every `dev-writer` pass under the fast-forward rule ... left as they are,
+      they contradict `RUNNER.md` in this piece". `dev-writer.md`'s sentence
+      meets that test more directly than any of the four, because it is the
+      `dev-writer`'s own file describing its own passes. The reason given for
+      keeping it, that it "changes nothing the `dev-writer` does", is equally
+      true of the `README.md` passages, so the contract does not state a
+      criterion that separates the two cases. After the merge, `RUNNER.md`
+      says `git merge --ff-only` and `dev-writer.md` says cherry-pick, for the
+      same commits. The practical risk is low. A `dev-writer` that believes
+      its pushed commits get cherry-picked has no reason to keep their SHAs,
+      and one that amends or rebases after pushing gets a refused `--ff-only`,
+      which fails closed. **Needed:** either apply the `README.md` rule to this
+      sentence, which is inside the authorisation by the same reasoning as
+      `:598-608`, or state the criterion that keeps it. **Measured:**
+      `git grep -n -F "first pass" 9dc235c -- <proposal>` returns `:334` and
+      `:575` as quoted above; at `34fd428` `:779` reads "bringing its passes
+      on by fast-forward". Severity: low. It is a contradiction between two
+      shipped role files, and the contract sets out to prevent exactly that.
+
+- [ ] **`spec-writer`** — `proposal.md:708-730` (the standing-test entry)
+      does not name the mutating reviewer's save/restore/re-apply commands,
+      which this range adds (`:555-560`), and they fail open.
+      **Scenario:** `RUNNER.md` is to carry `mkdir -p tmp`,
+      `git diff --binary --output=tmp/uncommitted.patch HEAD`,
+      `git restore --source=HEAD --staged --worktree -- .` and
+      `git apply tmp/uncommitted.patch`. The contract states what they do:
+      "The mutated state survives, in the tree and in the patch file", and
+      "the changes come back unstaged whether or not they were staged
+      before". None of these strings is in `proposal.md` at `9dc235c`, and
+      the entry names none of them. Their failure is not like the pathspec's.
+      Suppose a later edit drops the trailing `HEAD` from the `git diff`, or
+      drops `--binary`. The patch then silently leaves out staged changes, or
+      binary ones, and step 2's `restore --staged --worktree` discards those
+      changes. The reviewer's mutated state, which the contract says is
+      evidence only the runner may discard (`:529-533`), is destroyed with
+      every command exiting 0. By the entry's own ranking ("fails open ... is
+      the first a test should cover") this belongs beside the
+      `openspec/specs/` check, not outside the list. (`--diff-filter=U`,
+      `git merge --abort` and `git cherry-pick --abort` are also unnamed, but
+      they predate this range, and a mistype there stops the agent.)
+      **Measured:** `git grep -n -F -e "uncommitted.patch" -e "git restore"
+      -e "git apply" 9dc235c -- <proposal>` returns nothing. At `34fd428` it
+      returns `:556`, `:558` and `:559`. Staging this findings file before
+      committing it: `git diff --stat` printed nothing, and
+      `git diff --stat HEAD` listed the file. So the form without `HEAD`
+      leaves out exactly the staged changes that step 2 then discards.
+      Severity: moderate.
+
+- [ ] **`spec-writer`** — `proposal.md:718-720` says "a mistyped pre-tick
+      grep lists nothing, and the runner cannot tick ... Both fail closed".
+      That is false for one plausible mistype, and in that case the check
+      fails open.
+      **Scenario:** consecutive rounds share an endpoint. Round N's range ends
+      at the SHA where round N+1's starts, and the brief's heading format
+      (`:125-127`) writes both SHAs into every lane's file. So if the runner
+      searches for the new round's start SHA instead of the full `<a>..<b>`
+      string (a truncated copy, or a hand-typed range), the previous round's
+      headings match. Every lane's file is listed, and the runner ticks with
+      no lane having run the new round. That is the outcome the check exists
+      to prevent: "a stalled agent looks exactly like a finished one"
+      (`:189-191`). The entry uses the fail-open/fail-closed split to decide
+      which command a test covers first. So misclassifying this one puts a
+      fail-open gate at the back of the queue, and the entry's "Both fail
+      closed" reads as settled. **Needed:** correct the classification. The
+      spec-writer may also want the check to match the heading or verdict-box
+      form rather than the bare range; that is a design call, and this finding
+      does not presume it. **Measured** on this tree at `34fd428`, where no
+      round-2 lane had yet written anything:
+      `git grep -l -F "9dc235c..34fd428" 34fd428 -- openspec/changes/171-workflow-rules/findings/`
+      printed nothing (correct: the tick must wait), and
+      `git grep -l -F "9dc235c" 34fd428 -- openspec/changes/171-workflow-rules/findings/`
+      listed all six files (`architecture.md`, `correctness.md`,
+      `design-review.md`, `readability.md`, `security.md`, `spec-test.md`), all
+      matched by round 1's `c222c37..9dc235c` headings. Severity: moderate.
+
+Clean in this round, in prose. On internal consistency after the four
+callbacks, the returns are consistent. `:412-419` gives no count to
+`RUNNER.md`, and the six it routes match the list. `tasks.md` 10.x supersedes
+9.8's "five" explicitly. The fast-forward routes are consistent: the `closer`,
+a conflict resolver, and an agent whose commits are already on the remote ref
+appear alike at `:363-381`, `:485-488` and Impact `:840-842`. Where the spec
+check runs is consistent too: after the archive commit and before the push, at
+`:325-333`, `:350-356`, Impact `:864-866` and `tasks.md` 10.1. The four
+owner-authorised additions the header counts are each marked (`:92`, `:231`,
+`:259`, `:477`). The later additions (the verdict box and heading, the
+pre-tick check, returns without a count) sit under #171 or under a marked
+addition. The `README.md` passages are called corrections that follow from the
+fast-forward rule, both in the body and in Impact. Nothing in the range reaches
+outside the four issues' scope as stated fresh today.
+
 ## Areas checked clean
 
 - **Issue coverage.** Every "Done when" / proposed-change bullet in #171,
