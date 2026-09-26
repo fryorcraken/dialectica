@@ -1591,7 +1591,7 @@ all within #171's re-review mechanism. Nothing in the range adds a route to
 
 ## Re-review round 13 `1380d50..c3bda2b`
 
-- [ ] **`spec-writer`** (then `dev-writer` for `RUNNER.md:612-627` and
+- [x] **`spec-writer`** (then `dev-writer` for `RUNNER.md:612-627` and
       `design.md:362-367`) — `proposal.md:242-246` — the derivation of
       `<review>` is exact only on a premise that no role file states: that
       nothing lands on the runner's HEAD between dispatching the review round
@@ -1646,8 +1646,27 @@ all within #171's re-review mechanism. Nothing in the range adds a route to
       misread the check exists to catch, and the outcome is an unreviewed
       commit merging. The rule added in this range makes the runner drop the
       correct value, and the second reader derives the same wrong one.
+      **Outcome (`spec-writer`): accepted, fixed in `proposal.md` by the
+      rule, not the residual.** A new bullet under #171's re-review entry:
+      from dispatching the review round until every one of its reviewers'
+      commits is on the runner's HEAD, the runner brings no other commit
+      onto the piece, commits nothing, and dispatches no writer; a writer
+      needed meanwhile is dispatched once the round's commits are all on.
+      `RUNNER.md` states it once, in step 2. It is broader than your
+      "until the first findings commit", on purpose: it is `README.md`'s
+      "One writer at a time" rule (the contract does not move while
+      reviewers read it) on the piece branch, and holding the writer back
+      rather than holding back only its commits matters because a
+      `dev-writer` pushes its tip to the remote piece ref on every pass, so
+      a writer running mid-round would move the piece whatever the runner
+      brings on. The derivation paragraph now rests on that rule and cites
+      your box for what goes wrong without it. "What it still cannot see"
+      and the standing-test entry's runner-input paragraph name a runner
+      breaking the rule as a residual that neither check, nor the
+      `closer`-side follow-up, sees. `RUNNER.md` and `design.md:362-367`
+      are the `dev-writer`'s to follow.
 
-- [ ] **`spec-writer`** (then `dev-writer` for `RUNNER.md` "Record the call"
+- [x] **`spec-writer`** (then `dev-writer` for `RUNNER.md` "Record the call"
       and the tick paragraph, and `design.md:309-310`) — `proposal.md:218-246`
       and the `closer`-side follow-up at `:1257-1280` — the derivation fixes
       where round 1 starts, but no rule and no check says that the round
@@ -1697,6 +1716,37 @@ all within #171's re-review mechanism. Nothing in the range adds a route to
       same as round 11's box. The slip is an ordinary off-by-one in a two-dot
       range, and the design asserts the covering property without anything
       that enforces it.
+      **Outcome (`spec-writer`): accepted, fixed in `proposal.md` as a
+      fourth condition of the number check, reading its listing.** "The
+      ranges chain from `<review>` to HEAD": from the derived `<review>`,
+      follow the line starting there, then each time the line starting
+      where the last one followed ends; a line repeating a followed range is
+      a re-run and is passed over. Every line must be followed or passed
+      over, and a break is repaired by a new line for the missing range,
+      never by editing a line's range. Your first two conditions, as a path
+      rather than line by line, so that a repair line, which goes below the
+      last, can close a gap above it. Your third condition is kept with one
+      change: the `tasks.md` diff from the chain's end may also show round
+      lines, since the round's own record line is committed after its range
+      ends. For that reason "the last line ends at HEAD" cannot be the
+      condition: measured at `ab53b41c`, HEAD is six commits past round 13's
+      end `c3bda2b`, the record and the five re-reviewers' commits, and
+      `git diff --no-renames --name-only c3bda2b HEAD` lists five findings
+      files and `tasks.md`, whose diff is the round 13 line. A commit that
+      needs no review but the diff lists (a clean merge of `main`, the
+      archive) gets a skipped line so the chain runs past it. The 13 lines
+      on this tree chain from `c222c37` (derived `c222c37b`) to `c3bda2b`,
+      with 4 and 8 passed over. On a `./tmp/` copy with round 2 written
+      `1f62afd4..34fd428`, the number check's other three conditions pass
+      and the chain stops at `9dc235c`; `git diff --no-renames --name-only
+      9dc235c 1f62afd4` lists `proposal.md`; adding
+      ``round 14 `9dc235c..1f62afd4` `` closes it. The `closer`-side
+      follow-up now checks the chain to its own HEAD, which also covers a
+      commit landing after the tick with the untick forgotten; "What it
+      still cannot see" names that case for the runner's checks, which run
+      before the tick, and now says a removed line is seen unless it
+      repeated a range. `RUNNER.md` and `design.md:309-310` are the
+      `dev-writer`'s to follow.
 
 Security only, on Opus, narrowed to the three questions in the brief. Read
 `git diff 1380d50..c3bda2b` of `RUNNER.md`, `proposal.md` and `design.md` in

@@ -1001,7 +1001,7 @@ Below medium, so in prose rather than boxed:
 
 ## Re-review round 13 `1380d50..c3bda2b`
 
-- [ ] **`spec-writer`** — `proposal.md:242-246`, the premise under the
+- [x] **`spec-writer`** — `proposal.md:242-246`, the premise under the
       derived `<review>`. The derivation takes the parent of the oldest
       commit that adds a findings file. It justifies that with "The reviewers'
       commits are the first to land after the review round is dispatched:
@@ -1043,6 +1043,21 @@ Below medium, so in prose rather than boxed:
       runner that reads the first line. Severity: medium. It fails open in
       the lost-report repair, which is the one use the derivation was added
       for, and the second reader offered for it shares the blind spot.
+      **Outcome (`spec-writer`): accepted, fixed in `proposal.md` by your
+      first option, the rule.** From dispatching the review round until
+      every one of its reviewers' commits is on the runner's HEAD, the
+      runner brings no other commit onto the piece, commits nothing, and
+      dispatches no writer, so your red-CI fixer waits for the round.
+      `RUNNER.md` states it once, in step 2. The derivation paragraph
+      (`proposal.md` under the range rule) now rests on that rule, not on
+      "the runner commits nothing", and cites this box and the matching
+      security box for what goes wrong without it. The rule broken is
+      recorded as a residual in "What it still cannot see" and in the
+      standing-test entry's runner-input paragraph, beside removing a
+      re-run's line and lowering a number, as a stated rule neither check
+      nor the `closer`-side follow-up sees. With the rule kept, the derived
+      commit is the dispatch HEAD, so the gap your round 12 note weighed
+      does not arise in either direction.
 
 Read: `git diff 1380d50..c3bda2b -- openspec/changes/171-workflow-rules/proposal.md`
 in full. `proposal.md` at HEAD in full. `tasks.md`, `.openspec.yaml` and my

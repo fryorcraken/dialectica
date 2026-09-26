@@ -121,6 +121,18 @@ another file.
     tick, or the runner's own record line under the re-review row. A commit that moves reasoning into
     `design.md` does need review.
   - **`RUNNER.md` names no model**, only the Agent tool's `model` override.
+  - **Nothing lands on the piece while the review round is out.** From
+    dispatching the review round until every one of its reviewers' commits
+    is on the runner's HEAD, the runner brings no other commit onto
+    `piece/<name>`, commits nothing, and dispatches no writer. A writer
+    needed meanwhile, for a red CI run or an owner instruction, is
+    dispatched once the round's commits are all on. `RUNNER.md` states this
+    once, in step 2, where the review round is dispatched. It is
+    `README.md`'s rule that the contract does not move while reviewers read
+    it ("One writer at a time"), applied to the piece branch. It is also the
+    premise under the derivation of `<review>` below. "The runner commits
+    nothing" does not cover it, since bringing an agent's commits on adds no
+    content of the runner's.
   - **A re-review brief carries four things:** the round and the commit range
     to read (for `spec-test-reviewer`, only the spec and test files in it);
     that the reviewer's stage row is already ticked and stays ticked; that new
@@ -240,10 +252,14 @@ another file.
       ```
 
       The reviewers' commits are the first to land after the review round
-      is dispatched: the runner commits nothing between, and a reviewer
-      commits only its findings file and its own stage row. So the oldest
-      commit adding a findings file sits on the dispatch HEAD, or on a
-      reviewer's tick, which is tracking. Specifically:
+      is dispatched, by the rule above that nothing else lands while the
+      round is out, and a reviewer commits only its findings file and its
+      own stage row. So the oldest commit adding a findings file sits on the
+      dispatch HEAD, or on a reviewer's tick, which is tracking. Without
+      that rule the derived commit can be late: a commit brought on before
+      the first reviewer's becomes `<review>` itself, and lies before the
+      range (`findings/security.md` and `findings/spec-test.md`, re-review
+      round 13 `1380d50..c3bda2b`, first box of each). Specifically:
       - **The pathspec is the pre-archive folder, even once the change is
         archived.** The `closer` deletes `findings/` before `openspec
         archive`, and a re-reviewer after the archive writes its file
@@ -316,7 +332,7 @@ another file.
     changed `openspec/specs/`, or any other commit step 3 lists. This is the
     only row in the stage block that ever goes from `[x]` back to `[ ]`.
   - **Before it ticks the row, the runner first lists the round lines and
-    checks their numbers**, the number check. On its HEAD, in the stage
+    checks their numbers and ranges**, the number check. On its HEAD, in the stage
     block as it now stands:
 
     ```
@@ -324,7 +340,7 @@ another file.
     ```
 
     It prints, each with its line number, the re-review row, the round
-    lines, and the row after them, the `closer`'s first. Three things must
+    lines, and the row after them, the `closer`'s first. Four things must
     hold, and if any does not, the runner does not tick:
     - **Every line between the two rows is listed**: the round lines' line
       numbers run without a gap from the one after the re-review row's to
@@ -375,9 +391,63 @@ another file.
       (`findings/correctness.md`, re-review round 10 `c4b1df5..842758b`,
       first box). Left as written, 6, 8, 9 has no repeat, and round 9's
       forms match nothing until the re-run writes.
+    - **The ranges chain from `<review>` to HEAD.** The listing already
+      carries each round line's range in its fixed start, so this reads the
+      same output and adds no command beyond the two the range rule names.
+      Starting at `<review>`, read from the repository as the range rule
+      says, follow the lines: first the one whose range starts at
+      `<review>`, then each time the one starting where the last line
+      followed ends. A line carrying the same range as a line already
+      followed is a lane run again, and is passed over. Two SHAs name the
+      same commit when one is a prefix of the other: the derivation prints
+      `c222c37b` where this piece's round 1 line has `c222c37`.
+      - **Every round line is followed or passed over.** A line that is
+        neither means some commits lie in no round's range: a gap between
+        rounds, or before the first. The ordinary slip is an off-by-one: a
+        round over the commits `f1` to `f2` written ``round 2 `f1..f2` ``,
+        which leaves `f1` out, since a two-dot range excludes its start. The
+        runner writes a line for the missing range, below the last with the
+        next number as every line is, sized as step 3 says or skipped with
+        its reason, and follows again. It never changes an existing line's
+        range, for the reason it never lowers a number: records were written
+        under it.
+      - **Nothing but tracking lies between the chain's end and HEAD.** The
+        end is never HEAD itself: the round line's own commit, and the
+        round's records, land after the range it names. The range rule's two
+        commands, run from the chain's end in place of `<review>`, must pass
+        as they do there, except that the `tasks.md` diff may also show
+        round lines under the re-review row, which are the runner's own
+        tracking. If they fail, a commit that needs review landed after the
+        last round: the runner records the next round, starting at the
+        chain's end. A commit that needs no review but that the first
+        command lists, such as a clean merge of `main` or the archive
+        commit, gets a line of its own marked skipped with that reason, and
+        the chain runs past it.
 
-    This is what sees a re-run's line templated from the previous one with
-    its number left unchanged. The copy rule below carries that number into
+      Measured on this tree at `ab53b41c`: the derivation's last line is
+      `f94f7b8d c222c37b`; the thirteen round lines at `tasks.md:25-37`
+      chain from `c222c37` to `c3bda2b`, rounds 4 and 8 passed over as
+      repeats of 3 and 7. HEAD is six commits past `c3bda2b`, the round 13
+      record and the five re-reviewers' commits, so "the last line ends at
+      HEAD" could never hold after a round is recorded;
+      `git diff --no-renames --name-only c3bda2b HEAD` lists the five
+      findings files and `tasks.md`, and the `tasks.md` diff is the round 13
+      line added. On a copy of the stage block in `./tmp/` (since deleted),
+      with round 2 written ``round 2 `1f62afd4..34fd428` ``, starting at the
+      first commit that landed after round 1: the number check lists the
+      two rows and thirteen round lines between them, numbered 1 to 13 once
+      each, so its first three conditions pass; the chain stops at
+      `9dc235c`, round 1's end, where no line starts, and rounds 2 to 13 are
+      neither followed nor passed over. `git diff --no-renames --name-only
+      9dc235c 1f62afd4` lists `proposal.md`, so that slip would have merged
+      a `spec-writer` commit no round read (`findings/security.md`,
+      re-review round 13 `1380d50..c3bda2b`, second box). With
+      ``round 14 `9dc235c..1f62afd4` `` added below round 13, the number
+      check still passes and the chain runs 1, 14, 2, 3 and on to
+      `c3bda2b`.
+
+    The number check is what sees a re-run's line templated from the
+    previous one with its number left unchanged. The copy rule below carries that number into
     the brief, the reviewer's heading and the forms check, so all three
     agree and the forms check passes on the earlier run's record; the
     listing shows the number twice (`findings/security.md`, re-review round
@@ -490,11 +560,16 @@ another file.
       record. That breaks the line rule above outright
       (`findings/security.md`, re-review round 9 `d1d2165..c4b1df5`, the low
       note on a re-run given no line). **Nor does either check see a round
-      line removed from under the row.** The forms check runs only for the
-      lines there, and since a gap in the numbers is harmless, the number
-      check shows nothing wrong, so a removed round's lanes are never
-      checked. It breaks the rule that lines are only ever added, as a
-      re-run given no line breaks the line rule. The number check once read
+      line removed from under the row, when it repeated a range.** Any
+      other removed line breaks the chain, the number check's fourth
+      condition: the line after it starts where no followed line ends, or,
+      if it was the last, its commits lie between the chain's end and HEAD.
+      A removed re-run line leaves no such trace. The forms check runs only
+      for the lines there, and since a gap in the numbers is harmless, the
+      number check's other conditions show nothing wrong, so the earlier
+      round's check covers the re-run's lanes and passes on the rejected
+      run's record whenever that run left one. It breaks the rule that lines
+      are only ever added, as a re-run given no line breaks the line rule. The number check once read
       a gap as a lost line, but it could not tell a lost line from a number
       typed one too high, and the repair it gave for the second, lowering
       the numbers after it, is the one that fails open (the number check,
@@ -513,7 +588,14 @@ another file.
       and since
       `<review>` is read from the repository, that reader can derive it
       again and see a line whose range starts late (the `closer`-side
-      check in "Out of scope").
+      check in "Out of scope"). **Nor does either check see the review-round
+      rule broken**: a commit brought onto the piece while the review round
+      is out, before its first findings commit, becomes the derived
+      `<review>`, the chain starts after it, and a second reader derives the
+      same commit. Reaching this takes a runner breaking a stated rule. **Nor
+      does either check see a commit that lands after the tick** when the
+      runner forgets to untick, since both run before the tick; the
+      `closer`-side check's chain to its own HEAD would.
   - **This piece's rounds 1 and 2 predate the round number.** Their briefs
     gave ``## Re-review `<range>` `` and
     ``**re-review `<range>`: no findings**``, so the check for those two
@@ -1141,7 +1223,9 @@ another file.
     ends in a round 1 written as skipped over a range holding unreviewed
     work: the number check lists that one line, the forms check skips a
     round marked skipped, the row is ticked, and the commit reaches the
-    `closer` and merges, as in the first. The seven:
+    `closer` and merges, as in the first. The chain condition runs the
+    same two commands from the chain's end, so the three that mistype them
+    also let it pass over a commit landed after the last round. The seven:
     - a mistyped `openspec/specs/` path lists nothing, and the `closer`
       carries on past an archive that changed the live contract, so an
       unreviewed spec change would merge;
@@ -1215,9 +1299,12 @@ another file.
     does not tick either. What is left for a second reader is a runner
     copying the forms from the wrong line, and a runner that skips either
     check. Both belong to the `closer`-side follow-up below, which is a
-    second reader for them. A runner that removes a round line or lowers a
-    number breaks a stated rule that neither check, nor that follow-up, can
-    see ("What it still cannot see", above). The nothing-landed check's
+    second reader for them. A runner that removes a re-run's line, lowers a
+    number, or brings a commit onto the piece while the review round is out
+    breaks a stated rule that neither check, nor that follow-up, can see
+    ("What it still cannot see", above). A range typed off by one, or a
+    round never recorded, is runner input the number check's chain
+    condition sees. The nothing-landed check's
     `<review>` is read from the repository by a command `RUNNER.md`
     carries, so a mistyped copy of that command is a command defect, in the
     list above. What stays runner input is a runner that supplies a value
@@ -1243,7 +1330,8 @@ another file.
     runner run two checks before it ticks that row. The number check,
     `git grep -n -F -e "] re-review: every commit" -e "      round " -e "] findings all ticked" -- <change folder>/tasks.md`,
     must list every line between the re-review row and the row after it,
-    with at least one there and no number twice. The forms
+    with at least one there, no number twice, and ranges that chain from
+    `<review>` to HEAD with only tracking after the chain's end. The forms
     check,
     ``git grep -l -F -e '## Re-review round <n> `<range>`' -e '**re-review round <n> `<range>`: no findings**' -- <change folder>/findings/``,
     runs for every round the tick closes, with ``round <n> `<range>` ``
@@ -1255,8 +1343,12 @@ another file.
     copied from the wrong line, goes unnoticed: `closer.md` Step 1 checks
     only that every row but the `closer`'s own is ticked or struck.
   - **What a `closer`-side check would do:** in Step 1, check that every
-    line under the re-review row is a round line and that no number
-    repeats; match each round line under the row
+    line under the re-review row is a round line, that no number repeats,
+    and that the ranges chain from a `<review>` it derives itself to its
+    own HEAD, as the runner's number check does; the chain to its own HEAD
+    also sees a commit that landed after the runner's tick with no untick
+    (`findings/security.md`, re-review round 13 `1380d50..c3bda2b`, second
+    box); match each round line under the row
     against the findings files, by the same two forms; and, for a round 1
     marked skipped because nothing landed, derive `<review>` again by the
     runner's `git log` command, check that the line's range starts at it,
@@ -1448,7 +1540,8 @@ None. This change edits agent instructions and no system behaviour, so
 ## Impact
 
 - `.claude/agents/RUNNER.md`: the hand-back sequence (#169, #171; step 1's
-  diff-scoped marker command and its request for product decisions; step 3's
+  diff-scoped marker command and its request for product decisions; step 2's
+  rule that nothing lands on the piece while the review round is out; step 3's
   re-review brief, including the clean re-reviewer's verdict box and the
   heading naming the round, both in exact forms; round lines of one fixed
   indent, each numbered one more than the highest under the row, and a
@@ -1464,7 +1557,9 @@ None. This change edits agent instructions and no system behaviour, so
   runner's two checks before it ticks the re-review row, one listing the
   row, the round lines and the next row to confirm every line between the
   rows is listed and no number repeats, with a repeat repaired upward and
-  never by lowering, the other
+  never by lowering, and that the ranges chain from `<review>` with only
+  tracking between the chain's end and HEAD, a gap repaired by a line of its
+  own, the other
   searching those two forms with the round and range copied from the
   round's line, with their rows in "What you read"), "The `closer`, and what comes back" (#171; its returns
   given as examples with no count, including a `BLOCKED` PR and an unticked
