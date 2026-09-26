@@ -755,3 +755,126 @@ Below the box threshold, in prose only:
   their start"). A reader could still take it as the range's start SHA, which
   would give `dc1390a..6d43cda`, a form that fails closed and so disproves the
   example. The design wording is the unambiguous one. Low.
+
+## Re-review round 10 `c4b1df5..842758b`
+
+- [ ] **`spec-writer`** — `proposal.md:221-227`, mirrored at
+      `RUNNER.md:638-644` — for a skip, "a line with the wrong number gets
+      the number it should carry" lowers numbers, and a lowered number is one
+      an earlier line already carried, so the forms check for it can pass on
+      that earlier line's record. This is the failure the number check was
+      added to stop, and the rule's own reason says so: "a record written
+      under a repeated number cannot be told from the earlier run's".
+      **Scenario:** the runner writes the lines 1 to 6, then
+      ``round 8 `R` `` (correctness and security), then
+      ``round 9 `R` `` (a security re-run, because the round 8 security run
+      was not accepted). No line was lost; the runner mistyped 7 as 8. The
+      rejected security run left ``## Re-review round 8 `R` `` in
+      `security.md`. The number check lists 6, 8, 9, which is a skip. Nothing
+      was lost, so "gets its line back" does not apply, and the runner does
+      what the other remedy says: position 7 becomes `round 7`, position 8
+      becomes `round 8`. Both lanes run again under their new numbers. Round
+      7's forms check skips security, because a later round ran it again over
+      `R`. Round 8's forms, copied from the corrected line, are
+      ``round 8 `R` ``, and the rejected run's heading matches them, so
+      `security.md` is listed before the round 8 re-run has written anything.
+      The number check now shows 1 to 8 once each, correctness finishes round
+      7, and the runner ticks while the security re-run is still running or
+      has stalled. A skip after a lost line can be fixed the same way by
+      mistake, because the text does not say how a runner tells a lost line
+      from a mistyped number.
+      **Why only the skip:** a repeat is fixed by raising numbers. Each
+      raised number was carried only by a *later* line, and the round's own
+      "except a lane a later round ran again over the same range" already
+      removes those lanes from its check. I worked through 1, 2, 2, 3 →
+      1, 2, 3, 4 with a shared range and it fails closed. Lowering is the
+      direction that reuses a number an earlier record carries.
+      **Possible fix, for the spec-writer to choose:** fix a skip by adding a
+      line under the missing number, restoring it or recording that no round
+      ran under it, and never lower a number. Or state as the rule itself
+      that no line is given a number any committed heading or verdict box
+      already carries. Either one closes the case, and `RUNNER.md` follows
+      the fix.
+      **Severity:** medium. It fails open, and it fails open by following
+      the remedy the text gives. Reached by reasoning through the rule: I
+      built no fixture tree.
+
+- [ ] **`dev-writer`** — `RUNNER.md:644-645` — "An empty listing means the
+      command was mistyped, not that there are no rounds: every tick follows
+      at least one round line" is false for a piece where nothing lands after
+      the review round, and `RUNNER.md` never tells the runner to write a line
+      in that case.
+      **Scenario:** every review lane finds nothing, and no writer pass,
+      callback or owner rewrite follows. No commit needs review, so "Tick the
+      row when no commit that merges is unreviewed" holds right away. "Record
+      the call" asks for "one indented line per round", and a skipped round
+      gets a line. But there was no round to run or to skip, so the runner
+      has written no line. The number check lists nothing. The text tells the
+      runner that it mistyped the command. Retyping the command gives the
+      same empty listing, and nothing in `RUNNER.md` shows a way forward. The
+      runner either stalls on a finished piece, or it improvises by striking
+      the row, which the `closer`'s Step 1 accepts, or by inventing a line.
+      `proposal.md:204-205` already has the sentence that makes "every tick
+      follows at least one round line" true: "The row is never struck. A
+      round with nothing to review gets its line and then a tick."
+      `git grep -n -e "never struck" -e "nothing to review" -- .claude/agents`
+      finds neither phrase in any role file, so the runner never reads that
+      sentence.
+      **Fix:** carry proposal.md:204-205 into "Record the call". If nothing
+      lands after the review round, the row still gets a line (round 1,
+      skipped: nothing landed) before it is ticked. If the spec-writer
+      decides that "a round with nothing to review" does not cover this
+      piece, the box is theirs.
+      **Severity:** medium. It fails closed, but the runner misdiagnoses the
+      cause, and the text has no rule that lets a correct piece close.
+
+**Tick paragraph, applied to this tree.** At `b5c3786b`, `git grep -n -F "      round " -- openspec/changes/171-workflow-rules/tasks.md`
+lists `tasks.md:25-34`. Those are the ten lines directly under the row at
+`:24`, and they carry 1 to 10, once each, in order. No implementation-checklist
+line starts the same way, so the listing has no line from anywhere else. The
+row has never been ticked (`git log -S "[x] re-review: every commit"` over
+`tasks.md` returns nothing), so the tick closes all ten rounds. I did not run
+the forms check as ten single-quoted commands. I listed every heading and
+verdict box in `findings/` instead, with the backtick-free prefixes
+`## Re-review ` and `**re-review `, and matched each round's copied
+``round <n> `<range>` `` against those lines by eye:
+
+- Rounds 1 and 2 use their lines' own un-numbered forms, and each lists all
+  six files.
+- Round 3 lists five files, all but readability, which round 4 ran again.
+- Round 4 lists readability.
+- Round 5 lists the four lanes it ran.
+- Round 6 lists design-review and spec-test.
+- Round 7 lists correctness, design-review and spec-test. Security is
+  excepted, because round 8 ran it again.
+- Round 8 lists security.
+- Round 9 lists design-review, security and spec-test.
+- Round 10 lists nothing yet, which correctly holds back the tick until this
+  round's five lanes commit.
+
+A runner following the text ticks this piece correctly.
+
+Below the box threshold, in prose only:
+
+- **"so the check below would pass on it"** (`RUNNER.md:615`). There are now
+  two checks below. Only the forms check reads records, so it is the only
+  check that could "pass on" the rejected run's record, and no runner would
+  act differently. "The forms check below" would remove the question. Low.
+- **"directly under the re-review row"** needs the row's line number, and the
+  listing does not print the row. The runner reads the stage block anyway
+  ("What you read"), so this costs a glance, not a wrong action. Low.
+- **A renumbered lane's line.** "Runs again under the new number" puts the
+  re-run under the corrected line. "Record the call" says a lane run again
+  over a range it already had gets "a line of its own — the next number".
+  A runner following either instruction still ticks correctly, because under
+  the second the later line's check covers the lane and the corrected line's
+  check excepts it. So the two instructions only lead to different record
+  keeping. Low.
+- **`design.md`'s "What it still cannot see"** says a finding that discusses
+  the forms quotes them "with `<n>` and `<range>` as placeholders, as
+  `findings/security.md`'s outcomes do". This tree has two whole quotations of
+  the real round 3 forms: `findings/security.md:815` and
+  `findings/spec-test.md:413`. Both files also have their own round 3 records,
+  so no check on this piece passes on a quotation alone. But the claim that
+  this is unlikely is weaker than the paragraph says. The paragraph is outside
+  this range, apart from the word "forms". Low.
