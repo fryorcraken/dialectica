@@ -100,8 +100,8 @@ The template in `spec-writer.md` gains one row, between the review rows and the
 
 Under that row the runner writes one indented record line per round. The line
 starts ``round <n> `<range>` ``, numbered in the order the lines are written,
-and gives what landed, the lanes and models, and why; a lane dispatched again
-over the same range gets a line of its own (see "Findings go under a heading
+and gives what landed, the lanes and models, and why; a lane run again over
+the same range, fresh or continued, gets a line of its own (see "Findings go under a heading
 naming the round"). A skipped round gets a line with its reason. The runner ticks the row when no commit that
 merges is left unreviewed. If a later commit that needs review lands — a red-CI
 fix, a conflict resolution, a spec-changing archive — the runner unticks the
@@ -390,11 +390,15 @@ so the owner's "Agents tick their own" cannot protect it. So:
 
 - **The runner's round lines are numbered.** Each starts
   ``round <n> `<range>` ``, numbered from 1 in the order the lines are
-  written. A lane dispatched again over a range it already had — a run the
-  runner did not accept, or an agent replaced after a stall — gets a line of
-  its own: the next number, the same range, the lanes it re-runs, and why.
-  Continuing the same agent with `SendMessage` is not a new dispatch and gets
-  no line.
+  written. A lane run again over a range it already had — a run the runner
+  did not accept, or an agent replaced after a stall — gets a line of its
+  own: the next number, the same range, the lanes it re-runs, and why. That
+  holds however the lane is run again: a fresh dispatch, or the same agent
+  continued with `SendMessage`, whose message then gives the new line's two
+  forms whole, as a brief does. Continuing an agent gets no line only when it
+  adds no review to a record already committed: finishing a round it has not
+  yet recorded, such as after a stall, committing, or rebasing. Its record,
+  once committed, is the round's own.
 - **Every re-reviewer's file names the round, in one of two exact forms.** One
   with findings appends them under ``## Re-review round <n> `<range>` ``; a
   clean one appends the verdict box
@@ -407,12 +411,12 @@ so the owner's "Agents tick their own" cannot protect it. So:
   closes,**
   ``git grep -l -F -e '## Re-review round <n> `<range>`' -e '**re-review round <n> `<range>`: no findings**' -- <change folder>/findings/``,
   on its HEAD once every lane's findings commit is there. It must list the
-  file of every lane the round dispatched, except a lane a later round
-  dispatched again over the same range, which that round's check covers. A
-  lane not listed has not finished: the runner continues that reviewer or
-  dispatches a fresh one, which gets its own line, and does not tick. The
-  patterns are in single quotes because both hold backticks, which a shell
-  expands inside double quotes.
+  file of every lane the round ran, except a lane a later round ran again
+  over the same range, which that round's check covers. A lane not listed
+  has not finished: the runner continues that reviewer or dispatches a fresh
+  one, which gets its own line, and does not tick. The patterns are in
+  single quotes because both hold backticks, which a shell expands inside
+  double quotes.
 
 **Why not the bare range.** The first version was
 `git grep -l -F "<range>" -- <change folder>/findings/`. Reviewers write
@@ -437,6 +441,21 @@ must. The number also keeps consecutive rounds apart, which share an
 endpoint: round N's range ends at the SHA round N+1's starts at, so a search
 cut down to one SHA matches the previous round's records too.
 
+**A continued run needs the number as much as a fresh one.** The rule first
+gave a line only to a lane dispatched again, and said continuing the same agent
+with `SendMessage` was not a new dispatch. But the runner's cheapest answer to
+a run it rejects for "did not read X" is to continue that agent and say so, and
+the agent's rejected record is already committed under the old number: the old
+line's check passes on it before the continuation has done anything
+(`findings/security.md`, re-review round 3 `34fd428..dc1390a`, box). So the
+line is keyed to the lane being run again, not to how. Continuing an agent
+gets no line only when it adds no review to a record already committed:
+finishing a round it has not yet recorded, committing, or rebasing. The rebase
+case is named on its own because "has not yet committed its record" would not
+cover it: a reviewer continued to rebase after its cherry-pick conflicted has
+committed its record, and its run was accepted, so keying on the commit alone
+would give it a line for no review.
+
 **Rejected:**
 
 - **A separate per-dispatch tag**, the other fix `findings/security.md`
@@ -444,8 +463,14 @@ cut down to one SHA matches the previous round's records too.
   one the runner writes anyway.
 - **The two forms without the number** (``## Re-review `<range>` `` and
   ``**re-review `<range>`: no findings**``, which this piece's rounds 1 and 2
-  were briefed with). They fix the prose hits, but not the re-dispatch: both
+  were briefed with). They fix the prose hits, but not the re-run: both
   runs of a lane over one range write the same form.
+- **Forbidding the continuation of a rejected run**, so that a lane is only
+  ever run again by a fresh dispatch, which already got a line. It is also one
+  rule, but it fights the cheapest step the runner reaches for when the defect
+  is "did not read X", and a runner that continued anyway would reopen the
+  hole, silently. Numbering the re-run closes it whichever way the lane is
+  run.
 
 **What it still cannot see.** A later reviewer who quotes an earlier round's
 heading or verdict box whole, in prose, satisfies that round's check. The
@@ -486,7 +511,8 @@ command against files that already exist. **What breaks without it:** a
 round's completion rests on the runner's reading of whether an agent has
 finished, which is the failure a stalled agent produces; the residual, a
 runner that skips the check, is in Risks. **What breaks without the number:**
-a re-dispatched lane's check is satisfied by the run it replaced. **What
+a lane run again, fresh or continued, has its check satisfied by the run it
+replaced. **What
 breaks without the exact forms:** a later round's prose satisfies an earlier
 round's check, and the runner ticks over a lane that never ran.
 

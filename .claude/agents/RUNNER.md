@@ -601,12 +601,19 @@ indented line per round under that row, starting ``round <n> `<range>` ``,
 numbered from 1 in the order you write the lines: then what landed, the lanes
 and model each ran on, and why that size. A round you decide to skip gets a
 line too, with its reason — a skip is a decision, and an unrecorded one looks
-exactly like a forgotten one. **A lane you dispatch again over a range it
-already had gets a line of its own** — the next number, the same range, the
-lanes it re-runs, and why: a run you did not accept, or an agent replaced after
-a stall. Continuing the same agent with `SendMessage` is not a new dispatch and
-gets no line. The number is what tells two runs of one lane over one range
-apart, which the range alone cannot:
+exactly like a forgotten one. **A lane you run again over a range it already
+had gets a line of its own** — the next number, the same range, the lanes it
+re-runs, and why: a run you did not accept, or an agent replaced after a stall.
+That holds however you run it again: a fresh dispatch, or the same agent
+continued with `SendMessage`, whose message then gives the new line's two forms
+whole, as a brief does. Continuing an agent gets no line only when it adds no
+review to a record already committed: finishing a round it has not yet
+recorded, such as after a stall, committing, or rebasing. Its record, once
+committed, is the round's own. A continued run needs the new number as much as
+a fresh one: the rejected run's record is already committed under the old
+number, so the check below would pass on it before the continuation had done
+anything. The number is what tells two runs of one lane over one range apart,
+which the range alone cannot:
 
 ```markdown
 - [ ] re-review: every commit after the review round — runner
@@ -626,11 +633,11 @@ expands inside double quotes:
 git grep -l -F -e '## Re-review round <n> `<range>`' -e '**re-review round <n> `<range>`: no findings**' -- <change folder>/findings/
 ```
 
-It must list the findings file of every lane the round dispatched (the names
-are in "How many at once"), except a lane a later round dispatched again over
-the same range: that round's own check covers it. It prints file names, not
-findings, and it searches the two exact forms rather than the bare range,
-because reviewers cite ranges in prose, earlier rounds' included. A lane whose
+It must list the findings file of every lane the round ran (the names are in
+"How many at once"), except a lane a later round ran again over the same range:
+that round's own check covers it. It prints file names, not findings, and it
+searches the two exact forms rather than the bare range, because reviewers cite
+ranges in prose, earlier rounds' included. A lane whose
 file is not listed has not finished the round, however finished its agent looks
 and whatever its hand-back said: continue that reviewer, or dispatch a fresh one
 for the lane — which gets its own line — and do not tick. This row is the one

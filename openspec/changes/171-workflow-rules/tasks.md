@@ -374,3 +374,24 @@ under `./tmp/` (git 2.55.0), since deleted, before the claim was written.
 - [x] 12.10 Trial merge against `origin/piece/review-tiering` re-run after
       the `dev-writer.md` edits.
 - [x] 12.11 `openspec validate 171-workflow-rules --strict` passes.
+
+### 13. After the `spec-writer`'s line-rule ruling (`47f6008`)
+
+Supersedes 12.2's "a `SendMessage` continuation none". Wording follows
+`proposal.md`'s line-rule bullet under the re-review row.
+
+- [x] 13.1 `RUNNER.md` "Record the call": a lane run again over a range it
+      already had gets its own line, fresh or continued; a continuation gets
+      none only when it adds no review to a committed record (finishing an
+      unrecorded round, committing, rebasing); a continued run needs the
+      number because the rejected record is committed under the old one.
+      Verify: `git grep -n -e "no line" -e "not a new dispatch" --
+      .claude/agents` returns only `RUNNER.md`'s new sentence.
+- [x] 13.2 `RUNNER.md`'s pre-tick check: "the round ran" and "ran again" where
+      it said "dispatched". Verify: `git grep -n -F "dispatched again" --
+      .claude/agents/RUNNER.md` returns nothing.
+- [x] 13.3 `design.md`: the stage-block summary, the numbered-lines bullet and
+      the check say "run again"/"ran"; "Why the number" gains why a continued
+      run needs a number and why the rebase case is named; "Rejected" gains
+      forbidding the continuation of a rejected run.
+- [x] 13.4 `openspec validate 171-workflow-rules --strict` passes.
