@@ -896,6 +896,92 @@ Below medium, so in prose rather than boxed:
   runner-breaks-a-rule class as a removed line, and the listing shows the
   misplaced line. Low.
 
+## Re-review round 12 `dd4fe18..1380d50`
+
+- [ ] **`spec-writer`** — `proposal.md:1041-1043` versus `:1071-1093` (the
+      standing-test entry). This range adds the nothing-landed check's two
+      commands to the entry's list of commands, but not to its fail-closed
+      or fail-open split. The fail-open list still says "Three, and they are
+      the ones a test covers first", and still has three bullets. Both new
+      commands have a mistype that fails open, with every command exiting 0.
+      **Scenario:** the second command carries `-- <change folder>/tasks.md`.
+      The runner copies that pathspec onto the first command, or narrows it
+      to `-- <change folder>`, and runs
+      `git diff --name-only <review> HEAD -- <change folder>/tasks.md`. A
+      pathspec limits the listing to the paths it matches, so a red-CI fix
+      to `RUNNER.md` or to source is never listed. The check passes. The
+      runner writes round 1 as skipped because nothing landed, over a range
+      that holds unreviewed code. The forms check skips that line, and the
+      number check lists one line (`:448-451`). The row is ticked, and an
+      unreviewed commit reaches the `closer`. That is the same outcome as
+      the `openspec/specs/` bullet that heads the fail-open list: an
+      unreviewed change merges. Similarly, the second command with a
+      mistyped change folder prints nothing, and "must show only boxes
+      flipped" (`:238-239`) is met because nothing is shown. The entry uses
+      its split to decide which command a test covers first. So as it
+      stands, the check behind the one line that claims the branch holds
+      nothing unreviewed goes to the back of the queue, and "Three" reads as
+      complete. My round 5 box was the same defect for the stale number.
+      **Measured**, over this round's own range: `git diff --name-only
+      dd4fe18 1380d50` lists nine paths, including `.claude/agents/RUNNER.md`,
+      `design.md` and `proposal.md`. The same command with
+      `-- openspec/changes/171-workflow-rules/tasks.md` appended lists only
+      `tasks.md`, which passes the claim. `git diff --stat dd4fe18 1380d50 --
+      openspec/changes/171-workflow-rule/tasks.md` (folder name one letter
+      short) prints nothing and reports no error.
+      **Needed:** classify the two commands. Add the pathspec-narrowed first
+      command, and the empty second command, to the fail-open list, and
+      update its count. `design.md`'s matching Risks entry is the
+      `dev-writer`'s to follow. Severity: medium. It is a fail-open gate left
+      out of the triage, in the entry that is written to be lifted into the
+      follow-up issue.
+
+Read: `git diff dd4fe18..1380d50 -- openspec/changes/171-workflow-rules/proposal.md`
+in full. `proposal.md` at HEAD at `:100-480`, `:960-1250` and `:1330-1370`.
+`tasks.md`, `.openspec.yaml` and this file in full. `git diff dd4fe18..1380d50
+--stat`, stat only, plus the file-name listings in the box above. The brief
+narrowed this round to internal consistency, so I did not re-read the issues.
+I read no file under `.claude/agents/`, no `design.md` and no other findings
+file. The stat shows `RUNNER.md` as the only `.claude/` path in the range: no
+`settings.json` and no hooks.
+
+**The rest of `2bf65c8` is consistent.** The range rule (`:222-234`) and step
+3's definition of tracking (`:117-122`) agree. The check's allowed paths
+(`:236-241`) are exactly `findings/` and `tasks.md`'s box flips. `design.md`
+is named as needing review, as `:121-122` says. The fallback is a line in
+the ordinary form, sized as step 3 says. The lost-line repair (`:283-300`)
+agrees with the line rule. A restored line keeps the number the report
+recorded. That is not a new line, so "one more than the highest" does not
+apply, and a gap it leaves is harmless by `:194-196`. The nothing-landed form
+is used only where no round ran and the check passes. A round the runner
+cannot account for falls to the check. "What it still cannot see"
+(`:448-454`), the stale-input paragraph (`:1121-1126`), the `closer`-side
+follow-up (`:1157-1161`) and Impact (`:1348-1352`) all describe the same
+rule. In the standing-test entry, the two new commands sit under the
+`RUNNER.md` bullet, beside step 3's pre-tick commands. `<review>` is filed
+as runner input, beside the stale round number, not as a command defect,
+which is where it belongs. `tasks.md` 19.1-19.7 match.
+
+Below medium, so in prose rather than boxed:
+
+- **The second reader runs only one of the two commands.** The `closer`-side
+  bullet (`:1157-1159`) and "What it still cannot see" (`:452-453`) give the
+  second reader `git diff --name-only` "as the runner did". The runner also
+  ran the `tasks.md` diff. `tasks.md` is archived and merges, so a commit that
+  edits it beyond box flips needs review. A commit that touches only
+  `tasks.md` and was misread as tracking passes a second reader built from
+  that bullet. That text is a follow-up, not a rule. Low.
+- **`<review>` and "the parent of the review round's first findings commit"
+  (`:1125-1126`, `:225-227`) are the same commit only if the runner commits
+  nothing between dispatching the review round and bringing its first
+  findings commit on.** That holds on this piece. The comparison is offered
+  as a second reader's check, and the gap between the two runs in the safe
+  direction, since an earlier start holds more commits, not fewer. Low.
+- **The stale-input sentences are appended to a bullet headed "A stale round
+  number also fails open"** (`:1096`, `:1121-1126`). The words "in the same
+  way" carry the link, but a reader scanning the bullet heads for fail-open
+  cases will not find `<review>` there. Low.
+
 ## Areas checked clean
 
 - **Issue coverage.** Every "Done when" / proposed-change bullet in #171,
