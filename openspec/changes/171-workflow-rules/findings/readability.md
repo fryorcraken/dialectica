@@ -153,3 +153,117 @@ verbatim.
   a marker the brief names as decided (closed) from any other marker (open,
   keep and report), matching `RUNNER.md` step 1 and `proposal.md`'s
   description of the same rule stated once.
+
+## Re-review `c222c37..9dc235c`
+
+Dimension: **readability only**. Read: `git log --oneline c222c37..9dc235c`;
+`git diff c222c37..9dc235c` for `.claude/agents/RUNNER.md`, `closer.md`,
+`spec-writer.md` and `README.md`; `RUNNER.md` and `closer.md` in full at HEAD;
+`proposal.md` in full; `tasks.md` sections 8-9; the `design.md` passages the
+retraction greps hit; `dev-writer.md:124-218` and `README.md:160-253` for the
+sweep. Every command quoted was run in this tree.
+
+- [ ] **`dev-writer`** — `.claude/agents/RUNNER.md:597` — "Five things come
+      back" reads as the complete list of the `closer`'s returns, and it is
+      not: `closer.md:417-424` has the `closer` stop and report a PR that
+      stays `BLOCKED` with every required check green, and no entry in "The
+      `closer`, and what comes back" covers it.
+      **Scenario:** the `closer` hits the #170 case this piece exists to
+      handle, stops as Step 6 says, and reports the `gh pr view … reviewDecision`
+      output. The runner turns to its section for what comes back, counts five
+      bold entries (red run, unticked box, conflict, spec-changing archive,
+      refused push), and finds none that matches: no route, and no "goes to
+      the owner" like the refused push has. The same gap exists for the
+      zero-box findings file `closer.md:113-114` sends back "naming the file".
+      And the "An unticked box" entry (`RUNNER.md:620-621`) glosses it as "a
+      finding was never answered … whoever the finding names", which does not
+      fit an unticked stage row. Step 3 (`RUNNER.md:565-567`) relies on the
+      `closer` returning on exactly that: an unticked re-review row.
+      **Measured:** `git grep -n -F "Five things come back" -- .claude/agents`
+      → `RUNNER.md:597` only. `git grep -n -F "BLOCKED" -- .claude/agents/RUNNER.md`
+      → no output. The count was "Two" at `c222c37`. This range made it a
+      number the reader can check, and it checks false. `proposal.md:188-189`
+      already sets the rule for this shape elsewhere: returns are "given as
+      examples, not a list that reads as complete". Either drop the count,
+      or add a `BLOCKED` entry and widen the unticked-box entry to stage rows.
+      Severity: moderate. This is the one return #170 is about.
+
+- [ ] **`spec-writer`** — `openspec/changes/171-workflow-rules/proposal.md:359`,
+      `:369` and `:624` — the contract gives three different accounts of what
+      comes back from the `closer`.
+      **Scenario:** a `dev-writer` fixing the box above goes to the contract
+      for the list. Line 359 says Step 4 "lists every return" and names five.
+      Line 369, ten lines later, says Step 6's `BLOCKED` stop is "reported as
+      before", which makes it a sixth return the "every" list leaves out. The
+      Impact section at line 624 says "its four returns". The writer cannot
+      tell which count the contract means, or whether leaving `BLOCKED` out
+      was intended.
+      **Measured:** `git grep -n -i -e "four returns" -e "every return" --
+      openspec/changes/171-workflow-rules/proposal.md` → lines 359 and 624.
+      `tasks.md:188` says 9.x "Supersedes … 8.3's 'four returns'", and
+      `tasks.md:224` says "five returns", but the proposal was never brought
+      into line. Severity: low. The fix is wording, but it decides the fix for
+      the box above.
+
+- [ ] **`dev-writer`** — `.claude/agents/RUNNER.md:164` and `:182` — two
+      sentences in "One piece is one PR" still give cherry-pick as the route
+      for the branches the new rule fast-forwards.
+      **Scenario:** line 164 says the `dev-writer` "does not wait for your
+      cherry-pick", and the very next bullet (line 170) says "you fast-forward
+      to its branch". Line 182 is the paragraph about the `dev-writer` and the
+      `closer` pushing to the piece ref, and it ends "you learn each one from
+      the agent's report and cherry-pick from it". Those are the two agents
+      `RUNNER.md:240-243` tells the runner to fast-forward to instead. A runner
+      reading this section in order meets the old route twice around the one
+      correction. Line 182 is the more costly of the two: a cherry-pick of the
+      `closer`'s branch refuses its merge of `main` (`RUNNER.md:253`), and a
+      cherry-pick of pushed commits diverges silently (`:260-267`).
+      **Measured:** `git grep -n -i -F "cherry-pick" -- .claude/agents/RUNNER.md`
+      → 164 and 182 are the only hits that name the `dev-writer` or the
+      `closer`. The remaining generic ones (201, 219, 331, 603) describe the
+      default route and are correct. `proposal.md:345-348` records correcting
+      this section's "you cherry-pick", so the section is in scope, and these
+      two were missed. Severity: low.
+
+- [ ] **`spec-writer`** — `.claude/agents/dev-writer.md:131` — the premise this
+      piece corrected in `spec-writer.md` survives in a second role file, and
+      `proposal.md` does not account for it.
+      **Scenario:** `dev-writer.md:131` says each agent ticks only its own row
+      "so concurrent agents' cherry-picks do not conflict". `proposal.md:446-463`
+      calls the same claim in `spec-writer.md` "false by the measurement
+      above". It corrects that sentence because leaving it would contradict
+      `RUNNER.md` "in this same piece". The `dev-writer.md` sentence does the
+      same thing, and the proposal neither corrects it nor lists it. It is
+      missing from Out of scope's "Who reads the stage block, and would
+      change" (`proposal.md:509-524`), and the `dev-writer.md` exclusion at
+      `:573-576` covers only the "runner cherry-picks your commits" sentence.
+      Correcting it means editing a role file, which is outside the piece's
+      authorisation, so that is an **owner** call. What the `spec-writer` can
+      do is record it: in Out of scope, or as a sentence the `spec-writer.md`
+      reasoning covers.
+      **Measured:** `git grep -n -F "do not conflict" -- openspec/changes/171-workflow-rules/ .claude/agents/`
+      → only `dev-writer.md:131`, so neither the proposal nor any findings
+      file mentions it. Severity: low. The dev-writer is never one of the
+      concurrent agents itself, but the sentence is the premise the owner's
+      "Agents tick their own" ruling overturned.
+
+**Clean in this range.** The four cross-file pointers the range added resolve
+to headings that exist and say what they claim. From `closer.md` they are
+Step 1's "in its item 3", Step 2's "The `closer`, and what comes back", and
+the closing paragraph. The fourth is `spec-writer.md`'s and `README.md`'s
+"Dispatching". The same holds for every intra-`RUNNER.md` pointer added:
+"What a runner commits", "What a runner does", "Dispatching", "How many at
+once" and step 4. "What a runner does" and "What a runner commits" do not
+contradict: the second is a nested subsection that expands the first's single
+line on the re-review row. The two lists of what "work" is (line 11 and
+lines 37-38) differ in length but not in substance. "From the `dev-writer`'s
+hand-back to the merge" still reads as one sequence: every loop in the
+`closer` subsection goes back to step 3 by name. The retraction sweep for
+`rebase`, `force-with-lease`, `The closer does it`, `deleted in Step 1`,
+`only if it has a finding`, `Four things come back`, `has decided them all`
+and `not on neighbouring ones` across `.claude/agents/`, `CLAUDE.md` and
+`docs/` finds only the deliberate `rebase` uses (`RUNNER.md:13`, `:271`,
+`:275-277` and `:626`) and history in `design.md`/`proposal.md`.
+`README.md:241` ("never touch the same line") is literally true and is listed
+as kept in `proposal.md:512-514`. `README.md:172` omits the `closer`'s Step 2
+push, but "pushed by two agents only" still holds.
