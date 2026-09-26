@@ -37,9 +37,11 @@ commit merges a spec delta into the live contract, and #171's re-review rule
 covers neither (`findings/security.md`). And `RUNNER.md` says without exception
 that the runner does not write the work, although on this piece the runner
 committed role-file edits on the owner's direct instruction (`d805fe4`),
-tracking on reviewers' behalf (`a284e51`), and findings files copied from
-reviewers' trees (`c43c7a7`). Nothing says which of those a runner may do
-(`findings/architecture.md`). The owner took both into this piece.
+stage-row ticks on reviewers' behalf (`a284e51`, `e7e2bbd`), and findings files
+copied from reviewers' trees (`c43c7a7`). Nothing says which of those a runner
+may do (`findings/architecture.md`). The owner took both into this piece, and
+ruled on the second: **"A runner always delegates"**, and **"Agents tick their
+own"**. None of those four commits is a runner's to make.
 
 ## What Changes
 
@@ -129,6 +131,8 @@ another file.
     to `[ ]`.
   - **The runner commits the record lines, the tick and any untick itself**, in
     its own tree on `piece/<name>`, before the next dispatch forks from it.
+    They are the only content the runner commits: see "What the runner
+    commits" below.
   - **The `closer` is dispatched only when every row above its own three is
     ticked or struck**, this row included, so an unticked re-review row stops
     the `closer` at its existing Step 1 gate.
@@ -186,14 +190,15 @@ another file.
   included. The `closer` still never waits for a review: a commit of its own
   that needs one ends its turn, and it comes back to the runner the way a red
   run does. Specifically:
-  - **The `closer` brings `main` in by merging it, not by rebasing onto it.**
-    Step 2's fix for a stale branch becomes `git merge origin/main` in the
-    `closer`'s own tree, pushed to the piece ref by refspec with no force. The
-    rebase and its `--force-with-lease` push are removed, and "What you never
-    do" forbids force-pushing for any reason. The reason is the conflict rule
-    two bullets down: a writer's conflict resolution has to be one commit that the runner can
-    bring onto its HEAD without rewriting it, and that a reviewer can read on
-    its own. A later rebase would drop that merge commit and raise the same
+  - **The `closer` brings `main` in by merging it, not by rebasing onto it**
+    (the owner chose this over a rebase). Step 2's fix for a stale branch
+    becomes `git merge origin/main` in the `closer`'s own tree, pushed to the
+    piece ref by refspec with no force. The rebase and its
+    `--force-with-lease` push are removed, and "What you never do" forbids
+    force-pushing for any reason. The reason is the conflict rule two bullets
+    down: a writer's conflict resolution has to be one commit that the runner
+    can bring onto its HEAD without rewriting it, and that a reviewer can read
+    on its own. A later rebase would drop that merge commit and raise the same
     conflict again.
   - **A merge of `main` that stops on no conflict needs no review.** It changes
     none of the piece's own lines, and it adds nothing to the squash: what it
@@ -211,7 +216,8 @@ another file.
     re-dispatched. The re-review brief names the merge commit, and says to
     read it with `git show --remerge-diff <sha>`, which shows only what the
     resolution changed from git's own merge.
-  - **An archive commit that changes the live contract is reviewed.** After
+  - **An archive commit that changes the live contract is reviewed** (the
+    owner chose to stop when specs change). After
     Step 3's push, if `git diff --name-only HEAD^ HEAD -- openspec/specs/`
     lists any file, the `closer` stops before Step 4: it reports the archive
     commit and returns. An archive commit that changes nothing under
@@ -253,31 +259,90 @@ another file.
     table says the runner cherry-picks every agent's commits, and it says
     "Cherry-pick rather than merge". Both gain the fast-forward case above, by
     pointing to `RUNNER.md` rather than restating it.
-- **What the runner commits itself (owner-authorised, from
-  `findings/architecture.md`'s third finding).** `RUNNER.md`'s "What a runner
-  does" states it once, and step 3 and the red-run text point there:
-  - **Tracking is the runner's to commit.** That is:
-    - the re-review row's record lines, tick and untick;
-    - a stage-row tick for an agent whose hand-back reports its stage done and
-      whose output is on the piece, where the agent did not tick the row
-      itself (as `a284e51` did for five reviewers at once). `README.md`'s
-      "Each agent flips its own row" gains this case, by pointing to
-      `RUNNER.md`;
-    - an agent's output file that the agent wrote but could not commit, copied
-      byte for byte from its tree, unread, with the commit message naming the
-      tree it came from (as `c43c7a7` did after a signing failure).
-  - **Work is not the runner's to commit.** Work is a proposal, a spec,
-    `design.md`, code, tests, role-file text, or a finding's outcome. The one
-    exception is an edit the owner tells the runner itself to make, in the
-    session, as in `d805fe4`. An authorisation the runner relays for a
-    dispatched agent's edit is not that instruction. Neither is a brief, a
-    finding, or the edit looking small. Such a commit says in its message that
-    the owner instructed it directly. The runner makes it only while no writer
-    is running on the piece. It is work, so when it lands after the review
-    round it goes through step 3 like any other commit.
+- **What the runner commits (owner-authorised, from
+  `findings/architecture.md`'s third finding; ruled by the owner: "A runner
+  always delegates" and "Agents tick their own").** `RUNNER.md`'s "What a
+  runner does" states it once, and step 3, the per-agent sequence in
+  "Dispatching" and the red-run text point there:
+  - **The runner's own content is its re-review row and nothing else:** the
+    record lines, the tick and the untick. That is the only stage-block row
+    it touches.
+  - **Bringing an agent's commits onto `piece/<name>` adds no content of the
+    runner's.** A clean cherry-pick, or the fast-forward above for the
+    `closer` and a conflict resolver, carries commits an agent made. That
+    stays the runner's job.
+  - **Every agent ticks its own stage row.** The runner does not tick a row
+    for another agent, including when the agent's hand-back reports its stage
+    done and the row is still unticked. It keeps that agent's tree and
+    continues the agent with `SendMessage` to tick the row and commit it.
+    `README.md`'s "Each agent flips its own row" stands unchanged.
+  - **Everything else is work, and the runner delegates all of it, with no
+    exception.** Work is a proposal, a spec, `design.md`, code, tests,
+    role-file text, a finding's outcome, and another agent's tick. The last
+    two need no review under step 3, but needing no review does not make a
+    commit the runner's: who commits and whether a commit is reviewed are
+    separate questions. An edit the
+    owner asks for in the session is an instruction to dispatch the agent
+    whose file it is, not to make the edit, however small it is. When a
+    dispatched agent is refused an edit it was briefed to make, as the
+    `dev-writer` was before `d805fe4`, the runner reports the refusal to the
+    owner and does not make the edit itself.
+  - **Copying an agent's uncommitted output onto the piece is work, not
+    tracking.** It commits content the runner did not write, under the
+    runner's commit. When an agent reports that it wrote its output but could
+    not commit it, the runner keeps that agent's tree and continues the agent
+    with `SendMessage` to commit it, once whatever stopped the commit is
+    cleared. If only the owner can clear it, such as a permission prompt or a
+    credential, the runner reports that to the owner and waits. If the agent
+    cannot be continued, the runner dispatches a fresh agent for the stage,
+    which redoes it rather than copying the old agent's file. The signing
+    failure behind `c43c7a7` no longer arises: the owner removed the signing
+    requirement, and agents commit with `--no-gpg-sign`.
+  - **A cherry-pick that stops on a conflict is not the runner's to
+    resolve.** The runner runs `git cherry-pick --abort`, keeps the agent's
+    tree, and continues that agent with `SendMessage`: it rebases its own
+    branch onto `piece/<name>`, resolves the conflict there, and reports
+    back. The runner then cherry-picks again. The agent's branch is local and
+    never pushed, so the rebase rewrites nothing anyone else holds. If the
+    agent cannot be continued, the runner dispatches a fresh agent for the
+    stage. This is the case the six review rows meet: see "Open, for the
+    owner" below.
   - **"You do not write the work — not even one small edit while an agent is
-    being prepared" stays.** The exception is the owner's instruction, never
-    the runner's own initiative.
+    being prepared" stays, and gains no exception.**
+- **This piece's own history predates the ruling, and is not redone.** Four
+  runner commits on this piece are of kinds the ruling now excludes:
+  - `d805fe4`: `tester.md`, `closer.md`, `RUNNER.md` and `design.md` edits
+    made on the owner's direct instruction, after the `dev-writer`'s attempt
+    was refused;
+  - `c43c7a7`: four findings files copied from reviewers' trees after a
+    signing failure;
+  - `a284e51` and `e7e2bbd`: stage-row ticks for six reviewers.
+
+  They were made before the owner ruled, and they stand as they are: no
+  history rewrite, no revert, no redo. `d805fe4` landed before the review
+  round, so the six reviewers read its edits. The owner may raise these
+  commits separately; this piece does not.
+
+### Open, for the owner: six reviewers' ticks conflict on cherry-pick
+
+Measured on this pass in a scratch repository: two commits forked from one
+stage block, each ticking a different row, conflict when cherry-picked one
+after the other if the two rows are adjacent (`CONFLICT (content): Merge
+conflict in tasks.md`). With one unchanged line between the two rows, the
+second cherry-pick merges cleanly. The template's six review rows are
+adjacent, so when each reviewer ticks its own row, the second to sixth
+cherry-pick of a review round each stops on a conflict. That is the reason
+`a284e51`'s message gives for the runner ticking the rows. The premise that
+fails is `spec-writer.md`'s "git conflicts on the same line, not on
+neighbouring ones".
+
+This proposal handles the conflict within the ruling, by the conflicting
+cherry-pick rule above: each reviewer after the first rebases and resolves
+its own tick. That works, but costs up to five `SendMessage` round trips per
+review round, one after another. Whether to also remove the conflict from the
+template, for example with a blank line between rows, and to correct that
+sentence in `spec-writer.md`, is the owner's call. This piece makes no edit
+for it unless the owner authorises one.
 
 ### Out of scope
 
@@ -295,7 +360,8 @@ another file.
   owner-authorised additions above ask for. The writer and reviewer role files
   are not edited for the `closer`'s commits: a conflict resolver and a
   re-reviewer of an archive commit get what differs in the runner's brief, as
-  every re-reviewer does. `CLAUDE.md` is not edited either.
+  every re-reviewer does. No role file is edited to name `--no-gpg-sign`:
+  the brief carries it. `CLAUDE.md` is not edited either.
 
 ### Overlap with open PR #132 (`piece/review-tiering`)
 
@@ -340,12 +406,15 @@ None. This change edits agent instructions and no system behaviour, so
 
 - `.claude/agents/RUNNER.md`: the hand-back sequence (#169, #171), "The
   `closer`, and what comes back" (#171; its four returns, owner-authorised),
-  "What a runner does" (the re-review row, #171; what the runner commits, the
-  fast-forward, and "You do not rebase", owner-authorised), step 3's lists of
-  what needs review (owner-authorised), the per-agent sequence in
+  "What a runner does" (the re-review row, #171; owner-authorised and
+  owner-ruled: the runner's own content is that row alone, it always
+  delegates, agents tick their own rows, an uncommitted output file goes back
+  to its agent, and the fast-forward and "You do not rebase"), step 3's lists
+  of what needs review (owner-authorised), the per-agent sequence in
   "Dispatching" (cherry-pick, or fast-forward for the `closer` and a conflict
-  resolver, owner-authorised), and where "What you read" and "Rebuild the
-  state" find the stage block once the change is archived (#171).
+  resolver; a cherry-pick that conflicts goes back to its agent;
+  owner-authorised), and where "What you read" and "Rebuild the state" find
+  the stage block once the change is archived (#171).
 - `.claude/agents/spec-writer.md`: the stage-block template (#171).
 - `.claude/agents/closer.md`: Step 6 and "What you never do" (#170); Step 1,
   for where a re-dispatched `closer` reads the stage block after the archive
@@ -360,10 +429,10 @@ None. This change edits agent instructions and no system behaviour, so
 - `.claude/agents/tester.md`: what a marker the brief names as decided becomes,
   and "must not remove" narrowed to open markers (#169, owner-authorised).
 - `.claude/agents/README.md`: one paragraph (#133); and, owner-authorised, the
-  branch section's account of how work reaches `piece/<name>` and the stage
-  block's "Each agent flips its own row". Its "one row
-  per stage, then three rows the `closer` owns" stays as it is: the re-review
-  row is one more row before the `closer`'s three, so the sentence still
-  holds.
+  branch section's account of how work reaches `piece/<name>`, which points
+  to `RUNNER.md`. Nothing in its stage-block section changes. "Each agent
+  flips its own row" stands, as the owner ruled. "One row per stage, then
+  three rows the `closer` owns" also stays: the re-review row is one more
+  row before the `closer`'s three, so the sentence still holds.
 
 No code, tests, CI workflow or spec changes.
