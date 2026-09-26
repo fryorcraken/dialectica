@@ -132,6 +132,10 @@ the counter comes from the clock and the wall-clock stays at the time, is
 satisfied by the same line of `publish`: the field is signed as passed, whatever
 `next_counter` returned.
 
+*Added by a later change:* the second scenario does have a test of its own,
+added in `c1f1a8f` after this paragraph was written. The
+`time-pegged-clock-post-review` change's `design.md`, Decision 11, names it.
+
 This does not make the wall-clock field decide anything. The counter is computed
 from the host's time, not read from the field. The field is written from the
 same number, and no comparison reads it.
@@ -265,6 +269,10 @@ only until the time passes it"), because every reader inherits it from the
 rule. No reader has code of its own for it. The exposure is recorded in each
 reader's doc comments too, `revision.rs` on `current_version` and `moderation.rs`
 on `resolve`, because this folder is archived and the code stays.
+
+*Added by a later change:* at this change's merge, only `moderation.rs` stated
+the exposure. `revision.rs` gained it afterwards. The
+`time-pegged-clock-post-review` change's `design.md`, Decision 11, records it.
 
 ### 11. A receiver whose own clock is wrong
 

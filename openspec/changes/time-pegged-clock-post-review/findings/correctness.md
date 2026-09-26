@@ -126,7 +126,7 @@ above:
 > as SDS does (LIP-109, `logos-lips/docs/anoncomms/raw/sds.md`, lines 148-155
 > and 184-192).**
 
-- [ ] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/revision.rs:300-302`
+- [x] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/revision.rs:300-302`
       — the new "What signing an hour ahead buys here, and whom" section on
       `current_version` claims the ahead-signed version's lead is
       **permanent**, contradicting the "for up to an hour" bound stated three
@@ -171,6 +171,39 @@ above:
       but a fix to the wording here should probably use the same corrected
       phrasing there too, since `design.md`'s new Decision 11 explicitly
       frames this paragraph as making the two sites agree.
+      **Outcome (`dev-writer`): fixed** in the commit that ticks this box, on
+      a different diagnosis. The sentence is not false. It is ambiguous, and
+      this finding took the reading the paragraph did not mean. "Before the
+      window" meant before #165, when `ADVANCE_BOUND` rather than the receive
+      window governed the clock. It did not mean the hour before the time
+      passes the counter. It is the doc-comment form of archived Decision
+      10's "*Before:* an author who signed `u64::MAX` fixed that version as
+      current permanently".
+      Checked against the code, not either review's prose. Today:
+      `next_counter` is `now_ms.max(clock.saturating_add(1))` and `OpLog::clock`
+      is the maximum counter held, so nothing is permanent. This finding is
+      right about the present. At `0177eb1^`, before #165: `clock_from_counters`
+      skipped a counter more than `ADVANCE_BOUND` (1,000,000) above the clock,
+      the op was still stored, and `cmp_ops` still placed it first. So an op at
+      `u64::MAX` led `current_version` while the author's clock stayed below
+      it, and `next_counter(clock)` (`clock.saturating_add(1)`) could never
+      reach it. "Permanently" is true of that code. The security re-review
+      reached "consistent" by a route that does not address this clause: it
+      reasoned about the same-device and second-device cases, which is the
+      "for up to an hour" sentence.
+      The fix removes the ambiguity rather than the claim. The sentence now
+      reads "Under `ADVANCE_BOUND`, which the receive window replaced in #165,
+      the lead had no end", and says why (the op led the order while the clock
+      stayed below it). The next sentence's "the bound" became "the one-hour
+      bound", because the rewording put another bound's name one line above
+      it. `design.md`, Decision 11, records why the sentence names
+      `ADVANCE_BOUND`. Doc comment only. No test can see it.
+      **`moderation.rs:437-438` has the same ambiguity and the same truth
+      value**: "Before the window, a moderator who signed the maximum counter
+      won such a dispute permanently" is true of pre-#165 code, by the same
+      argument. The readability re-review read it as ambiguous too. It would
+      take the same rewording. It is outside this piece's diff, so I have
+      reported it and not changed it.
 
 Nothing else in the `439c192..HEAD` diff drew a correctness finding:
 

@@ -297,12 +297,14 @@ impl CurrentVersion {
 /// the ahead-signed one — for up to an hour. No third party can use it, which is
 /// why this reader's exposure is narrower than [`crate::moderation::resolve`]'s,
 /// where any moderator can. A revision published after receiving the ahead-signed
-/// one carries the greater counter and becomes current. Before the window, an
-/// author who signed the maximum counter fixed that version as current
-/// permanently, and their own later revisions could never displace it. Nothing
-/// here has code of its own for this: the bound is the ordering rule's
-/// (`op-ordering`, "An op signed ahead of the time leads only until the time
-/// passes it"), and every reader of the rule's first entry inherits it.
+/// one carries the greater counter and becomes current. Under `ADVANCE_BOUND`,
+/// which the receive window replaced in #165, the lead had no end: an op signed
+/// at the maximum counter was stored and led the order while the clock stayed
+/// below it, so that version was current permanently and its author's later
+/// revisions could never displace it. Nothing here has code of its own for
+/// this: the one-hour bound is the ordering rule's (`op-ordering`, "An op
+/// signed ahead of the time leads only until the time passes it"), and every
+/// reader of the rule's first entry inherits it.
 pub fn current_version<L: OpLog>(
     log: &L,
     post: &OpId,

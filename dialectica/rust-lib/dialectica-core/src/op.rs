@@ -564,8 +564,8 @@ pub struct OpClock {
     /// reads the counter alone. That is narrower than it was. A skewed clock
     /// does get an author's ops refused — through the counter, which an honest
     /// author pegs to the same clock — and the archived `time-pegged-clock`
-    /// change's `design.md`, Decision 11, works that cost through. What holds is that this field is
-    /// never the reason.
+    /// change's `design.md`, Decision 11, works that cost through. What holds
+    /// is that this field is never the reason.
     pub asserted_ms: u64,
 }
 

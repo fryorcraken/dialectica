@@ -18,7 +18,7 @@ Every review row covers this change's own diff **and** `git diff 2eada33 c1f1a8f
 ## 1. Carry the removed reasoning
 
 - [x] 1.1 Write `design.md` so that every label in `proposal.md`, "Reasoning removed from the specs" (O1–O18, F1–F4, T1–T5, V1, R1, H1–H2), is either argued in a Decision or cited to the archived `2026-09-25-time-pegged-clock/design.md` Decision that argues it. Verify against the table in `design.md` Decision 1, which lists every label once.
-- [x] 1.2 Leave the archived `2026-09-25-time-pegged-clock/` folder unedited. Verify with `git diff origin/main... -- openspec/changes/archive/`, which is empty.
+- [x] 1.2 Carry no reasoning into the archived `2026-09-25-time-pegged-clock/` folder (`design.md` Decision 1). Its only edit is the two forward pointers of 4.5. Verify with `git diff origin/main... -- openspec/changes/archive/`, which shows those two notes and nothing else.
 
 ## 2. Check nothing outside the specs relied on the removed text
 
@@ -36,3 +36,6 @@ Every review row covers this change's own diff **and** `git diff 2eada33 c1f1a8f
 - [x] 4.1 Cite the archived design by change name in the four repointed doc comments (`arrival.rs`, `op.rs` twice, `transport.rs`), matching the crate's idiom, and record why in `design.md`, Risks. Doc comments only.
 - [x] 4.2 Record in `design.md`, Decision 11, that archived Decision 3's "What pins it" missed the test `c1f1a8f` added. Re-measure the mutation it names rather than quoting it.
 - [x] 4.3 Add the self-only one-hour exposure to `revision::current_version`'s doc, which archived Decision 10 says is there. Record the correction in `design.md`, Decision 11. Doc comment only; no test can see it.
+- [x] 4.4 In that paragraph, name `ADVANCE_BOUND` as what "permanently" describes, in place of "Before the window", which review read as the hour before the time passes the counter. Doc comment only.
+- [x] 4.5 Add a note to archived Decisions 3 and 10, marked as added by a later change, pointing at `design.md` Decision 11. Record why in Decision 11, and correct Context and Decision 1, which stated the archive as not edited.
+- [x] 4.6 Rewrap `op.rs`'s `asserted_ms` doc and `design.md`'s first Risks bullet where the citation rewording left an over-long line.

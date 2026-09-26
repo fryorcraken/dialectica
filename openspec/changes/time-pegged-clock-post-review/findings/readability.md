@@ -132,7 +132,7 @@ dialectica/rust-lib`, 20 hits): it matches the established idiom exactly
 readability improvement and consistent with the rest of the crate. Two of
 the four rewords, though, left a line unwrapped:
 
-- [ ] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/op.rs:567`
+- [x] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/op.rs:567`
       — the `asserted_ms` field's doc comment reword left one line far longer
       than every other line in the same paragraph, instead of rewrapping the
       whole sentence to the file's normal column width.
@@ -152,8 +152,13 @@ the four rewords, though, left a line unwrapped:
       439c192 HEAD` above; the other three sibling edits in the same diff
       wrapped correctly). Fix: rewrap lines 565–568 to the paragraph's normal
       width.
+      **Outcome (`dev-writer`): fixed** in the commit that ticks this box.
+      "is" moved down to the last line, which now reads "is that this field
+      is never the reason.". Every line of the paragraph is at most 80
+      columns, the width of line 562 above it. The words are unchanged. No
+      test can see a doc comment.
 
-- [ ] **`spec-writer`** — `openspec/changes/time-pegged-clock-post-review/design.md:406`
+- [x] **`spec-writer`** — `openspec/changes/time-pegged-clock-post-review/design.md:406`
       — the same class of defect, in the new sentences the Risks bullet added
       about the citation-name convention: one line runs far longer than the
       bullet's other lines instead of being rewrapped.
@@ -169,6 +174,13 @@ the four rewords, though, left a line unwrapped:
       no content lost, purely a line-wrap inconsistency introduced by this
       diff (confirmed via `git diff 439c192 HEAD`). Fix: rewrap lines 401–407
       to the bullet's normal width.
+      **Outcome (`dev-writer`): fixed** in the commit that ticks this box.
+      Misrouted: `design.md` belongs to the `dev-writer`, by the roles table
+      in `.claude/agents/README.md`, and `spec-writer.md` bars the spec-writer
+      from it. So the `dev-writer` acted on it. The joint after
+      `` `git ls-files openspec/changes/archive`. `` is rewrapped across three
+      lines at the bullet's normal width, with the words unchanged. The
+      bullet's line numbers moved when Decision 11 grew in this same pass.
 
 Read `revision.rs`'s new section, "What signing an hour ahead buys here, and
 whom", against its explicit model, `moderation.rs`'s existing "Last" is by

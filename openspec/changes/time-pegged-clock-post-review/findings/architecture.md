@@ -129,7 +129,7 @@ the reasoning (three existing citations of the same change-name form:
 `get-stoa`) rather than leaving the choice unexplained, which is what the
 finding asked for. This closes clean.
 
-- [ ] **`dev-writer`** — `openspec/changes/time-pegged-clock-post-review/design.md:348-393`
+- [x] **`dev-writer`** — `openspec/changes/time-pegged-clock-post-review/design.md:348-393`
       (Decision 11) — the two corrections this piece records against the
       archived `time-pegged-clock` design (archived Decision 3's "What pins
       it" missing a test that was in fact added; archived Decision 10's claim
@@ -183,6 +183,25 @@ finding asked for. This closes clean.
       the corrected archived Decisions, so no live citation trail actually
       terminates on the stale text without a detour through the archive
       itself.
+      **Outcome (`dev-writer`): fixed** in the commit that ticks this box,
+      with a forward pointer inside the archived `design.md` rather than
+      either resolution offered above. Archived Decision 3 (after its "What
+      pins it" paragraph) and archived Decision 10 (after its last paragraph)
+      each gain a short note headed "*Added by a later change:*" that names
+      this change's `design.md`, Decision 11. The "not edited" rule this
+      finding weighed against was never a rule of this repo: no document
+      under `docs/`, `.claude/agents/` or `CLAUDE.md` says it, and it came
+      from a runner's brief, which has since withdrawn it. So Context and
+      Decision 1 no longer state it. Decision 1 now says that declining to
+      carry reasoning into the archive is a judgement about content, not a
+      rule. Decision 11 records why the pointer was chosen and why a sibling
+      file (found only by listing a folder the reader had no reason to list)
+      and accepting the gap (recorded where the affected reader will not see
+      it) were not. `tasks.md` 1.2, which said the archive was left unedited,
+      now names these two notes as its only edit. Check:
+      `git grep -n -F -e "time-pegged-clock-post-review" --
+      openspec/changes/archive/2026-09-25-time-pegged-clock` returns lines 137
+      and 275, one under each Decision. No test can see a Markdown file.
 
 ## What I checked and found clean, this pass
 

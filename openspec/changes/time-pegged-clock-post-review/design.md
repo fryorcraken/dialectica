@@ -12,8 +12,9 @@ from the specs", quotes each removed passage verbatim under a label (O1–O18 fo
 `post-revision`, H1–H2 `thread-read`). Each Decision below names the labels it
 carries. Throughout, **"archived design"** means
 `openspec/changes/archive/2026-09-25-time-pegged-clock/design.md`, and
-**"archived proposal"** means the `proposal.md` beside it. Both are history and
-are not edited.
+**"archived proposal"** means the `proposal.md` beside it. Neither is extended
+with the reasoning this change carries (Decision 1). The archived design gains
+only two labelled forward pointers to corrections made here (Decision 11).
 
 No code behaviour changes. The rules the reasoning explains are implemented in
 `dialectica-core` (`arrival.rs`, `authoring.rs`, `transport.rs`,
@@ -49,13 +50,17 @@ design does not already argue. Where the archived design argues a passage, the
 Decision cites its Decision number instead of repeating it.
 
 *Considered:* **editing the archived design** to add what it lacks. *Rejected*:
-the archive is the record of what #165 decided and why, and editing it makes
-that record say something #165 did not. **Leaving the prose in the specs.**
-*Rejected* by the owner's ruling. **Citing the archived proposal** for passages
-only it argues (its "The recorded rules this change reverses"). *Rejected* as
-the only home: a proposal records why a change was wanted, and a reader looking
-for why a mechanism is built as it is reads a `design.md`. The Decisions below
-cite the archived proposal where it helps, and still state the reasoning.
+the archived design is the record of what #165 decided and why, and adding
+reasoning to it makes that record say something #165 did not. This is a
+judgement about this change's content, not a rule: no document in this repo
+forbids editing an archived change, and Decision 11 adds a labelled pointer to
+it where the pointer is the only way its reader learns of a correction.
+**Leaving the prose in the specs.** *Rejected* by the owner's ruling. **Citing
+the archived proposal** for passages only it argues (its "The recorded rules
+this change reverses"). *Rejected* as the only home: a proposal records why a
+change was wanted, and a reader looking for why a mechanism is built as it is
+reads a `design.md`. The Decisions below cite the archived proposal where it
+helps, and still state the reasoning.
 
 Where each label went:
 
@@ -347,10 +352,32 @@ whose clock is slow signs behind, by any amount. It follows that:
 
 ### 11. Two corrections to the archived design
 
-The archived design is not edited (Decision 1), so where review of #165's last
-four commits (`git diff 2eada33 c1f1a8f`) found it wrong, the correction is
-here. A reader of the archive should read these two against the Decisions they
-name.
+Review of #165's last four commits (`git diff 2eada33 c1f1a8f`) found the
+archived design wrong in two places. Each correction is argued here. The
+archived Decision it corrects carries a short note, directly after the
+paragraph it corrects and marked as added by a later change, that names this
+Decision.
+
+*Chosen:* the correction here and a forward pointer there. A reader who reaches
+the archived design by one of the citations in `dialectica-core` and reads a
+neighbouring Decision has no reason to look for a later change. Without the
+pointer, nothing in the archived file, its folder or `docs/OPENSPEC-ARCHIVE.md`
+tells them the Decision was corrected. They would take Decision 3's "no test of
+its own" at face value, and either write a duplicate test or cite the absence.
+
+*Considered:* **rewriting the two archived Decisions in place.** *Rejected* for
+Decision 1's reason: the archive would then state as #165's reasoning something
+#165 did not write. The pointer is visibly a later addition, so the record of
+what #165 said stays readable. **A sibling file in the archived folder.**
+*Rejected*: a reader inside `design.md` finds it only by listing the folder,
+which is the step they had no reason to take. **Accepting the gap and saying so
+here.** *Rejected*: it records the gap where the affected reader will not see
+it, and the fix is two short paragraphs.
+
+*How to check them:* no test can see a Markdown file. The pointers are found
+with `git grep -n -F -e "time-pegged-clock-post-review" --
+openspec/changes/archive/2026-09-25-time-pegged-clock`, which returns one line
+under each of archived Decisions 3 and 10.
 
 **Archived Decision 3, "What pins it", understates its own coverage.** It says
 the second `op-ordering` scenario, "A counter taken from the clock leaves the
@@ -383,10 +410,13 @@ an hour ahead. It did not say what makes this reader's exposure narrower: only
 the post's author's versions are considered, so the lead is over that author's
 own other versions and no third party can use it. This change adds that
 paragraph to `current_version`'s doc, under "What signing an hour ahead buys
-here, and whom", so the archived sentence is now true of both sites. No test can
-see a doc comment. The behaviour it describes is the ordering rule's and is
-pinned by `op-ordering`'s scenario "An op signed ahead of the time leads only
-until the time passes it".
+here, and whom", so the archived sentence is now true of both sites. Its
+contrast with the old code names `ADVANCE_BOUND` rather than saying "before the
+window": review read that phrase as the hour before the time passes the
+counter, which made the paragraph's "permanently" contradict its own "for up to
+an hour". No test can see a doc comment. The behaviour it describes is the
+ordering rule's and is pinned by `op-ordering`'s scenario "An op signed ahead
+of the time leads only until the time passes it".
 
 ## Risks / Trade-offs
 
@@ -403,8 +433,9 @@ until the time passes it".
   is how every other archived-design citation in `dialectica-core` is written
   (`transport.rs` on the `op-ordering` change, `op.rs` on `stoa-metadata-op`,
   `wire.rs` on `get-stoa`). The dated folder is found from the name with
-  `git ls-files openspec/changes/archive`. A sweep of every comment in `dialectica/rust-lib` naming one of the six
-  capabilities found no other that cites a removed passage. `asserted_time.rs`'s
+  `git ls-files openspec/changes/archive`. A sweep of every comment in
+  `dialectica/rust-lib` naming one of the six capabilities found no other that
+  cites a removed passage. `asserted_time.rs`'s
   "`op-ordering` says why the clamp may not be promoted" stays as it is: the
   sentence it points at predates #165 and is kept.
 - **[A spec read alone now states rules without #165's reasons]** → That is the
