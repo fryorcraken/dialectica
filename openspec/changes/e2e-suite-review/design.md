@@ -279,6 +279,44 @@ non-integer (archived D1).
 - Before this change, 7 checks were red across the new cases and the
   missing-report case (D6 has one of them).
 
+### D8 — No workflow splices an expression into a `run:` body, and a check keeps it that way
+
+Actions substitutes a `${{ … }}` into a `run:` body's text before the shell
+parses it, so a value carrying shell syntax would run as shell. Passed through
+`env:`, it reaches the shell as a variable and is one word. #164's
+`ui-tests.yml` spliced `${{ matrix.spec }}` into two `run:` bodies, and both
+workflows spliced `${{ env.LGS_VERSION }}` into `cargo install`, while every
+other value in those jobs came through `env:`.
+
+None of this is exploitable today. The matrix is a hand-typed `[join]`, the
+version is a repo literal, and both workflows run on `pull_request` with
+`contents: read` and no secrets, so a fork that could change the matrix could
+already add any step it liked. The risk arrives if the matrix is ever derived
+rather than typed, which is the direction the "every spec in the tree is in
+the matrix" step points.
+
+**Chosen:** `REPORT` and `JUNIT` as job-level `env:` in `ui-tests.yml`'s `spec`
+job, beside `SPEC`, and `"$LGS_VERSION"` in both `cargo install` steps. Plus a
+check, `tst_workflow_run_bodies.sh`, run from ci.yml's `ui-specs` job, that
+fails on any `${{` in any `run:` body of any workflow file. It globs
+`.github/workflows/` rather than naming the two files, and fails on finding
+none.
+
+**Why a check and not only the edit:** a fix to three lines holds only until
+the next step is written the old way, and nothing would notice. The rule is
+total over workflow files, and the committed files contain no exception to it.
+
+**Rejected:** limiting the check to `ui-tests.yml`, the finding's scope.
+ci.yml's `build` job had the same `LGS_VERSION` splice, and a check that
+covers one file of two leaves a rule that holds by accident in the other.
+
+**What breaks without it, measured:** against the workflows as #164 left them,
+the check names four steps, ci.yml's `build` "Install logos-scaffold" and
+ui-tests.yml's "Install logos-scaffold", "Run the spec" and "The run proved
+what the spec asks". With its `select` made to match nothing, exactly one check
+goes red, the injected-splice case. Its pairing case moves the same expression
+into the step's `env:` and must pass.
+
 ## Risks / Trade-offs
 
 - **The `lgs` source read is a working tree, not the tag.** Its crate version

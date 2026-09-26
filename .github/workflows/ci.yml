@@ -1155,7 +1155,7 @@ jobs:
           node dialectica-ui/tests/validate-ui-specs.mjs
 
       # `yq`, the jq wrapper, is the one thing this job needs that the image
-      # does not carry. The three scripts below read YAML with it, and the
+      # does not carry. The four scripts below read YAML with it, and the
       # scaffold.toml steps they extract from ui-tests.yml read TOML with the
       # `tomlq` it ships. The runner's preinstalled `yq` is a different tool,
       # the Go one, with no `tomlq` and not jq's language; this package
@@ -1194,6 +1194,13 @@ jobs:
       # one file both workflows load.
       - name: The two UI workflows pin the same tool versions
         run: dialectica-ui/tests/tst_ui_tool_pins.sh
+
+      # A `${{ … }}` in a `run:` body is spliced into the script text before
+      # the shell parses it; through `env:` it is one word however it is
+      # spelled. Every workflow file is checked, not only the UI one. The
+      # e2e-suite-review change's design.md D8.
+      - name: No workflow splices an expression into a run body
+        run: dialectica-ui/tests/tst_workflow_run_bodies.sh
 
       # The scaffold-diff guard's own tests, so whether its diff mechanism
       # tells a changed value from lgs's comment-and-reorder rewrite is
@@ -1588,7 +1595,7 @@ jobs:
       # exits 101 with "binary `lgs` already exists in destination".
       - name: Install logos-scaffold
         if: steps.lgs-cache.outputs.cache-hit != 'true'
-        run: cargo install logos-scaffold --version ${{ env.LGS_VERSION }} --locked
+        run: cargo install logos-scaffold --version "$LGS_VERSION" --locked
 
       # Artefacts land at deterministic paths, one directory per variant:
       #   .scaffold/basecamp/lgx/<NN>-<module>.lgx        (dev)

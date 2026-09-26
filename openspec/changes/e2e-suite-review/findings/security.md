@@ -17,7 +17,7 @@ via `git diff 767be15 8368b2f -- dialectica-ui/tests/check_qml_reachable.py`).
 
 ## Finding
 
-- [ ] **`dev-writer`** — `.github/workflows/ui-tests.yml:353-354,371` — `${{ matrix.spec }}`
+- [x] **`dev-writer`** — `.github/workflows/ui-tests.yml:353-354,371` — `${{ matrix.spec }}`
       is spliced directly into three `run:` script bodies instead of going
       through an env-var indirection, unlike every other use of the same
       context value in this file.
@@ -59,6 +59,25 @@ via `git diff 767be15 8368b2f -- dialectica-ui/tests/check_qml_reachable.py`).
       full trigger/permissions/secrets surface); this is a pattern finding, not
       a reproduced exploit — no CI run demonstrates impact, and none is needed
       to see the anti-pattern.
+      **Fixed** in the commit that flips this box. `REPORT` and `JUNIT` are
+      job-level `env:` values in `ui-tests.yml`'s `spec` job, beside `SPEC`,
+      and the three `run:` bodies read `"$REPORT"`/`"$JUNIT"`. The same
+      pattern was also in both workflows' `cargo install logos-scaffold
+      --version ${{ env.LGS_VERSION }}`, ci.yml's `build` job included, and
+      both now read `"$LGS_VERSION"`. A new check,
+      `dialectica-ui/tests/tst_workflow_run_bodies.sh`, run from ci.yml's
+      `ui-specs` job, fails on any `${{` in any `run:` body of any file under
+      `.github/workflows/` (design.md D8). **Predicted** against the
+      workflows before the edit: the two "as committed" checks red, naming
+      those four steps, and the injected-splice and env-pairing cases green.
+      **Observed:** the four steps named as predicted, and 3 red rather than
+      2. The env-pairing case is built from the real `ui-tests.yml`, so until
+      the edit it inherited that file's three splices; it went green with the
+      edit. Mutation after the fix, restored: the check's `select` made to
+      match nothing turns exactly the injected-splice case red (predicted 1,
+      observed 1). `tst_ui_tool_pins.sh` still passes, so its
+      "writes a version into its run: body" check does not read
+      `"$LGS_VERSION"` as a literal.
 
 ## Clean
 

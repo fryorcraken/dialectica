@@ -65,8 +65,16 @@ jobs:
       matrix:
         spec: [join]
 
+    # Every value a `run:` body reads arrives through `env:`, never as a
+    # `${{ … }}` spliced into the script text, where a value carrying shell
+    # syntax would run as shell. `tst_workflow_run_bodies.sh` fails on a
+    # splice; the e2e-suite-review change's design.md D8.
     env:
       SPEC: dialectica-ui/tests/ui/${{ matrix.spec }}.yaml
+      # The run's machine report, which the adjudicator reads, and its JUnit
+      # twin. Named per spec so the evidence artifact says which run it is.
+      REPORT: ui-results/${{ matrix.spec }}.json
+      JUNIT: ui-results/${{ matrix.spec }}.xml
 
       # The profile `lgs basecamp install` installs into and the run is driven
       # against. `install` fills both seeded profiles; one is enough to run in.
@@ -233,7 +241,7 @@ jobs:
       # `cargo install` over an existing binary exits 101.
       - name: Install logos-scaffold
         if: steps.lgs-cache.outputs.cache-hit != 'true'
-        run: cargo install logos-scaffold --version ${{ env.LGS_VERSION }} --locked
+        run: cargo install logos-scaffold --version "$LGS_VERSION" --locked
 
       # Builds `[repos.basecamp]` at its pin and attr — `app`, the DEV build,
       # which has the QML inspector compiled in (the SHIPPING outputs pass
@@ -350,8 +358,8 @@ jobs:
             --user-dir "$MODULE_ROOT" \
             --basecamp "$BASECAMP_BIN" \
             --strict \
-            --json  "ui-results/${{ matrix.spec }}.json" \
-            --junit "ui-results/${{ matrix.spec }}.xml" \
+            --json  "$REPORT" \
+            --junit "$JUNIT" \
             --artifacts ui-results/screenshots \
             2>&1 | tee ui-results/sitometres.log
 
@@ -367,8 +375,7 @@ jobs:
         if: always()
         run: |
           set -eu
-          dialectica-ui/tests/adjudicate-ui-run.sh \
-            "ui-results/${{ matrix.spec }}.json" "$SPEC"
+          dialectica-ui/tests/adjudicate-ui-run.sh "$REPORT" "$SPEC"
 
       # Basecamp's own log is the only record of what the app did — QML errors,
       # module load failures, which dependency it could not resolve. Its path is
