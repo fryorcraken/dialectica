@@ -457,3 +457,47 @@ Below medium, in prose:
 - `proposal.md:848` ("dropped writes `Binary files a/<f> and b/<f> differ`
   for a binary change, and `git apply` then refuses it") was not rewrapped
   after the edit and runs past the file's width. Cosmetic.
+
+## Re-review round 7 `6d43cda..d1d2165`
+
+- [x] **re-review round 7 `6d43cda..d1d2165`: no findings** — read `git diff 6d43cda..d1d2165` of `RUNNER.md`, `design.md` and `proposal.md`, `design.md:400-555` at HEAD, `tasks.md`'s round lines, and #171, #170, #169, #133 fresh; clean
+
+**The round-6 box is fixed.** The stale-number case is out of the fail-open
+list and is its own paragraph (`design.md`, Risks), saying it is a runtime
+input no fixture test of the role files covers. The follow-up count is
+"three" in both `design.md` and `proposal.md`, and `git grep -n -F "four
+fail-open"` returns only this file and `tasks.md`'s verify step. The call is
+recorded as taken, in a new Decision (`design.md:477-502`) with the chosen
+rule, the constraint (the number sets a rejected run aside only if the check
+uses the new line's number), and two rejected alternatives, each with what
+ruled it out. The first unboxed note from round 6 is answered at `:508-515`.
+
+**RUNNER.md takes the decision as recorded.** The tick paragraph's clause
+("copied from that round's own line as the brief's was, not typed") is the
+`design.md` bullet's wording (`:413-415`) less "under the re-review row". The
+one-sentence reason sits after the command's description, where the new
+Decision says it does. Copying works on the round lines as they are:
+`tasks.md:25-31` each carry ``round <n> `<range>` `` literally, and rounds 1
+and 2 carry their own un-numbered check, which is what `proposal.md`'s "each
+of their lines names its own check" and `design.md:517-519` both say.
+
+**`design.md` and `proposal.md` agree** on the rule, the rejected typed
+number, the wrong-line residual and its home (the `closer`-side follow-up),
+and the Risk split. Re-measured at `c3d697e9`: round 3's forms over
+`34fd428..dc1390a` list five files without `readability.md`; round 4's list
+`readability.md` alone; round 5's over `dc1390a..d1c8726` list
+`correctness.md`, `design-review.md`, `security.md` and `spec-test.md`. All
+three match both documents.
+
+Below medium, in prose:
+
+- `proposal.md`'s "What it still cannot see" says a round 6 check "run with
+  round 5's start would pass"; `design.md:513` says "round 5's forms".
+  "Start" names nothing defined. It reads as a slip for "forms".
+- The new Decision says the clause makes the check search what the reviewer
+  was told to write "by construction". That holds only for a correct copy.
+  The wrong-line paragraph a few lines down names the exception, so a reader
+  is not misled, but the phrase claims more than the entry delivers.
+- The new Decision has no cost line. The cost is small (the runner copies
+  rather than types, which it already does for the brief), and saying so
+  would make the entry complete.
