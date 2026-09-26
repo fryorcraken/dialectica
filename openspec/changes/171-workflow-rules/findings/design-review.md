@@ -650,3 +650,59 @@ Below medium, in prose:
   the six-space pattern and is listed, so the check does not enforce "exactly
   six". The effect is benign, since a listed line has its number read, but the
   sentence claims more than the command checks.
+
+## Re-review round 12 `dd4fe18..1380d50`
+
+- [x] **re-review round 12 `dd4fe18..1380d50`: no findings** — read the range's diff of `RUNNER.md`, `design.md` and `proposal.md`, design.md's "Every commit that merges" entry and issue #171 fresh, and re-ran the entry's measurements; clean
+
+**RUNNER.md follows the decision as recorded, and design.md and proposal.md
+agree.** The range rule (`<review>..<HEAD>`, with `<review>` the HEAD the
+review round was dispatched from), the two `git diff` commands, the
+"What you read" row, and restoring a missing line as the round that ran all
+match `design.md`'s "The nothing-landed round 1 records its evidence" and its
+at-least-one bullet. They also match `proposal.md`'s two sub-bullets and
+at-least-one bullet, with the same two findings cited. The residual
+("What it still cannot see"), the two Risks and the `closer`-side
+follow-up say the same thing in both documents.
+
+**"Or any other change to `tasks.md`" is a rewording.** Both documents already
+say the second command "must show only boxes flipped", and that the line is
+written "only once `git diff` over that range shows tracking alone". So a failed
+second check already means no skip. RUNNER.md only says the consequence out
+loud, which the documents state for the first command. The line adds no new
+trigger.
+
+**The measurements reproduce.** `git log --oneline -1 f94f7b8d~1` gives
+`c222c37b`. `git diff --name-only c222c37 e7e2bbdd` lists the six findings
+files and `tasks.md`. Over `c222c37 ae59b43c` the same command adds
+`proposal.md`. And `git grep -n -F "both ends"` at `dd4fe18` finds exactly
+one statement in each of the three files, none with a reason. So the claim
+that "no recorded decision is reversed" holds.
+
+**The rejected alternatives hold, and the judgement-skip decision is
+recorded.** It is the third alternative, "Forbidding a judgement skip of round
+1", and #171 backs it. The issue asks for the size of a re-review to be left
+to judgement, with "a decision to skip a re-review ... visible rather than
+silent". A judgement skip names what landed over a range that holds it. Only
+the nothing-landed line asserts a fact that a diff can refute. Rejecting
+`git log --oneline` because subjects are where the misreading starts is the
+right reason.
+
+Below medium, in prose:
+
+- The check fails closed on some commits that the definition calls tracking,
+  yet RUNNER.md and design.md both say a failure "means a commit that needs
+  review is in the range". Two examples:
+  - A clean merge of `main` between `<review>` and HEAD. `design.md:283`
+    says it needs no review, but it puts `main`'s paths into `--name-only`.
+  - A non-box `tasks.md` edit, such as a round line, which `design.md:265`
+    calls tracking.
+
+  In the nothing-landed case neither is likely before round 1, and a false
+  failure costs only an ordinary round. "Means a commit that may need review
+  is in the range; size it as step 3 says" would be accurate, and a merge of
+  `main` could still be sized as a skip on judgement.
+- The entry's own form lacks a stated cost: it forecloses nothing, and it adds
+  two commands per nothing-landed piece. One clause under a "Cost" label would
+  complete the entry. The cost is visible from the rule, so this is a
+  suggestion.
