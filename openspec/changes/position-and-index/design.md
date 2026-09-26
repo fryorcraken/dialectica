@@ -108,11 +108,24 @@ The third, for the place rule, is D5.
 **Considered:** asserting the literal positions `"0".."4"` at the wire, as the
 core test does one layer down.
 
-**Ruled out** because `thread-read` deliberately leaves the token's form open:
-*"Contracting only that keeps a later change free to alter the token's form
-without breaking a caller that stayed inside the contract."* A wire test pinning
-`"0"` would turn that freedom into a breaking change. The core test already pins
-the current value, where it is an implementation fact rather than a contract.
+**Ruled out** because `thread-read` contracts no form for the token. What the
+requirement gives a caller is three properties, which D2's two tests and D5's
+assert between them: inequality within one read, the same value at every page
+size, and, after this change, a value set by the place. What it withholds, it
+states as a prohibition, in a sentence this change's MODIFIED block keeps
+unchanged: *"Nor SHALL a caller rely on the token being a number, on arithmetic
+over two of them meaning anything, on two items' values being adjacent or any
+fixed distance apart, …"*. The literals `"0".."4"` spell numbers, adjacent and one apart. A
+wire test pinning them would assert exactly the form a caller is told not to
+rely on, so a later change to that form would turn the test red while breaking
+no caller that stayed inside the contract. The core test already pins the
+current value, where it is an implementation fact rather than a contract.
+
+Why the contract stops at those properties is argued in #173's archived design,
+`openspec/changes/archive/2026-09-26-time-pegged-clock-post-review/design.md`,
+Decision 10, bullet H2, which ends: *"Contracting only that leaves a later change
+free to alter the token's form without breaking a caller that stayed inside the
+contract."* That argument sat in `thread-read` itself until #173 moved it out.
 
 **What these two cannot see.** A position taken from the item itself, such as
 its op id, is unique within a read and the same at every page size, so both
@@ -161,9 +174,10 @@ different items at one place give them the same position.
 
 That rule is also why the uniqueness sentence was narrowed to *one read*. Under
 the place rule, the position at a place belongs to the hidden reply in a read
-that includes it and to the reply after it in a read that does not. "No two
-items of a thread ever share a position" would contradict that; "no two items
-of one read" does not.
+that includes it and to the reply after it in a read that does not. The live
+sentence, *"Two positions SHALL be unequal for two distinct items of one
+thread"*, would contradict that. The delta's *"for two distinct items returned
+by one read of a thread, taken across all of that read's pages"* does not.
 
 **Chosen for the test:** read one thread twice across every page, once with
 `includeHidden` true and once without, where a moderator has hidden a reply that

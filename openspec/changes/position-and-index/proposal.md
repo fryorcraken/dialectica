@@ -77,8 +77,8 @@ None.
   author's asserted time, as two separate fields*. Two edits and one scenario;
   the rest of the block is copied unchanged from the live requirement as it
   stands after #173. #173 removed the paragraph beginning "The alternatives all
-  invite arithmetic that means nothing" from this requirement and moved it to
-  its own `design.md`, Decision 10
+  invite arithmetic that means nothing" from this requirement. Its argument now
+  lives, reworded, in #173's own `design.md`, Decision 10, bullet H2
   (`openspec/changes/archive/2026-09-26-time-pegged-clock-post-review/`). The
   block does not carry that paragraph, because a MODIFIED block replaces the
   whole requirement on archive and would put it back. Its uniqueness sentence
