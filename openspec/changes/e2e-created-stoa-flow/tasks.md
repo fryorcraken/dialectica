@@ -63,6 +63,35 @@ the next push.
       `feed.yaml`'s read step is red with "genesis record ended mid-field",
       that is #152: stop and report, do not weaken the step
 
+      **Observed, on head `34eaa20`: `feed.yaml` red on its central step, and
+      stopped here per the brief.** UI tests
+      https://github.com/fryorcraken/dialectica/actions/runs/36213442819:
+      `join`, `create`, `thread` and `moderation` green; `sitometres feed
+      spec` failed on "the feed was read, and holds nothing",
+      `root.feedReadState === 'ok'` evaluating to false after its 30s and
+      `feedRowCount === 0` passing. Every later step passed: after the post
+      was published the re-read was "ok" and held one row. The adjudicator
+      printed `verdict: fail`, sixteen `[pass]`, one `[fail]`. (sitometres
+      carried on past a failed `expect:`, where `e2e-suite-review` saw it
+      stop after a failed `wait_for:`.) The Basecamp log records the two
+      `list_threads` calls, at the open and after the publish, but not their
+      replies, so the run itself does not name the reason.
+
+      **The cause, found locally at the component layer and not fixed here:**
+      `FeedScreen` reloads on `onStoaAddressChanged`, and when `Main.open()`
+      sets `chosen`, the feed's `stoaAddress` binding updates before its
+      `stoaGenesis` binding. So the first `list_threads` of every open carries
+      the previous genesis, which is `""` coming from the list. A throwaway
+      probe (not committed) opened a Stoa with record `"00ff"` through
+      `Main.open()` and recorded exactly one `list_threads`, whose arguments
+      were `{"stoa":"abab…","genesis":"","page":0,"includeHidden":false}`.
+      The core decodes `""` as "genesis record ended mid-field". Any later
+      read carries the right record, which fits #152's report of an error on
+      entering a Stoa that "Try reading again" clears. It is a view defect,
+      and `feed.yaml` is right to fail on it. CI
+      https://github.com/fryorcraken/dialectica/actions/runs/36213442743:
+      `Lint`, `QML lint`, `UI spec validation` and `Rust core tests` green
+
 ### 4. `create.yaml` goes red when the key block outlives the key
 
 - [ ] 4.1 Break (design.md D6): `keyBlockLoader` also active in the key-held
