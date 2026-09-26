@@ -191,3 +191,11 @@ confirmed by measurement rather than assumed.
   dialectica-core`: all passed, 0 failed (tree clean of mutation at the time
   of this run).
 - `nix build ./dialectica#lgx` from the tree root: succeeded.
+
+## Gate record
+
+- [x] **none** — no spec-test findings in either review round (initial diffs
+      1 and 2, plus the re-review of `439c192..HEAD`). Both rounds report
+      "clean" with mutation-backed verification; recorded as a box so the
+      closer's gate can see this file has been reviewed, not skipped —
+      nothing to act on.
