@@ -974,8 +974,9 @@ check names. `RUNNER.md` gives it as the fourth bullet of the number check.
     read wherever its round's lanes read it, and a round marked skipped is
     read by none, so coverage by a skipped line rests on its reason, which
     nothing checks. That is why the tail check's own repairs are never
-    skipped, why the two lines that may be skipped end at the commit their
-    reason names (below), and why a skipped line breaking either rule is
+    skipped, why the two lines that may be skipped at the tail check end at
+    the commit their reason names (below), and why a skipped line breaking
+    either rule is
     recorded as a residual for the `closer`-side follow-up.
   - **Why "every line is followed" is not needed.** A commit left out by a
     gap lies after every end reached before the gap, so the tail check from
@@ -1017,20 +1018,29 @@ check names. `RUNNER.md` gives it as the fourth bullet of the number check.
       (the wording half of `findings/security.md`'s fix). It makes the
       sentence true by narrowing it, and leaves the fail-open path offered as
       an option to exactly the runner whose slip made the gap.
-    - **Kept: the skipped line for a clean merge of `main` or an archive
-      commit that changed nothing under `openspec/specs/`.** Its reason is a
+    - **Kept: the skipped line for the `closer`'s merge of `main` when it
+      stopped on no conflict, or an archive commit that changed nothing
+      under `openspec/specs/`.** Its reason is a
       fact about that one commit, not a claim that another round covered
       something, and without a line the tail from before it lists every path
       the merge or archive touched, so no later tail check could pass. It is not
       the same hole, because the line is bounded on both sides. Its range
       starts at an end the chain reaches and **ends at that commit, never at
       HEAD or any later commit**, so the tail from it lists whatever landed
-      after it. The start side: both commits are the `closer`'s, made after
-      the tick, so a commit that needs review can sit between the reached end
-      and such a line's end only if it landed after the tick and the runner
-      did not untick, which the proposal already discloses as a residual
-      neither check sees (`findings/security.md`, re-review round 14
-      `c3bda2b..e5dcce4`, archive-masking note). That argument says nothing
+      after it. The start side: the pair's own wording makes both commits
+      the `closer`'s, since it names the `closer`'s merge, as step 3's list of
+      commits needing no review does, and only the `closer` archives. The
+      `closer` runs only once the row is ticked, so an unreviewed commit that
+      needs review can sit between the reached end and such a line's end only
+      if it landed after a tick and the runner did not untick, which the
+      proposal already discloses as a residual neither check sees
+      (`findings/security.md`, re-review round 14 `c3bda2b..e5dcce4`,
+      archive-masking note). Worded as "a clean merge of `main`", the pair
+      did not bound that side: a writer commit before the writer's own clean
+      merge, with its round forgotten, sat under the skipped merge line and
+      merged unread, measured by security; a writer's merge, clean or not, now
+      gets a sized line (`findings/security.md`, re-review round 17
+      `b5ceed2..d806700`, box). The start-side argument says nothing
       about the end side, where the runner did untick: a `closer` that merges,
       archives and returns red is followed by an untick and a fix, and a
       skipped archive line templated "from there to your HEAD" would vouch
@@ -1041,9 +1051,10 @@ check names. `RUNNER.md` gives it as the fourth bullet of the number check.
       round 16 `bad7c88..b5ceed2`, box of each). The start is not narrowed to
       `<first parent>..<sha>`: the tick is no line's end, so that would force
       a sized lane over the tick commit, and the start side is already
-      bounded. Nothing checks the reason or where the range ends, so a
-      skipped line breaking either rule is recorded as a residual and routed
-      to the `closer`-side follow-up (`proposal.md`, "Out of scope"). The
+      bounded. Neither pre-tick check asks whether a skipped line's range
+      fits its reason, so a skipped line breaking these rules is recorded as
+      a residual and routed to the `closer`-side follow-up (`proposal.md`,
+      "Out of scope"). The
       archive-masking note's round-15 variant, a skipped archive line over
       the archive's own range leaving a line from an end the chain reaches to
       the archive's parent, needed that second line skipped too; it is a
@@ -1211,17 +1222,24 @@ check's two commands from it sees the claim fail. That reader is the deferred
 `closer`-side check.
 
 **Nor does either check see a skipped line after round 1 that breaks the tail
-check's rules**: a repair marked skipped, whatever its reason, or a line
-skipped as a clean merge of `main` or an archive commit whose range ends past
-that commit. The number check reads only the line's fixed start, the chain
-follows a skipped line like any other, and the forms check skips it, so a
-commit in its range that needs review merges unread. Only the reason on the
-line tells a permitted skip from a forbidden one, and nothing checks the
-reason or where the range ends (`findings/spec-test.md` and
-`findings/security.md`, re-review round 16 `bad7c88..b5ceed2`, box of each).
-Reaching this takes a runner breaking a stated rule, and the deferred
-`closer`-side check would see it (Risks, "Only the runner runs the pre-tick
-checks").
+check's rules**: a repair marked skipped, whatever its reason; a line skipped
+as a merge of `main` that is not the `closer`'s; or a line skipped as the
+`closer`'s merge or an archive commit whose range ends past that commit, or
+holds before it a commit that needs review and lies in no other line's range.
+The number check reads only the line's fixed start, the chain follows a
+skipped line like any other, and the forms check skips it, so a commit in its
+range that needs review merges unread. A forbidden skip can read exactly like
+a permitted one: a repair marked skipped with the kind of reason a round the
+runner decides to skip carries, such as `cargo fmt` whitespace, reads like
+that skip recorded when its commit landed, since nothing on the line records
+when it was written, and a merge or archive line's reason is true of its
+commit whatever else its range holds. Neither check asks whether a skipped
+line's range fits its reason (`findings/spec-test.md` and
+`findings/security.md`, re-review round 16 `bad7c88..b5ceed2`, box of each;
+`findings/readability.md` and `findings/security.md`, re-review round 17
+`b5ceed2..d806700`, `spec-writer` box of each). Reaching this takes a runner
+breaking a stated rule, and the second reader it is routed to is the deferred
+`closer`-side check (Risks, "Only the runner runs the pre-tick checks").
 
 **This piece's rounds 1 and 2 predate the number.** Their briefs gave the
 un-numbered forms, so the check for those two rounds searches those forms,
@@ -2131,18 +2149,38 @@ no role file.
   commit that merges and was misread as tracking; a line whose range starts
   later is a `<review>` the runner supplied or misread, and a diff over that
   line's own range alone would pass with it (`findings/security.md`,
-  re-review round 12 `dd4fe18..1380d50`, second box). For every other line
-  marked skipped, it would check that the range ends at a clean merge of
-  `main` or at an archive commit that changed nothing under
-  `openspec/specs/`, and run the nothing-landed check's two commands from the
-  line's start to that commit's first parent, so a repair marked skipped, or
-  a skipped line whose range runs past the commit its reason names, fails
+  re-review round 12 `dd4fe18..1380d50`, second box). For a skipped line
+  after round 1, the contract states only what the check must refuse and
+  what it must accept (`proposal.md`, "Skipped lines after round 1"). It
+  must refuse each form "What it still cannot see" lists: a repair marked
+  skipped, whatever its reason; a line skipped as a merge of `main` that is
+  not the `closer`'s; and a line skipped as the `closer`'s merge or an
+  archive commit whose range runs past that commit, or holds before it a
+  commit that needs review and lies in no other line's range
   (`findings/spec-test.md` and `findings/security.md`, re-review round 16
-  `bad7c88..b5ceed2`, box of each). It would not check that the range lists
-  one commit, the form spec-test's box offered: a two-dot range ending at a
-  merge lists every commit the merge brought from `main`, and a line starting
-  at a reached end also holds the runner's tick, so a correct line would fail
-  it.
+  `bad7c88..b5ceed2`, box of each; `findings/security.md`, re-review round
+  17 `b5ceed2..d806700`, box). It must accept every skip the rules allow: a
+  judgement skip, recorded with its reason when its commit landed, such as
+  `RUNNER.md`'s sample line for a `cargo fmt` fix; and the `closer`'s merge
+  of `main` when it stopped on no conflict and an archive commit that
+  changed nothing under `openspec/specs/`, each on a line of its own. How
+  the check tells the two apart is left to the issue, including a repair
+  marked skipped with a judgement skip's kind of reason, which reads like a
+  judgement skip recorded when its commit landed. No procedure is recorded
+  here because the one first written refused lines the rules allow: it
+  required every skipped line after round 1 to end at a merge or an
+  archive, which refuses the judgement skip, and its diff from the line's
+  start to that commit's parent lists the round's own record and any other
+  skipped commit before it (`findings/design-review.md`,
+  `findings/readability.md` and `findings/spec-test.md`, re-review round 17
+  `b5ceed2..d806700`, `spec-writer` box of each). Whatever the issue
+  settles, the check cannot require a skipped line's range to hold one
+  commit, the form spec-test's round-16 box offered: a two-dot range ending
+  at a merge holds every commit the merge brought from `main`, and a line
+  starting at an end the chain reaches also holds that round's own record
+  and findings commits, so the permitted merge and archive lines would fail
+  it (both measured, `findings/spec-test.md`, re-review round 17
+  `b5ceed2..d806700`).
 - **[The review round costs at least three `SendMessage` round trips.]** →
   Accepted for this piece. The one-file-per-row follow-up removes it.
 - **[`tester.md` said "Keep the markers and report each one — the spec-writer

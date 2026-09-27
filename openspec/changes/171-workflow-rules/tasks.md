@@ -734,3 +734,52 @@ findings box is touched.
       residuals and the `closer`-side follow-up name the skipped line after
       round 1.
 - [x] 23.5 `openspec validate 171-workflow-rules --strict` passes.
+
+### 24. After the `spec-writer`'s removal of the skipped-line criterion (`5bca33f0`)
+
+Follows `proposal.md` as `5bca33f0` left it, and the `dev-writer` box in
+round 17 of `findings/readability.md`. The skippable pair as 22.1 and 23.1
+word it, "a clean merge of `main`", is superseded by 24.1; those items
+record what their pass did and are left as written.
+
+- [x] 24.1 `RUNNER.md` tail bullet: the skippable pair names "the `closer`'s
+      merge of `main` when it stopped on no conflict", step 3's wording, and
+      reads "Only two kinds of commit". The end rule is unchanged, since
+      `proposal.md` keeps "never at HEAD or any later commit". Judgement
+      skips (`RUNNER.md` "Record the call" and its sample line) are
+      unchanged. Verify:
+      `git grep -n -F -e "stopped on no conflict" -- .claude/agents/RUNNER.md`
+      returns step 3's list and the tail bullet, and
+      `git grep -n -F -e "clean merge" -- .claude/agents/` returns nothing.
+- [x] 24.2 `design.md` Risk "Only the runner runs the pre-tick checks": the
+      criterion and its first-parent procedure are gone; the Risk mirrors
+      `proposal.md`'s "Skipped lines after round 1" (what the check must
+      refuse and accept, the procedure left to the issue), says why the
+      first criterion was dropped, and keeps the one-commit rejection
+      without a procedure. Verify:
+      `git grep -n -F -e "first parent" -- openspec/changes/171-workflow-rules/design.md`
+      returns no line inside the Risk (it starts at the line
+      `git grep -n -F -e "Only the runner runs the pre-tick checks.]"` prints
+      and ends before the next Risk).
+- [x] 24.3 `design.md` "What it still cannot see": the skipped-line residual
+      lists the widened forbidden forms and replaces "Only the reason on the
+      line tells" with the proposal's two reasons a forbidden skip reads
+      like a permitted one. Verify:
+      `git grep -n -F -e "reason on the line" -- openspec/changes/171-workflow-rules/design.md`
+      returns nothing, and
+      `git grep -n -F -e "A forbidden skip can read exactly" -- openspec/changes/171-workflow-rules/design.md`
+      returns the residual.
+- [x] 24.4 `design.md` "Why the tail check alone is sound": "the two lines
+      that may be skipped at the tail check". The "Kept" bullet names the
+      `closer`'s merge, rests its start side on the pair's wording rather
+      than an assumption, says *unreviewed* and "after a tick", and cites
+      security's round 17 box for the writer's clean merge the old wording
+      let through. Verify:
+      `git grep -n -F -e "skipped at the tail check" -e "The start-side argument" -- openspec/changes/171-workflow-rules/design.md`
+      returns both.
+- [x] 24.5 `findings/readability.md`'s round 17 `dev-writer` box flipped with
+      its outcome.
+- [x] 24.6 PR #174's body: the `closer`-side follow-up carries "Skipped
+      lines after round 1" and the new open question in place of the
+      removed criterion; the skippable pair names the `closer`'s merge.
+- [x] 24.7 `openspec validate 171-workflow-rules --strict` passes.

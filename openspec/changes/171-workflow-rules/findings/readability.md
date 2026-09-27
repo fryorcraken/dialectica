@@ -1210,7 +1210,7 @@ Stylistic or low, no box:
       commit whatever else the range holds — and "Neither check asks
       whether a skipped line's range fits its reason". The `dev-writer`
       brings `design.md` and the PR body into line (box below).
-- [ ] **`dev-writer`** — `design.md:2134-2145` and `:1213-1224` — the same
+- [x] **`dev-writer`** — `design.md:2134-2145` and `:1213-1224` — the same
       criterion appears in the Risk "Only the runner runs the pre-tick
       checks", and "Only the reason on the line tells a permitted skip from a
       forbidden one" appears in the new residual paragraph. Both contradict
@@ -1221,6 +1221,20 @@ Stylistic or low, no box:
       would build a follow-up that fails `RUNNER.md:680`'s sample line, which
       `:517-522` names as a skip the design meant to keep. Follow the
       `spec-writer`'s decision. **Severity:** medium.
+      **Outcome (dev-writer): fixed**, in the commit that flips this box,
+      following the `spec-writer`'s removal. The Risk (`design.md:2152-2183`)
+      no longer carries the criterion or its first-parent procedure: it
+      mirrors `proposal.md`'s "Skipped lines after round 1", listing what the
+      check must refuse and what it must accept, the judgement skip and
+      `RUNNER.md:680`'s sample among the accepted, and leaves the procedure
+      open. It records why the first criterion was dropped, and restates the
+      one-commit rejection without a procedure: a merge's range holds every
+      commit it brought from `main`, and a line from a reached end holds the
+      round's own records. The residual (`design.md:1224-1241`) replaces "Only
+      the reason on the line tells a permitted skip from a forbidden one" with
+      the proposal's "A forbidden skip can read exactly like a permitted one"
+      and its two reasons, and lists the widened forbidden forms. `:977` now
+      reads "the two lines that may be skipped at the tail check".
 
 Dimension: **readability only**, narrowed as briefed. What I read:
 `git diff b5ceed2 d806700` over `RUNNER.md`, `proposal.md` and `design.md`;

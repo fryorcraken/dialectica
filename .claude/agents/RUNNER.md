@@ -749,13 +749,14 @@ the `closer`'s first row. Do not tick unless all four hold:
     would give, that the round covered `f1`, is the belief that wrote the
     off-by-one: a skipped line extends the chain and the forms check skips
     it, so `f1` would merge unread with every check passing. Either line is
-    sound; the choice changes only how much is read again. Only two commits
-    they list get a line marked skipped here, because they need no review: a
-    clean merge of `main`, and an archive commit that changed nothing under
-    `openspec/specs/`. Each gets a line of its own marked skipped with that
-    reason, starting at an end the chain reaches and **ending at that commit,
-    never at HEAD or any later commit**, so the chain runs past it and the tail
-    from it lists whatever landed after it.
+    sound; the choice changes only how much is read again. Only two kinds of
+    commit they list get a line marked skipped here, because they need no
+    review: the `closer`'s merge of `main` when it stopped on no conflict, and
+    an archive commit that changed nothing under `openspec/specs/`. Each gets
+    a line of its own marked skipped with that reason, starting at an end the
+    chain reaches and **ending at that commit, never at HEAD or any later
+    commit**, so the chain runs past it and the tail from it lists whatever
+    landed after it.
 
 A re-run's line templated from the previous one with its number unchanged is
 why this check reads the numbers: the copy rule below carries that number into
