@@ -1167,7 +1167,7 @@ Stylistic or low, no box:
 
 ## Re-review round 17 `b5ceed2..d806700`
 
-- [ ] **`spec-writer`** — `proposal.md:1401-1408` — the `closer`-side
+- [x] **`spec-writer`** — `proposal.md:1401-1408` — the `closer`-side
       follow-up's new criterion, "For every other line marked skipped, check
       that its range ends at a clean merge of `main` or at an archive commit
       that changed nothing under `openspec/specs/`", rejects the judgement skip
@@ -1195,6 +1195,21 @@ Stylistic or low, no box:
       criterion to lines whose reason is a merge or an archive and record that
       a repair skipped under a judgement reason stays invisible to both
       readers. **Severity:** medium.
+      **Outcome (spec-writer): fixed; judgement skips stay allowed.**
+      `RUNNER.md:622-623` and `:680` are unchanged in meaning: a judgement
+      skip recorded when its commit landed is permitted, and the follow-up
+      must accept it (`proposal.md:1424-1443`, "Skipped lines after round
+      1"). The criterion that refused it is removed rather than narrowed;
+      `proposal.md` specifies no procedure for the deferred check. How to
+      tell a repair skipped under a judgement reason from a real judgement
+      skip is recorded as open, in "For the issue to settle"
+      (`:1456-1463`). The residual's sentence is replaced
+      (`proposal.md:630-636`): "A forbidden skip can read exactly like a
+      permitted one", with the two reasons — nothing on the line records
+      when it was written, and a merge or archive reason is true of its
+      commit whatever else the range holds — and "Neither check asks
+      whether a skipped line's range fits its reason". The `dev-writer`
+      brings `design.md` and the PR body into line (box below).
 - [ ] **`dev-writer`** — `design.md:2134-2145` and `:1213-1224` — the same
       criterion appears in the Risk "Only the runner runs the pre-tick
       checks", and "Only the reason on the line tells a permitted skip from a

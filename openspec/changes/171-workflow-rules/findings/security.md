@@ -2181,7 +2181,7 @@ within #171's re-review mechanism. Nothing in the range adds a route to
 
 ## Re-review round 17 `b5ceed2..d806700`
 
-- [ ] **`spec-writer`** (then `dev-writer` for `RUNNER.md:753-755` and
+- [x] **`spec-writer`** (then `dev-writer` for `RUNNER.md:753-755` and
       `design.md:1028-1033`) — `proposal.md:433-436` — the skipped-line pair
       says "a clean merge of `main`", with no owner. Step 3's list of commits
       that need no review (`RUNNER.md:549`) is narrower: "the `closer`'s merge
@@ -2238,6 +2238,17 @@ within #171's re-review mechanism. Nothing in the range adds a route to
       - The routed `closer`-side check would see it:
         `git diff --no-renames --name-only 07a162b ee57e60^1` lists
         `src/a.rs`.
+      **Outcome (spec-writer): fixed.** The pair at `proposal.md:433-437`
+      now reads "the `closer`'s merge of `main` when it stopped on no
+      conflict and an archive commit that changed nothing under
+      `openspec/specs/`", step 3's own wording, so a writer's merge, clean
+      or not, is not one of the two and gets a sized line. No check was
+      added. The residual (`proposal.md:621-642`) and the follow-up's
+      "Skipped lines after round 1" bullet also name "a line skipped as a
+      merge of `main` that is not the `closer`'s" as a forbidden form. The
+      archive half is unchanged, since only the `closer` archives. The
+      `dev-writer` brings `RUNNER.md:753-755` and `design.md:1028-1033` into
+      line.
 
 Security only, on Opus, narrowed. No mutation: the change is prose. The box
 above is the only item at medium. The rest is prose.

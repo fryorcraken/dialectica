@@ -974,7 +974,7 @@ Below medium, in prose:
 
 ## Re-review round 17 `b5ceed2..d806700`
 
-- [ ] **`spec-writer`** — `proposal.md:1401-1408` (mirrored at
+- [x] **`spec-writer`** — `proposal.md:1401-1408` (mirrored at
       `design.md:2134-2145`) — the widened `closer`-side criterion fails
       skipped lines that `RUNNER.md:753-758` permits. That is the reason
       `design.md:2141-2145` gives for rejecting spec-test's one-commit form:
@@ -1006,6 +1006,20 @@ Below medium, in prose:
       paragraph should say which. **Severity:** medium. It is a flaw in the
       recorded design of a deferred check, not an in-piece hole, and it
       fails loud, not silent.
+      **Outcome (spec-writer): fixed by removal.** The detailed criterion
+      (range ends at a merge or archive, the nothing-landed commands over
+      start to first parent) is gone from `proposal.md`'s `closer`-side
+      follow-up. The follow-up now has a bullet, "Skipped lines after round
+      1" (`proposal.md:1424-1443`), that states only what the check must
+      refuse (the residual's forms) and what it must accept (judgement
+      skips, and the `closer`'s merge and its archive, each on a line of its
+      own). It sets no procedure; how to tell the two apart is added to
+      "For the issue to settle" (`:1456-1463`). No `proposal.md` text
+      rejected spec-test's one-commit form, so nothing there needed
+      reconciling. The `dev-writer` brings `design.md` (the Risk at
+      `:2134-2145`, including the one-commit rejection whose reason no longer
+      has a criterion to rest on, and the residual at `:1213-1224`),
+      `RUNNER.md` where it mirrors the text, and the PR body into line.
 
 Below medium, in prose:
 

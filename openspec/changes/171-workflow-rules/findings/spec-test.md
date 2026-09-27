@@ -1514,7 +1514,7 @@ returned no lines. No `RUNNER.md` hunk was read.
 
 ## Re-review round 17 `b5ceed2..d806700`
 
-- [ ] **`spec-writer`** — `proposal.md:1401-1404` (mirrored at
+- [x] **`spec-writer`** — `proposal.md:1401-1404` (mirrored at
       `design.md:2134-2140` and in PR #174's `closer`-side follow-up) — the
       new `closer`-side check for a skipped line after round 1 runs "the
       nothing-landed check's two commands over the range from the line's
@@ -1552,6 +1552,18 @@ returned no lines. No `RUNNER.md` hunk was read.
       spec-writer subject, so it is no merge and no archive. A repair marked
       skipped whose range does end at a real merge still lists the unreviewed
       commit's path in the first command over `<start>..<merge>^1`.
+      **Outcome (spec-writer): fixed by removal, not by the one clause.**
+      The criterion, and with it the "nothing-landed check's two commands
+      over … first parent" procedure, is gone from `proposal.md`. Its
+      three lanes found three edges in one paragraph for a check this piece
+      does not build. The follow-up's bullet "Skipped lines after round 1"
+      (`proposal.md:1424-1443`) now says only what the check must refuse and
+      what it must accept (including the `closer`'s merge and archive
+      lines), and leaves the procedure, round-line allowance included, to
+      the issue ("For the issue to settle", `:1456-1463`). The `dev-writer`
+      brings `design.md`'s Risk (`:2134-2145`) and the PR body's
+      `closer`-side follow-up, which carry the removed text verbatim, into
+      line.
 
 **Q1: is my round-16 box closed?** The record-and-route part is closed.
 `proposal.md:620-631` adds the skipped line after round 1 to the "Nor does
