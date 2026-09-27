@@ -1065,3 +1065,61 @@ Below medium, in prose:
   The "independent witness" point (a merge's cleanliness is observed by the
   `closer`, but not checked at the tail) still applies and is now covered by
   the recorded residual at `design.md:1213-1224`.
+
+## Re-review round 18 `d806700..b33f0f5`
+
+- [x] **re-review round 18 `d806700..b33f0f5`: no findings** — read `git diff d806700 b33f0f5` over `RUNNER.md`, `proposal.md` and `design.md`, `git log --oneline d806700..b33f0f5`, `RUNNER.md:533-555` and `:716-759`, `design.md:960-1067` and `:2140-2183`, my round-17 section, and swept the three files for "after the last round" and `.claude/agents/` for "openspec archive"; clean
+
+Below medium, in prose:
+
+- **Q1: my round-17 box is closed, and no recorded decision still rests on
+  the removed criterion.** `proposal.md`'s follow-up has lost the
+  "ends at a merge or archive, diff start to first parent" procedure; the
+  new bullet (`proposal.md:1424-1443`) states refuse/accept only.
+  `design.md`'s Risk (`:2152-2183`) mirrors it. The Kept entry
+  (`:1021-1061`) now routes the residual on "neither pre-tick check asks
+  whether a skipped line's range fits its reason" rather than on a
+  criterion, and `:977-980` says only which lines may be skipped. The
+  scenario in my box (`R..M` then `R..A`) is named in the removal reason as
+  "any other skipped commit before it". Nothing now depends on it.
+- **Q2: the removal is recorded, but as a Risk sub-paragraph with its
+  rejected alternatives unnamed.** `design.md:2169-2176` says why no
+  procedure is recorded: the first one refused judgement skips, and its
+  diff also listed the round's own record and earlier skipped commits. It
+  cites all three lanes. It does not say why a *corrected* procedure was
+  not written in its place, and it does not name the two repairs my box
+  offered (constrain the start; tolerate an earlier skipped line's paths).
+  The convergence argument that justifies leaving it to the issue already
+  exists at `:1014-1016` ("every box on this gate since round 5 has been an
+  edge of mechanism added to close the one before"). One clause pointing at
+  it would make this a full Decisions entry. The next reader would then not
+  re-propose either repair as though no one had considered it. This is a
+  suggestion, not a box: the check is deferred, and the issue owns its
+  design. The restated one-commit rejection (`:2176-2183`) stands without a
+  procedure. It rejects a *requirement*, not a step inside one. Both of its
+  counterexamples are properties of the permitted lines themselves: a
+  two-dot range ending at a merge holds `main`'s commits, and a line from a
+  reached end holds that round's record commits. Spec-test measured both.
+  So it holds whatever procedure the issue picks.
+- **Q3: `RUNNER.md` implements the Kept decision as recorded, and nothing
+  else.** `:752-759` changes "two commits … a clean merge of `main`" to
+  "two kinds of commit … the `closer`'s merge of `main` when it stopped on
+  no conflict", in the words of step 3's list at `:549`. The archive clause
+  and the "ending at that commit, never at HEAD" bound are unchanged. No
+  other `RUNNER.md` line moved in the range. One small gap: the Kept entry's
+  `:1041-1042` says "a writer's merge, clean or not, now gets a sized line".
+  `RUNNER.md` gets there only by exclusion. Step 3 names a writer's
+  *conflict resolution* (`:540`), and a writer's clean merge appears in
+  neither list. It falls under "every commit that changes something which
+  merges" (`:543`) and is absent from the no-review list, so the text is
+  correct. But a runner has to infer that. The start-side claim "only the
+  `closer` archives" (`:1032`) holds: `closer.md` is the only role file that
+  runs `openspec archive`.
+- **Q4: nothing in the range changes my earlier notes.** `design.md:1007`
+  still gives "at least one lane" without its reason (a zero-lane round
+  passes the forms check vacuously). That reason is still only in
+  `findings/spec-test.md`, which the `closer` deletes. `design.md:989` still
+  says the check "always terminates", and `RUNNER.md` still does not tell
+  the runner to re-check from the end it just wrote. `proposal.md:1279`
+  still says "after the last round". The range touched none of these
+  sites.
