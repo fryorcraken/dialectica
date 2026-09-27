@@ -1692,3 +1692,125 @@ Below the box threshold, in prose only:
   often it will happen. Low.
 
 `./tmp/r16cor/tasks.md`, the copy used above, has since been deleted.
+
+## Re-review round 17 `b5ceed2..d806700`
+
+- [x] **re-review round 17 `b5ceed2..d806700`: no findings** — read `git diff b5ceed2 d806700` over `RUNNER.md`, `proposal.md`, `design.md` and `tasks.md`, `RUNNER.md:615-810`, `proposal.md:395-442`, `:600-638` and `:1370-1419`, `design.md:1005-1050`, `findings/security.md`'s round 16 section, `closer.md`'s conflict rule, and PR #174's last two body revisions from GitHub; walked the rule on this tree and in a scratch repository under `./tmp/`; clean
+
+**Q1, walking the rule.** At HEAD `7174364e` the derivation's last line is
+`f94f7b8d c222c37b`, so `<review>` is `c222c37b`. The number-check listing
+prints the row at `tasks.md:24`, round lines at 25-41 and the `closer`'s row at
+42. The lines run without a gap, rounds 1 to 17 appear once each, and `:735`
+is a wrapped line outside the rows, not a round line. The chain reaches
+`c222c37`, `9dc235c`, `34fd428`, `dc1390a` (rounds 3 and 4), `d1c8726`,
+`6d43cda`, `d1d2165` (rounds 7 and 8), `c4b1df5`, `842758b`, `dd4fe18`,
+`1380d50`, `c3bda2b`, `e5dcce4`, `bad7c88`, `b5ceed2` and `d806700`. Every
+line is reached. `git diff --no-renames --name-only d806700 HEAD` lists only
+`tasks.md`, and its diff is the round 17 line added, so the tail is tracking
+only. The forms check for round 17 lists nothing, while round 16's lists all
+five lanes' files. So the number check passes, and the row cannot be ticked
+until round 17's five findings commits are on HEAD.
+
+In a scratch repository, `tmp/r17` branch `piece`: `c0` `cd4b1b2` (review),
+the findings add, fix `c2d5b81`, and the round 1 line
+``round 1 `cd4b1b2..c2d5b81` ``. Then the `closer`'s clean `--no-ff` merge of a
+`main` commit touching `main.txt` (`dd23846`). Then
+``round 2 `c2d5b81..dd23846` skipped: clean merge of main``, and a red-CI
+fix to `code.txt` (`1933387`) with no round.
+
+- `git diff --no-renames --name-only dd23846 HEAD` lists `chg/tasks.md` and
+  `code.txt`. **Yes: the tail from the merge lists the later commit**, it
+  fails, and the fix gets a sized line.
+- For contrast, a skipped line ending at HEAD `1933387`, the form the clause
+  now forbids: the tail from there lists nothing, and the fix merges unread.
+- The tail from `c2d5b81`, before the merge, lists `main.txt` too. That is why
+  the merge needs its own line at all.
+
+**Q2, `RUNNER.md:753-758` against `proposal.md:433-442`.** The rule is word
+for word the same: starting at an end the chain reaches, "ending at that
+commit, never at HEAD or any later commit", so the chain runs past it and the
+tail from it lists whatever landed after it. The proposal adds one sentence of
+rationale that `RUNNER.md` leaves out: a range running past the commit would
+vouch for every commit after it. A runner acts on nothing in that sentence.
+No box.
+
+**Q3, `tasks.md` section 23.** Each verify command gives what its row claims.
+
+- 23.1: `git grep -n -F -e "ending at that commit" -- .claude/agents/` prints
+  `RUNNER.md:756` only, which is the tail bullet.
+- 23.3: `git grep -n -F -e "skipped line after round 1" -- …/design.md`
+  prints `:1213` (the "What it still cannot see" residual), `:1260` (inside
+  "What else was considered", which starts at `:1250`) and `:2112` (the Risk
+  "Only the runner runs the pre-tick checks").
+- 23.5: `openspec validate 171-workflow-rules --strict` passes.
+
+23.2 and 23.4 name no command. I read 23.2's targets: `design.md:974-979`
+and `:1020-1050` say what the row says. 23.4 is checked under Q4.
+
+**Q4, the PR body.** Node 1 was edited at 2026-09-27T04:18:44Z and node 2 at
+2026-09-26T18:05:35Z. I compared them section by section, reading both from
+the persisted `gh api graphql` output. The changes are confined to the five
+passages the dev-writer named:
+
+- step 3: after "Only two commits get a skipped line there…", one new
+  sentence: "Each such line starts at an end the chain reaches and ends at
+  that commit, never at HEAD or any later commit, so the tail from it lists
+  whatever landed after it."
+- the `design.md` summary's number-check bullet: "a skipped line after round
+  1 that breaks the tail check's rules" joins the list of broken rules.
+- the tail-repair bullet: the kept-pair sentence gains "and its range ends at
+  that commit, never at HEAD: the after-the-tick argument bounds only its
+  start, …" with "(measured by security in a scratch repository)". That
+  attribution is true: `findings/security.md:2097-2113` records `tmp/r16sec/`.
+- the standing-test follow-up: "What remains" gains the skipped-line case with
+  its two forms.
+- the owner follow-up's `closer`-side check, which has two edits in the one
+  bullet. "But a runner that skips any of these…" gains the skipped-line
+  case, and a new passage says what the check does for every other line
+  marked skipped. That passage matches `proposal.md:1401-1408`.
+
+Every other passage is unchanged: intro, Why, steps 1, 2 and 4, the rest of
+step 3, the other role-file bullets, the other `design.md` bullets, `NO SPEC:`,
+the other follow-ups and the #132 overlap. No sentence was lost, no claim
+changed and no follow-up was dropped. `Closes #171`, `Closes #170`,
+`Closes #169` and `Closes #133` stand on four separate lines. This was a
+careful comparison by eye, like the dev-writer's. The persisted output is
+outside the tree and the brief bans the shapes a mechanical diff would need,
+so no diff tool ran.
+
+Below the box threshold, in prose only:
+
+- **The start side's bound rests on `closer.md:191`, "A conflict is not yours
+  to resolve", and the design never names that dependence** (`design.md:1028-1033`).
+  I built the mirror of round 16's scenario on the start side, on branch
+  `piece2` of `tmp/r17`. After the tick `b2f0518`, a merge of `main` that
+  conflicts is resolved in place (`3422ab3`). Then come the archive `b3b125f`
+  and a red-CI fix `dddbcca`. The runner unticks and writes
+  ``round 2 `c2d5b81..b3b125f` `` skipped as an archive, plus a sized round 3
+  for the fix, and forgets the resolution. The results:
+  - `git diff --no-renames --name-only dddbcca HEAD` lists only
+    `archive/tasks.md`.
+  - The `tasks.md` diff is the untick and the two lines.
+  - The chain reaches `dddbcca`.
+  - The resolution is inside a skipped line whose reason is true of the
+    archive.
+
+  That contradicts "only if it landed after the tick and the runner did not
+  untick", because here the runner did untick. It is not a box, because the
+  resolution can only sit there if the `closer` resolved a conflict itself.
+  `closer.md:191` forbids that, and a writer's resolution lands before a
+  re-tick whose checks list it. The deferred `closer`-side check would catch
+  it: `git diff --no-renames --name-only c2d5b81 3422ab3` (line start to the
+  archive's first parent) lists `code.txt`. Naming the dependence ("the
+  `closer`'s merge is clean because it aborts on a conflict") would make the
+  argument complete. Round 16's security note already records that "clean"
+  goes unchecked. Low.
+- **"Never at HEAD" is ambiguous when that commit is HEAD**
+  (`RUNNER.md:756-757`, `proposal.md:437-438`). A `closer` archives and
+  returns red, and a runner that records the skipped lines before dispatching
+  the fixer stands at HEAD = the archive. Read literally, "ending at that
+  commit" and "never at HEAD" then conflict. "Never past that commit, even
+  where HEAD is later" says what is meant. A literal reader either waits for
+  the fix or sizes a round over the archive. Both fail safe. Low.
+
+The scratch repository `tmp/r17` was cleaned before this commit.
