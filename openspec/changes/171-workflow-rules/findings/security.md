@@ -2399,3 +2399,76 @@ and nothing else under `.claude/`. Its one hunk is the tail bullet's pair,
 which is within #171's re-review mechanism. Nothing in the range adds a
 route to `main`, a force or `--admin`. `tmp/r18sec/` (branches `p4`, `p5`,
 `main`, `main2`, `piece`) is left in place as evidence.
+
+## Re-review round 19 `b33f0f5..07a43f9`
+
+- [x] **re-review round 19 `b33f0f5..07a43f9`: no findings** — read `git diff b33f0f5 07a43f9` over `proposal.md`, `design.md` and `tasks.md`, `findings/spec-test.md`'s round 18 section, `proposal.md:110-122`, `:420-443`, `:590-650` and `:1390-1465`, `design.md:2125-2183`, and `RUNNER.md:640-759`; measured both shapes in `tmp/r19-sec/`; clean
+
+Security only, on Opus, narrowed. No mutation: the change is prose. Nothing
+at medium or above; one low note below, unboxed.
+
+Scratch graph in `tmp/r19-sec/`, branch `piece`: `base` `ca02888`, `E`
+`970c782` (round 1's end), `F` `275b0fe` (a fmt fix), `W` `ef6ce02` (a
+writer commit), `X` `031fa63` on `main`, the `closer`'s merge `M`
+`5aac5af`, and the archive `A` `b772ee2`. `git log --oneline` over
+`E..M` lists `M X W F`, over `E..A` lists `A M X W F`, over `E..F` lists
+`F`, and over `F..W` lists `W`.
+
+**Question 1: spec-test's overlap case is closed, and a correct line whose
+earlier commits lie in sized rounds is still accepted.**
+- Overlap: round 1 `base..E` sized, round 2 `E..M` skipped as the
+  `closer`'s merge, round 3 `E..A` skipped as its archive. `W` lies before
+  `M` in both. The only line not marked skipped is round 1, whose range is
+  `E` alone, so `W` lies in the range of no line that is not marked skipped
+  and the clause refuses both lines. Under the old wording each skipped
+  line covered `W` for the other.
+- Correct line: round 1 as above, round 2 `E..W` sized (it holds `F` and
+  `W`), round 3 `E..M` skipped as the `closer`'s merge, round 4 `M..A`
+  skipped as the archive. `F` and `W` both lie in round 2, which is not
+  skipped, so round 3 is accepted. Round 4's range is `A` alone. `X` lies
+  in `E..M` under both wordings and in no other line. So whether a commit
+  brought from `main` "needs review" is the same question it was before
+  this round, and `design.md:2178-2183` already names it.
+- Nothing in the new wording lets a skipped line cover anything, the line
+  under test included. So no new fail-open shape exists.
+
+**Question 2: nothing else in the range weakens a gate or claims in-piece
+coverage.** The clause sits where it sat, in both residual lists ("Nor does
+either check see", `proposal.md:621-643` and `design.md:1224-1242`) and in
+the deferred `closer`-side check. Neither the residuals nor the Risk says
+any in-piece check enforces it. `git grep -n -F -e "no other line" -e "range
+of no line"` over `.claude/agents/`, `proposal.md` and `design.md` prints
+the four new clauses plus `proposal.md:607` and `design.md:1201`. Those two
+are the lowered-number rule, correctly left alone. No role file carries the
+clause. The range touches nothing under `.claude/`, so the issue scope is
+unchanged since round 18. Tasks section 25 records the edit and nothing
+more.
+
+One low note, unboxed:
+
+- *The new clause refuses one permitted merge line after a judgement skip,
+  unless a judgement-skipped commit "needs no review"* (low, fail-closed).
+  Take round 1 `base..E` sized, round 2 `E..F` skipped as `RUNNER.md:680`'s
+  sample (`cargo fmt` whitespace), round 3 `F..W` sized, and round 4 `E..M`
+  skipped as the `closer`'s merge. Round 4 starts at `E`, an end the chain
+  reaches, so `RUNNER.md:756-757` permits it. It holds `F` before `M`, and
+  `F` lies only in round 2, which is skipped. `F` changes a file that
+  merges, and `proposal.md:117` says such a commit "needs review". So the
+  refuse clause refuses round 4, while the accept list (`proposal.md:1435-
+  1440`) says the check must accept it. The old wording accepted it,
+  because round 2 counted as another line. This is the round-17 trap
+  `design.md:2173-2174` names, "any other skipped commit before it", coming
+  back through the coverage clause. It fails closed, not open. The runner
+  can avoid it by starting round 4 at `W`. The spec-writer's outcome in
+  `findings/spec-test.md` says the issue settles whether such a commit
+  "needs review". But the list at `proposal.md:1458-1465` names only telling
+  a permitted skipped line from a forbidden one, not this coverage question.
+  If an issue resolves the conflict by letting skipped lines cover again,
+  it reopens spec-test's round-18 case, so the open question should name
+  both sides. Spec-test and correctness can weigh whether that is worth a
+  line. No gate is bypassed.
+
+Not read: PR #174's body in full. `gh pr view 174 --json body` overflowed to
+a file outside the working directories, and only its preview was read.
+Tasks 25.3's claim about the body's two copies is correctness's to compare.
+`tmp/r19-sec/` (branches `piece`, `main`) is left in place as evidence.
