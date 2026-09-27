@@ -702,3 +702,34 @@ rewritten.
       returns nothing.
 - [x] 22.3 PR #174's body: the tail-check repair passage follows 22.1.
 - [x] 22.4 `openspec validate 171-workflow-rules --strict` passes.
+
+### 23. After the `spec-writer`'s fixed end for a skipped line (`d40172d9`)
+
+Follows `proposal.md` as `d40172d9` left it, and the `dev-writer` pointers in
+the round 16 boxes of `findings/security.md` and `findings/spec-test.md`. No
+findings box is touched.
+
+- [x] 23.1 `RUNNER.md` tail bullet: the skipped line for a clean merge of
+      `main` or a spec-free archive starts at an end the chain reaches and
+      ends at that commit, never at HEAD or any later commit, so the tail
+      from it lists whatever landed after it. Stated once. Verify:
+      `git grep -n -F -e "ending at that commit" -- .claude/agents/`
+      returns the tail bullet only.
+- [x] 23.2 `design.md`'s "Kept" bullet: the line is bounded on both sides;
+      the after-the-tick argument covers the start side only, and the fixed
+      end covers the end side, with round 16's scenario; why the start is not
+      narrowed to the one commit. "Why the tail check alone is sound" says
+      why the two skippable lines end at their commit and where a broken
+      rule is routed.
+- [x] 23.3 `design.md` "What it still cannot see": a skipped line after round
+      1 that breaks the tail check's rules is a residual neither check sees,
+      pointing at Risks; "What else was considered" and the Risk "Only the
+      runner runs the pre-tick checks" name it, and that Risk's `closer`-side
+      check covers every skipped line other than round 1, with why it does
+      not require a one-commit range. Verify:
+      `git grep -n -F -e "skipped line after round 1" -- openspec/changes/171-workflow-rules/design.md`
+      returns the residual, the "What else was considered" list and the Risk.
+- [x] 23.4 PR #174's body: the skipped-line passage ends at that commit; the
+      residuals and the `closer`-side follow-up name the skipped line after
+      round 1.
+- [x] 23.5 `openspec validate 171-workflow-rules --strict` passes.

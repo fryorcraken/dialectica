@@ -974,7 +974,9 @@ check names. `RUNNER.md` gives it as the fourth bullet of the number check.
     read wherever its round's lanes read it, and a round marked skipped is
     read by none, so coverage by a skipped line rests on its reason, which
     nothing checks. That is why the tail check's own repairs are never
-    skipped (below).
+    skipped, why the two lines that may be skipped end at the commit their
+    reason names (below), and why a skipped line breaking either rule is
+    recorded as a residual for the `closer`-side follow-up.
   - **Why "every line is followed" is not needed.** A commit left out by a
     gap lies after every end reached before the gap, so the tail check from
     any of those ends lists its changes whenever they merge. The condition
@@ -1020,14 +1022,31 @@ check names. `RUNNER.md` gives it as the fourth bullet of the number check.
       fact about that one commit, not a claim that another round covered
       something, and without a line the tail from before it lists every path
       the merge or archive touched, so no later tail check could pass. It is not
-      the same hole. Both commits are the `closer`'s, made after the tick, so
-      a commit that needs review can sit inside such a line's range only if
-      it landed after the tick and the runner did not untick, which the
-      proposal already discloses as a residual neither check sees
-      (`findings/security.md`, re-review round 14 `c3bda2b..e5dcce4`,
-      archive-masking note). That note's round-15 variant, a skipped archive
-      line over the archive's own range leaving a line from an end the chain
-      reaches to the archive's parent, needed that second line skipped too; it is a
+      the same hole, because the line is bounded on both sides. Its range
+      starts at an end the chain reaches and **ends at that commit, never at
+      HEAD or any later commit**, so the tail from it lists whatever landed
+      after it. The start side: both commits are the `closer`'s, made after
+      the tick, so a commit that needs review can sit between the reached end
+      and such a line's end only if it landed after the tick and the runner
+      did not untick, which the proposal already discloses as a residual
+      neither check sees (`findings/security.md`, re-review round 14
+      `c3bda2b..e5dcce4`, archive-masking note). That argument says nothing
+      about the end side, where the runner did untick: a `closer` that merges,
+      archives and returns red is followed by an untick and a fix, and a
+      skipped archive line templated "from there to your HEAD" would vouch
+      for that fix under a reason true only of the archive, so it merges
+      unread when the runner also forgets the fix's round. The fixed end
+      closes that side: the tail from the archive lists the fix's paths and
+      fails (`findings/security.md` and `findings/spec-test.md`, re-review
+      round 16 `bad7c88..b5ceed2`, box of each). The start is not narrowed to
+      `<first parent>..<sha>`: the tick is no line's end, so that would force
+      a sized lane over the tick commit, and the start side is already
+      bounded. Nothing checks the reason or where the range ends, so a
+      skipped line breaking either rule is recorded as a residual and routed
+      to the `closer`-side follow-up (`proposal.md`, "Out of scope"). The
+      archive-masking note's round-15 variant, a skipped archive line over
+      the archive's own range leaving a line from an end the chain reaches to
+      the archive's parent, needed that second line skipped too; it is a
       repair, so it is now sized, and the variant is closed.
   - **What it costs.** A round 1 whose start is earlier than the derived
     `<review>`, or a line starting inside another's range, is not reached,
@@ -1191,6 +1210,19 @@ derives `<review>` again, checks the line's range starts there, and runs the
 check's two commands from it sees the claim fail. That reader is the deferred
 `closer`-side check.
 
+**Nor does either check see a skipped line after round 1 that breaks the tail
+check's rules**: a repair marked skipped, whatever its reason, or a line
+skipped as a clean merge of `main` or an archive commit whose range ends past
+that commit. The number check reads only the line's fixed start, the chain
+follows a skipped line like any other, and the forms check skips it, so a
+commit in its range that needs review merges unread. Only the reason on the
+line tells a permitted skip from a forbidden one, and nothing checks the
+reason or where the range ends (`findings/spec-test.md` and
+`findings/security.md`, re-review round 16 `bad7c88..b5ceed2`, box of each).
+Reaching this takes a runner breaking a stated rule, and the deferred
+`closer`-side check would see it (Risks, "Only the runner runs the pre-tick
+checks").
+
 **This piece's rounds 1 and 2 predate the number.** Their briefs gave the
 un-numbered forms, so the check for those two rounds searches those forms,
 and from round 3 on briefs use the numbered ones. Round 1 is the re-dispatch
@@ -1223,8 +1255,9 @@ lines, whose only fixed part is their start. A runner-side check is one
 command against files that already exist. **What breaks without it:** a
 round's completion rests on the runner's reading of whether an agent has
 finished, which is the failure a stalled agent produces; the residual, a
-runner that skips either check, copies its forms from the wrong line, or
-writes a nothing-landed round 1 without that line's own check, is in
+runner that skips either check, copies its forms from the wrong line,
+writes a nothing-landed round 1 without that line's own check, or writes a
+skipped line after round 1 that breaks the tail check's rules, is in
 Risks. **What breaks without the number:**
 a lane run again, fresh or continued, has its check satisfied by the run it
 replaced. **What
@@ -2074,9 +2107,11 @@ no role file.
 - **[Only the runner runs the pre-tick checks.]** The number check and the
   forms check make the re-review row's tick rest on numbers the runner has seen
   listed and on the re-reviewers' own records, but a runner that skips either
-  check, runs the forms check with forms copied from the wrong line, or writes
-  a nothing-landed round 1 without that line's own check, goes unnoticed: the
-  `closer` reads neither the round lines nor the heading nor the verdict box. →
+  check, runs the forms check with forms copied from the wrong line, writes
+  a nothing-landed round 1 without that line's own check, or writes a
+  skipped line after round 1 that breaks the tail check's rules, goes
+  unnoticed: the `closer` reads neither the round lines nor the heading nor
+  the verdict box. →
   Deferred to the owner as a design question (`proposal.md`, "Out of scope",
   "An independent check of the re-review row by the `closer`"). That check
   would run both again as a second reader. Its number criterion, that every
@@ -2096,7 +2131,18 @@ no role file.
   commit that merges and was misread as tracking; a line whose range starts
   later is a `<review>` the runner supplied or misread, and a diff over that
   line's own range alone would pass with it (`findings/security.md`,
-  re-review round 12 `dd4fe18..1380d50`, second box).
+  re-review round 12 `dd4fe18..1380d50`, second box). For every other line
+  marked skipped, it would check that the range ends at a clean merge of
+  `main` or at an archive commit that changed nothing under
+  `openspec/specs/`, and run the nothing-landed check's two commands from the
+  line's start to that commit's first parent, so a repair marked skipped, or
+  a skipped line whose range runs past the commit its reason names, fails
+  (`findings/spec-test.md` and `findings/security.md`, re-review round 16
+  `bad7c88..b5ceed2`, box of each). It would not check that the range lists
+  one commit, the form spec-test's box offered: a two-dot range ending at a
+  merge lists every commit the merge brought from `main`, and a line starting
+  at a reached end also holds the runner's tick, so a correct line would fail
+  it.
 - **[The review round costs at least three `SendMessage` round trips.]** →
   Accepted for this piece. The one-file-per-row follow-up removes it.
 - **[`tester.md` said "Keep the markers and report each one — the spec-writer
