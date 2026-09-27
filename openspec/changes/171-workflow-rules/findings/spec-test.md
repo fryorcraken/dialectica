@@ -1812,3 +1812,74 @@ and round-17 sections of this file, `findings/security.md` from round 16,
 opened. The 24.1 greps over it printed two lines and nothing, and no
 `RUNNER.md` hunk was read. No mutation was run, because the change is prose.
 This round added no scratch to my tree.
+
+## Re-review round 19 `b33f0f5..07a43f9`
+
+- [x] **re-review round 19 `b33f0f5..07a43f9`: no findings** — read the
+      `b33f0f5 07a43f9` diff of `proposal.md`, `design.md` and `tasks.md`,
+      `proposal.md:596-661` and `:1390-1465`, this file's round-18 section,
+      PR #174's body, and issues #171, #170, #169 and #133; ran every
+      section 25 verify command; clean
+
+**Q1: is my round-18 box closed?** Yes. `proposal.md:624-627` and
+`:1429-1431` both end "holds before it a commit that needs review and lies in
+the range of no line that is not marked skipped", and `design.md:1228` and
+`:2159` mirror it.
+
+- **The overlap scenario is refused.** The lines are round 1 ending at `E`,
+  ``round 2 `E..M` `` skipped for the `closer`'s merge, and
+  ``round 3 `E..A` `` skipped for the archive, with `W` in both. The only line
+  not marked skipped is round 1, and `W` lands after `E`, so it lies outside
+  round 1's range. Line 2 holds `W` before `M`, and no unskipped line covers
+  `W`, so line 2 is refused. Line 3 holds `W` before `A` for the same reason,
+  so line 3 is refused. The mutual cover is gone, and the qualifier has no
+  "other", so a line under test cannot cover itself either.
+- **The correct pair is accepted.** Take the same writer commit `W`, now under
+  a sized ``round 2 `E..X` ``. Then either
+  ``round 3 `X..M` ``/``round 4 `M..A` `` or the overlapping
+  ``round 3 `E..M` ``/``round 4 `E..A` `` follows, both skipped. `W` lies in
+  round 2's range, and round 2 is not marked skipped. Before `M`, the merge
+  line holds only `main`'s commits, which do not merge through this PR, and
+  `W`, which is covered. Before `A`, the archive line also holds `M`. `M`
+  needs no review, since `:1438` lists it among the skips the rules allow.
+  Both lines are accepted in both shapes.
+
+**Q2: `tasks.md` section 25 verify commands.** Each one was run as the row
+names it.
+- **25.1 and 25.2:** `git grep -n -F -e "no other line's range" -- …/proposal.md …/design.md`
+  printed nothing. `git grep -n -F -e "range of no line" -- …/design.md`
+  printed `:1228` and `:2159`, which are the two passages the row names.
+  Widening the search with `-e "no other line"` found only `design.md:1201`
+  and `proposal.md:607`. Both are about lowering a round number, and the row
+  says they stay unchanged. **Holds.**
+- **25.3:** read with `gh pr view 174 --json body,updatedAt` (`updatedAt`
+  2026-09-27T04:58:17Z). Both copies of the refuse list carry the new clause:
+  the standing-test follow-up's "What remains" and the `closer`-side
+  follow-up. The four `Closes #n` lines each stand on a line of their own.
+  **Holds** for what one revision shows. "The edit changed nothing else" is a
+  claim about two revisions, and I did not compare them. The correctness lane
+  checks that.
+- **25.4:** the round-18 box above carries the `dev-writer`'s outcome below
+  the `spec-writer`'s. **Holds.**
+- **25.5:** `openspec validate 171-workflow-rules --strict` printed "Change
+  '171-workflow-rules' is valid". **Holds.**
+
+Below the box threshold, in prose only:
+
+- **The qualifier moves a judgement-skipped commit onto the open question.**
+  Under the old wording, a commit under a permitted judgement-skip line
+  covered itself. Now it covers nothing. Suppose a merge or archive line
+  starts at an end the chain reaches before that judgement line, which the
+  start rule allows. That line is then refused exactly when the
+  judgement-skipped commit "needs review". The text does not define that
+  phrase for such a commit. If the answer is yes, the check refuses a line the
+  rules allow, against the accept list at `:1435-1440`. The round-18 outcome
+  already hands this question to the issue, and `:1462-1465` carries it, so
+  this is not new ground. Low. An issue written from `proposal.md` should say
+  that a commit the runner judged skippable "needs" no review, or it
+  inherits that contradiction.
+
+Nothing under `.claude/agents/` was opened. All four issues are open, with no
+comments. #169 was last updated 2026-09-26T11:14:21Z and the others on
+2026-09-25, so nothing in them moved the scope. No mutation was run, because
+the change is prose. This round added no scratch to my tree.
