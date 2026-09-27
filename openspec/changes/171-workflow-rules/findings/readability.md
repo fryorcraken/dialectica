@@ -1164,3 +1164,101 @@ Stylistic or low, no box:
   never skipped") would close that route in the place a runner looking for
   permission would read. Low: getting there means ignoring the more specific
   instruction.
+
+## Re-review round 17 `b5ceed2..d806700`
+
+- [ ] **`spec-writer`** — `proposal.md:1401-1408` — the `closer`-side
+      follow-up's new criterion, "For every other line marked skipped, check
+      that its range ends at a clean merge of `main` or at an archive commit
+      that changed nothing under `openspec/specs/`", rejects the judgement skip
+      that `RUNNER.md:622-623` allows for any round, that `RUNNER.md:680`
+      shows as its sample, and that `design.md:517-522` keeps on purpose
+      ("#171 has the runner size every round and record any skip").
+      `design.md:1006-1009` also counts it as an allowed skip: "a formatting
+      fix the runner would have skipped by judgement had it recorded that
+      round when the commit landed". The residual added at `:620-631` repeats
+      the gap in its own words: "Only the reason on the line tells a permitted
+      skip from a forbidden one." A repair marked skipped with a judgement
+      reason reads exactly like a judgement skip written when its commit
+      landed, and nothing on the line records when it was written.
+      **Scenario:** the owner accepts the follow-up. A writer builds Step 1
+      from this text and runs it on the stage block from `RUNNER.md`'s own
+      sample. Line ``round 3 `e4f5a6b..0c9d8e7` red-CI fix — skipped: `cargo
+      fmt` whitespace only`` ends at a `cargo fmt` commit, which is neither a
+      merge nor an archive, so the check fails a line the runner was told to
+      write. The follow-up's own text rejects spec-test's one-commit form
+      because "a correct line would fail it", and its adopted form has the
+      same flaw. A reader can act on this in one of two wrong ways: ship a
+      check that blocks correct merges, or decide that judgement skips after
+      round 1 are now banned while `RUNNER.md` still offers them. Either
+      decide that (then `RUNNER.md:622-623` and `:680` change), or narrow the
+      criterion to lines whose reason is a merge or an archive and record that
+      a repair skipped under a judgement reason stays invisible to both
+      readers. **Severity:** medium.
+- [ ] **`dev-writer`** — `design.md:2134-2145` and `:1213-1224` — the same
+      criterion appears in the Risk "Only the runner runs the pre-tick
+      checks", and "Only the reason on the line tells a permitted skip from a
+      forbidden one" appears in the new residual paragraph. Both contradict
+      `design.md:517-522` and `:1006-1009` in the same file, which keep the
+      judgement skip. `:976-979`, "the two lines that may be skipped", has no
+      "at the tail check" qualifier and reads the same way.
+      **Scenario:** as in the `spec-writer` box above: a reader of the Risk
+      would build a follow-up that fails `RUNNER.md:680`'s sample line, which
+      `:517-522` names as a skip the design meant to keep. Follow the
+      `spec-writer`'s decision. **Severity:** medium.
+
+Dimension: **readability only**, narrowed as briefed. What I read:
+`git diff b5ceed2 d806700` over `RUNNER.md`, `proposal.md` and `design.md`;
+`RUNNER.md:590-800` cold; `design.md:505-534`, `:960-1060` and `:2104-2147`;
+`proposal.md:1380-1414`; every `skipped` hit in `.claude/agents/`; and round
+16's spec-test and security boxes that this round answers.
+
+**1. The tail bullet, read cold: the line's two ends are clear.** Take a
+runner writing a skipped line for a `closer`'s merge `M` of `main`, reading
+only `RUNNER.md:734-758`. The line starts "at an end the chain reaches". The
+bullet has just told that runner how to find one, and any reached end works.
+It ends "at that commit", which is `M`. The bold "never at HEAD or any later
+commit" rules out the templated "from there to your HEAD" that round 16's
+security box described. "the tail from it lists whatever landed after it"
+then tells the runner what happens next: the tail check runs again from `M`.
+None of this needs `proposal.md`.
+
+**2. Stated once: yes in `.claude/agents/`, no across the change.** The same
+`git grep` as round 16 returns the same hits, apart from the tail bullet's
+new clause at `:756-758`. That clause is the only statement in
+`.claude/agents/` of where a skipped line's range ends. The nothing-landed
+round 1 at `:628` (`<review>..<HEAD>`) is the one other range given for a
+skipped line. It is round 1, which the new text excludes. The judgement skip
+at `:622` and `:680` gives no end rule, and its sample line ends at the fix
+it names. Inside `RUNNER.md` nothing contradicts. The contradiction is
+between `RUNNER.md` together with `design.md:517-522` on one side and the
+new follow-up criterion on the other, as the two boxes above describe.
+
+**3. `design.md`'s new text.** The "Kept" bullet (`:1020-1050`) still makes
+one argument, in order: why the line is kept, that it is bounded on both
+sides, the start side, the end side, why the start is not narrowed, the
+residual and where it is routed, and the round-15 variant. Each sentence
+leads to the next. The last sentence, on the round-15 variant, is history
+attached at the end. It is not wrong, but it would sit better before "Nothing
+checks the reason". Length alone is not a problem here. The new residual
+paragraph (`:1213-1224`) points to the Risk by name, as its neighbours do.
+It first restates the mechanism in three sentences, almost word for word
+from `proposal.md:620-631`. That matches the pattern of the "Nor does either
+check see" list and would be fine without the sentence the `dev-writer` box
+cites.
+
+Stylistic or low, no box:
+- `RUNNER.md:756-757`, "ending at that commit, never at HEAD", contradicts
+  itself when that commit *is* HEAD at the time of writing. Example: the
+  `closer` archives with a spec change `A`, merges `main` as `M` and returns.
+  The runner then writes a sized round for `A` and a skipped `A..M` line,
+  with HEAD at `M`. The intent is "never past it", and a runner who
+  hesitates here writes a sized round at worst, which is safe. "never past
+  it: not at a later commit, nor at HEAD when HEAD is later" would say
+  exactly that.
+- Round 16's notes on `RUNNER.md:752-753` ("Only two commits they list")
+  and on `:622-623` still stand. With the boxes above, the second note is no
+  longer only a clarity point. The clause it suggests, "recorded when the
+  round lands; a line written because the tail check failed is never
+  skipped", is one way the `spec-writer`'s decision could be carried into
+  `RUNNER.md`.
