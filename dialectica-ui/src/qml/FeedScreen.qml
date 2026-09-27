@@ -6,9 +6,10 @@ import QtQuick.Layouts
 //
 // The three states are mutually exclusive by construction — `state` is computed
 // from one variable, so no combination of flags can render two at once. That is
-// the point: `SPEC.md` requires an empty feed and an unreadable store to be told
-// apart by "a named failure — never by the same neutral empty list", and two
-// independent booleans is how that eventually renders one as the other.
+// the point: `feed-view`'s "A feed that holds nothing and a feed that could not
+// be read are different screens" requires an empty feed and an unreadable store
+// to be told apart, and two independent booleans is how that eventually renders
+// one as the other.
 ScreenFrame {
     id: screen
 
@@ -33,6 +34,18 @@ ScreenFrame {
     //   "failed"  the store could not be read; `failure` says why
     property string readState: "unread"
     property var rows: []
+
+    // What the screen is entitled to render and what any other caller may read.
+    //
+    // `rows` is NOT that: `reload()`'s failure path deliberately leaves it
+    // holding the last good page, so a failure cannot blank it underneath a
+    // banner by accident of ordering. That makes it the wrong property for
+    // anything asking "what does this feed hold?" — a reader of `rows` after a
+    // failed reload would count posts the screen has just said it could not
+    // read. The guard lives here, once, the shape `DStoaListScreen.visibleRows`
+    // already has, rather than restated at each reader: the Repeater, the empty
+    // state, and `Main.qml`'s `feedRowCount` handle all read this.
+    readonly property var visibleRows: screen.readState === "ok" ? screen.rows : []
     property string failure: ""
     property bool hasMore: false
     property int page: 0
@@ -271,10 +284,17 @@ ScreenFrame {
     // first Stoa opened would be the only one ever read: `reload()` ran at
     // construction, when the address was still empty, and nothing asked again.
     //
-    // It is `stoaAddress` that triggers rather than `stoaGenesis`, and the pair
-    // is not arbitrary — the address is what identifies the Stoa, and the record
-    // travels with it. A genesis arriving separately for the same address is the
-    // same Stoa, so re-reading on it would issue a second identical call.
+    // It is `stoaAddress` that triggers rather than `stoaGenesis`: the address is
+    // what identifies the Stoa, and the record travels with it.
+    //
+    // **So the record must already be here when the address arrives**, and
+    // that is the caller's to guarantee, because two properties set by two
+    // bindings arrive one after the other. `Main.qml` withholds the address
+    // until the record it binds has landed. It did not, and the first read of
+    // every open carried the PREVIOUS record — "" coming from the list — which
+    // the core refused as "genesis record ended mid-field" until something read
+    // again: issue #152, and `feed.yaml`'s red in UI tests run 36213442819 (the
+    // `e2e-created-stoa-flow` change's design.md D8).
     //
     // This is also what re-probes BOTH identity answers on arrival at a feed,
     // which is the rule `reload()` carries: neither is answered from a value
@@ -541,7 +561,12 @@ ScreenFrame {
             color: DTheme.inkMuted
             textFormat: Text.PlainText
 
+            // Named for the end-to-end suite, for the reason `readThreadArea`
+            // is — and here the reason bites: the first handler in this
+            // header's row is the "All Stoas" button's, so a click aimed at
+            // `moderateLink` by label would leave the feed for the list.
             MouseArea {
+                objectName: "moderateArea"
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
                 onClicked: screen.moderationRequested()
@@ -694,7 +719,7 @@ ScreenFrame {
     // Screen 07's empty half. A paper border and a plain statement about THIS
     // MACHINE — never a claim about the Stoa, which this peer cannot make.
     Rectangle {
-        visible: screen.readState === "ok" && screen.rows.length === 0
+        visible: screen.readState === "ok" && screen.visibleRows.length === 0
         Layout.fillWidth: true
         implicitHeight: emptyBody.implicitHeight + 2 * DTheme.cardPaddingY
         color: DTheme.paper
@@ -737,7 +762,7 @@ ScreenFrame {
                 // list is empty, so the literal was accurate — and a literal
                 // among bound neighbours is the kind of thing that stays
                 // accurate right up until the visibility condition changes.
-                text: "STORE READ OK · " + screen.rows.length + " POSTS HELD"
+                text: "STORE READ OK · " + screen.visibleRows.length + " POSTS HELD"
                 font: DTheme.label
                 color: DTheme.inkMuted
                 textFormat: Text.PlainText
@@ -748,7 +773,11 @@ ScreenFrame {
     // ---- state: posts ---------------------------------------------------
 
     Repeater {
-        model: screen.readState === "ok" ? screen.rows : []
+        // No guard here: `visibleRows` is already empty unless the read
+        // succeeded, so a failed read cannot leave an earlier page's rows on
+        // screen (`feed-view`, "A feed that holds nothing and a feed that could
+        // not be read are different screens").
+        model: screen.visibleRows
 
         delegate: RowLayout {
             id: row
@@ -888,7 +917,14 @@ ScreenFrame {
                         color: DTheme.ink
                         textFormat: Text.PlainText
 
+                        // Named separately from the Text above, for the
+                        // end-to-end suite: sitometres looks for a click target
+                        // among a label's ANCESTORS' descendants, never its own
+                        // children, so a click on `readThreadLink` would land on
+                        // whichever handler its enclosing row lists first. The
+                        // handler itself is the unambiguous target.
                         MouseArea {
+                            objectName: "readThreadArea"
                             anchors.fill: parent
                             cursorShape: Qt.PointingHandCursor
                             onClicked: screen.threadOpened(parent.target)

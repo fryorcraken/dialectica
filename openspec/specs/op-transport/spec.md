@@ -309,11 +309,9 @@ Each of the following SHALL be refused, and each SHALL be reported distinguishab
 
 A refusal SHALL NOT partially apply: a refused payload SHALL leave the op log, the peer's view of the Stoa, and its channel state as they were.
 
-**A boundary reporting only "invalid" sends the reader looking in the wrong place.** These six failures have six different causes and six different responses: a build that is behind, a corrupt or hostile payload, a forgery, a misdirected or replayed op, a peer sending more than the network permits, and an op signed by a clock more than an hour ahead of this one or by an author choosing a counter to jump the order. A peer that cannot tell them apart cannot report which of them is happening to its user or to a log.
+**The window is judged last, and only on an op that would otherwise be admitted.** A payload that fails any other check MUST be reported as that failure, even if its counter is also beyond the window. The window's rule belongs to `op-ordering` and is not restated here. What this capability adds is that the window is checked at this boundary, before anything is stored, and is reported as a refusal of its own.
 
-**The window is judged last, and only on an op that would otherwise be admitted.** A payload that fails any other check MUST be reported as that failure, even if its counter is also beyond the window. The window's rule and its reasoning belong to `op-ordering` and are not restated here. What this capability adds is that the window is checked at this boundary, before anything is stored, and is reported as a refusal of its own. A forgery reported as "too far ahead" would describe a forged op by a field its forger chose.
-
-**An op this peer already holds is judged like any other arrival.** Validation precedes every lookup by a property of the op, as the opening of this requirement says, and finding whether an op is already held is a lookup by its op id. An arriving op whose counter is beyond the window MUST therefore be refused as ahead of this peer's time even when the peer already holds that op, and MUST NOT be reported as already held. The refusal leaves the held op as it was. This can happen only when this peer's current time has moved back after it admitted the op.
+**An op this peer already holds is judged like any other arrival.** An arriving op whose counter is beyond the window MUST be refused as ahead of this peer's time even when the peer already holds that op, and MUST NOT be reported as already held. The refusal leaves the held op as it was.
 
 **Forgery is one refusal here rather than two, and that is a narrowing.** This list previously separated a bad signature from a key that did not bind to a separately-claimed author. An op names its author by carrying that author's public key and by nothing else, so there is no second identifier a key could fail to bind to: substituting the author substitutes the key, and the signature then fails under it. The forged-authorship case is therefore wholly caught by the signature check, and a peer that reported the two apart would be reporting a distinction its inputs cannot make.
 
@@ -539,7 +537,7 @@ An op the peer already holds arriving on the channel SHALL leave the peer holdin
 
 Admitting an op to the op log SHALL NOT be read as a statement that the op is permitted, that its author may moderate, that a revision it declares takes effect, or that a Stoa's posting policy admits its author. Validation at this boundary answers one question and nothing further: are the bytes a well-formed, authentic op, addressed to this channel's Stoa, whose counter is not further ahead of this peer's current time than `op-ordering`'s receive window allows?
 
-**The window is a judgement on a field's value, and it is not a judgement of authority.** It asks how an op's counter stands against this peer's time at the moment of arrival. Its reasoning, and the reversal of this system's earlier rule that no op is refused for a field value, belong to `op-ordering`.
+**The window is a judgement on a field's value, and it is not a judgement of authority.** It asks how an op's counter stands against this peer's time at the moment of arrival.
 
 Authority is decided on read, against state a peer may not have held when the op arrived. A boundary that also decided authority would decide it once, from whatever the peer knew at that instant, and would then present the answer as a property of the stored op.
 

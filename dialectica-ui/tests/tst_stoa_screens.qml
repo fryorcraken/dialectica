@@ -864,6 +864,13 @@ TestCase {
         // The listing itself still succeeded: "which Stoas am I in" was answered.
         compare(screen.readState, "ok",
                 "an item short of its record is not a failed read")
+        // `stoa-navigation-view`'s "A listing item with no record gets a row,
+        // no share, and no error": the two rows above are still rendered, and
+        // nothing is rendered as an error for either.
+        compare(screen.visibleRows.length, 2,
+                "a row is rendered for each item, record or no record")
+        compare(screen.failure, "",
+                "an item short of its record renders no error")
         screen.destroy()
     }
 

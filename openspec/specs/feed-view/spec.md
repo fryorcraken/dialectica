@@ -1,7 +1,7 @@
 # feed-view Specification
 
 ## Purpose
-Defines what the feed screen may and may not claim about the order it presents posts in, and about the time it shows against each one. It exists because the feed is where a reader forms their belief about *when* things happened, and the two values behind that belief — a causal counter and an author's own assertion — support a much narrower claim than a forum feed is ordinarily read as making.
+Defines what the feed screen may and may not claim about the order it presents posts in, and about the time it shows against each one, and how it keeps a feed that holds nothing apart from one that could not be read. It exists because the feed is where a reader forms their belief about *when* things happened, and the two values behind that belief — a causal counter and an author's own assertion — support a much narrower claim than a forum feed is ordinarily read as making.
 
 ## Requirements
 
@@ -13,7 +13,7 @@ The feed SHALL label its ordering in terms of position within the forum's order,
 
 **"Newest first" is permitted and is the label this interface uses.** It is honest read as *latest in the forum's own order*, which is what the ordering is: `op-ordering` orders by descending Lamport counter carried in each op's signed bytes, with ties broken by ascending op id. A post that orders first is the latest one the forum's order knows of. That is a real claim, it is the claim the reader wants, and every peer holding the same ops computes the same answer.
 
-**"Most recent first" is forbidden, and the difference between the two phrases is the whole of this requirement.** The order is by Lamport counter, and a counter is its author's own claim about the time, raised above every counter that author held. Nothing verifies that claim. An author may sign it up to an hour ahead of a receiving peer's time, and an author whose clock is slow signs it behind. "Most recent" is a claim about when posts were written, and the ordering carries only what each author's clock said. The feed SHALL NOT render that phrase, nor any other phrase asserting that the sequence is chronological, in time order, by date, or by when posts were written.
+**"Most recent first" is forbidden, and the difference between the two phrases is the whole of this requirement.** The feed SHALL NOT render that phrase, nor any other phrase asserting that the sequence is chronological, in time order, by date, or by when posts were written.
 
 The denial SHALL be rendered rather than left implicit. A reader meeting a forum feed assumes a chronological one unless told otherwise, so a label that merely declines to claim time leaves the interface relying on the reader not to make the ordinary assumption. What is rendered SHALL state that the feed is not ordered by the time it displays, and SHALL give as the reason that the displayed time is the author's own claim — not that no time is available. Every op carries a time; the feed declines to order by it. A denial phrased as a limitation awaiting a missing field would promise a chronological feed that this design has decided against.
 
@@ -108,3 +108,62 @@ The feed SHALL NOT render the displayed time as though it were the sort key — 
 
 - **WHEN** the feed is rendered
 - **THEN** no control is offered that sorts or re-sorts the rows by the time displayed against them
+
+### Requirement: A feed that holds nothing and a feed that could not be read are different screens
+
+The feed MUST distinguish three outcomes of reading a Stoa's feed, and MUST NOT
+render any two of them alike: the read succeeded and returned rows, which are
+rendered; the read succeeded and returned none; the read failed.
+
+`feed-read`'s requirement "A feed read that fails is the error shape, and never
+an empty feed" puts the two answers on the wire as different replies. This
+requirement constrains how the screen renders them, and nothing about the read.
+
+A read that succeeds with no items MUST put the screen in its read-succeeded
+state, and the screen MUST render no failure.
+
+A read that fails MUST put the screen in its failed state. The screen MUST render
+no rows in that state, including rows an earlier successful read of the same
+Stoa returned. It MUST render the reason the core gave, unreworded. A failure
+reached through the view's one call path without a core reason, such as an
+unreachable core, MUST be rendered with the reason that path reports.
+
+A reply that is neither a page of rows nor the error shape — a success carrying
+no array of items, or an `items` field that is not an array — MUST be treated as
+a failed read, with a reason of the view's own naming what was wrong with the
+reply, and MUST NOT be rendered as an empty feed.
+
+#### Scenario: A read with no items is the success state, not a failure
+
+- **WHEN** the feed's read succeeds and carries no items
+- **THEN** the screen is in its read-succeeded state
+- **AND** it renders no failure
+- **AND** it renders no rows
+
+#### Scenario: A read that fails is a failure, not an empty feed
+
+- **WHEN** the feed's read answers with the error shape
+- **THEN** the screen is in its failed state
+- **AND** it renders no rows
+- **AND** the core's message is present in what is rendered
+
+#### Scenario: The empty state and the failed state are not the same state
+
+- **WHEN** one feed is driven with a successful read carrying no items, and
+  another with the error shape
+- **THEN** the two screens are in different states
+- **AND** the text they render differs
+
+#### Scenario: A failed read does not leave an earlier read's rows on screen
+
+- **WHEN** the feed's read succeeds with rows, and a later read of the same Stoa
+  answers with the error shape
+- **THEN** the screen is in its failed state
+- **AND** none of the earlier read's rows is rendered
+
+#### Scenario: A success with no items array is a failure rather than an empty feed
+
+- **WHEN** the feed's read answers with an object carrying no `items` array, and
+  again with an `items` field that is not an array
+- **THEN** the screen is in its failed state in both cases
+- **AND** it renders a failure of its own naming what was wrong with the reply

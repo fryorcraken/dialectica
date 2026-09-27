@@ -1,0 +1,14 @@
+# `schema` is REQUIRED for this file to be valid change metadata, and without it
+# `skip_specs` is silently NOT HONOURED. It must name a known schema; this
+# project's is the built-in `spec-driven`, set in `openspec/config.yaml`.
+schema: spec-driven
+created: 2026-09-25
+
+# No spec delta: this change edits developer documentation (README, .gitignore,
+# CLAUDE.md) and one CI step. Staging the SDK source before `cargo test` is how
+# the repository is built and tested, not how dialectica behaves. No wire
+# shape, op, view or stored state changes, and no capability in
+# `openspec/specs/` covers developer tooling. Contracting it would contract the
+# gate rather than the system, which `core-e2e` and `e2e-ui-suite` (both
+# archived) declined to do for the same reason.
+skip_specs: true

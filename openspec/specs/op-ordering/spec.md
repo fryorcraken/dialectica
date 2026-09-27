@@ -18,9 +18,9 @@ The reasoning that produced it is preserved, because it is still the thing to de
 
 The prohibition assumed the transport's order was available to defer to. It is not, and the transport does not supply one: `op-transport` contracts that every arrival over the live transport carries no Lamport timestamp and no message id. So the prohibition's practical effect was never "use the transport's order instead of ours" — it was **no order at all**, with every consumer falling to the degraded path and resolving on a hash. A rule that forbids the only available order in favour of one that never arrives protects nothing.
 
-The property the prohibition was defending is preserved **by construction and more strongly than before**: the counter is inside the signed preimage and the op id is a function of the op's own bytes, so **every input to this comparison travels with the op**. Two peers holding the same two ops compute the same order from the ops alone, consulting no local state, no arrival record, and nothing either peer received separately. The prior design could not say that — it depended on recorded arrival metadata, which is per-peer by construction and which the "seeing one op twice" problem exists because of. **The current time this system now reads does not change that.** It decides the counter an op is signed with and whether an arriving op is admitted, and it never enters a comparison between two ops.
+The property the prohibition was defending is preserved **by construction and more strongly than before**: the counter is inside the signed preimage and the op id is a function of the op's own bytes, so **every input to this comparison travels with the op**. Two peers holding the same two ops compute the same order from the ops alone, consulting no local state, no arrival record, and nothing either peer received separately. The prior design could not say that — it depended on recorded arrival metadata, which is per-peer by construction and which the "seeing one op twice" problem exists because of.
 
-**Ordering SHALL NOT consult the transport's Lamport timestamp or message id, where either is ever supplied.** A second order would be precisely the disagreement the original reasoning names, arrived at from the other side. The transport's clock and this system's counter both start from epoch milliseconds and take the same step on send, but the transport's clock also advances on traffic that no application sees. The two therefore advance on different sets of messages and cannot be relied on to agree op for op. Recorded arrival metadata MAY still be retained as a record of what a peer received; it SHALL NOT order.
+**Ordering SHALL NOT consult the transport's Lamport timestamp or message id, where either is ever supplied.** A second order would be precisely the disagreement the original reasoning names, arrived at from the other side. Recorded arrival metadata MAY still be retained as a record of what a peer received; it SHALL NOT order.
 
 **The tiebreak is the op id and not the transport's message id.** The op id is a function of the op's own bytes, so every peer holding the op computes the same one without consulting anything it received; a message id is assigned by the transport, does not reach this system at all, and would be a tiebreak absent on every op — which is not a tiebreak.
 
@@ -170,13 +170,15 @@ This is what makes the clock monotone across a restart and across a rebuild-by-r
 
 **What a reader can check, and what only an implementation can.** The scenarios below assert the *consequences* of deriving on demand — the value survives a restart, survives a rebuild in a different append sequence, and is the same on two peers that received the same ops in different sequences. They do not assert that no counter was recorded beside the ops, because no caller can observe that: a stored counter kept perfectly in step with the log is indistinguishable from a derivation through the read interface, and the cases where it would diverge (a restore from backup, a replay reaching further back, a crash between the append and the counter update) are not reachable through this contract's own operations. The "never stored" sentence above is therefore a **constraint on the implementation**, discharged structurally rather than by a scenario, and `design.md` carries how. Writing it as a scenario clause would be a requirement no test could distinguish from its negation.
 
-**The clock is the highest counter held, with no exception for a counter far above the rest.** This clock previously excluded a counter more than a fixed bound above the rest, so that one absurd counter could not pull it to the ceiling. That exclusion is gone. The receive window, "An op whose counter is more than one hour ahead of this peer's time is refused on arrival", keeps such a counter out of the store altogether, so every counter the clock reads is one the peer admitted. **The clock does not read the current time.** The time enters when an op is signed, through "A published op takes the later of the current time and one above the author's clock". It does not enter the clock, so the clock remains a function of the ops held and nothing else.
+The clock is the highest counter held, with no exception for a counter far above the rest.
+
+The clock does not read the current time.
 
 The clock SHALL be scoped per Stoa. Ops of one Stoa never order against ops of another, so a shared clock would leak one Stoa's activity into another's counters, letting a reader in a quiet Stoa infer that the peer is busy elsewhere.
 
 **Per-Stoa scoping bounds that leak but does not remove it within a Stoa, and this contract states the remainder rather than leaving it to be discovered.** A published counter is the later of its author's current time and one above its author's clock, and the clock is the highest counter the author holds. So whenever the author holds an op whose counter is at or above the author's current time, the counter on its next op **states the highest counter it held of that Stoa at the moment of publishing**. Anyone who can read ops of that Stoa can read it. That makes a peer's next published op an **oracle for whether that peer has received a particular op signed ahead of the time**. An observer publishes an op whose counter is ahead of the target's time, relays it to the target or withholds it, and reads the counter on the target's next post. One above the observer's op means it arrived, and the target's own time means it did not.
 
-**This is inherent to a Lamport counter and is accepted, with the cost bounded as follows.** Pegging the counter to the time narrows the leak compared with a pure counter. An op signed at its author's own time says nothing about what its author received, so a probe needs an op signed ahead of the target's time, and the receive window caps how far ahead that can be. The leak never reveals *which* ops arrived beyond the probe the observer planted. It reveals nothing about Stoas the observer cannot read, which is what the scoping above buys. A counter at its author's own time reveals that author's clock reading, which the wall-clock field of an honest op already discloses. And it is a property of a peer that **publishes**: a peer that only reads emits no counter and is not probed by this.
+**This is inherent to a Lamport counter and is accepted, with the cost bounded as follows.** An op signed at its author's own time says nothing about what its author received, so a probe needs an op signed ahead of the target's time, and the receive window caps how far ahead that can be. The leak never reveals *which* ops arrived beyond the probe the observer planted. It reveals nothing about Stoas the observer cannot read, which is what the scoping above buys. A counter at its author's own time reveals that author's clock reading, which the wall-clock field of an honest op already discloses. And it is a property of a peer that **publishes**: a peer that only reads emits no counter and is not probed by this.
 
 **The alternative was rejected rather than overlooked.** Suppressing or fuzzing the counter would break the one property the counter exists for — that every peer computes the same order from the ops alone — since a counter a peer may distort is a counter two peers can disagree about. A forum that orders causally has to put the causal value on the wire. What follows for callers: a counter SHALL NOT be treated as private, and a peer SHALL NOT be told that publishing conceals what it has received.
 
@@ -194,8 +196,6 @@ The clock SHALL be scoped per Stoa. Ops of one Stoa never order against ops of a
 
 - **WHEN** a peer holds ops of one Stoa carrying several different counters, however far apart they are
 - **THEN** its clock for that Stoa equals the highest of them
-
-This scenario keeps its name, and "accepted" now means admitted to the store. Its condition used to require every counter to be within the advance bound. It now holds however far apart the counters are, because the clock excludes no counter the peer holds.
 
 #### Scenario: A counter above the clock advances it
 
@@ -223,8 +223,6 @@ This scenario keeps its name, and "accepted" now means admitted to the store. It
 - **THEN** its clock after the rebuild equals its clock before it
 - **AND** both equal the highest counter among those ops
 
-This scenario keeps its name. It used to fix the clock at the highest counter within the advance bound, below an over-bound op's counter. There is no advance bound now, so the clock is the highest counter held.
-
 #### Scenario: Two peers receiving the same ops reach the same clock
 
 - **WHEN** two peers receive the same set of ops in different sequences
@@ -238,10 +236,6 @@ This scenario keeps its name. It used to fix the clock at the highest counter wi
 ### Requirement: The wall-clock decides nothing, and is handed out in a form that resists being sorted
 
 The author-asserted wall-clock **field** SHALL NOT participate in any ordering, comparison, tiebreak, resolution or gating decision. No comparison of two ops SHALL read it, and no requirement in any capability SHALL be satisfied by consulting it.
-
-**This requirement used to stand for a wider principle — that the author's claimed time decides nothing — and that principle is withdrawn.** The Lamport counter is now pegged to its author's clock: an honest author signs the later of its current time and one above its clock. So the counter carries the author's reading of the time, and that reading decides both where the op orders and, through the receive window, whether a peer admits it at all. What bounds the author's choice is no longer that time decides nothing. It is that the window refuses a counter more than one hour ahead of the receiving peer's own time, so an author can lead honest ops by at most one hour.
-
-What remains of this requirement is the part that still holds and still matters: the **separate** wall-clock field orders nothing, gates nothing, and is handed out in a form that resists being sorted. Nothing checks it. The window reads the counter and never this field, so the field is bounded by nothing, and a value bounded by nothing must not decide anything.
 
 **Being display-only is a discipline the interface has to enforce, not a property the value has.** A number that means a time invites a sort, and a view that sorts on it produces a ranking every author can forge. The contract therefore constrains the shape it is handed out in, not only the uses it is put to:
 
@@ -291,7 +285,7 @@ The allowance and the floor SHALL be fixed constants, and clamping SHALL be a **
 
 **The reading peer's own clock is itself untrusted for this**, and the contract does not pretend otherwise: a peer with a badly skewed clock clamps honest ops and passes hostile ones. That is acceptable **only because nothing depends on the outcome** — the clamp changes what is rendered and nothing else. This asymmetry is the reason clamping may not be promoted into an ordering rule later.
 
-**The receive window is not that promotion, and what separates them is the value each reads.** The window reads the counter, which orders, and refuses to admit an op whose counter is too far ahead. The clamp reads the wall-clock field, which orders nothing, and changes only how that field is shown. A peer with a badly skewed clock does pay a price under the window: it refuses honest ops, or has its own refused. That price is stated in the window's requirement rather than hidden here. The clamp adds nothing to it and MUST NOT be made to.
+The clamp MUST NOT cause any op to be refused.
 
 Because the clamp is computed against a local clock, two peers MAY present the same op differently, and a caller SHALL NOT treat the displayed time as a value two peers agree on.
 
@@ -329,17 +323,13 @@ Because the clamp is computed against a local clock, two peers MAY present the s
 
 An op a peer publishes MUST carry a counter equal to the greater of two values: the peer's current Unix time in milliseconds, and one above the peer's clock for the op's Stoa at the moment of publishing.
 
-This is the send rule of the SDS protocol (LIP-109), `max(timeNowInMs, current_lamport_timestamp + 1)`, applied to each Stoa separately. The clock it reads is the one the requirement "A peer's Lamport clock is a function of the ops it holds" defines, so the current time enters the counter here, when an op is signed, and nowhere in the clock itself.
-
-**The counter is still a causality mechanism.** A peer holding an op at N publishes above N, whatever its own time says, so an op written by a peer that held another always carries the greater counter of the two. Every peer that receives both computes the same relation from the ops alone.
-
-**Pegging the counter to the time lets a peer that holds nothing order correctly.** A peer that has received nothing of a Stoa publishes at its current time. That places its op among the Stoa's recent ops, where a pure counter would have signed one and placed it below every op the peer had not yet received.
+**The counter is a causality mechanism.** A peer holding an op at N publishes above N, whatever its own time says, so an op written by a peer that held another always carries the greater counter of the two. Every peer that receives both computes the same relation from the ops alone.
 
 **What a counter states and what it does not.** Short of saturation, a counter C states that its author held no op of that Stoa carrying C or more when it published, and that its author's current time was not after C. It does not state *which* op the author held, nor that the author held any op at C − 1, and a reader MUST NOT infer either. A scalar counter cannot carry that, and the contract does not pretend otherwise. **Detecting that an op refers to something the peer does not hold is a property of the ops themselves.** A reply names its parent op id inside the signed preimage, so "I hold a reply to X and no X" can be answered with no counter involved. That is the causal edge this forum acts on. The counter supplies an order, not a gap.
 
 **Saturation, not overflow.** Where one above the clock would exceed the maximum representable counter, the value MUST saturate at the maximum rather than wrap. A wrapping counter would place the highest op below the lowest, inverting the order for every op in the Stoa at once.
 
-**One reading of the time signs both clock fields.** A publish MUST take its current time once. The op's wall-clock field MUST carry the same value as the current time its counter was computed from, so an op whose author's clock was behind that time carries a counter equal to its wall-clock. The counter is computed from the time and not read from the field, so this gives the wall-clock field no part in any decision. It is what makes exact the clock requirement's statement that a counter at its author's own time discloses nothing the wall-clock field of an honest op does not.
+**One reading of the time signs both clock fields.** A publish MUST take its current time once. The op's wall-clock field MUST carry the same value as the current time its counter was computed from, so an op whose author's clock was behind that time carries a counter equal to its wall-clock.
 
 #### Scenario: A first op in a Stoa carries the current time
 
@@ -380,8 +370,6 @@ This is the send rule of the SDS protocol (LIP-109), `max(timeNowInMs, current_l
 - **THEN** the reply's counter is greater than the post's
 - **AND** the ordering rule places the reply before the post, on every peer holding both
 
-This scenario replaces "A reply orders after the post it replies to". Its last clause placed the post first, which contradicts the ordering rule, because the rule places the higher counter first. `thread-read` shows a thread's replies in the reverse of this rule, which is where a reply appears after the post it answers.
-
 #### Scenario: A reply to an op signed ahead of the time still carries the greater counter
 
 - **WHEN** a peer holds a post whose counter is ahead of the peer's current time, but within the receive window, and the peer publishes a reply to it
@@ -409,17 +397,15 @@ This scenario replaces "A reply orders after the post it replies to". Its last c
 
 A peer MUST refuse an op arriving from the transport if the op's counter exceeds the peer's own current Unix time in milliseconds by more than the receive window, and MUST NOT store it. The window MUST be one hour, which is 3,600,000 milliseconds, and MUST be the same on every peer. This requirement MUST NOT refuse an op whose counter exceeds the peer's current time by the window exactly, or by less. The refusal is reported at the transport boundary, as `op-transport` contracts.
 
-**There is no lower bound.** A peer MUST NOT refuse an op because its counter is below the peer's current time, however far below. History that reaches a peer late, through repair, sync or a snapshot of another peer's store, is in the past by definition, and a lower bound would refuse exactly that history.
+**There is no lower bound.** A peer MUST NOT refuse an op because its counter is below the peer's current time, however far below.
 
-**An op carrying no counter is not subject to the window.** Such an op was encoded under the version that predates the clock fields and carries nothing to compare. It MUST NOT be refused for lacking a counter, and the ordering rule places it below every op that carries one.
+**An op carrying no counter is not subject to the window.** Such an op was encoded under the version that predates the clock fields. It MUST NOT be refused for lacking a counter, and the ordering rule places it below every op that carries one.
 
 **A refusal leaves nothing behind that affects a later arrival.** A peer MUST NOT record a refusal in any form that changes how a later arrival of the same bytes is judged. Once the peer's current time has come within the window of an op's counter, the same op arriving again MUST be admitted exactly as an op arriving for the first time would be.
 
 **The reference is this peer's own current time.** The window MUST be measured against the current time as this peer reads it. It MUST NOT be measured against the timestamp the transport hands in with a message, nor against any value the op carries other than its counter. The op's wall-clock field MUST NOT affect the decision.
 
-**This replaces the advance bound, and it is a refusal on purpose.** The advance bound stored every counter and declined only to advance the clock past an implausible one. So the clock stayed below ops that were already ordered above it. An honest peer answering an op signed far ahead therefore signed a *lower* counter than the op it answered, and in a thread the answered reply came after every answer to it. The window removes such an op instead. Nothing more than one hour ahead is stored, so the clock can follow every counter held, and an answer always carries the greater counter. The most an author can lead honest ops by is one hour. A counter at the maximum representable value is refused; under the advance bound, the same counter bought its author the head of the order permanently.
-
-**The cost is stated, not hidden.** This refuses an authentic op for the value of a field, which this system previously ruled out. A peer whose clock runs more than an hour fast has every op it publishes refused by every peer whose clock is right, until those peers' time catches up with its counters. A peer whose clock runs more than an hour slow refuses honest ops. Neither refusal reaches the author. One hour of tolerance is what that trade buys, and it is far larger than the skew of any clock that is synchronised at all.
+A refusal under this requirement does not reach the op's author.
 
 **The comparison MUST NOT overflow.** A counter at the maximum representable value, or a current time at the maximum representable value, MUST NOT make the check wrap or abort. The check MUST reach the answer that the rule above gives.
 

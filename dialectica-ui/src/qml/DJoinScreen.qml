@@ -806,6 +806,10 @@ ScreenFrame {
         }
 
         FlatButton {
+            // The way back to the list, before a join and after one
+            // (`view-navigation`). Named so the end-to-end suite can press
+            // it: `seeded-join.yaml` leaves a successful join through here.
+            objectName: "joinCancelButton"
             // copy.json `join.cancel`
             text: "Cancel"
             kind: "secondary"

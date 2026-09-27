@@ -1,0 +1,15 @@
+schema: spec-driven
+created: 2026-09-26
+
+# Two spec deltas, both found by checking the successful-join specification's
+# steps against `openspec/specs/`, and both recorded in advance by the archived
+# `e2e-created-stoa-flow` proposal (proposal.md, "Capabilities"):
+#
+# - `stoa-navigation-view`: "A join is reported from the core's reply, never
+#   assumed" had no positive half for a Stoa the peer was not in.
+# - `view-navigation`: "Every state a user can enter has a specified way out"
+#   brought a created Stoa to the list and not a joined one.
+#
+# The view already meets both. The seeder, and the harness's own obligations,
+# stay out of every capability, for the reason the archived `e2e-ui-suite`
+# change's `.openspec.yaml` gives.

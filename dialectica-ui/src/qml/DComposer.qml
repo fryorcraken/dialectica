@@ -336,6 +336,14 @@ ColumnLayout {
 
         TextEdit {
             id: field
+            // Named for the end-to-end suite, and derived from `kind` rather
+            // than written as one literal: the feed and the thread each mount a
+            // composer, both stay in the element tree whichever screen is
+            // shown, and a spec typing into "the composer" must not depend on
+            // which one the host happens to report as visible. Each screen
+            // mounts one composer of its own kind, so "postDraftField" and
+            // "replyDraftField" each name exactly one field.
+            objectName: root.kind + "DraftField"
             anchors.fill: parent
             anchors.margins: DTheme.itemGap
             font: DTheme.body
@@ -406,6 +414,8 @@ ColumnLayout {
         spacing: DTheme.itemGap
 
         FlatButton {
+            // Named from `kind` for the reason the draft field is.
+            objectName: root.kind + "SubmitButton"
             // "Publish", not "Send". The word is the claim: nothing here sends
             // anything, and the success message says so too.
             text: root.kind === "reply" ? "Publish the reply" : "Publish the post"

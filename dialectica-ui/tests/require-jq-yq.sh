@@ -22,8 +22,8 @@
 # It PROBES the one property the callers rely on, YAML in and JSON out, rather
 # than parsing a version string that neither tool promises to keep stable.
 #
-# design.md D12 says why these scripts read YAML with `yq` at all, and what
-# breaks without this check, measured.
+# The e2e-ui-suite change's design.md D12 says why these scripts read YAML with
+# `yq` at all, and what breaks without this check, measured.
 require_jq_yq() {
     probe=$(printf 'a: [1, 2]\n' | yq -c . 2>/dev/null) || probe=""
     if [ "$probe" = '{"a":[1,2]}' ]; then

@@ -1,0 +1,145 @@
+# End-to-end: a successful join, from the paste to the joined Stoa's feed.
+#
+# Run by `.github/workflows/ui-tests.yml`, the way join.yaml runs; the harness
+# is described there and in the `e2e-ui-suite` change's design.md. The layout
+# and the seeder are the `e2e-successful-join` change's design.md.
+#
+# What it observes, on a fresh profile: the profile holds no Stoa; pasting the
+# seeded reference previews it and joins nothing, and the preview's lookup
+# answers a fallback, so the seeded founding title is rendered as the founding
+# title; acting on the join is reported as joined, with no failure of the join
+# rendered; the way back renders the list, with the joined Stoa among its rows
+# and a share offered for its row, without a restart; and opening that row
+# renders its feed, read successfully and holding nothing. Each is a
+# requirement in `stoa-navigation-view`, `view-navigation` or `feed-view`.
+#
+# ---------------------------------------------------------------------------
+# THE REFERENCE PASTED BELOW, AND WHERE IT COMES FROM
+# ---------------------------------------------------------------------------
+#
+# It names a Stoa that exists in no profile: a genesis record built from a
+# fixed creator key and the title "A Stoa seeded outside this profile", and
+# its address, the record's hash. A join consults nothing but those two
+# inputs, so no second peer is needed to make it succeed.
+#
+# It is COMMITTED here, and `dialectica-core/tests/seeded_reference.rs` reads
+# it back out of this file and puts it through the core's own `getStoa` and
+# `joinStoa` on every PR, in ci.yml's `rust` job. If that test goes red, the
+# genesis encoding has changed under every reference already shared, and the
+# test's own docs say what to do before touching the literal here.
+#
+# Keep it a single-quoted scalar, and keep it the only reference in this file:
+# that test reads the literal textually and refuses anything else.
+#
+# ---------------------------------------------------------------------------
+# WHAT IS ASSERTED, AND WHAT IS DELIBERATELY NOT
+# ---------------------------------------------------------------------------
+#
+# Every step asserting an absence asserts a presence in the same snapshot, for
+# the reason join.yaml's no-key step gives. No `calls:`: the effects are what
+# the requirements are about. Nothing about the key state is asserted: a join
+# needs no key, and the key-held route is create.yaml's.
+
+app: dialectica_ui
+
+# The second hop sitometres does not walk: see join.yaml.
+with: [dialectica, delivery_module]
+timeout: 30s
+
+steps:
+  - name: the app opens
+    open: dialectica_ui
+
+  - name: it starts on the Stoa list
+    wait_for:
+      state: "root.screenShown === 'list'"
+    timeout: 45s
+
+  # The precondition that makes the listed row below evidence of the join: a
+  # read that SUCCEEDED and holds nothing. A failed read also leaves no rows.
+  - name: membership was read, and this profile holds no Stoa
+    wait_for:
+      state:
+        - "root.listReadState === 'ok'"
+        - "root.stoaCount === 0"
+
+  # ---- the preview -------------------------------------------------------
+
+  - name: paste the seeded reference
+    type:
+      into: { objectName: "pasteField" }
+      text: '{"stoa":"a4b3e43d6c0f19d24ffe6d1048fd00b60d797eed30d872610d2e87b14806bf4f","genesis":"018146640f02493af4fbc54fe33388e75dc2c937ae0b7727cc2b2afb1b75199a3e0000000022412053746f6120736565646564206f75747369646520746869732070726f66696c65"}'
+
+  - name: ask to look at it
+    click: { objectName: "pasteButton" }
+
+  - name: it previews
+    wait_for:
+      state: "root.screenShown === 'join'"
+    timeout: 30s
+
+  # The lookup runs synchronously as the reference lands, so this reads its
+  # result rather than waiting for a later one. `foundingTitleText` holds a
+  # title only where one is available, and before a join only a FALLBACK
+  # lookup supplies one; `fallbackNote` is drawn for exactly that reply.
+  # `previewing` is "no join call has been made for this reference".
+  - name: it names the seeded founding title from a fallback, and has joined nothing
+    expect:
+      state: "root.joinState === 'previewing'"
+      text:
+        - { objectName: "foundingTitleText", text: "A Stoa seeded outside this profile" }
+        - { objectName: "fallbackNote" }
+
+  # ---- the join ----------------------------------------------------------
+
+  - name: join it
+    click: { objectName: "joinButton" }
+
+  - name: it is reported as joined, and no failure of the join is rendered
+    wait_for:
+      state:
+        - "root.joinState === 'joined'"
+        - "root.joinFailure === ''"
+      text: { objectName: "joinedPanel" }
+      not_text: { objectName: "joinFailurePanel" }
+    timeout: 45s
+
+  # ---- the way back ------------------------------------------------------
+  #
+  # The return survives the success (`view-navigation`); pressing it is the
+  # assertion that it is offered, because a click on a hidden control fails
+  # by name.
+
+  - name: go back to the list
+    click: { objectName: "joinCancelButton" }
+
+  # One row, and it is the seeded address: the listing was read again after
+  # the join, since nothing else puts a row on this screen. The share button
+  # is that row's, there being one row.
+  - name: the joined Stoa is listed without a restart, and can be shared
+    wait_for:
+      state:
+        - "root.screenShown === 'list'"
+        - "root.listReadState === 'ok'"
+        - "root.listedStoas.length === 1"
+        - "root.listedStoas[0] === 'a4b3e43d6c0f19d24ffe6d1048fd00b60d797eed30d872610d2e87b14806bf4f'"
+      text: { objectName: "shareButton" }
+
+  # ---- its feed ----------------------------------------------------------
+
+  - name: open it
+    click: { objectName: "openStoaButton" }
+
+  - name: its feed is rendered
+    wait_for:
+      state: "root.screenShown === 'feed'"
+
+  # The read carries the record the join was given, kept by the view and
+  # handed on; the core verifies it against the address before reading. A
+  # read that failed also leaves no rows, which is why the state is asserted
+  # beside the count.
+  - name: the feed was read, and holds nothing
+    expect:
+      state:
+        - "root.feedReadState === 'ok'"
+        - "root.feedRowCount === 0"

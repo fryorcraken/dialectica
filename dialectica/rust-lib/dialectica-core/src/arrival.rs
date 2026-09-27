@@ -193,9 +193,10 @@ impl Arrival {
 /// counter held, and an answer always carries the greater counter.
 ///
 /// It is a refusal of an authentic op for a field's value, which this system
-/// previously ruled out. `op-ordering` states the cost — a peer whose clock runs
-/// more than an hour fast has its ops refused, and one running more than an hour
-/// slow refuses honest ops — and `design.md` works it through for both.
+/// previously ruled out. The cost — a peer whose clock runs more than an hour
+/// fast has its ops refused, and one running more than an hour slow refuses
+/// honest ops — is worked through for both in the archived `time-pegged-clock`
+/// change's `design.md`, Decision 11.
 ///
 /// # The same on every peer
 ///
