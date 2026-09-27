@@ -2178,3 +2178,128 @@ Scope: `git diff --stat bad7c88 b5ceed2` touches `.claude/agents/RUNNER.md`
 and nothing else under `.claude/`. Its one hunk is the tail bullet, which is
 within #171's re-review mechanism. Nothing in the range adds a route to
 `main`, a force or `--admin`. `tmp/r16sec/` is left in place for the runner.
+
+## Re-review round 17 `b5ceed2..d806700`
+
+- [ ] **`spec-writer`** (then `dev-writer` for `RUNNER.md:753-755` and
+      `design.md:1028-1033`) — `proposal.md:433-436` — the skipped-line pair
+      says "a clean merge of `main`", with no owner. Step 3's list of commits
+      that need no review (`RUNNER.md:549`) is narrower: "the `closer`'s merge
+      of `main` when it stopped on no conflict". `design.md`'s "Kept" argument
+      bounds the start side with "both commits are the `closer`'s, made after
+      the tick", but no rule text says so. A writer's merge of `main` that
+      happens to be clean meets the pair as worded. A writer commit before
+      that merge then sits between the reached end and the line's end with
+      the untick done, which is the case "Kept" says cannot happen.
+      **Scenario:** round 1 ends at `E` and the runner ticks (`T1`). The
+      `closer` meets a conflict on `src/a.rs`, aborts, and returns with no
+      commit. The runner unticks (`U`) and dispatches a writer. The writer
+      commits `W`, an edit to `src/a.rs` (a preparatory change, or any other
+      commit on that file), and then merges `origin/main` with no conflict
+      (`Mw`, empty `git show --remerge-diff`). The runner forgets `W`'s
+      round, which is round 16's premise and the slip the tail check is
+      there to catch. At the re-tick, the tail from `E` lists `src/a.rs`,
+      and the clean merge of `main` explains that path. `W` touches the
+      conflicting file, so it adds no path to the list. The runner writes
+      ``round 2 `E..Mw` skipped: a clean merge of main``. It starts at a
+      reached end and ends at the merge, as the new text requires. The number
+      check passes, the chain reaches `Mw`, the tail from `Mw` shows only the
+      tick and the line, and the forms check skips the line. The row is
+      ticked and `W` merges unread.
+      **Fix, for the `spec-writer` to choose:** in the pair, say "the
+      `closer`'s merge of `main` when it stopped on no conflict", which is
+      step 3's own wording. A writer's merge, clean or not, is then a
+      conflict resolution and gets a sized round, so the bridge to it is
+      read. "Kept"'s premise then becomes a stated rule rather than an
+      assumption. Only the `closer` archives, so the archive half needs no
+      change, though "the `closer`'s" there would match.
+      **Severity:** medium. It is the same class as round 16's box. One
+      runner slip (a forgotten round for a commit it brought on) plus a skip
+      the text allows as worded merges an unreviewed commit with every gate
+      green, and the listing cannot separate `W` from `main`'s change. It is
+      narrower than round 16 because it needs a clean merge by someone other
+      than the `closer`. `closer.md` never produces one. A writer produces
+      one only by committing before its merge, which departs from "resolve
+      the conflict in that merge commit" (`RUNNER.md:861-863`), or when
+      `main` has moved so that the conflict is gone. `dev-writer.md` neither
+      forbids nor mentions merging `main`.
+      **Measured** in `tmp/r17sec/`, branch `p4`: `R` `3ab126b`, `E`
+      `07a162b`, `T1` `d50c9fd`, `U` `583125e`, `W` `62bac48`
+      (`src/a.rs`), `Mw` `ee57e60`. `git show --remerge-diff ee57e60`
+      prints only the hash, so the merge is clean.
+      - `git diff --no-renames --name-only 07a162b ee57e60` prints
+        `c/findings/security.md`, `c/tasks.md` and `src/a.rs`.
+      - That is the same list as the `closer`'s clean merge on branch
+        `piece` (`07a162b bb49fcd`), so `W` is invisible in it.
+      - The number-check listing prints the rows at 2 and 5 and rounds 1-2
+        at 3-4.
+      - `git diff --no-renames --name-only ee57e60 HEAD` lists `c/tasks.md`
+        only. Its diff is the tick and the round-2 line, so the tail passes.
+      - The routed `closer`-side check would see it:
+        `git diff --no-renames --name-only 07a162b ee57e60^1` lists
+        `src/a.rs`.
+
+Security only, on Opus, narrowed. No mutation: the change is prose. The box
+above is the only item at medium. The rest is prose.
+
+**Question 1: my round-16 box is closed.** I re-ran its scenario on branch
+`piece` of `tmp/r17sec/`: `E` `07a162b`, `T1` `d50c9fd`, `M1` `bb49fcd` (a
+clean merge of a `main` that touched `src/a.rs`, with an empty
+`--remerge-diff`), `A` `deb392c` (findings deleted, `c/` moved to
+`archive-c/`, nothing under `openspec/specs/`), `U` `7ab8f7f`, `X` `fc4cae8`
+(`src/a.rs`, no round), then ``round 2 `07a162b..bb49fcd` `` and
+``round 3 `bb49fcd..deb392c` ``, both skipped, as the new text requires.
+- `git diff --no-renames --name-only deb392c HEAD` lists
+  `archive-c/tasks.md` and `src/a.rs`, so the tail fails and `X` is caught.
+- From the other reached ends (`3ab126b`, `07a162b`, `bb49fcd`) the lists
+  are longer and also hold `src/a.rs`, so no choice of end passes.
+- `X` is still invisible in the from-`E` listing: `07a162b fc4cae8` and
+  `07a162b deb392c` print the same six paths. The fixed end is what closes
+  it, not the listing.
+
+**Question 2: the start side.** Under the rules the `closer` follows, the
+argument holds. The `closer` merges and archives only after Step 1 finds
+every row ticked, and the runner ticks only after a tail check passes. So
+between the reached end and the `closer`'s merge there is only tracking, plus
+anything that landed after a tick with no untick.
+- On branch `p3` the runner does untick (`U3`) and a fix follows. At the
+  re-tick, the tail from both `3ab126b` and `07a162b` lists `src/b.rs`, and
+  no merge or archive can exist yet for a skipped line to end at.
+- Branch `p2` measures the disclosed residual. A post-tick commit with no
+  untick (`b047559`, `src/b.rs`) sits under the skipped
+  ``round 2 `07a162b..366a75d` ``. The tail from the archive `bb51f6d` lists
+  `archive-c/tasks.md` only, so every check passes.
+- The argument fails only where the merge is not the `closer`'s, which is
+  the box.
+
+An earlier reached end, such as `<review>` itself, only widens the range over
+commits that some sized round already read. It hides nothing new (my
+round-15 note on branching skipped lines).
+
+**Question 3: the routed check makes no in-piece claim.** `proposal.md:620-631`
+and `design.md:1213-1224` call the skipped-line residual one that "neither
+check" sees. They say only that the `closer`-side check "in 'Out of scope'"
+would see it, and `design.md`'s Risks entry defers it to the owner. On `p2`
+and `p4` the check as worded would catch both start-side cases: the start to
+the merge's first parent lists `src/b.rs` and `src/a.rs`. Two low notes
+follow.
+
+- *It would fail correct lines if it ran round 1's criteria* (low, follow-up
+  only, fails closed). On `piece`, `git diff 07a162b bb49fcd^1 -- c/tasks.md`
+  shows the round-1 line added as well as the tick. "The nothing-landed
+  check's two commands" as worded requires only boxes flipped. The follow-up
+  needs the tail check's allowance for round lines under the row, the one
+  `RUNNER.md:736-738` gives.
+- *The conflict-resolution brief points the reviewer at
+  `git show --remerge-diff <sha>`* (`RUNNER.md:605-609`) (low). If the
+  box's `W` does get a sized round over `E..Mw`, a brief shaped as that
+  paragraph says steers the reader to the merge alone, whose remerge-diff is
+  empty. The range diff still holds `W`, but it is diluted by `main`'s
+  changes. The box's fix makes the round exist. What the brief points at is
+  a quality question for the owner.
+
+Scope: `git diff --stat b5ceed2 d806700` touches `.claude/agents/RUNNER.md`
+and nothing else under `.claude/`. Its one hunk is the tail bullet's closing
+clause, within #171's re-review mechanism. Nothing in the range adds a route
+to `main`, a force or `--admin`. `tmp/r17sec/` (branches `piece`, `p2`, `p3`,
+`p4`) is left in place for the runner.
