@@ -1657,3 +1657,136 @@ updated 2026-09-25 and #169 on 2026-09-26, so none changed since round 16.
 Nothing under `.claude/agents/` was read. The 23.1 grep over it printed one
 line, and no `RUNNER.md` hunk was read. My tree holds the scratch repository
 `tmp/r17-spec-test`, which is gitignored and not committed.
+
+## Re-review round 18 `d806700..b33f0f5`
+
+- [ ] **`spec-writer`** (then `dev-writer` for `design.md:1228` and `:2159`
+      and PR #174's body, which carries the clause twice) —
+      `proposal.md:1428-1430`, mirrored at `:624-626` — the refuse clause
+      "holds before it a commit that needs review and lies in no other
+      line's range" counts a *skipped* line as an other line. Two skipped
+      lines whose ranges overlap then vouch for each other, and the commit
+      that needs review is refused by neither. Overlap between the two
+      permitted lines is allowed by the rules. Each starts "at an end the
+      chain reaches" (`:437-438`), so after ``round 2 `E..M` `` skipped for
+      the `closer`'s merge, ``round 3 `E..A` `` skipped for its archive is
+      a permitted line. Design-review's round-17 box shows this shape
+      passing every rule, and `design.md`'s Risk now says a permitted line's
+      range holds "any other skipped commit before it".
+      **Scenario:** round 1 ends at `E` and the runner ticks. A writer
+      commit `W` that needs review lands, and the runner does not untick.
+      That is the disclosed residual at `:646-649`, which the text routes to
+      this follow-up. The `closer` merges `main` cleanly (`M`) and archives
+      with no spec change (`A`). The runner writes ``round 2 `E..M` ``
+      skipped: `closer`'s merge, and ``round 3 `E..A` `` skipped: archive.
+      Both are permitted shapes, and both hold `W` before their commit. For
+      line 2, `W` lies in line 3's range. For line 3, `W` lies in line 2's
+      range. So the clause refuses neither. The chain reaches `A`. The tail
+      from `A` is tracking only, as security's round-17 branch `p2` measured
+      for the one-line form. The follow-up built from this text accepts the
+      stage block, and `W` merges unread. With a single line ``M..A``, the
+      clause would refuse ``E..M`` as intended. So the defect is in the
+      clause's wording, not its idea.
+      **Fix, for the `spec-writer` to choose:** "lies in the range of no line
+      that is not marked skipped". Or name what counts as covering, a line
+      some lane read. The issue then settles whether a commit under a
+      permitted judgement skip "needs review". That is the question
+      `:1460-1463` already hands it. **Severity:** medium. This text is
+      written "to be lifted into an issue as it stands". The clause is the
+      only part of the follow-up that sees a commit landed after the tick and
+      before the `closer`'s merge, since the chain passes over it. As
+      worded, the clause fails open on a shape the rules permit, and it
+      fails silently.
+      **Measured:** range semantics on this tree, with stand-ins for `M` and
+      `A`. `git log --format="%h %p %s" d806700..b33f0f5` and
+      `git log --format="%h %p %s" d806700..38844e3d` both list `5bca33f0`,
+      the spec-writer commit, which needs review. Whenever `M` is an ancestor
+      of `A`, every commit in `E..M` is also in `E..A`. No scratch repository
+      was built, because the brief forbids `git -C` into another tree.
+
+**Q1: is my round-17 box closed?** Yes, by removal. The first-parent procedure
+is gone, so the missing round-line allowance has nothing left to apply to.
+`proposal.md:1424-1443` states only what the check must refuse and accept,
+and `:1456-1463` hands the procedure to the issue.
+
+The refuse list names every case this piece's reviewers found:
+- a repair marked skipped, whatever its reason (spec-test rounds 15 and 16);
+- a merge of `main` that is not the `closer`'s (security round 17);
+- a merge or archive line whose range runs past its commit (security
+  round 16);
+- a merge or archive line that holds an unreviewed commit before its commit
+  (security round 17's `W`, and my round-17 low note on a line starting too
+  early).
+
+The accept list names every permitted form: the judgement skip (readability
+round 17), the `closer`'s merge when it stopped on no conflict, and the
+spec-free archive, each on a line of its own. The indistinguishable case, a
+repair marked skipped under a judgement-style reason, is named as open.
+
+The only gap is the box above: the fourth refuse form's qualifier fails open
+when two lines overlap.
+
+**Q2: `tasks.md` section 24 verify commands.** Each one was run as the row
+names it.
+- **24.1:** `git grep -n -F -e "stopped on no conflict" -- .claude/agents/RUNNER.md`
+  prints `:549` and `:754`. `git grep -n -F -e "clean merge" -- .claude/agents/`
+  prints nothing. Both match the row's claim. I did not open the file, so
+  that `:549` is step 3's list and `:754` is the tail bullet rests on round
+  17's line references. **Holds** as far as a grep can show.
+- **24.2:** `git grep -n -F -e "first parent" -- …/design.md` prints `:1052`
+  and `:1604`. The Risk "Only the runner runs the pre-tick checks" starts at
+  `:2125`, and the next Risk starts at `:2184`. Neither hit falls inside the
+  Risk. **Holds.**
+- **24.3:** "reason on the line" prints nothing. "A forbidden skip can read
+  exactly" prints `:1231`. That line lies inside "What it still cannot see",
+  which runs from `:1153` to "What else was considered" at `:1268`.
+  **Holds.**
+- **24.4:** the grep prints `:977` ("skipped at the tail check") and `:1043`
+  ("The start-side argument"). **Holds.**
+- **24.5:** `findings/readability.md`'s round-17 `dev-writer` box is `[x]`
+  and carries an outcome. **Holds.**
+- **24.6:** read with `gh pr view 174 --json body` (`updatedAt`
+  2026-09-27T04:43:48Z). The `closer`-side follow-up carries the refuse and
+  accept lists, the note that `proposal.md` sets no procedure, and the new
+  open question. The skippable pair names the `closer`'s merge when it
+  stopped on no conflict. The removed first-parent criterion is gone.
+  **Holds.** Both of the body's copies of the refuse list carry the clause
+  from the box above.
+- **24.7:** `openspec validate 171-workflow-rules --strict` prints "Change
+  '171-workflow-rules' is valid". **Holds.**
+
+Below the box threshold, in prose only:
+
+- **`proposal.md:1399-1401` gives the chain more credit than it has.** It
+  says the check's "chain to its own HEAD also sees a commit that landed
+  after the runner's tick with no untick", and `:646-649` says the same.
+  That is true only for a commit after the last skipped line. A post-tick
+  commit before the `closer`'s merge sits under the skipped merge line, and
+  the chain passes over it, as security's round-17 `p2` measured. What sees
+  it is the skipped-line clause, which the box above says fails open. Low.
+  It is pre-existing text, and the box's fix makes the combined check true.
+- **An archive commit with extra edits is still accepted.** Security's
+  round-16 low note was that "changed nothing under `openspec/specs/`" is the
+  wrong fact for "needs no review", because an archive commit that also
+  edits a file outside the moved folder meets it. The accept list uses the
+  same words, so the follow-up would accept that commit. Low. It needs a
+  `closer` breach.
+- **The reasons for dropping the first criterion survive only in
+  `design.md`.** `proposal.md:1439-1443` cites the three round-17 findings
+  files for why the criterion "refused lines the rules allow", and the
+  `closer` deletes those files. The concrete traps are the round's own
+  record in the range, another skipped commit in the range, and the
+  judgement skip. `design.md`'s Risk states them, and it is archived. An
+  issue written from `proposal.md` alone would not know them, though it
+  would meet them. Low.
+
+Read: the `d806700 b33f0f5` diff of `proposal.md`, `design.md` and
+`tasks.md`, `proposal.md:380-459`, `:580-659` and `:1370-1469`, the round-16
+and round-17 sections of this file, `findings/security.md` from round 16,
+`findings/readability.md`'s round 17, `findings/design-review.md` from round
+16, PR #174's body, and issues #171 (body and comments), #170, #169 and #133
+(state and comments). All four issues are open with no comments, and their
+`updatedAt` is unchanged since round 17. Nothing under `.claude/agents/` was
+opened. The 24.1 greps over it printed two lines and nothing, and no
+`RUNNER.md` hunk was read. No mutation was run, because the change is prose.
+This round added no scratch to my tree.
