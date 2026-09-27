@@ -1919,3 +1919,91 @@ Below the box threshold, in prose only:
 - **23.3's "covers every skipped line other than round 1" is superseded**
   by 24.2's removal. Section 24's preamble names only 22.1 and 23.1 as
   superseded. It is a record of a past pass, and no one acts on it. Low.
+
+## Re-review round 19 `b33f0f5..07a43f9`
+
+- [x] **re-review round 19 `b33f0f5..07a43f9`: no findings** — read `git diff b33f0f5 07a43f9` over `proposal.md`, `design.md` and `tasks.md` (no `.claude/` file in the range); `proposal.md:380-664`, `:1370-1479`; `design.md:1195-1244`, `:2140-2189`; `RUNNER.md:520-779`; spec-test's round 18 section; PR #174's last two body revisions on GitHub; issues #171, #170, #169, #133; clean
+
+Correctness only, on Opus, narrowed. No mutation: the change is prose. No
+scratch file or repository was made.
+
+**1. The rule, walked on this tree at `72f821ca`.** The derivation's last line
+is `f94f7b8d c222c37b`, so `<review>` is `c222c37b`. The number check lists
+the re-review row at `:24`, round lines at `:25-43` with no gap, and the
+`closer`'s row at `:44`. The other listed line, `:737`, lies outside the two
+rows and is a wrapped implementation line, not a round line. The nineteen
+lines carry 1 to 19, each once. The chain runs `c222c37` → `9dc235c` →
+`34fd428` → `dc1390a` (3 and 4) → `d1c8726` → `6d43cda` → `d1d2165` (7 and
+8) → `c4b1df5` → `842758b` → `dd4fe18` → `1380d50` → `c3bda2b` → `e5dcce4` →
+`bad7c88` → `b5ceed2` → `d806700` → `b33f0f5` → `07a43f9`. Tail from
+`07a43f9`: `git diff --no-renames --name-only 07a43f9 HEAD` lists `tasks.md`
+only, its diff is the round 19 line added under the row, and
+`git log --oneline 07a43f9..HEAD` shows only the record commit `72f821ca`. The
+round 18 forms check lists the five lanes' files; round 19's lists nothing
+at `72f821ca`, as expected, since this is that round. **Conclusion:** numbers,
+chain and tail pass. The runner ticks only once round 19's forms check lists
+`correctness.md`, `security.md` and `spec-test.md`, with rounds 1-18 still
+passing theirs (the row has never been ticked, so the tick closes all
+nineteen).
+
+**2. The new clause, read literally.** Both `proposal.md` copies (`:626-627`
+and `:1431`) now end "holds before it a commit that needs review and lies in
+the range of no line that is not marked skipped", which is the box's
+suggested wording verbatim. The diff changes nothing else in either file:
+each hunk is that phrase and its re-wrap. Dropping "other" is sound, since the
+line under test is itself skipped and so can never be its own cover. The
+spec-test scenario (`E..M` and `E..A`, both skipped, `W` before `M`) is now
+refused by both lines. A correct line still passes. Take a sized round
+``R..X`` holding a commit `W` that needs review, then the `closer`'s merge
+written ``R..M`` skipped, since `R` is also an end the chain reaches: `W`
+lies in ``R..X``'s range, a line not marked skipped, so the merge line is not
+refused. The ordinary forms, ``X..M`` and then ``M..A``, hold nothing before
+their commit but tracking and the merge's `main` commits, so they are not
+refused either.
+
+**3. `tasks.md` section 25, each verify run.**
+- 25.1/25.2: "no other line's range" over `proposal.md` and `design.md` prints
+  nothing. "range of no line" over `design.md` prints `:1228` and `:2159`,
+  as claimed. The preamble's two lowering passages (`design.md:1201`,
+  `proposal.md:607`) are unchanged: a grep for "no other line" prints only
+  those two.
+- 25.3: see 4.
+- 25.4: spec-test's round 18 box is `[x]`, with the `spec-writer`'s outcome at
+  `:1706` and the `dev-writer`'s below it at `:1720`.
+- 25.5: `openspec validate 171-workflow-rules --strict` reports valid.
+
+**4. The PR body.** `lastEditedAt` is `04:55:58Z`, which is the newest
+`userContentEdits` node, so that node is the live body. I compared it with
+`04:42:58Z` by reading, sentence by sentence in both follow-up lists and in
+step 3, and paragraph by paragraph elsewhere. I could not diff them
+mechanically within the allowed shell shapes. Exactly the two passages the
+`dev-writer` named changed. The standing-test follow-up's "What remains"
+parenthetical and the `closer`-side follow-up's refuse list each swap "lies
+in no other line's range" for "lies in the range of no line that is not
+marked skipped". I found no other change. `Closes #171`, `#170`, `#169` and
+`#133` stand on lines of their own in both revisions. All four issues are
+open with no comments.
+
+Below the box threshold, in prose only:
+
+- **The new clause changes one permitted shape's outcome from accepted to
+  "depends on a question the text does not ask".** Take a judgement skip
+  ``X..F`` (a `cargo fmt` fix) and then the `closer`'s merge written
+  ``X..M`` skipped. Both start at a reached end, so the rules permit both.
+  Under the old clause `F` lay in another line's range, so the merge line was
+  accepted. Under the new one it is refused if `F` "needs review". The
+  spec-writer's outcome says `proposal.md:1462-1465` already hands that
+  question to the issue. Read literally, those lines ask how to tell a
+  permitted skipped line from a forbidden one. They do not ask whether a
+  commit under a judgement skip counts as needing review for the refuse
+  clause. Failing this way is closed, not open. It follows the natural reading
+  (a judgement skip is a decision that the commit needs no review), and the
+  accept list's "a judgement skip" points there. Low.
+- **The same clause applies to the commits a merge brings from `main`.** A
+  permitted ``X..M`` holds them before `M`, and after this change no line
+  covers them. `design.md:2178-2181` already says the permitted merge line
+  holds them and must pass, so they count as needing no review. This is
+  unchanged in substance. Low.
+- **The re-wrap left ragged lines.** `design.md:1229` and `:2160` run to
+  about 100 columns, and `proposal.md:627` is a two-word line. Cosmetic; this
+  is the readability lane's call, and that lane was skipped this round.
