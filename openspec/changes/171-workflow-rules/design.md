@@ -1225,8 +1225,8 @@ check's two commands from it sees the claim fail. That reader is the deferred
 check's rules**: a repair marked skipped, whatever its reason; a line skipped
 as a merge of `main` that is not the `closer`'s; or a line skipped as the
 `closer`'s merge or an archive commit whose range ends past that commit, or
-holds before it a commit that needs review and lies in no other line's range.
-The number check reads only the line's fixed start, the chain follows a
+holds before it a commit that needs review and lies in the range of no line
+that is not marked skipped. The number check reads only the line's fixed start, the chain follows a
 skipped line like any other, and the forms check skips it, so a commit in its
 range that needs review merges unread. A forbidden skip can read exactly like
 a permitted one: a repair marked skipped with the kind of reason a round the
@@ -2156,8 +2156,8 @@ no role file.
   skipped, whatever its reason; a line skipped as a merge of `main` that is
   not the `closer`'s; and a line skipped as the `closer`'s merge or an
   archive commit whose range runs past that commit, or holds before it a
-  commit that needs review and lies in no other line's range
-  (`findings/spec-test.md` and `findings/security.md`, re-review round 16
+  commit that needs review and lies in the range of no line that is not
+  marked skipped (`findings/spec-test.md` and `findings/security.md`, re-review round 16
   `bad7c88..b5ceed2`, box of each; `findings/security.md`, re-review round
   17 `b5ceed2..d806700`, box). It must accept every skip the rules allow: a
   judgement skip, recorded with its reason when its commit landed, such as

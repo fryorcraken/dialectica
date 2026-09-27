@@ -784,3 +784,27 @@ record what their pass did and are left as written.
       lines after round 1" and the new open question in place of the
       removed criterion; the skippable pair names the `closer`'s merge.
 - [x] 24.7 `openspec validate 171-workflow-rules --strict` passes.
+
+### 25. After the `spec-writer`'s refuse-clause qualifier (`0ffadb73`)
+
+Follows `proposal.md` as `0ffadb73` left it, and the `dev-writer` pointer in
+the round 18 box of `findings/spec-test.md`: a skipped line is never cover
+for another in the refuse clause. The two "no other line" passages about
+lowering a round number (`design.md:1201`, `proposal.md:607`) are a
+different rule and are unchanged.
+
+- [x] 25.1 `design.md` "What it still cannot see": the skipped-line residual
+      ends "lies in the range of no line that is not marked skipped".
+- [x] 25.2 `design.md` Risk "Only the runner runs the pre-tick checks": the
+      refuse list ends the same way. Verify for 25.1 and 25.2:
+      `git grep -n -F -e "no other line's range" -- openspec/changes/171-workflow-rules/proposal.md openspec/changes/171-workflow-rules/design.md`
+      prints nothing, and
+      `git grep -n -F -e "range of no line" -- openspec/changes/171-workflow-rules/design.md`
+      prints both passages (`:1228`, `:2159`).
+- [x] 25.3 PR #174's body: both copies of the refuse list (the standing-test
+      follow-up's "What remains" and the `closer`-side follow-up) carry the
+      same replacement; the edit changed nothing else, and the four
+      `Closes #n` lines stand on lines of their own.
+- [x] 25.4 `findings/spec-test.md`'s round 18 box carries the `dev-writer`'s
+      outcome below the `spec-writer`'s.
+- [x] 25.5 `openspec validate 171-workflow-rules --strict` passes.

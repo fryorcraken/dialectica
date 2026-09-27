@@ -1717,6 +1717,14 @@ line, and no `RUNNER.md` hunk was read. My tree holds the scratch repository
       "lies in no other line's range" becoming "lies in the range of no line
       that is not marked skipped", at `design.md:1228` and `:2159`, and at
       both of PR #174's body copies of the refuse list.
+      **Outcome (`dev-writer`):** mirrored, and nothing else. `design.md`'s
+      residual in "What it still cannot see" (`:1228-1229`) and the Risk
+      "Only the runner runs the pre-tick checks" (`:2159-2160`) now read
+      "lies in the range of no line that is not marked skipped", as do both
+      copies in PR #174's body: the standing-test follow-up's "What remains"
+      list and the `closer`-side follow-up. `design.md:1201` and
+      `proposal.md:607`, about lowering a round number, are unchanged.
+      `tasks.md` section 25.
 
 **Q1: is my round-17 box closed?** Yes, by removal. The first-parent procedure
 is gone, so the missing round-line allowance has nothing left to apply to.
