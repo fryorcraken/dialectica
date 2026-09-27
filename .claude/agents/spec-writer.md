@@ -45,8 +45,12 @@ follow what each gives you — the schema carries the format rules.
 ## You also open `tasks.md` with the stage block
 
 Write it once, unticked, before anyone else touches the file. Every later agent
-flips exactly one `[ ]` to `[x]`; nobody adds a row. That is what keeps their
-cherry-picks clean — git conflicts on the same line, not on neighbouring ones.
+flips exactly one `[ ]` to `[x]`; nobody adds a row. An agent forked after the
+previous tick reached the runner's HEAD cherry-picks cleanly. Ticks on adjacent
+rows by agents forked from the same HEAD — the review round — conflict when
+picked one after another, because git conflicts on neighbouring changed lines as
+well as on the same line; [`RUNNER.md`](RUNNER.md)'s "Dispatching" says who
+resolves that.
 
 ```markdown
 ## Stages
@@ -60,6 +64,7 @@ cherry-picks clean — git conflicts on the same line, not on neighbouring ones.
 - [ ] review: architecture — `code-reviewer`
 - [ ] review: spec-test — `spec-test-reviewer`
 - [ ] review: design — `design-reviewer`
+- [ ] re-review: every commit after the review round — runner
 - [ ] findings all ticked, `findings/` deleted — `closer`
 - [ ] `openspec validate --strict`, then `archive` — `closer`
 - [ ] CI green, title/body checked, PR merged — `closer`
@@ -68,6 +73,11 @@ cherry-picks clean — git conflicts on the same line, not on neighbouring ones.
 The archive row sits **above** the merge row on purpose: the archive is a commit on
 the piece branch that rides the same PR, so it happens before CI and the merge, not
 after. [`closer.md`](closer.md) says why.
+
+The re-review row is the runner's: it records a decision rather than an agent's
+work, and collects one indented line per re-review round beneath it. Write it bare,
+like the rest; [`RUNNER.md`](RUNNER.md), "From the `dev-writer`'s hand-back to the
+merge", says what goes under it and when it is ticked.
 
 Tick your own row when the spec is done. **Strike a row through with its reason
 rather than deleting it** if it genuinely does not apply — a missing row reads as an
