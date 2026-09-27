@@ -1511,3 +1511,137 @@ Read: the `bad7c88 b5ceed2` diff of `proposal.md`, `design.md` and
 issue #171 (open, no comments, `updatedAt` 2026-09-25, unchanged since round
 15). Nothing under `.claude/agents/` was read. The 22.1 grep over it
 returned no lines. No `RUNNER.md` hunk was read.
+
+## Re-review round 17 `b5ceed2..d806700`
+
+- [ ] **`spec-writer`** — `proposal.md:1401-1404` (mirrored at
+      `design.md:2134-2140` and in PR #174's `closer`-side follow-up) — the
+      new `closer`-side check for a skipped line after round 1 runs "the
+      nothing-landed check's two commands over the range from the line's
+      start to that commit's first parent". Those two commands are defined
+      at `:293-297`, and the second requires the `tasks.md` diff to "show
+      only boxes flipped". Only the tail check (`:411-415`) adds the
+      exception that the diff "may also show round lines under the re-review
+      row", and the new text does not carry it. A skipped line after round 1
+      starts at an end the chain reaches (`:437`). That round's own line is
+      recorded after its end (`:409-410`), so it always lies in
+      `<start>..<commit>^1`. As written, the check fails every correct
+      skipped merge or archive line after round 1. That is the same defect
+      the spec-writer gave for declining the one-commit form: "a correct line
+      would fail it".
+      **Scenario:** a clean merge of `main` lands on this piece right after
+      round 16's records, i.e. with first parent `9777492a`. The runner
+      writes ``round 17 `b5ceed2..<merge>` skipped: clean merge of main``,
+      which is correct under `:433-442`. The `closer`-side check finds the
+      range ends at a merge and passes that condition. Then over
+      `b5ceed2..9777492a` the second command shows a `+      round 16 …`
+      line, which is not a box flip, so the correct line is refused. Any
+      follow-up lifted from this text "as it stands" (PR body) is red on
+      every piece that merges `main` after round 1. **Severity:** medium.
+      The criterion is unusable for the case it was written for, and the fix
+      is one clause: "with the tail check's allowance for round lines under
+      the row", or "run the tail check's commands".
+      **Measured:** `git diff --no-renames --name-only b5ceed2 9777492a`
+      lists the five findings files and `tasks.md`, so the first command
+      passes. `git diff b5ceed2 9777492a -- openspec/changes/171-workflow-rules/tasks.md`
+      shows one added line, round 16's round line, so the second command as
+      defined at `:296-297` fails. With the round-line allowance both pass,
+      and the check still refuses both forbidden forms. My round-16 repair
+      `1380d50..a0ce38f1` fails the end condition:
+      `git log --format="%h %p %s" -1 a0ce38f1` shows one parent and a
+      spec-writer subject, so it is no merge and no archive. A repair marked
+      skipped whose range does end at a real merge still lists the unreviewed
+      commit's path in the first command over `<start>..<merge>^1`.
+
+**Q1: is my round-16 box closed?** The record-and-route part is closed.
+`proposal.md:620-631` adds the skipped line after round 1 to the "Nor does
+either check see" list in the same form as its siblings. That form is: what
+the runner breaks, why the number, chain and forms checks all pass it, the
+finding it came from, "Reaching this takes a runner breaking a stated rule",
+and the routing to the `closer`-side check. `:1401-1408` widens that check,
+and `design.md:1213-1224`, `:1257-1261` and the Risk at `:2107-2145` match it.
+The optional clause was taken in the stronger security form (`:437-442`).
+
+I re-ran round 17 `1380d50..a0ce38f1`, marked skipped, against the new text.
+The in-piece checks still pass it, as round 16 measured and as the contract
+now records. The routed `closer`-side check, as specified, fails it at the
+end condition, because `a0ce38f1` is neither a merge nor an archive. So the
+box is closed for the forbidden cases. The unticked box above is about the
+permitted case, which the same text refuses too.
+
+**Is the reason for declining my one-commit form right?** Yes, on both
+halves.
+
+- **A merge's range lists more than one commit.** I measured this in the
+  scratch repo `tmp/r17-spec-test`: base, then `main1` and `main2` on
+  `main`, then `round-end` and `record-round-line` on `piece`, then
+  `merge --no-ff main`. `git -C tmp/r17-spec-test log --format="%h %p %s" 85b948f..HEAD`
+  lists four commits: the merge, `record-round-line`, `main2` and `main1`.
+  Even from the merge's first parent, `ac22faa..HEAD`, it lists three: the
+  merge and both `main` commits.
+- **A line starting at a reached end holds more than the one commit.** On
+  this tree, `b5ceed2..9777492a` holds the round-16 record commit and five
+  findings commits. The spec-writer calls this "the runner's tick", which is
+  loose wording: what is always there is the round's record and its
+  findings, with the tick there only if the row was ticked first. The
+  conclusion holds either way. My form was wrong.
+
+**Q2: `tasks.md` section 23 verify commands.**
+
+- **23.1:** `git grep -n -F -e "ending at that commit" -- .claude/agents/`
+  prints exactly one line, `.claude/agents/RUNNER.md:756`, which is
+  consistent with "stated once". I did not open the file, so I cannot
+  confirm by reading that `:756` is the tail bullet. It is the line round
+  16's outcome pointed the dev-writer at (`RUNNER.md:752-756`). The command
+  shows only that the phrase appears once. **Holds** as far as a grep can
+  show.
+- **23.2:** there is no command. Against the diff: the "Kept" bullet now says
+  "bounded on both sides". It gives the start-side argument with its round-14
+  citation, then the end-side untick-and-fix scenario and why the start is
+  not narrowed to `<first parent>..<sha>` (`design.md:1025-1050`). "Why the
+  tail check alone is sound" starts at `:960`, and its `:977-979` gives why
+  the two skippable lines end at their commit and where a broken rule is
+  routed. **Holds.**
+- **23.3:** `git grep -n -F -e "skipped line after round 1" -- openspec/changes/171-workflow-rules/design.md`
+  prints `:1213`, `:1260` and `:2112`. By heading positions from
+  `git grep -n -e "^#"`, these fall under "What it still cannot see"
+  (`:1142`), "What else was considered" (`:1250`) and the Risk "Only the
+  runner runs the pre-tick checks" (`:2107`). **Holds.** The Risk's text
+  about not requiring a one-commit range is at `:2141-2145`.
+- **23.4:** PR #174's body, from `gh pr view 174 --json body`, says each
+  skipped line "ends at that commit, never at HEAD or any later commit".
+  The standing-test follow-up and the `closer`-side follow-up both name "a
+  skipped line after round 1 that breaks the tail check's rules". The
+  `design.md` summary carries the end-side argument. **Holds.** The body also
+  carries the box above verbatim ("run the nothing-landed check's two
+  commands over the range from the line's start to that commit's first
+  parent"), so the fix has to reach it too.
+- **23.5:** `openspec validate 171-workflow-rules --strict` prints "Change
+  '171-workflow-rules' is valid". **Holds.**
+
+Below the box threshold, in prose only:
+
+- **A skipped line that starts too early is not named in the residual's
+  enumeration.** `:620-623` lists "a repair marked skipped, whatever its
+  reason, or a line … whose range ends past that commit". A third form
+  breaks the same rule: a skipped line `E..M`, with `M` a clean merge, where
+  a commit that needs review lies between the reached end `E` and `M`. Its
+  end is right and nothing labels it a repair. `:433-437` forbids it only
+  through "a line of its own". The general clause "breaks the tail check's
+  rules" covers it, and the widened `closer`-side check refuses it, because
+  the first command over `E..M^1` lists the commit's path. Low.
+- **The round-1 half of the `closer`-side check has no stated end.**
+  `:1395-1396` runs the two commands "over the range from it" and does not
+  say to what. If that means the `closer`'s HEAD, the round-1 line itself
+  and every later round line are in the `tasks.md` diff, and the box above
+  recurs. This text is from an earlier round and this round did not change
+  it, so it is only noted. Low.
+
+Read: the `b5ceed2 d806700` diff of `proposal.md`, `design.md` and
+`tasks.md`, `proposal.md:284-323`, `:380-459`, `:580-649` and `:1370-1419`,
+this file's round-16 section, PR #174's body, and issues #171, #170, #169
+and #133. All four are open with no comments. #171, #170 and #133 were last
+updated 2026-09-25 and #169 on 2026-09-26, so none changed since round 16.
+Nothing under `.claude/agents/` was read. The 23.1 grep over it printed one
+line, and no `RUNNER.md` hunk was read. My tree holds the scratch repository
+`tmp/r17-spec-test`, which is gitignored and not committed.
