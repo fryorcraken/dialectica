@@ -971,3 +971,83 @@ Below medium, in prose:
   only if the runner re-checks from the end it just wrote, and `RUNNER.md`
   still does not say so. This range neither helps nor worsens it. It costs
   rounds, not soundness.
+
+## Re-review round 17 `b5ceed2..d806700`
+
+- [ ] **`spec-writer`** — `proposal.md:1401-1408` (mirrored at
+      `design.md:2134-2145`) — the widened `closer`-side criterion fails
+      skipped lines that `RUNNER.md:753-758` permits. That is the reason
+      `design.md:2141-2145` gives for rejecting spec-test's one-commit form:
+      "a correct line would fail it". `RUNNER.md` lets a skipped line start
+      at *any* end the chain reaches. The criterion diffs that start against
+      the named commit's first parent, so it passes only when nothing but
+      tracking lies between the two. A second skipped commit lying between
+      them breaks that.
+      **Scenario:** the `closer` merges `main` (`M`) and then archives (`A`,
+      first parent `M`). The runner writes the skipped line `R..M`, then the
+      skipped line `R..A`. `R` is an end the chain reaches, both lines end at
+      their own commit, and the tail from `A` is clean, so every rule in
+      `RUNNER.md` holds. The criterion then runs `git diff --no-renames
+      --name-only R M` for the archive line, which lists every path `main`
+      moved since `R`, and it fails. The mirror image comes from closer.md
+      Step 4, which archives and then merges `main` again (`M2`, first
+      parent `A`). A line `R..M2` diffs `R` against `A`, lists the archive's
+      move, and fails the same way. **Verified** by git semantics rather than
+      by a run: a first parent's tree differs from `R` by whatever the
+      earlier skipped commit changed. **Why it matters:** the decision record
+      rejects one alternative for a defect the adopted criterion shares. The
+      follow-up is the only named reader for this residual, and whoever
+      builds it will meet the defect as a false red, then loosen the check ad
+      hoc or push runners to reorder lines. The fix is one of two: constrain
+      the start (`RUNNER.md` and `proposal.md:437-442` say the latest end the
+      chain reaches, or the end of the other skipped line when one precedes
+      it), or constrain the criterion (it tolerates the paths of a skipped
+      line ending at a commit in between). Either way `design.md`'s rejection
+      paragraph should say which. **Severity:** medium. It is a flaw in the
+      recorded design of a deferred check, not an in-piece hole, and it
+      fails loud, not silent.
+
+Below medium, in prose:
+
+- **Q1: `RUNNER.md` implements the decision and nothing else.**
+  `:755-758` adds one clause, "starting at an end the chain reaches and
+  ending at that commit, never at HEAD or any later commit", in the words of
+  `proposal.md:437-439`. It does not carry the proposal's "would vouch"
+  rationale, which belongs in the contract rather than the runner's
+  instructions. No other line in `RUNNER.md` changed in the range.
+- **Q2: the out-of-brief Risk edit is a faithful mirror plus one rejected
+  alternative, and decides nothing the contract lacks.** `design.md:2134-2141`
+  restates `proposal.md:1401-1408` with the same criterion and the same
+  citations. The additional sentence at `:2141-2145` records why the
+  one-commit form was not taken. That is an alternative and what ruled it
+  out, which is `design.md`'s job, and the reason is not a contract term.
+  `proposal.md` needs no counterpart. The box above concerns the soundness
+  of that reason, not where it was written down.
+- **Q3: the start-side argument is sound, but it rests on an ordering claim
+  from `closer.md`, not on a measurement.** "Both commits are the
+  `closer`'s, made after the tick" holds by construction. The `closer` runs
+  only once every row but its own is ticked (`RUNNER.md:795-796`). It merges
+  in Step 2 (`closer.md:179-183`) and archives in Step 3. A conflict
+  resolution is not one of the two skippable commits (`RUNNER.md:540`). So
+  nothing here needed measuring, and nothing unmeasured is carried. There
+  are two soft spots. (a) "A commit that needs review can sit between the
+  reached end and such a line's end only if it landed after the tick" should
+  say *unreviewed*. From an older reached end, reviewed commits needing
+  review do sit in that span. They are covered by other lines, so the
+  argument survives, but the sentence as written is false. (b) "Made after
+  the tick" means the most recent tick. After a red run and a re-tick, the
+  first `closer`'s merge and archive predate the current tick, and a
+  re-dispatched `closer` may merge again. The argument still holds, because
+  each of those commits followed *a* tick with nothing unticked in between,
+  but the text reads as though there is one tick.
+- **Q4: nothing in the range changes my round-16 notes.** `design.md:1006`
+  still states "at least one lane" without the reason, which is still only
+  in `findings/spec-test.md:1304-1307`. `design.md:988` still says the check
+  "always terminates", and `RUNNER.md` still does not say to re-check from
+  the end just written. `proposal.md:1268` still has "after the last round".
+  The new Kept text does address the round-16 note that "It is not the same
+  hole" overstated. It now rests the claim on bounding both sides and
+  labels the tick argument as start-side only, which is the honest form.
+  The "independent witness" point (a merge's cleanliness is observed by the
+  `closer`, but not checked at the tail) still applies and is now covered by
+  the recorded residual at `design.md:1213-1224`.
