@@ -1814,3 +1814,108 @@ Below the box threshold, in prose only:
   the fix or sizes a round over the archive. Both fail safe. Low.
 
 The scratch repository `tmp/r17` was cleaned before this commit.
+
+## Re-review round 18 `d806700..b33f0f5`
+
+- [x] **re-review round 18 `d806700..b33f0f5`: no findings** — read `git diff d806700 b33f0f5` over `RUNNER.md`, `proposal.md`, `design.md` and `tasks.md`; `RUNNER.md:520-812`; `proposal.md:395-443`, `:1340-1463`; `design.md:955-1074`, `:1195-1243`, `:2095-2183`; readability's and security's round 17 sections; PR #174's last two body revisions on GitHub; clean
+
+Correctness only, on Opus, narrowed. No mutation: the change is prose. No
+scratch repository was built.
+
+**1. The rule, walked on this tree at `38844e3d`.** The derivation's last line
+is `f94f7b8d c222c37b`, so `<review>` is `c222c37b`. The number check lists
+the re-review row at `:24`, round lines at `:25-42` with no gap, and the
+`closer`'s row at `:43`. A second listed line, `:736`, lies outside the two
+rows and is a wrapped implementation line, not a round line. The eighteen
+lines carry 1 to 18, each once. The chain runs `c222c37` → `9dc235c` →
+`34fd428` → `dc1390a` (3 and 4) → `d1c8726` → `6d43cda` → `d1d2165` (7 and
+8) → `c4b1df5` → `842758b` → `dd4fe18` → `1380d50` → `c3bda2b` → `e5dcce4` →
+`bad7c88` → `b5ceed2` → `d806700` → `b33f0f5`. Tail from `b33f0f5`:
+`git diff --no-renames --name-only b33f0f5 HEAD` lists `tasks.md` only. Its
+diff is the round 18 line added under the row, and
+`git log --oneline b33f0f5..HEAD` shows only the record commit `38844e3d`, so
+the tail passes. `git log -S` finds no commit that ever ticked the row, so the
+tick would close rounds 1-18. The round 17 forms check lists the five lanes'
+files. Round 18's forms check lists nothing at `38844e3d`, as expected, since
+this is that round. **Conclusion:** the numbers, chain and tail all pass. The
+runner ticks only once all five lanes' round 18 files are listed by the forms
+check, with rounds 1-17 each still passing theirs.
+
+**2. `RUNNER.md` against `proposal.md`.** The one `RUNNER.md` hunk in the
+range (`:752-759`) matches `proposal.md:433-440` clause for clause. The pair is
+the `closer`'s merge of `main` when it stopped on no conflict, plus a
+spec-free archive. Each gets a line of its own, starting at a reached end and
+ending at that commit. The wording is step 3's (`RUNNER.md:549`). "Two kinds
+of commit" against the proposal's "the two" changes nothing a runner would do.
+Only the `closer` archives (`git grep -n -F -e "openspec archive"` over
+`.claude/agents/` hits `closer.md` and prose only), so `design.md:1030-1032`'s
+start-side premise holds. My round 17 low note, a `closer` resolving a
+conflict itself, is now inside the refuse list: that merge is not "when it
+stopped on no conflict", and a skipped archive line holding it holds a commit
+that needs review.
+
+**3. Removal consistency.** `git grep -n -F -e "first parent"` has two hits in
+`design.md` outside `findings/`. `:1052` is the unrelated "not narrowed to
+`<first parent>..<sha>`" in "Kept". `:1604` is the archive's parent in another
+decision. Neither refers to the removed criterion. `tasks.md:761` is 24.2's own
+verify command. The rest are findings files. `"line's start"`, `"commit its
+reason names"` and `"range ends at a"` have no stale hit. The PR body no longer
+carries the criterion. `design.md:2169-2175` names it only as history, saying
+why it was dropped. The claims that remain, "the chain to its own HEAD also
+sees a commit that landed after the tick with no untick" (`proposal.md:1399-1401`,
+`design.md:1212-1213`, `:2138-2141`, PR body), do not rest on the criterion.
+Such a commit lands before that `closer`'s own merge, so the `closer`'s Step 1
+tail from a reached end lists it before any skipped merge or archive line can
+cover it.
+
+**4. `tasks.md` section 24's verifies, each run.**
+- 24.1: `stopped on no conflict` returns `RUNNER.md:549` and `:754`, and
+  `clean merge` over `.claude/agents/` returns nothing.
+- 24.2: `first parent` in `design.md` returns `:1052` and `:1604`. The Risk
+  runs from `:2125`, the line the second command prints, to `:2183`, so
+  neither hit is inside it.
+- 24.3: `reason on the line` returns nothing, and `A forbidden skip can read
+  exactly` returns `:1231`, in the residual.
+- 24.4: returns `:977` and `:1043`.
+- 24.5: both readability round 17 boxes are ticked with outcomes.
+- 24.7: `openspec validate 171-workflow-rules --strict` reports valid.
+
+The verifies for 22.1 and 23.1 still return what they claim. The verify for
+23.3 now returns a fourth hit, `:2171`, inside the same Risk.
+
+**5. The PR body.** I compared the two revisions (`04:42:58Z` against
+`04:18:44Z`) by reading, sentence by sentence, in step 3, the `design.md`
+summary and both follow-up lists, and paragraph by paragraph elsewhere. I
+could not diff them mechanically within the allowed shell shapes. Exactly the
+five passages the `dev-writer` named changed:
+- step 3's no-review list;
+- step 3's pair, now "Only two kinds of commit";
+- the never-skipped-repairs bullet, now naming the `closer`'s merge and the
+  measured writer-merge case;
+- the standing-test parenthetical, widened to the three forms;
+- the `closer`-side follow-up. The criterion sentence is gone. The
+  refuse/accept substance and "sets no procedure" come after the number-check
+  sentence, and the new open question comes after "not a one-line addition".
+
+I found no other change. Both revisions carry `Closes #171`, `#170`, `#169`
+and `#133`, each on its own line.
+
+Below the box threshold, in prose only:
+
+- **"Lies in no other line's range" counts skipped lines as cover**
+  (`proposal.md:626`, `:1430`, and `design.md:1228`, `:2159`, mirrored in the
+  PR body). Take a runner that writes both ``E..M`` (skipped as the `closer`'s
+  merge) and ``E..A`` (skipped as the archive). Both start at a reached end,
+  and both are allowed by the tail rules. A commit `X` that needs review,
+  lying before `M`, is then "in another line's range" for each of them, so a
+  check built literally from the refuse list accepts both. Two-dot ranges from
+  one start nest, as this piece's own history shows: all seven commits of
+  `git log --oneline d806700..5bca33f0` are also in `d806700..b33f0f5`. It
+  is not a box, because `X` cannot get there while the `closer`-side check
+  runs. `X` precedes the `closer`'s merge, so that `closer`'s own Step 1
+  chain-to-HEAD lists it before either line exists. A wording that says
+  "in no range but a skipped merge or archive line's" would close it for a
+  designer who builds the refuse list alone. Low.
+- **23.3's "covers every skipped line other than round 1" is superseded**
+  by 24.2's removal. Section 24's preamble names only 22.1 and 23.1 as
+  superseded. It is a record of a past pass, and no one acts on it. Low.
