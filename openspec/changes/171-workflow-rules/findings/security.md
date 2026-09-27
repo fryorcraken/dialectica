@@ -2314,3 +2314,88 @@ and nothing else under `.claude/`. Its one hunk is the tail bullet's closing
 clause, within #171's re-review mechanism. Nothing in the range adds a route
 to `main`, a force or `--admin`. `tmp/r17sec/` (branches `piece`, `p2`, `p3`,
 `p4`) is left in place for the runner.
+
+## Re-review round 18 `d806700..b33f0f5`
+
+- [x] **re-review round 18 `d806700..b33f0f5`: no findings** — read `git diff d806700 b33f0f5` over `RUNNER.md`, `proposal.md`, `design.md` and `tasks.md`, `closer.md` Step 2, and `RUNNER.md` step 3 and "The `closer`, and what comes back"; re-ran round 17's `p4` and a `closer`-merge variant in `tmp/r18sec/`; clean
+
+Security only, on Opus, narrowed. No mutation: the change is prose. Nothing
+at medium or above; the two notes below are low and unboxed.
+
+**Question 1: my round-17 box is closed.** The pair now reads "the
+`closer`'s merge of `main` when it stopped on no conflict" in all three
+places (`proposal.md:434-435`, `RUNNER.md:754`, `design.md:1021-1022`),
+matching step 3's list (`RUNNER.md:549`). Re-run in `tmp/r18sec/`, branch
+`p4`: `R` `b1c9924`, `E` `c2b83be` (round 1 `b1c9924..c2b83be`), `T1`
+`f0342f3`. The `closer`'s `git merge main` stops on `CONFLICT (content):
+Merge conflict in src/a.rs` and is aborted. Then `U` `b0b787f`, `W`
+`d7c5fe0` (`src/a.rs`), and the writer's `Mw` `25e3c6f`. `git show
+--remerge-diff 25e3c6f` prints only the hash, so `Mw` is clean.
+`git diff --no-renames --name-only c2b83be 25e3c6f` lists `c/tasks.md` and
+`src/a.rs`, so the tail from `E` fails. Under the new text the runner may
+not write ``round 2 `c2b83be..25e3c6f` `` skipped, because `Mw` is a
+writer's merge and not the `closer`'s. Neither permitted kind applies, so
+the repair is a sized line, and `W` lies in its range. The runner cannot
+write the p4 line by following the text. It can write it only by misnaming
+whose merge `Mw` is, and the residual now lists that as "a line skipped as
+a merge of `main` that is not the `closer`'s" (`proposal.md:623-624`,
+`design.md:1226`).
+
+The start-side argument the pair now rests on holds under the `closer`'s
+own merge. On branch `p5`: `T1` `f0342f3`, then the `closer`'s clean merge
+`M1` `fe8cdff` (`main2` touched only `src/c.rs`), a red run, `U`
+`b67bb22`, and a fix `W` `c8fcd04` (`src/b.rs`) whose round the runner
+forgets. The runner then writes only the permitted
+``round 2 `c2b83be..fe8cdff` `` skipped as the `closer`'s merge (`555415f`).
+The tail from each reached end lists `src/b.rs`:
+- `fe8cdff HEAD` lists `c/tasks.md` and `src/b.rs`;
+- `c2b83be HEAD` adds `src/c.rs`;
+- `b1c9924 HEAD` adds `c/findings/security.md`.
+
+So the re-tick is refused and no second `closer` merge can exist to hide
+`W`. A `closer`'s merge can sit after an unreviewed commit only through a
+tick with no untick. That is the residual already disclosed. `closer.md`
+Step 1 independently refuses to run on an unticked row, so the `closer`'s
+half of the argument does not rest on the runner alone.
+
+**Question 2: removing the criterion removed no in-piece protection.** The
+criterion lived only in the deferred follow-up. That is `proposal.md`'s
+"Out of scope" bullet (now `:1424-1443`, "Skipped lines after round 1") and
+`design.md`'s Risk "Only the runner runs the pre-tick checks"
+(`:2152-2183`). No role file cited it. `git grep -n -F -e "skipped"` over
+`closer.md`, `README.md`, `code-reviewer.md`, `dev-writer.md` and
+`spec-writer.md` finds no rule about skipped round lines, and
+`closer.md` Step 1 still checks only that rows are ticked, as the Risk says.
+The text no longer claims the follow-up would catch the skipped-line forms.
+Round 17's residuals said "the `closer`-side check in 'Out of scope' would
+see it". The residuals now say only that it is "the second reader it is
+routed to" (`proposal.md:640-642`, `design.md:1240-1242`), and "Neither
+check asks whether a skipped line's range fits its reason" replaces
+"nothing checks the reason". `git grep -n -F -e "would see" -e "would catch"`
+over `proposal.md` and `design.md` finds no other such claim. `design.md`'s
+"Kept" start side now rests on the pair's wording and on the `closer` running
+only after a tick. It does not rest on the removed procedure.
+
+Two low notes follow, neither boxed.
+
+- *Whose merge it is is known only from the runner's own record* (low).
+  `closer.md:181` runs `git merge origin/main` in a `worktree-agent-<id>`
+  tree, and a writer's brief says the same. Both produce git's default
+  message, so nothing on the commit separates `Mw` from `M1` (here
+  `Merge branch 'main' into p4` and `Merge branch 'main2' into p5`). The
+  repository does separate them: `git log 25e3c6f -- c/tasks.md` shows the
+  untick `b0b787f` as the last row change before `Mw`, while `M1`'s first
+  parent is the tick. The text never says to look. It matters only after a
+  lost report plus a forgotten round, and the residual already names the
+  misattributed form.
+- *Judgement skips remain the permitted skip that nothing verifies* (low,
+  pre-existing, disclosed). The follow-up must accept a judgement skip
+  "recorded with its reason when its commit landed". The residual says
+  a forbidden repair can wear that reason, so the text withholds the
+  in-piece claim. This is unchanged by the round.
+
+Scope: `git diff --stat d806700 b33f0f5` touches `.claude/agents/RUNNER.md`
+and nothing else under `.claude/`. Its one hunk is the tail bullet's pair,
+which is within #171's re-review mechanism. Nothing in the range adds a
+route to `main`, a force or `--admin`. `tmp/r18sec/` (branches `p4`, `p5`,
+`main`, `main2`, `piece`) is left in place as evidence.
