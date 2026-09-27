@@ -1660,7 +1660,7 @@ line, and no `RUNNER.md` hunk was read. My tree holds the scratch repository
 
 ## Re-review round 18 `d806700..b33f0f5`
 
-- [ ] **`spec-writer`** (then `dev-writer` for `design.md:1228` and `:2159`
+- [x] **`spec-writer`** (then `dev-writer` for `design.md:1228` and `:2159`
       and PR #174's body, which carries the clause twice) —
       `proposal.md:1428-1430`, mirrored at `:624-626` — the refuse clause
       "holds before it a commit that needs review and lies in no other
@@ -1703,6 +1703,20 @@ line, and no `RUNNER.md` hunk was read. My tree holds the scratch repository
       the spec-writer commit, which needs review. Whenever `M` is an ancestor
       of `A`, every commit in `E..M` is also in `E..A`. No scratch repository
       was built, because the brief forbids `git -C` into another tree.
+      **Outcome (`spec-writer`):** took the suggested qualifier, and nothing
+      else. In `proposal.md`, both copies of the refuse clause now end "holds
+      before it a commit that needs review and lies in the range of no line
+      that is not marked skipped": "What it still cannot see" (`:624-627`)
+      and the `closer`-side follow-up's "Skipped lines after round 1"
+      (`:1429-1431`). "Other" is dropped because the line under test is
+      itself marked skipped, so it can never count as its own cover. In the
+      scenario, `E..M` and `E..A` are both skipped, so neither covers `W` and
+      the clause refuses both. Whether a commit under a permitted judgement
+      skip "needs review" stays with the issue, as `:1462-1465` already
+      hands it. **Left for the `dev-writer`:** mirror the same replacement,
+      "lies in no other line's range" becoming "lies in the range of no line
+      that is not marked skipped", at `design.md:1228` and `:2159`, and at
+      both of PR #174's body copies of the refuse list.
 
 **Q1: is my round-17 box closed?** Yes, by removal. The first-parent procedure
 is gone, so the missing round-line allowance has nothing left to apply to.
