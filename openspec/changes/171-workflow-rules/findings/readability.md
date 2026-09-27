@@ -1291,3 +1291,70 @@ Stylistic or low, no box:
   round lands; a line written because the tail check failed is never
   skipped", is one way the `spec-writer`'s decision could be carried into
   `RUNNER.md`.
+
+## Re-review round 18 `d806700..b33f0f5`
+
+- [x] **re-review round 18 `d806700..b33f0f5`: no findings** — read `git diff d806700 b33f0f5` over `RUNNER.md`, `proposal.md` and `design.md`; `RUNNER.md:530-590` and `:590-790` cold; `proposal.md:405-445`, `:600-650` and `:1380-1463`; `design.md:505-534`, `:960-1061`, `:1218-1242` and `:2130-2183`; `tasks.md` section 24; every `skipped` hit in `.claude/agents/`; clean
+
+Dimension: **readability only**, narrowed to medium and above as briefed.
+
+**1. Round 17's two boxes are closed.** The criterion "its range ends at a
+merge or an archive" is gone from `proposal.md` and from the `design.md`
+Risk. Both now list what the deferred check must refuse and what it must
+accept, and the accept list names the judgement skip and `RUNNER.md:680`'s
+sample (`proposal.md:1433-1438`, `design.md:2162-2166`). "Only the reason on
+the line tells…" is replaced in both residuals by "A forbidden skip can read
+exactly like a permitted one", with its two reasons. `design.md:977` reads
+"at the tail check". I found nothing in the three files that forbids what
+`RUNNER.md:622-623` permits. `design.md:1006-1010` and `:517-522` still keep
+the judgement skip, and they now agree with the Risk.
+
+**2. The tail bullet, read cold (`RUNNER.md:734-759`).** A runner can tell
+which skip is allowed where. At the tail check the repair is never skipped
+(`:746-747`, bold). "Only two kinds of commit … here" names the same pair as
+step 3's no-review list, in the same words (`:549`, `:754`). Elsewhere,
+`:622-623` allows a skip for any round. "the `closer`'s merge of `main` when it
+stopped on no conflict" now makes clear that a writer's merge is not in the
+pair. "Two kinds of commit" also answers round 16's note that "two commits"
+read as a count, where a piece can hold two of the same kind.
+
+"never at HEAD" stays low. The two phrases conflict in only one case: the
+runner writes the line while the `closer`'s merge or archive is still HEAD,
+before committing the untick that must come before any new round. By the
+time the pre-tick check runs, the untick and the line's own commit have
+landed after it. The bullet's own `:738-739`, "the end is never HEAD itself",
+uses HEAD in the same sense. A runner who hesitates here writes a sized
+round at worst, and a sized round is safe. Nobody acts wrongly.
+
+**3. Stated once.** `git grep -n -F -e "skipped" -- .claude/agents/` returns
+`RUNNER.md:81, 625, 656, 680, 707, 713, 747, 750, 753, 756, 768`. It also
+returns hits in `README.md`, `closer.md`, `code-reviewer.md`,
+`spec-test-reviewer.md` and `spec-writer.md` that are about skipped stages or
+mutations, not round lines. Every `RUNNER.md` hit is one of four things:
+round 1 skipped because nothing landed (`:81`, `:625`, `:656`, `:707`,
+`:713`), the judgement skip's sample (`:680`), the tail bullet (`:747-756`),
+or the forms check's exclusion (`:768`). None describes skip permission
+differently from the tail bullet. `git grep -n -F -e "clean merge" --
+.claude/agents/` returns nothing, as 24.1 says.
+
+Low, no box:
+- `proposal.md:1433-1435` and `design.md:2162-2163` define a permitted
+  judgement skip as one "recorded with its reason when its commit landed".
+  `RUNNER.md:622-623`, the only text the runner reads, still leaves out that
+  timing. The tail bullet's bold "neither is ever marked skipped" does
+  forbid the late skip, so a runner who reads the bullet acts correctly.
+  This is the third round carrying this note. It is the cheapest clause
+  available and it is still optional.
+- The refuse list's "a line skipped as a merge of `main` that is not the
+  `closer`'s" (`proposal.md:623-624`, `:1427`; `design.md:1226`, `:2156`)
+  is qualified only by the list's lead-in, "that breaks the tail check's
+  rules". A writer's clean merge skipped by judgement when it landed is
+  allowed by `RUNNER.md:622`. Taken without that lead-in, it also matches
+  this item. The open question at `proposal.md:1460-1463` hands the general
+  problem to the issue, but names only the repair case. Similarly,
+  `design.md:1041-1042`, "a writer's merge, clean or not, now gets a sized
+  line", is true at the tail check. It reads as a general rule, and
+  `RUNNER.md` states no such rule. A reader who took it that way would size
+  a round they could have skipped, which is safe. Adding "at the tail
+  check" there, or naming the writer-merge case beside the repair case in
+  the open question, would close it.
