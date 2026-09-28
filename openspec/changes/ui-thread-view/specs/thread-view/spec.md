@@ -229,11 +229,9 @@ that does not exist. **The premise differs and the rendered meaning is the same,
 which is why this states the one and reuses the other** rather than defining a
 second notion of an inert control for a reader to tell apart from the first.
 
-No method on the module surface reads a prior version. `docs/PLAN.md` records
-this as a documented placeholder for the MVP phase, naming `revision.rs` as
-establishing that superseded versions stay in the op log while no contract method
-exposes them. The affordance is therefore inert because the call does not exist,
-not because it was not wired.
+No method on the module surface reads a prior version: superseded versions stay
+in the op log, and no contract method exposes them. The affordance is therefore
+inert because the call does not exist, not because it was not wired.
 
 The view SHALL NOT render prior version text it obtained by any other route, and
 SHALL NOT present the current version as though it were an earlier one.
@@ -265,8 +263,8 @@ not a disabled one and not one that accepts text and refuses submission. This
 requirement is therefore conditional on the gate being open, and SHALL NOT be
 read as requiring a reply box the probe withholds.
 
-What this change does supply is the instantiation those requirements were
-written for. `composer-view` notes that it "does not require a reply affordance
+What this screen supplies is the instantiation those requirements were written
+for. `composer-view` notes that it "does not require a reply affordance
 to be reachable", a screen listing thread heads having nowhere to put one; a
 thread screen does, so the reply path becomes reachable here for the first time.
 
@@ -282,6 +280,10 @@ identifier for a reply made to something other than the root. A composer that
 sent the root regardless would publish every reply as a top-level answer, which
 verifies, stores and renders in the wrong place permanently.
 
+**A reply affordance on a post other than the root is out of scope**: the screen
+offers one, for the thread's root. Where a later change offers one on another
+post, the rule above names that post as the parent.
+
 **No thread identifier SHALL be sent with a reply.** `content-authoring` refuses a
 reply request carrying one, the thread being derived from the parent.
 
@@ -296,12 +298,6 @@ where the value is produced rather than at each use.
 - **WHEN** a thread is rendered and the posting probe reports posting is not
   possible for that Stoa
 - **THEN** no text input for a reply is rendered for any item of the thread
-
-#### Scenario: A reply names the post it was made under
-
-- **WHEN** a reply is submitted from the affordance on a reply that is not the root
-- **THEN** the publish call names that reply's op id as the parent
-- **AND** it does not name the thread's root identifier as the parent
 
 #### Scenario: A reply to the root names the root
 
@@ -385,9 +381,7 @@ represent how a post in a thread was voted on.
 
 No field of a thread item carries one. `thread-read` places any tally over votes
 out of its scope, and `composer-view`'s *The vote control displays no score*
-forbids a rendered score wherever a vote control appears — including here, and
-`docs/PLAN.md` records that a merged requirement of that kind is not overridden
-by a scope note.
+forbids a rendered score wherever a vote control appears — including here.
 
 Voting is outside the MVP by a recorded owner decision, so the thread screen is
 not required to offer a vote control at all. Where one is offered,
@@ -410,7 +404,7 @@ is not an exception to it.
 A user who opens a thread SHALL be able to return to the feed they opened it from
 without restarting the view.
 
-`stoa-navigation-view`'s *Every state a user can enter has a specified way out*
+`view-navigation`'s *Every state a user can enter has a specified way out*
 establishes the general rule and the reason it is stated as a contract rather
 than left to habit: a return route that no scenario requires can be deleted with
 every test still passing, so it is unprotected precisely because it works.
@@ -423,9 +417,9 @@ refused read, which is the state a user is most likely to need to leave.
 
 The thread the screen renders SHALL be the one the acted-on feed row identifies,
 and the view SHALL NOT carry a thread identifier of its own supplied as a
-property with a default. This is `stoa-navigation-view`'s *The view holds no Stoa
-of its own* applied to the value this screen exists to render: a second source
-for it is a build shipping a hardcoded thread.
+property with a default. This is `view-navigation`'s *The view holds no Stoa of
+its own, and the feed is reached from the list* applied to the value this screen
+exists to render: a second source for it is a build shipping a hardcoded thread.
 
 The Stoa the screen reads in SHALL be the one the feed was rendered for, and the
 view SHALL NOT invent a Stoa address or a genesis record it was not given.
