@@ -83,3 +83,56 @@ attributed to it. The misattributed phrase "nothing queries it yet" belongs to
 the unrelated `ops_by_target`-adjacent reserved index comment at line 557 and
 has been dropped from this citation. Comment-only change; no test or
 implementation behaviour affected.
+
+## Re-review round 1 `b4378cf5..218acde3`
+
+Checked the fix against the source line it now cites, and read the round's new
+material for readability.
+
+- The quote in `the_stored_author_is_the_signer_regardless_of_moderator_status`
+  (lines 1593-1597) now reads: "the column is reserved: 'nothing writes this
+  and no read consults it' is a comment that excuses a column from every
+  behavioural test" — checked word for word against `score_epoch`'s own
+  comment at lines 1468-1470, which reads: "the column is reserved: "nothing
+  writes this and no read consults it" is a comment that excuses a column
+  from every behavioural test, while the rows go to every peer's disk." The
+  cited words now match exactly. The switch from double to single quotes for
+  the nested quotation is correct typographic practice, not a new
+  inconsistency: this citation is itself wrapped in an outer pair of double
+  quotes (it borrows a whole sentence from another comment), so the quote
+  nested inside that borrowed sentence has to drop a level to stay
+  distinguishable from the outer pair — three flush double-quote marks would
+  be the harder read. The attribution (which test, which column) is also
+  correct this time. Round 1's finding is resolved.
+- `tst_thread_reply.qml`'s four new tests
+  (`test_no_reply_affordance_is_reachable_with_no_root_identifier`,
+  `test_a_root_items_own_missing_id_does_not_reach_the_reply_parent`,
+  `test_the_screen_threads_the_items_sanitiser_report_through_to_the_render`,
+  `test_the_marker_and_the_inert_row_state_nothing_about_earlier_content`) and
+  their comments follow the file's existing convention: a full-sentence test
+  name, a comment citing the exact requirement/scenario wording, and — for
+  three of the four — an explicit "regression this guards against" paragraph
+  naming the mutation the test is shaped to catch. The three new helpers
+  (`findByTypeName`, `bodyTextOf`, `collectTexts`) don't collide with any
+  existing name in the file and each does one small, named job.
+- `design.md`'s and `proposal.md`'s amended inventory prose (the Non-Goals
+  list, the Impact section) is internally consistent and cross-checks against
+  the actual commits: `sqlite.rs`'s two named tests and the `stored_author`
+  helper, `tst_thread_reply.qml`'s one named test, and the two `NO SPEC:`
+  reworks, all match `git show a98c4345` and `git show 5f95e7e9` exactly,
+  including which requirement each pins. `proposal.md`'s Impact section stays
+  terse and explicitly defers commit-hash detail to `design.md`'s Non-Goals
+  ("`design.md`'s Non-Goals names the commits") rather than duplicating it
+  blind — a deliberate summary/detail split, not accidental repetition.
+- One observation, not a defect: the Non-Goals bullet for "Any production-code
+  change" now carries a three-level nested inventory (per-file, per-commit)
+  where every sibling Non-Goals item in the same list is one line. It reads
+  as evidence backing a strong claim ("and nothing else"), which fits this
+  document's generally evidentiary style, but it does make that one bullet
+  scan very differently from the rest of the list. Stylistic — no action
+  needed.
+
+- [x] **re-review round 1 `b4378cf5..218acde3`: no findings** — read the
+      fixed quotation against its source line, the four new
+      `tst_thread_reply.qml` tests and their comments, and the amended
+      `design.md`/`proposal.md` inventory prose; clean
