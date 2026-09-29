@@ -74,6 +74,19 @@ pub fn op_log_path_in(dir: &Path) -> PathBuf {
     dir.join("ops.sqlite")
 }
 
+/// What [`SqliteOpLog::create_schema`] found once it held the write lock.
+enum Created {
+    /// This connection created the schema.
+    Now,
+    /// Another connection had stamped this version first.
+    Already(i32),
+}
+
+fn user_version(conn: &Connection) -> Result<i32, OpLogError> {
+    conn.query_row("PRAGMA user_version", [], |row| row.get(0))
+        .map_err(storage)
+}
+
 /// The storage layout this build writes and understands.
 ///
 /// Held in SQLite's own `PRAGMA user_version`, which is one `INTEGER` the file
@@ -239,13 +252,17 @@ impl SqliteOpLog {
         // it is the absence of one, and the only case where creating the schema
         // is correct. Any other unexpected value is a store somebody else's
         // build wrote.
-        let found: i32 = conn
-            .query_row("PRAGMA user_version", [], |row| row.get(0))
-            .map_err(storage)?;
+        let mut found = user_version(&conn)?;
 
         if found == 0 {
-            Self::create_schema(&conn)?;
-        } else if found != LAYOUT_VERSION {
+            match Self::create_schema(&conn)? {
+                Created::Now => return Ok(SqliteOpLog { conn }),
+                // Another connection created it between the read above and the
+                // write lock; judge the version it stamped like any other.
+                Created::Already(stamped) => found = stamped,
+            }
+        }
+        if found != LAYOUT_VERSION {
             return Err(OpLogError::UnknownLayoutVersion {
                 found,
                 expected: LAYOUT_VERSION,
@@ -406,10 +423,34 @@ impl SqliteOpLog {
     ///
     /// A later "add a migration" refactor is the change this warning is
     /// addressed to.
-    fn create_schema(conn: &Connection) -> Result<(), OpLogError> {
+    ///
+    /// # The version is read again under the write lock
+    ///
+    /// Two connections opening a store that does not exist yet both read version
+    /// `0` and both came here; the second's `CREATE TABLE` failed with "table ops
+    /// already exists", which reached a caller as a storage failure. That became
+    /// reachable when the inbound processor started opening the log on its own
+    /// thread beside the dispatch thread. `BEGIN IMMEDIATE` takes the write lock
+    /// first, so the re-read is decided by whoever held it last: `0` means this
+    /// connection creates, anything else means another did.
+    /// `two_connections_opening_a_fresh_store_at_once_both_open_it` is red without
+    /// it. The first, unlocked read stays, so an existing store never takes the
+    /// write lock to open.
+    fn create_schema(conn: &Connection) -> Result<Created, OpLogError> {
+        conn.execute_batch("BEGIN IMMEDIATE;").map_err(storage)?;
+        match user_version(conn) {
+            Ok(0) => {}
+            Ok(stamped) => {
+                let _ = conn.execute_batch("COMMIT;");
+                return Ok(Created::Already(stamped));
+            }
+            Err(e) => {
+                let _ = conn.execute_batch("ROLLBACK;");
+                return Err(e);
+            }
+        }
         let result = conn.execute_batch(&format!(
-            "BEGIN;
-             CREATE TABLE ops (
+            "CREATE TABLE ops (
                  -- §3.1's idempotence AND `cmp_ops`'s precondition, in one
                  -- constraint. See this function's documentation.
                  op_id             BLOB PRIMARY KEY NOT NULL,
@@ -602,7 +643,7 @@ impl SqliteOpLog {
             let _ = conn.execute_batch("ROLLBACK;");
             return Err(storage(e));
         }
-        Ok(())
+        Ok(Created::Now)
     }
 
     /// The one `SELECT`, shared by all three ordered reads.
@@ -911,6 +952,33 @@ mod tests {
     use crate::log::Appended;
     use crate::op::Op;
     use std::cmp::Ordering;
+
+    #[test]
+    fn two_connections_opening_a_fresh_store_at_once_both_open_it() {
+        // The inbound processor and a dispatch handler each open the log per
+        // call, on two threads. On a store that does not exist yet both read
+        // version 0, and both used to run the CREATE — the second failing with
+        // "table ops already exists", an op refused as a storage failure.
+        // Repeated because it is a race; a Barrier lines the two opens up.
+        for round in 0..40 {
+            let dir = TempDir::new(&format!("race-{round}"));
+            let path = dir.file("ops.sqlite");
+            let start = std::sync::Barrier::new(2);
+            std::thread::scope(|s| {
+                let opens: Vec<_> = (0..2)
+                    .map(|_| {
+                        s.spawn(|| {
+                            start.wait();
+                            SqliteOpLog::open(&path).map(|_| ())
+                        })
+                    })
+                    .collect();
+                for open in opens {
+                    assert_eq!(open.join().unwrap(), Ok(()), "round {round}");
+                }
+            });
+        }
+    }
 
     #[test]
     fn the_op_log_file_name_is_pinned() {
