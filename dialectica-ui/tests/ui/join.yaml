@@ -25,13 +25,13 @@
 # `view-navigation`. This file observes them against a running host; it adds
 # none.
 #
-# It does NOT cover a SUCCESSFUL join. That needs a reference whose founding
-# record hashes to its address and names a Stoa this profile does not hold,
-# which needs a seeder. A specification that appears to cover a successful join
-# while asserting something weaker is worse than an absent one, so the gap is
-# stated here rather than approximated. Creating a key and then a Stoa, the
-# feed, the thread and the moderation screen are the sibling specs in this
-# directory, each reached through a Stoa the profile creates itself.
+# It does NOT cover a SUCCESSFUL join; seeded-join.yaml does, with a reference
+# whose founding record hashes to its address and names a Stoa no profile
+# holds. It is a separate file so that a defect in the refusal path cannot
+# leave the successful join unreported, and the reverse (the
+# `e2e-successful-join` change's design.md). Creating a key and then a Stoa,
+# the feed, the thread and the moderation screen are the other sibling specs
+# in this directory, each reached through a Stoa the profile creates itself.
 #
 # ---------------------------------------------------------------------------
 # WHY THERE ARE NO CREATE STEPS

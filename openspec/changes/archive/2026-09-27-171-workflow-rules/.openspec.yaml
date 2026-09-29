@@ -1,0 +1,13 @@
+# `schema` is REQUIRED for this file to be valid change metadata, and without it
+# `skip_specs` is silently NOT HONOURED. It must name a known schema; this
+# project's is the built-in `spec-driven`, set in `openspec/config.yaml`.
+schema: spec-driven
+created: 2026-09-25
+
+# No spec delta: this change edits agent instructions under `.claude/agents/`
+# only. It changes how the runner sequences agents, what the closer may do to
+# get a PR merged, and one paragraph of README prose. None of that is behaviour
+# of dialectica, so no requirement in `openspec/specs/` is added, changed or
+# removed. Writing one to satisfy validation would contract the build process
+# as though it were the system.
+skip_specs: true

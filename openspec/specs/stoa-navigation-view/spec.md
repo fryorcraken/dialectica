@@ -538,6 +538,11 @@ out.
 The screen MUST report a join as having happened only on a successful reply from
 the core, and MUST NOT render success on the strength of having made the call.
 
+**A successful reply to a join MUST be reported as a join**, and the screen MUST
+NOT render a failure of that join. This holds for a Stoa the peer was not in
+before the join, which is the ordinary case, exactly as it holds for one the
+peer was already in.
+
 Failure is always the single error shape and never a partial success, which is
 what lets one branch decide this. A screen that navigated onward as soon as it
 dispatched the call would show the user a Stoa they are not recorded as being in,
@@ -566,6 +571,14 @@ warning, or a collision to resolve.
   and the core answers successfully
 - **THEN** the screen reports success
 - **AND** it renders no error, warning, or collision
+
+#### Scenario: Joining a Stoa not held is reported as joined
+
+- **WHEN** the preview's lookup answers a fallback reply for a Stoa that is not
+  among the ones the peer is in, and the user then acts on the join affordance
+  and the core answers successfully
+- **THEN** the screen reports the Stoa as joined
+- **AND** it renders no failure of the join
 
 ### Requirement: A Stoa already held whose title matches is shown as a distinct Stoa, not as a duplicate
 

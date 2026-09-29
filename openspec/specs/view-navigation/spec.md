@@ -204,8 +204,9 @@ verification in the core and surface as a refusal the user cannot act on.
 
 A user who reaches the join preview MUST be able to return to the list without
 restarting, both before acting and after a join has succeeded; a Stoa created
-through the create affordance MUST reach the list without a restart; and a user
-who has opened a Stoa's feed MUST be able to return to the list without a
+through the create affordance MUST reach the list without a restart; a Stoa
+joined through the join preview MUST reach the list without a restart; and a
+user who has opened a Stoa's feed MUST be able to return to the list without a
 restart.
 
 **The general rule is that arriving somewhere is half a transition**, and a spec
@@ -249,6 +250,15 @@ and until it was, it was a working route no scenario protected.
 - **WHEN** a Stoa is created successfully
 - **THEN** the listing is read again
 - **AND** the created Stoa is among the rows rendered, without the view being
+  restarted
+
+#### Scenario: A joined Stoa reaches the list without a restart
+
+- **WHEN** a join of a Stoa the peer was not in has succeeded, and the user acts
+  on the affordance returning to the list
+- **THEN** the listing has been read again since the join succeeded
+- **AND** the list is rendered
+- **AND** the joined Stoa is among the rows rendered, without the view being
   restarted
 
 #### Scenario: The list is reached again from a Stoa's feed
