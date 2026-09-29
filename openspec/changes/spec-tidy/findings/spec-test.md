@@ -288,3 +288,47 @@ capabilities' promoted requirements, the two `NO SPEC` markers, the folded
 `view-navigation` requirements, the four prose-only deltas, and the two named
 `sqlite.rs`/`tst_thread_reply.qml` tests — held up with no test-vs-spec
 defect.
+
+- [x] **re-review round 1 `b4378cf5..218acde3`: no findings** — read the range
+      diff and full text of `dialectica-ui/tests/tst_thread_reply.qml` (the four
+      new/changed tests answering the reply-composer, sanitiser-threading,
+      revised-marker and vote-ordering findings above), the comment-only hunk
+      of `dialectica/rust-lib/dialectica-core/src/log/sqlite.rs`, and
+      `thread-view`'s "The reply composer is wired…", "Every string rendered
+      from an item…", "A revised post is marked as revised…",
+      "The earlier-versions affordance is inert…" and "No score, tally or vote
+      count…" requirements in `openspec/specs/thread-view/spec.md`. All four
+      new tests assert against something the untouched implementation did not
+      merely echo back (the composer visibility/no-publish guard on
+      `threadId === ""`; a regression guard that the composer's `parent` is
+      never derived from the item's own `id` field; the `SanitisedText`
+      instance's `removedCount`/`markedCount`/text asserted through the real
+      screen rather than the shared component alone; exact-count string
+      collection for `"edited"` and the inert row's two static strings) — each
+      is corroborated in this file's existing predicted/observed mutation
+      records (lines 156–170, 199–207, 236–243), which name the exact line
+      changed, the exact failure observed, and the restore. I independently
+      attempted one further mutation (removing the `&& screen.threadId !== ""`
+      clause from `DThreadScreen.qml:672`'s `replyComposerOpen.visible`
+      binding, the same line the tester's own predicted/observed entry names)
+      to cross-check `test_no_reply_affordance_is_reachable_with_no_root_
+      identifier`; the edit was refused by the environment's permission
+      classifier ("Modify Shared Resources") before any test ran, the same
+      block the runner already recorded and accepted for `sqlite.rs` in this
+      file's process finding above. No mutation of mine is in the tree. Given
+      that prior precedent and the tester's own specific, restorable
+      predicted/observed entries, I did not press further within this round's
+      budget. The composer tests' translation of "an item carrying no op id"
+      into this screen's own `threadId === ""` (test 1) plus a direct guard
+      against deriving `parent` from the item's own field instead (test 2) is
+      a disclosed, reasoned choice given this screen exposes exactly one
+      reply affordance, on the root, whose id the view tracks as `threadId`
+      rather than as a field on the read item — not a gap. Deferring "No
+      ordering is offered as vote-based" with no test is an acceptable answer:
+      confirmed by reading `DThreadScreen.qml`/`VoteControl.qml` are not part
+      of this round's diff and no ordering control of any kind exists on this
+      screen today, a test asserting its absence could not be shown to fail
+      by any mutation (there is no line to remove that would make it pass
+      falsely), which is exactly the vacuous-safety shape this role's
+      guidance warns against; deferring to the change that first adds such a
+      control is the correct point to add it. Clean.
