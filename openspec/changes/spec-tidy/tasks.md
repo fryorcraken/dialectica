@@ -20,7 +20,8 @@
 ## Implementation
 
 This piece is spec text, plus comment edits and the `tester` stage's tests, and
-no production code (`design.md`, Non-Goals, has the inventory). The spec-writer
+no production code. No test is pending; one is deferred (`design.md`,
+Non-Goals, has the inventory and the deferral). The spec-writer
 did groups 1 to 3 before this checklist was written, and each item names the
 commit that did it. Group 4 is the dev-writer's. `design.md` says why the work
 took these shapes.
@@ -79,10 +80,12 @@ took these shapes.
 - [x] 4.4 `openspec validate spec-tidy --strict` reports the change valid.
 - [x] 4.5 `openspec validate --specs --strict` reports every live spec passing
       and none failing.
-- [x] 4.6 `sh dialectica-ui/tests/run-qml-tests.sh` passes every spec file. This
-      piece touches no QML, so a green suite shows only that nothing in code
-      moved. It cannot see the spec text, and no gate checks a code comment's
-      citation against the live specs.
+- [x] 4.6 `sh dialectica-ui/tests/run-qml-tests.sh` passes every spec file. The
+      piece changes no production QML, only comments in two QML sources, so a
+      green suite shows that nothing in code moved and that the `tester`
+      stage's five new `tst_thread_reply.qml` functions pass. It cannot see the
+      spec text, and no gate checks a code comment's citation against the live
+      specs.
 - [x] 4.7 Four code comments cited a route requirement this piece moved, or
       called an archived change "unarchived" (`design.md`, Risks). They now
       point at `view-navigation`, `thread-view` or `moderation-view`, with

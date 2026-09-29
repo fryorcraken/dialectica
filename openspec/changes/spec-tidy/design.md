@@ -47,15 +47,36 @@ Two facts about the tooling shape every decision below. Both are recorded in
     - `sqlite.rs`: two `#[test]` functions and a `stored_author` helper, all
       inside `mod tests`. One pins op-log's stored author column (`a98c434`),
       the other a storage failure at read time (`5f95e7e`).
-    - `tst_thread_reply.qml`: one test that a successful publish inserts no
-      item (`5f95e7e`).
+    - `tst_thread_reply.qml`: five test functions, all against `thread-view`.
+      `test_no_item_is_added_by_a_publish` (`5f95e7e`) pins that a successful
+      publish inserts no item. Four more (`218acde`) close the review round's
+      coverage findings:
+      `test_no_reply_affordance_is_reachable_with_no_root_identifier` and
+      `test_a_root_items_own_missing_id_does_not_reach_the_reply_parent`
+      cover a post with no identifier;
+      `test_the_screen_threads_the_items_sanitiser_report_through_to_the_render`
+      covers the sanitiser report reaching the render;
+      `test_the_marker_and_the_inert_row_state_nothing_about_earlier_content`
+      covers the revised marker and the inert earlier-versions row. The file
+      also gains three non-test helpers (`findByTypeName`, `bodyTextOf`,
+      `collectTexts`) for those tests. No production QML changes with them.
     - `tst_moderation_screen.qml` and `tst_stoa_screens.qml`: two `NO SPEC:`
       comments reworded to cite the requirements that now cover them
       (`a98c434`). Comment-only; no existing assertion changes.
-  - **Tests still pending** from the five open `tester` findings in
-    `findings/readability.md` and `findings/spec-test.md`. Until those boxes
-    are closed, this inventory is incomplete; each box's outcome names what it
-    added.
+    - `sqlite.rs` again: `218acde` rewords a misattributed quotation in the
+      stored-author test's comment. Comment-only.
+  - **No tests are pending.** Every `tester` finding from the review round is
+    closed: four fixed by the tests and comment above, one deferred with no
+    test.
+  - **The deferred one: `thread-view`'s "No ordering is offered as vote-based"
+    has no test.** The thread screen has no ordering control of any kind today,
+    vote-based or otherwise; its only per-row control is a non-interactive
+    `VoteControl` with its score hidden. A test asserting that no ordering is
+    vote-based would pass whether or not a guard existed, because there is
+    nothing for it to guard, so it could never fail for the reason its name
+    gives. The alternative, writing it now, was rejected as a test that reports
+    safety nobody checked. **Trigger:** the first change that adds an ordering
+    or re-ordering control to the thread screen adds this test alongside it.
 
 ## Decisions
 

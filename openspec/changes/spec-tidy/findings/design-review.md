@@ -86,7 +86,7 @@ target, plus the fourth spec-test gap) and one deferred with no test — but
 touched none of `design.md`, `proposal.md` or `tasks.md`. The inventory is
 stale again, in the same place it was stale before:
 
-- [ ] **`dev-writer`** — `design.md`'s Non-Goals (and `proposal.md`'s Impact,
+- [x] **`dev-writer`** — `design.md`'s Non-Goals (and `proposal.md`'s Impact,
       which mirrors it) undercounts the tests this piece added and
       misdescribes their status. Both say "one QML test" in
       `tst_thread_reply.qml`; `218acde3` added four more there
@@ -118,3 +118,25 @@ stale again, in the same place it was stale before:
       sentence into Non-Goals: the deferral, its reason, and its trigger,
       the way the four-comments and tests-added bullets already do for the
       rest of this inventory.
+
+      **Fixed** in the commit that ticks this box. Counts re-derived from
+      `git diff origin/main...HEAD -- dialectica-ui/tests/tst_thread_reply.qml`
+      and `git log -S "function test_" origin/main..HEAD` on that file: the
+      piece adds **five** test functions there, one from `5f95e7e` and the
+      four this finding names from `218acde`, plus three non-test helpers
+      (`findByTypeName`, `bodyTextOf`, `collectTexts`). `design.md`'s
+      Non-Goals now names all five with their commits, records `218acde`'s
+      comment-only reword in `sqlite.rs`, states that no test is pending, and
+      carries the "No ordering is offered as vote-based" deferral: its reason
+      (no ordering control of any kind on the thread screen, so the test could
+      not fail for the reason it names; confirmed by `git grep` on
+      `DThreadScreen.qml`, whose only per-row control is `VoteControl` with
+      `showScore: false, interactive: false`), the rejected alternative, and
+      its trigger. `proposal.md`'s Impact now says five QML tests and "No
+      tests are pending". In `tasks.md`, the Implementation preamble now
+      points at the deferral. Group 4.6 said "This piece touches no QML",
+      which is false because the piece edits comments in two QML sources and
+      adds QML tests, so it now says what a green suite shows. The Stages
+      block is untouched. No test can show a prose inventory is right;
+      `git diff origin/main...HEAD --stat -- dialectica dialectica-ui` is the
+      check against it.

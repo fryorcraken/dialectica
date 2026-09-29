@@ -166,12 +166,14 @@ Spec text in `openspec/specs/` and `openspec/changes/`. Outside those:
   two end-to-end specs under `dialectica-ui/tests/ui/`. Each cited a requirement
   this piece moved, or called a change this piece archives "unarchived".
 - **Tests are added** for requirements the archives promoted: two `#[test]`
-  functions and a helper in `sqlite.rs`'s `mod tests`, and one QML test in
-  `tst_thread_reply.qml`. Two `NO SPEC:` comments in `tst_moderation_screen.qml`
-  and `tst_stoa_screens.qml` are reworded to cite the requirements that now
-  cover them. `design.md`'s Non-Goals names the commits.
-- **More tests are pending** from the five open `tester` findings in
-  `findings/readability.md` and `findings/spec-test.md`.
+  functions and a helper in `sqlite.rs`'s `mod tests`, and five QML test
+  functions in `tst_thread_reply.qml`. Two `NO SPEC:` comments in
+  `tst_moderation_screen.qml` and `tst_stoa_screens.qml` are reworded to cite
+  the requirements that now cover them. `design.md`'s Non-Goals names each test
+  and its commit.
+- **No tests are pending.** Every `tester` finding is closed. One,
+  `thread-view`'s "No ordering is offered as vote-based", is deferred with no
+  test; `design.md`'s Non-Goals says why and what triggers one.
 
 No production code, existing test assertion or wire contract changes.
 
