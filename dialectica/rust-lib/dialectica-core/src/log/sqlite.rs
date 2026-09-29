@@ -59,7 +59,20 @@ use crate::arrival::{clock_from_counters, Arrival, MessageId};
 use crate::identity::Address;
 use crate::op::{OpId, SignedOp};
 use rusqlite::{Connection, OptionalExtension};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+/// This store's file name inside a host-supplied directory.
+///
+/// **One place, because two readers of one file must agree on which file it
+/// is.** The path was spelled `dir.join("ops.sqlite")` inline at four adapter
+/// sites, and the inbound path is a fifth writer of the same file: a listener
+/// storing arrivals into a different file from the one every read opens would
+/// be a peer that receives everything and shows nothing, with no error anywhere.
+/// Follows [`crate::membership::membership_path_in`] and
+/// [`crate::keystore::default_path_in`].
+pub fn op_log_path_in(dir: &Path) -> PathBuf {
+    dir.join("ops.sqlite")
+}
 
 /// The storage layout this build writes and understands.
 ///
@@ -898,6 +911,17 @@ mod tests {
     use crate::log::Appended;
     use crate::op::Op;
     use std::cmp::Ordering;
+
+    #[test]
+    fn the_op_log_file_name_is_pinned() {
+        // A persisted name: renaming it strands every existing peer's ops in a
+        // file nothing opens any more. Hardcoded rather than read back from the
+        // function, so a rename fails here instead of agreeing with itself.
+        assert_eq!(
+            op_log_path_in(Path::new("/a/dir")),
+            PathBuf::from("/a/dir/ops.sqlite")
+        );
+    }
 
     /// A path in a fresh temporary directory, and the directory's guard.
     ///

@@ -2528,6 +2528,7 @@ pub fn create_stoa(
     request: &str,
     creator: impl FnOnce() -> Result<crate::identity::PublicKey, crate::keystore::KeystoreError>,
     store: &mut crate::membership::MembershipStore,
+    joined: &mut dyn FnMut(&crate::identity::Address),
 ) -> String {
     guarded("create_stoa", || {
         let parsed = match Request::parse(request) {
@@ -2578,10 +2579,61 @@ pub fn create_stoa(
             Err(e) => return error_json(&e.to_string()),
         };
         match store.join(&membership) {
-            Ok(_) => stoa_reply(&stoa, &genesis),
+            Ok(_) => recorded_and_replied(&membership, joined),
             Err(e) => error_json(&e.to_string()),
         }
     })
+}
+
+/// Tell the Stoa lifecycle a membership is recorded, then render the reply —
+/// and do not let the first become the second.
+///
+/// # Why a sink, and why it is called here
+///
+/// `stoa-membership` requires a create or a join that succeeds to request the
+/// Stoa's channel, **after** the membership is recorded, and never for a refused
+/// one. Called on the success arm of `store.join` and nowhere else, so both hold
+/// by position: a refusal returns before this line, and a recorded membership is
+/// the only way to reach it. It is the same shape as the publish path's
+/// `deliver` sink, and for the same reason — `dialectica-core` cannot reach
+/// delivery, so the adapter supplies what "request the channel" means.
+///
+/// **It fires for a repeated join too.** `store.join` reports
+/// [`crate::membership::Joined::AlreadyIn`] as success, and the spec requires a
+/// repeated create or join to request the channel again: it is how a channel
+/// that failed to open once is asked for without a restart.
+///
+/// # A panicking sink does not change the reply
+///
+/// The reply MUST NOT depend on the channel. The sink is a handoff into another
+/// process's lifecycle, so its most violent failure is contained here exactly as
+/// [`delivered_and_published`] contains a panicking publish sink: logged, and the
+/// membership reported as recorded, because it is.
+fn recorded_and_replied(
+    membership: &crate::membership::Membership,
+    joined: &mut dyn FnMut(&crate::identity::Address),
+) -> String {
+    if let Err(payload) = catch_unwind(AssertUnwindSafe(|| joined(&membership.stoa))) {
+        eprintln!(
+            "dialectica: requesting the channel for Stoa {} panicked — the membership is \
+             recorded and stays recorded: {}",
+            membership.stoa.to_hex(),
+            panic_detail(&*payload)
+        );
+    }
+    stoa_reply(&membership.stoa, &membership.genesis)
+}
+
+/// A panic payload's message, for a log line.
+///
+/// Shared by the two sinks that contain a panic rather than let it reach the
+/// reply, so the two cannot come to render the same payload differently.
+fn panic_detail(payload: &(dyn std::any::Any + Send)) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|s| (*s).to_string())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "non-string panic payload".to_string())
 }
 
 /// Hand the published op to delivery, then report it as published — and do not
@@ -2627,15 +2679,10 @@ fn delivered_and_published(
     deliver: &mut dyn FnMut(&crate::op::OpId),
 ) -> String {
     if let Err(payload) = catch_unwind(AssertUnwindSafe(|| deliver(&published.id))) {
-        let detail = payload
-            .downcast_ref::<&str>()
-            .map(|s| (*s).to_string())
-            .or_else(|| payload.downcast_ref::<String>().cloned())
-            .unwrap_or_else(|| "non-string panic payload".to_string());
         eprintln!(
             "dialectica: delivery panicked handing off {} — the op is published and stays published: {}",
             published.id.to_hex(),
-            detail
+            panic_detail(&*payload)
         );
     }
     published_json(published)
@@ -3042,7 +3089,11 @@ pub fn publish_post<L: crate::log::OpLog>(
 /// same either way and carries no "was this new" flag: the spec asks that the
 /// second attempt succeed and change nothing, and a view that rendered "already
 /// joined" differently would be rendering a distinction the user did not make.
-pub fn join_stoa(request: &str, store: &mut crate::membership::MembershipStore) -> String {
+pub fn join_stoa(
+    request: &str,
+    store: &mut crate::membership::MembershipStore,
+    joined: &mut dyn FnMut(&crate::identity::Address),
+) -> String {
     guarded("join_stoa", || {
         let parsed = match Request::parse(request) {
             Ok(r) => r,
@@ -3067,7 +3118,7 @@ pub fn join_stoa(request: &str, store: &mut crate::membership::MembershipStore) 
             Err(e) => return e,
         };
         match store.join(&membership) {
-            Ok(_) => stoa_reply(&membership.stoa, &membership.genesis),
+            Ok(_) => recorded_and_replied(&membership, joined),
             Err(e) => error_json(&e.to_string()),
         }
     })
@@ -5806,6 +5857,7 @@ mod tests {
             r#"{"title":"first"}"#,
             || crate::keystore::creator_key_in(&dir.0),
             &mut a_membership_store(),
+            &mut ignored_join,
         );
         let c: serde_json::Value = serde_json::from_str(&created).unwrap();
         assert!(
@@ -5827,6 +5879,7 @@ mod tests {
             r#"{"title":"first"}"#,
             || crate::keystore::creator_key_in(&dir.0),
             &mut a_membership_store(),
+            &mut ignored_join,
         );
         let c: serde_json::Value = serde_json::from_str(&created).unwrap();
         assert!(
@@ -5949,6 +6002,7 @@ mod tests {
             r#"{"title":"asked first"}"#,
             || crate::keystore::creator_key_in(&dir.0),
             &mut a_membership_store(),
+            &mut ignored_join,
         ));
         let genesis_hex = created["genesis"]
             .as_str()
@@ -6269,8 +6323,7 @@ mod tests {
         let keystore_path = dir.0.join("a-directory-standing-in-for-the-keystore-file");
         std::fs::create_dir(&keystore_path).expect("the fixture directory is creatable");
 
-        let record_failure =
-            crate::identity_store::IdentityStoreError::Storage("boom".to_string());
+        let record_failure = crate::identity_store::IdentityStoreError::Storage("boom".to_string());
         // Independent of the code under test: `Display` for `Storage` never
         // mentions a master key (see `identity_store.rs`), so a reason naming one
         // could only have come from the removal-failure branch.
@@ -10117,6 +10170,11 @@ mod tests {
     /// with the handler's `&mut` log.
     fn ignored_delivery(_id: &crate::op::OpId) {}
 
+    /// A membership sink that records nothing — for create and join tests not
+    /// about the channel a recorded membership requests. A plain `fn` item for
+    /// the reason [`ignored_delivery`] is one.
+    fn ignored_join(_stoa: &crate::identity::Address) {}
+
     fn as_json(out: &str) -> serde_json::Value {
         serde_json::from_str(out)
             .unwrap_or_else(|e| panic!("a handler must emit valid JSON ({e}): {out}"))
@@ -12244,10 +12302,11 @@ mod tests {
                 r,
                 || Ok(feed_key(1).public_key()),
                 &mut a_membership_store(),
+                &mut ignored_join,
             )
         }
         fn join_m(r: &str) -> String {
-            join_stoa(r, &mut a_membership_store())
+            join_stoa(r, &mut a_membership_store(), &mut ignored_join)
         }
         fn list_stoas_m(r: &str) -> String {
             list_stoas(r, &a_membership_store())
@@ -14070,13 +14129,15 @@ mod tests {
                 r#"{"title":"Agora"}"#,
                 || Ok(feed_key(1).public_key()),
                 &mut a_membership_store(),
+                &mut ignored_join,
             ),
             create_stoa(
                 "garbage",
                 || Ok(feed_key(1).public_key()),
                 &mut a_membership_store(),
+                &mut ignored_join,
             ),
-            join_stoa("garbage", &mut a_membership_store()),
+            join_stoa("garbage", &mut a_membership_store(), &mut ignored_join),
             list_stoas("{}", &a_membership_store()),
             list_stoas("garbage", &a_membership_store()),
             publish_post(
@@ -14149,7 +14210,7 @@ mod tests {
     /// A creation that succeeds in finding a key.
     fn create(store: &mut MembershipStore, title: &str) -> serde_json::Value {
         let request = serde_json::json!({ "title": title }).to_string();
-        let out = create_stoa(&request, || Ok(creator_key()), store);
+        let out = create_stoa(&request, || Ok(creator_key()), store, &mut ignored_join);
         serde_json::from_str(&out)
             .unwrap_or_else(|e| panic!("create_stoa emitted invalid JSON ({e}): {out}"))
     }
@@ -14227,11 +14288,13 @@ mod tests {
             r#"{"title":"Agora"}"#,
             || Ok(feed_key(1).public_key()),
             &mut one,
+            &mut ignored_join,
         );
         let b = create_stoa(
             r#"{"title":"Agora"}"#,
             || Ok(feed_key(2).public_key()),
             &mut two,
+            &mut ignored_join,
         );
         let va: serde_json::Value = serde_json::from_str(&a).unwrap();
         let vb: serde_json::Value = serde_json::from_str(&b).unwrap();
@@ -14263,7 +14326,12 @@ mod tests {
             "creator": feed_key(9).public_key().to_hex(),
         })
         .to_string();
-        let out = create_stoa(&request, || Ok(creator_key()), &mut store);
+        let out = create_stoa(
+            &request,
+            || Ok(creator_key()),
+            &mut store,
+            &mut ignored_join,
+        );
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
 
         let address = crate::identity::Address::from_hex(v["stoa"].as_str().unwrap()).unwrap();
@@ -14325,7 +14393,12 @@ mod tests {
         ];
         for make in makers {
             let mut store = a_membership_store();
-            let out = create_stoa(r#"{"title":"Agora"}"#, || Err(make()), &mut store);
+            let out = create_stoa(
+                r#"{"title":"Agora"}"#,
+                || Err(make()),
+                &mut store,
+                &mut ignored_join,
+            );
             let v: serde_json::Value = serde_json::from_str(&out).unwrap();
             assert!(v.get("error").is_some(), "got {out}");
             assert!(
@@ -14351,7 +14424,12 @@ mod tests {
         // ordering this requirement adds on top of `stoa-genesis`'s bound.
         let mut store = a_membership_store();
         let request = serde_json::json!({ "title": "x".repeat(1025) }).to_string();
-        let out = create_stoa(&request, || Ok(creator_key()), &mut store);
+        let out = create_stoa(
+            &request,
+            || Ok(creator_key()),
+            &mut store,
+            &mut ignored_join,
+        );
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert!(v.get("error").is_some(), "got {out}");
         assert!(v.get("stoa").is_none());
@@ -14452,7 +14530,7 @@ mod tests {
             let (stoa, genesis) = a_blank_titled_reference(title);
             let mut store = a_membership_store();
             let request = serde_json::json!({ "stoa": stoa, "genesis": genesis }).to_string();
-            let out = join_stoa(&request, &mut store);
+            let out = join_stoa(&request, &mut store, &mut ignored_join);
             let v: serde_json::Value = serde_json::from_str(&out).unwrap();
             let reason = v["error"].as_str().unwrap_or_else(|| panic!("got {out}"));
             assert!(reason.contains("blank"), "{reason}");
@@ -14656,7 +14734,7 @@ mod tests {
         let g = a_joinable_record("Somebody else's Stoa");
         let address = g.address().unwrap();
 
-        let out = join_stoa(&join_request(&g, &address), &mut store);
+        let out = join_stoa(&join_request(&g, &address), &mut store, &mut ignored_join);
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert!(v.get("error").is_none(), "got {out}");
         // Both fields, against literals — the reply is what lets a view show what
@@ -14688,7 +14766,7 @@ mod tests {
         })
         .to_string();
 
-        let out = join_stoa(&request, &mut store);
+        let out = join_stoa(&request, &mut store, &mut ignored_join);
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert!(v.get("error").is_none(), "got {out}");
         assert_eq!(v["stoa"].as_str(), Some(lower.as_str()));
@@ -14712,7 +14790,11 @@ mod tests {
 
         for impostor in [other_creator, other_title] {
             let mut store = a_membership_store();
-            let out = join_stoa(&join_request(&impostor, &address), &mut store);
+            let out = join_stoa(
+                &join_request(&impostor, &address),
+                &mut store,
+                &mut ignored_join,
+            );
             let v: serde_json::Value = serde_json::from_str(&out).unwrap();
             assert!(v.get("error").is_some(), "got {out}");
             assert!(
@@ -14768,7 +14850,7 @@ mod tests {
         ] {
             let request =
                 serde_json::json!({ "stoa": address.to_hex(), "genesis": bad }).to_string();
-            let out = join_stoa(&request, &mut store);
+            let out = join_stoa(&request, &mut store, &mut ignored_join);
             let v: serde_json::Value = serde_json::from_str(&out).unwrap();
             assert!(v.get("error").is_some(), "for {bad:?}, got {out}");
             assert!(v.get("stoa").is_none());
@@ -14800,8 +14882,8 @@ mod tests {
         let address = g.address().unwrap();
         let request = join_request(&g, &address);
 
-        let first = join_stoa(&request, &mut store);
-        let second = join_stoa(&request, &mut store);
+        let first = join_stoa(&request, &mut store, &mut ignored_join);
+        let second = join_stoa(&request, &mut store, &mut ignored_join);
         let v: serde_json::Value = serde_json::from_str(&second).unwrap();
         assert!(
             v.get("error").is_none(),
@@ -14830,7 +14912,11 @@ mod tests {
             crate::identity::Address::from_hex(created["stoa"].as_str().unwrap()).unwrap();
         let record = store.get(&address).unwrap().unwrap().genesis;
 
-        let out = join_stoa(&join_request(&record, &address), &mut store);
+        let out = join_stoa(
+            &join_request(&record, &address),
+            &mut store,
+            &mut ignored_join,
+        );
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert!(v.get("error").is_none(), "got {out}");
         assert_eq!(
@@ -14879,7 +14965,11 @@ mod tests {
         let mut store = a_membership_store();
         create(&mut store, "Agora");
         let g = a_joinable_record("Elsewhere");
-        let joined = join_stoa(&join_request(&g, &g.address().unwrap()), &mut store);
+        let joined = join_stoa(
+            &join_request(&g, &g.address().unwrap()),
+            &mut store,
+            &mut ignored_join,
+        );
 
         let list: serde_json::Value = serde_json::from_str(&list_stoas("{}", &store)).unwrap();
         let join: serde_json::Value = serde_json::from_str(&joined).unwrap();
@@ -15021,7 +15111,7 @@ mod tests {
             "genesis": row["genesis"].as_str().unwrap(),
         })
         .to_string();
-        let out = join_stoa(&request, &mut store);
+        let out = join_stoa(&request, &mut store, &mut ignored_join);
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert!(
             v.get("error").is_none(),
@@ -15068,7 +15158,7 @@ mod tests {
         })
         .to_string();
         let mut writable = crate::membership::MembershipStore::open(&path).unwrap();
-        let out = join_stoa(&request, &mut writable);
+        let out = join_stoa(&request, &mut writable, &mut ignored_join);
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert!(
             v.get("error").is_none(),
@@ -15189,7 +15279,11 @@ mod tests {
             "the fixture's two Stoas must differ, or the assertions below prove nothing"
         );
         with_membership_store(&membership_path_in(dir.path()), |store| {
-            join_stoa(&join_request(&joined, &joined_address), store)
+            join_stoa(
+                &join_request(&joined, &joined_address),
+                store,
+                &mut ignored_join,
+            )
         });
         let before = with_membership_store_read(&membership_path_in(dir.path()), |store| {
             serde_json::to_string(&store.get(&joined_address).unwrap().unwrap().genesis.title)
@@ -15249,6 +15343,7 @@ mod tests {
                     &serde_json::json!({ "title": &title }).to_string(),
                     || Ok(creator_key()),
                     store,
+                    &mut ignored_join,
                 )
             });
         }
@@ -15317,11 +15412,16 @@ mod tests {
         ];
 
         for bad in &creates {
-            let out = create_stoa(bad, || Ok(creator_key()), &mut a_membership_store());
+            let out = create_stoa(
+                bad,
+                || Ok(creator_key()),
+                &mut a_membership_store(),
+                &mut ignored_join,
+            );
             assert_error_only(&out, bad, "stoa");
         }
         for bad in &joins {
-            let out = join_stoa(bad, &mut a_membership_store());
+            let out = join_stoa(bad, &mut a_membership_store(), &mut ignored_join);
             assert_error_only(&out, bad, "stoa");
         }
         for bad in &lists {
@@ -15365,10 +15465,14 @@ mod tests {
             r#"{"title":7}"#.to_string(),
             format!(r#"{{"title":"{}"}}"#, "x".repeat(1025)),
         ] {
-            let _ = create_stoa(&bad, || Ok(creator_key()), &mut store);
+            let _ = create_stoa(&bad, || Ok(creator_key()), &mut store, &mut ignored_join);
         }
-        let _ = join_stoa(&join_request(&g, &address), &mut store);
-        let _ = join_stoa(r#"{"stoa":"nothex","genesis":"00"}"#, &mut store);
+        let _ = join_stoa(&join_request(&g, &address), &mut store, &mut ignored_join);
+        let _ = join_stoa(
+            r#"{"stoa":"nothex","genesis":"00"}"#,
+            &mut store,
+            &mut ignored_join,
+        );
 
         assert_eq!(
             store.len().unwrap(),
@@ -15458,7 +15562,11 @@ mod tests {
         assert_eq!(reply["policy"], "open");
 
         let g = a_joinable_record("Elsewhere");
-        let joined = join_stoa(&join_request(&g, &g.address().unwrap()), &mut store);
+        let joined = join_stoa(
+            &join_request(&g, &g.address().unwrap()),
+            &mut store,
+            &mut ignored_join,
+        );
         let v: serde_json::Value = serde_json::from_str(&joined).unwrap();
         assert_eq!(v["policy"], "open");
     }
@@ -15470,12 +15578,18 @@ mod tests {
         // field is not a caller error, and refusing one would break every view
         // written against a later, wider request shape.
         let mut store = a_membership_store();
-        let plain = create_stoa(r#"{"title":"Agora"}"#, || Ok(creator_key()), &mut store);
+        let plain = create_stoa(
+            r#"{"title":"Agora"}"#,
+            || Ok(creator_key()),
+            &mut store,
+            &mut ignored_join,
+        );
         let mut other = a_membership_store();
         let extra = create_stoa(
             r#"{"title":"Agora","somethingElse":true,"order":"new"}"#,
             || Ok(creator_key()),
             &mut other,
+            &mut ignored_join,
         );
         assert_eq!(plain, extra, "an unknown field must not change the answer");
     }
@@ -15637,7 +15751,11 @@ mod tests {
         let joining = a_joinable_record("The Stoa being joined");
         let joined_address = joining.address().unwrap();
         let out = with_membership_store(&membership_path_in(dir.path()), |store| {
-            join_stoa(&join_request(&joining, &joined_address), store)
+            join_stoa(
+                &join_request(&joining, &joined_address),
+                store,
+                &mut ignored_join,
+            )
         });
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert!(
@@ -15708,7 +15826,7 @@ mod tests {
         let joining = a_joinable_record("Somewhere new");
         let address = joining.address().unwrap();
         let out = with_membership_store(&membership_path_in(dir.path()), |store| {
-            join_stoa(&join_request(&joining, &address), store)
+            join_stoa(&join_request(&joining, &address), store, &mut ignored_join)
         });
         assert!(
             serde_json::from_str::<serde_json::Value>(&out)
@@ -15750,7 +15868,12 @@ mod tests {
         let path = membership_path_in(dir.path());
 
         let created = with_membership_store(&path, |store| {
-            create_stoa(r#"{"title":"The one I made"}"#, || Ok(creator_key()), store)
+            create_stoa(
+                r#"{"title":"The one I made"}"#,
+                || Ok(creator_key()),
+                store,
+                &mut ignored_join,
+            )
         });
         let cv: serde_json::Value = serde_json::from_str(&created).unwrap();
         assert!(cv.get("error").is_none(), "got {created}");
@@ -15759,7 +15882,11 @@ mod tests {
         let joining = a_joinable_record("The one I joined");
         let joined_address = joining.address().unwrap();
         let joined = with_membership_store(&path, |store| {
-            join_stoa(&join_request(&joining, &joined_address), store)
+            join_stoa(
+                &join_request(&joining, &joined_address),
+                store,
+                &mut ignored_join,
+            )
         });
         assert!(
             serde_json::from_str::<serde_json::Value>(&joined)
@@ -15846,7 +15973,11 @@ mod tests {
         let survivor = a_joinable_record("The one that is really joined");
         let survivor_address = survivor.address().unwrap();
         let ok = with_membership_store(&path, |store| {
-            join_stoa(&join_request(&survivor, &survivor_address), store)
+            join_stoa(
+                &join_request(&survivor, &survivor_address),
+                store,
+                &mut ignored_join,
+            )
         });
         assert!(
             serde_json::from_str::<serde_json::Value>(&ok)
@@ -15858,7 +15989,7 @@ mod tests {
         );
 
         let out = with_membership_store(&path, |store| {
-            join_stoa(&join_request(&impostor, &claimed), store)
+            join_stoa(&join_request(&impostor, &claimed), store, &mut ignored_join)
         });
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert!(v.get("error").is_some(), "the join must be refused: {out}");
@@ -15977,6 +16108,7 @@ mod tests {
             &serde_json::json!({ "title": "Agora" }).to_string(),
             || crate::keystore::creator_key_in(dir.path()),
             &mut store,
+            &mut ignored_join,
         );
         let created: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert!(
@@ -16086,11 +16218,15 @@ mod tests {
         let request = join_request(&impostor, &claimed);
 
         let mut empty = a_membership_store();
-        let from_empty = join_stoa(&request, &mut empty);
+        let from_empty = join_stoa(&request, &mut empty, &mut ignored_join);
 
         let mut holding_it = a_membership_store();
-        join_stoa(&join_request(&real, &claimed), &mut holding_it);
-        let from_holding_it = join_stoa(&request, &mut holding_it);
+        join_stoa(
+            &join_request(&real, &claimed),
+            &mut holding_it,
+            &mut ignored_join,
+        );
+        let from_holding_it = join_stoa(&request, &mut holding_it, &mut ignored_join);
 
         // The third case is on a REAL DISK, in the same directory as its op log.
         // In-memory, as this was, the ops sat somewhere the store could not have
@@ -16116,10 +16252,11 @@ mod tests {
             join_stoa(
                 &join_request(&elsewhere, &elsewhere.address().unwrap()),
                 store,
+                &mut ignored_join,
             )
         });
         let from_with_ops = with_membership_store(&membership_path_in(dir.path()), |store| {
-            join_stoa(&request, store)
+            join_stoa(&request, store, &mut ignored_join)
         });
 
         assert_eq!(
@@ -17574,7 +17711,10 @@ mod tests {
         // "an empty store file on a profile that has none").
         let dir = WireTempDir::new("get-stoa-no-store-yet");
         let path = dir.path().join("ops.sqlite");
-        assert!(!path.exists(), "the fixture must be a path with no file yet");
+        assert!(
+            !path.exists(),
+            "the fixture must be a path with no file yet"
+        );
 
         let out = get_stoa(&full_request(), || crate::log::SqliteOpLog::open(&path));
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();

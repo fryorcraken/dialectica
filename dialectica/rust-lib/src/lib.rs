@@ -776,7 +776,7 @@ impl Dialectica {
             // nothing on this path can fail for it.
             let key = core::wire::publishing_key(&keystore);
 
-            let mut log = match core::log::SqliteOpLog::open(&dir.join("ops.sqlite")) {
+            let mut log = match core::log::SqliteOpLog::open(&core::log::op_log_path_in(&dir)) {
                 Ok(l) => l,
                 Err(e) => return core::error_json(&e.to_string()),
             };
@@ -911,7 +911,7 @@ impl DialecticaModule for Dialectica {
         // and its failure is exactly the "unreadable store" the view renders as
         // screen 07's failed state.
         core::list_threads_from_request(&request, || {
-            core::log::SqliteOpLog::open(&dir.join("ops.sqlite"))
+            core::log::SqliteOpLog::open(&core::log::op_log_path_in(&dir))
         })
     }
 
@@ -926,7 +926,7 @@ impl DialecticaModule for Dialectica {
         // another instance.
         core::read_thread_from_request(
             &request,
-            || core::log::SqliteOpLog::open(&dir.join("ops.sqlite")),
+            || core::log::SqliteOpLog::open(&core::log::op_log_path_in(&dir)),
             // The reading peer's clock, for clamping an implausible asserted
             // time. It changes rendered text and nothing else — not which items
             // come back, not their order.
@@ -949,7 +949,12 @@ impl DialecticaModule for Dialectica {
             // `core::keystore::creator_key_in` for why that distinction is the
             // whole point — and for why the pair it used to return collapsed to
             // one value when the author address was deleted.
-            core::create_stoa(&request, || core::keystore::creator_key_in(&dir), store)
+            core::create_stoa(
+                &request,
+                || core::keystore::creator_key_in(&dir),
+                store,
+                &mut |_| {},
+            )
         })
     }
 
@@ -959,7 +964,7 @@ impl DialecticaModule for Dialectica {
             Err(e) => return e,
         };
         core::with_membership_store(&core::membership_path_in(&dir), |store| {
-            core::join_stoa(&request, store)
+            core::join_stoa(&request, store, &mut |_| {})
         })
     }
 
@@ -983,7 +988,7 @@ impl DialecticaModule for Dialectica {
         // call answers for a Stoa this peer has not joined and cannot record a
         // join. Opened per call, as `list_threads` opens it.
         core::get_stoa(&request, || {
-            core::log::SqliteOpLog::open(&dir.join("ops.sqlite"))
+            core::log::SqliteOpLog::open(&core::log::op_log_path_in(&dir))
         })
     }
 
