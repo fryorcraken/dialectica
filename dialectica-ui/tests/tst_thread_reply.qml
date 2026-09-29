@@ -133,6 +133,35 @@ TestCase {
         screen.destroy()
     }
 
+    // `thread-view`'s "Every core call the thread screen makes goes through the
+    // view's single call path": "The view SHALL NOT insert an item on the
+    // strength of a publish having succeeded" — `composer-view`'s "A published
+    // post is not shown until core has been read again", restated for this
+    // screen. `DThreadScreen`'s composer fires `onPublished: screen.reload()`,
+    // and the fixture's `read_thread` answers the SAME one item on every call —
+    // so a locally composed row is the only way the count below could move.
+    function test_no_item_is_added_by_a_publish() {
+        var calls = []
+        var screen = makeScreen(calls, true)
+
+        compare(screen.items.length, 1, "the fixture starts with the root alone")
+
+        var composer = findChild(screen, "replyComposer")
+        composer.draft = "a reply"
+        composer.submit()
+
+        var reads = 0
+        for (var i = 0; i < calls.length; i++)
+            if (calls[i].method === "read_thread")
+                reads += 1
+        verify(reads >= 2, "the publish must be followed by a re-read")
+
+        compare(screen.items.length, 1,
+                "the items rendered are exactly what the re-read returned; "
+                + "nothing composed by the view was inserted")
+        screen.destroy()
+    }
+
     // ---- the gate governs the reply box ----------------------------------
     //
     // `composer-view` requires NO text input where the probe says posting is not

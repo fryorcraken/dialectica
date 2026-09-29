@@ -2088,6 +2088,38 @@ mod tests {
     }
 
     #[test]
+    fn a_read_against_storage_broken_after_open_is_a_failure_not_an_empty_result() {
+        // op-log's ADDED "Every read is defined over the ops the peer happens to
+        // hold": "An implementation whose storage can fail SHALL report that
+        // failure as a distinct outcome from an empty result, and SHALL NOT
+        // panic." The test above pins this for `open` — the only place a bad
+        // path is refused by `check_layout` before this file's other tests can
+        // reach a live connection. That refusal makes the SAME defect
+        // unreachable through a plain reopen: dropping the table and reopening
+        // hits `check_layout`'s own refusal first, which
+        // `a_store_stamped_with_our_version_but_missing_the_tables_is_refused_at_open`
+        // already pins. This test reaches for a READ instead, by breaking
+        // storage through the log's OWN already-open connection — bypassing
+        // `open`'s guard entirely, since nothing reopens here.
+        let mut log = SqliteOpLog::in_memory().unwrap();
+        log.append(signed(a_post("about to lose its table")), Arrival::unordered())
+            .unwrap();
+        assert_eq!(log.len().unwrap(), 1, "the fixture must be genuinely non-empty");
+
+        log.conn
+            .execute("DROP TABLE ops", [])
+            .expect("the sabotage itself must succeed");
+
+        match log.iter() {
+            Err(OpLogError::Storage(_)) => {}
+            other => panic!(
+                "a read over storage that became unusable must be a distinct \
+                 failure, not confused with an empty result, got {other:?}"
+            ),
+        }
+    }
+
+    #[test]
     fn a_corrupt_stored_op_is_reported_rather_than_decoded() {
         // The store worked and what it returned did not — a different fact from
         // a disk failure, and one that points at a hand-edited file rather than
