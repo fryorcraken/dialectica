@@ -63,6 +63,8 @@ Consequently, releasing what a Stoa's channel holds SHALL be done by closing the
 
 **Creation SHALL be requested before any channel operation this application requests.** A creation that delivery declines or that fails SHALL NOT stop the module from serving: it SHALL be written to the module's log with delivery's reason; every call that does not need delivery SHALL answer as it would have otherwise; and channel operations SHALL still be requested, because a node that another module in the same context created serves this application's channels too.
 
+**Start SHALL be requested only after delivery has accepted this application's creation.** When delivery declines, fails or does not answer the creation, start SHALL NOT be requested. A node this application did not create is not this application's to start, any more than to stop.
+
 **This requirement binds the adapter that makes delivery calls, which is not the code the requirements above contract.** No part of this capability's own surface starts, stops or counts nodes. The obligation is stated here, where the reasoning for it lives, and discharged in the adapter.
 
 **A peer cannot observe compliance with the prohibition, and no scenario below claims it can.** Observing it would take a second module in the same context noticing that its delivery had gone, which is a property of a deployed context rather than of this capability. The obligation is therefore that a stop call **SHALL NOT appear** in this application at all: a prohibition on the code rather than on an outcome, checked by reading the application rather than by exercising it. A change that adds one satisfies every other requirement in this capability and breaks this one, and nothing in this capability's surface will say so.
@@ -86,7 +88,7 @@ Whether a handler, once written, closes this peer's channels is contracted by "A
 
 #### Scenario: Node creation is requested once however often startup runs
 
-- **WHEN** the module's startup runs twice in one module process
+- **WHEN** the module's startup runs twice in one module process, and delivery accepts the creation
 - **THEN** node creation is requested once
 - **AND** node start is requested once
 
@@ -100,6 +102,7 @@ Whether a handler, once written, closes this peer's channels is contracted by "A
 - **WHEN** delivery answers node creation with its error shape
 - **THEN** the module's log carries delivery's reason
 - **AND** channel creation is still requested for every Stoa the peer is in
+- **AND** node start is not requested
 - **AND** a call that reads the op log answers as it would have had the creation succeeded
 
 ## ADDED Requirements
@@ -110,7 +113,9 @@ Every publish that succeeds at the module's surface — one that stored the op, 
 
 The payload handed over MUST be exactly the op's wire form as stored, as "What the channel carries is an op's wire form and nothing else" requires. The channel MUST be named by the channel identifier "Channel identity is a pure function of the Stoa address" derives from the op's Stoa, and by no other value.
 
-When this peer has no channel open for the op's Stoa at the time the send would be made, the peer MUST NOT send anything and MUST NOT open a channel, and the module's log MUST record the op id and the Stoa it was not sent for.
+Once the module's startup has wired delivery, when this peer has no channel open for the op's Stoa at the time the send would be made, the peer MUST NOT send anything and MUST NOT open a channel, and the module's log MUST record the op id and the Stoa it was not sent for.
+
+**A publish answered before the module's startup has wired delivery MUST send nothing, then or later.** The op MUST NOT be held for a send once delivery is wired, and the module's log MUST record the op id. A later publish of the same op is sent as any re-publish is.
 
 **The reply MUST NOT wait on the handoff.** `content-authoring` forbids the reply to wait on anything delivery does with the op, and a send is a call into another process. A send that delivery declines, fails, or never answers MUST leave the op in the log unchanged, MUST NOT change the reply, and MUST be recorded in the module's log with the op id and delivery's reason where delivery gave one.
 
@@ -124,16 +129,23 @@ When this peer has no channel open for the op's Stoa at the time the send would 
 
 #### Scenario: Re-publishing an op already held sends it again
 
-- **WHEN** an op the peer already holds is published again, so that the reply reports it was not newly stored
+- **WHEN** an op the peer already holds is published again into a Stoa whose channel this peer has open, so that the reply reports it was not newly stored
 - **THEN** delivery is asked to send it on its Stoa's channel
 
 #### Scenario: A publish into a Stoa with no open channel sends nothing and opens nothing
 
-- **WHEN** a post is published into a Stoa this peer has no channel open for
+- **WHEN** the module's startup has wired delivery, and a post is then published into a Stoa this peer has no channel open for
 - **THEN** delivery is not asked to send anything
 - **AND** delivery is not asked to create a channel
 - **AND** the reply reports the op as published and names its op id
 - **AND** the module's log records that op id and that Stoa
+
+#### Scenario: A publish before delivery is wired is not sent when it is
+
+- **WHEN** a post is published into a Stoa the peer is in, before the module's startup has wired delivery, and startup then runs
+- **THEN** the module's log records the op id as not sent
+- **AND** delivery is not asked to send anything, before or after startup
+- **AND** channel creation for that Stoa is requested once, by startup
 
 #### Scenario: A send delivery declines leaves the op published
 
@@ -171,6 +183,12 @@ Each refusal MUST be recorded in the module's log naming which refusal it was. *
 
 A delivered message whose fields cannot be read MUST be discarded and recorded in the module's log. A refusal, a discarded message, or a failure to store MUST NOT stop the peer from processing the messages that follow.
 
+**A message the op log cannot take is not decided again.** When the op log cannot be opened, or the append fails, the module's log MUST record it as a storage failure, and the message MUST NOT be held for another attempt: its op is in the log afterwards only if it arrives again.
+
+**A message arriving on a channel that is not open, but whose opening this peer has requested and delivery has not yet answered, MUST be judged only once that open is settled** — reported created, declined, failed, or given up as unanswered — and against the channels open then. Delivery can hand over a message on a channel before its answer to the creation reaches this peer. A message on any other channel identifier, an open one included, MUST be judged without waiting on any open.
+
+**If this peer cannot subscribe to the messages delivery hands over on reliable channels, the module's log MUST record that this peer will not receive ops from other peers**, and node creation, channel creation and sends MUST still be requested as they would have been otherwise.
+
 #### Scenario: An op another peer published is stored
 
 - **WHEN** a message arrives on a channel this peer has open, carrying a valid op that names that channel's Stoa and whose counter is within the receive window of this peer's clock
@@ -198,6 +216,41 @@ A delivered message whose fields cannot be read MUST be discarded and recorded i
 
 - **WHEN** a message whose fields cannot be read is followed by one carrying a valid op on an open channel
 - **THEN** the valid op is stored
+
+#### Scenario: A message the op log cannot take is logged and not retried
+
+- **WHEN** a message carrying a valid op arrives on an open channel while the op log cannot be opened, and the op log can be opened again afterwards
+- **THEN** the module's log records a storage failure
+- **AND** the op is not in the op log afterwards
+
+#### Scenario: A message arriving while its channel opens is stored once delivery reports the channel created
+
+- **WHEN** this peer has requested a Stoa's channel, a message carrying a valid op for that Stoa arrives on it before delivery has answered, and delivery then reports the channel created
+- **THEN** the op is stored
+- **AND** it is not refused as arriving on an unknown channel
+
+#### Scenario: A message arriving while its channel opens is refused once delivery declines the open
+
+- **WHEN** this peer has requested a Stoa's channel, a message carrying a valid op for that Stoa arrives on it before delivery has answered, and delivery then answers the creation with its error shape
+- **THEN** the message is refused as arriving on an unknown channel
+- **AND** the refusal is made after delivery's answer, not before it
+
+#### Scenario: A message on a channel not being opened does not wait on another channel's open
+
+- **WHEN** one Stoa's channel open is requested and unanswered, and a message arrives on a channel identifier this peer has neither open nor being opened
+- **THEN** that message is refused as arriving on an unknown channel before the open is answered
+
+#### Scenario: A message on an open channel does not wait on a repeated open
+
+- **WHEN** a Stoa's channel is open, its opening is requested again and not yet answered, and a message carrying a valid op for that Stoa arrives on it
+- **THEN** the op is stored before the repeated open is answered
+
+#### Scenario: A peer that cannot subscribe still publishes
+
+- **WHEN** subscribing to reliable-channel messages fails at startup, the peer is in a Stoa, and a post is then published into it
+- **THEN** the module's log records that this peer will not receive ops from other peers
+- **AND** channel creation is requested for the Stoa
+- **AND** delivery is asked to send the post
 
 #### Scenario: Only reliable-channel receipts reach the op log
 

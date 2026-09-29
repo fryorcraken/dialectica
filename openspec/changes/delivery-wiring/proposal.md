@@ -23,28 +23,37 @@ the design relies on.
   reliable-channel layer explicitly. The module never calls `stop()`. If delivery
   declines the creation, the module logs it and keeps serving, and it still
   attempts channel opens: another module in the same context may already have
-  created the node.
+  created the node. It then does not ask for the node to be started, since a
+  node it did not create is not its to start. Startup running a second time in
+  one process asks delivery for nothing, channels included.
 - **Opening channels.** A successful `createStoa` or `joinStoa` asks for the
   Stoa's channel to be opened, using `ChannelIdentity::of` and a sender
   identifier of this installation's own. At start, the module does the same for
   every Stoa in the membership record. A channel counts as open only once
   delivery reports that it created it. The create or join reply does not wait for
   the open and does not report on it. A failed open is logged, and is attempted
-  again at the next start or the next create or join of that Stoa.
+  again at the next start or the next create or join of that Stoa. A repeated
+  open that delivery declines leaves an already-open channel open. A create or
+  join answered before startup has wired delivery asks for nothing then; startup
+  asks for its channel along with every other Stoa the peer is in.
 - **Publishing.** Every successful `publishPost`, `publishReply` or `publishVote`
   hands the op's stored wire form to `channelSend` on the Stoa's channel. This
   replaces the logging no-op. The op is stored before it is sent, as
   `op-transport` already requires. The reply does not wait for the send. A
   declined, failed or unanswered send is logged, and the reply still reports the
   op as published. A publish into a Stoa with no open channel sends nothing,
-  opens nothing, and logs the fact. Sends go out in the order their publishes
-  were answered.
+  opens nothing, and logs the fact. A publish answered before startup has wired
+  delivery is logged and never sent, not held for later. Sends go out in the
+  order their publishes were answered.
 - **Receiving.** A listener passes every `channelMessageReceived` event through
   `transport::receive`. The receive window is judged against this peer's own
   clock at processing time, never against the event's timestamp, so #162's
   one-hour refusal applies on the live path. Each refusal is logged by kind. The
   log never carries the payload, the sender identifier, or a channel identifier
-  this peer has not opened.
+  this peer has not opened. A message on a channel whose open is still
+  unanswered is judged once the open settles, not refused in the gap. A message
+  the op log cannot take is logged as a storage failure and not retried. A
+  failed subscription is logged, and opens and sends still happen.
 - **The inbound bound.** Payloads waiting for the boundary are capped at a fixed
   count. When the cap is reached, the arriving payload is discarded and the
   waiting ones are kept. This **reverses #30**, which discarded the oldest.
@@ -91,7 +100,8 @@ Stoa-lifecycle obligation that `op-transport` assigns to `stoa-membership`.
     of its own. The requirement now adds one site that asks the delivery module
     to create and start its node. That site is reached at most once per
     process, names the channel layer in the configuration, runs before any
-    channel operation, and does not stop the module when delivery declines.
+    channel operation, does not stop the module when delivery declines, and
+    asks for the node's start only after delivery accepted its creation.
     Its scenario keeps its name, *No site in this application stops or creates
     a delivery node*. `openspec` will not archive a MODIFIED block that drops a
     scenario, and under the requirement's own wording ("creating a second one
@@ -135,7 +145,8 @@ requirements use `MUST`.
 - **Closing channels** on shutdown and on leaving a Stoa. This is the fourth
   thing `op-transport` says is owed, and there is still no site for it.
 - **Retrying** a declined send, or a failed channel open, without a restart or
-  a repeated create or join.
+  a repeated create or join. Also retrying an inbound message the op log could
+  not store, and sending an op published before startup wired delivery.
 - **The node's network configuration**, such as the preset and the mode. It goes
   in `design.md` and is raised with the owner. `op-transport` already excludes it
   from the contract beyond the lifecycle.
