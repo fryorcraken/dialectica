@@ -162,3 +162,17 @@ stale again, in the same place it was stale before:
       false }` — is exactly what the file shows. `proposal.md` and
       `tasks.md` mirror `design.md` and "No tests are pending" is true: all
       five `tester` findings from round 1 are closed. Clean.
+
+## Re-review round 3 `218acde3..cdc87c5c`
+
+- [x] **re-review round 3 `218acde3..cdc87c5c`: no findings** — read `git log
+      --format="%h %G? %s" 218acde3..cdc87c5c` (five signed commits, all
+      review/re-review bookkeeping) and `git diff --no-renames --name-only
+      218acde3 cdc87c5c`, which lists only `findings/correctness.md`,
+      `findings/design-review.md`, `findings/readability.md`,
+      `findings/spec-test.md` and `tasks.md`. `git diff 218acde3 cdc87c5c --
+      openspec/changes/spec-tidy/tasks.md` shows exactly one line added under
+      the re-review row (the round 1 `b4378cf5..218acde3` findings-pass
+      summary); no other line in `tasks.md` changed. Nothing in this range
+      touches source, spec, design.md or proposal.md, so there is nothing a
+      reviewer needs to read. Clean.
