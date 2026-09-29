@@ -128,12 +128,21 @@ a decision rather than an edit.
 and start are each requested at most once however often startup runs
 (`node_creation_is_requested_once_however_often_startup_runs`). `StartNode` is the
 first action in the worker's queue, so creation precedes every channel operation.
+Doing *nothing* on the second call — no channel either — is `stoa-membership`'s
+"Startup running again in the same module process MUST NOT request any channel":
+the first run asked for every membership's, and every create or join since asks
+for its own.
 
 A declined creation is logged with delivery's reason and the channels are still
-requested. **`start` is then not requested** — a choice the spec does not make
-(marked `NO SPEC` in `a_declined_node_creation_does_not_stop_the_module`): delivery
-v0.2.1 declines a second `createNode` with "Context already initialized", which is
-most often another module in the context owning the node and its start.
+requested. **`start` is then not requested**, as `op-transport` now requires
+("Start SHALL be requested only after delivery has accepted this application's
+creation", and the declined-creation scenario's "node start is not requested").
+The reason it was chosen before the spec stated it still holds: delivery v0.2.1
+declines a second `createNode` with "Context already initialized", which is most
+often another module in the context owning the node — and a node this application
+did not create is not its to start, any more than to stop. `declined` treats a
+transport failure and an unanswered call as declines too, which is the
+requirement's "declines, fails or does not answer".
 
 ### 7. The sender identifier: 32 random bytes per Stoa, retained in `senders.sqlite`
 
@@ -212,11 +221,21 @@ map carries **pending** opens beside open ones, and the processor, meeting a
 message on a channel that is pending and not open, waits for the answer (bounded
 at 40 s, past `CALL_TIMEOUT`). An `Opening` guard settles the open on every path
 out of the worker, a panic included, so nothing waits on an open nobody will
-answer. A declined *repeat* open leaves an already-open channel open.
+answer.
 
-This is behaviour the spec does not state — marked `NO SPEC` in
-`a_message_arriving_while_its_channel_opens_is_judged_after_the_answer`. Removing
-the wait turns that test red.
+`op-transport` now states the behaviour: a message on a channel "whose opening
+this peer has requested and delivery has not yet answered, MUST be judged only
+once that open is settled", and one on any other channel identifier, an open one
+included, without waiting. The wait's condition is exactly that — pending *and*
+not open — so a message on an open channel whose open is being repeated, or on an
+unrelated channel, is judged at once. Removing the wait turns
+`a_message_arriving_while_its_channel_opens_is_judged_after_the_answer` red.
+
+A declined *repeat* open leaves an already-open channel open (`Channels::settle`
+opens on success and never closes), which is `stoa-membership`'s "A repeated
+request that delivery declines, fails or does not answer MUST leave a channel
+that is already open open": delivery created it once, and nothing in this change
+closes it.
 
 ### 12. The module's log is a seam, and its words are in core
 
@@ -250,19 +269,36 @@ dispatch thread. Three things follow:
 `stoas.sqlite` and `senders.sqlite` are each opened by one thread only (dispatch,
 and the worker), so neither has the race.
 
-### Behaviour the spec does not state, chosen here
+### Behaviour chosen during implementation, now in the spec
 
-Each is marked `NO SPEC:` at its code site and in a test, and is for the spec to
-confirm or reverse — these are observable, so they belong in the spec, not here.
+Each of these was chosen while the code was written, and the spec now states it.
+The reasoning that chose each is here; the contract is the requirement cited.
 
-- `start` is requested only after a creation delivery accepted (Decision 6).
-- A second startup requests nothing at all, channels included.
-- A message on a channel still opening waits for the answer (Decision 11).
-- A declined repeat open leaves an already-open channel open.
-- A failed subscription is logged and sending stays wired.
-- A join or publish before delivery is wired is logged and dropped, not held.
-- An op log that will not open is a logged storage refusal; the message is not
-  retried.
+- **`start` only after an accepted creation** — `op-transport`, "Start SHALL be
+  requested only after delivery has accepted this application's creation"
+  (Decision 6).
+- **A second startup requests nothing, channels included** — `stoa-membership`,
+  "Startup running again in the same module process MUST NOT request any
+  channel" (Decision 6).
+- **A message on a channel still opening is judged once the open settles** —
+  `op-transport`'s inbound-boundary requirement and its four "while its channel
+  opens" / "does not wait" scenarios (Decision 11).
+- **A declined repeat open leaves an open channel open** — `stoa-membership`,
+  "A declined repeat request leaves an open channel open" (Decision 11).
+- **A failed subscription is logged and sending stays wired** — `op-transport`,
+  "A peer that cannot subscribe still publishes". Refusing to wire delivery at
+  all would take publishing away from a peer that can still publish.
+- **A join or publish before delivery is wired is logged and dropped, not
+  held** — `op-transport`, "A publish before delivery is wired is not sent when
+  it is", and `stoa-membership`, "A join before delivery is wired has its
+  channel requested once, by startup". Holding requests would need a second
+  queue in front of the worker for a state a dispatch cannot normally reach (the
+  scaffold fires `on_context_ready` before the first dispatch), and startup
+  already asks for every membership's channel.
+- **A message the op log cannot take is logged and not retried** —
+  `op-transport`, "A message the op log cannot take is logged and not retried".
+  Retrying would mean holding messages the bounded queue has already let go, and
+  an op arriving again is admitted as a first arrival would be.
 
 ### How each `CLAUDE.md` module-contract trap is handled
 
