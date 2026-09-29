@@ -2,7 +2,7 @@
 
 ## Stages
 
-- [ ] spec — `spec-writer`
+- [x] spec — `spec-writer`
 - [ ] design + code — `dev-writer`
 - [ ] tests — `tester`
 - [ ] review: correctness — `code-reviewer`
