@@ -709,7 +709,9 @@ The two SHALL NOT be one field and SHALL NOT be derivable from one another. A ca
 
 **The separation is the defence, and it is a shape rather than a rule anyone has to remember.** The ordering position and the asserted time answer different questions, and the second is forgeable by every author. A single field serving both would be a number that looks like a time and decides a sequence, which is the arrangement that has already failed in the nearest comparable project: an author-asserted timestamp read for ranking, with nothing clamping it, letting a post claiming a future instant pin itself above every honest one permanently. Their validator noticed future timestamps and produced a warning that was never called on the ingest path. The defect was not the missing check; it was that the value was sitting there as a number for whoever wanted to rank by it.
 
-**The position SHALL identify where an item sits in the whole thread's sequence, and it SHALL NOT be a sort key.** The sequence a caller renders is **the sequence the read returned**; the position exists so that an item's place in the whole thread is knowable from the item, and so it does not change when the page size does. An item's position SHALL be the same value whatever page size the read used, and SHALL index the whole thread rather than restarting at each page. Two positions SHALL be unequal for two distinct items of one thread.
+**The position SHALL identify where an item sits in the whole thread's sequence, and it SHALL NOT be a sort key.** The sequence a caller renders is **the sequence the read returned**; the position exists so that an item's place in the whole thread is knowable from the item, and so it does not change when the page size does. An item's position SHALL be the same value whatever page size the read used, and SHALL index the whole thread rather than restarting at each page. Two positions SHALL be unequal for two distinct items returned by one read of a thread, taken across all of that read's pages.
+
+**The position SHALL be determined by the place alone, and by nothing about the item that occupies it.** A value taken from the item itself, such as its op id or its author, does not meet this even where it is unique and the same at every page size. Where two reads of one thread return different items at the same place in their sequences, those two items SHALL carry the same position. The same item can therefore carry different positions in two reads whose sequences differ, such as one read that includes hidden replies and one that does not. In each read its position is its place in the sequence that read returned.
 
 **A caller SHALL NOT be required to sort by it, and SHALL NOT be able to rely on doing so.** This is the part that has to be said explicitly, because the value looks sortable and is not: nothing here promises that comparing two positions in a caller's own natural ordering reproduces the sequence, and a caller that sorted on them would be relying on a property this contract does not give. Nor SHALL a caller rely on the token being a number, on arithmetic over two of them meaning anything, on two items' values being adjacent or any fixed distance apart, or on a position being comparable against one from a **different** thread's read. The read SHALL surface it in a form that does not present itself as a quantity.
 
@@ -752,6 +754,12 @@ An item whose op carries no asserted time — one encoded before the fields exis
 
 - **WHEN** a thread's items are read across every page
 - **THEN** no two of them carry the same position
+
+#### Scenario: The item at a place carries that place's position in every read
+
+- **WHEN** a moderator hides a reply that has at least one other reply after it in the thread's sequence, and the thread is read across every page once with hidden content included and once without
+- **THEN** at each place both reads fill, the two items at that place carry the same position
+- **AND** the reply that follows the hidden reply in the including read carries a different position in each read
 
 #### Scenario: The position is not surfaced as a quantity
 
