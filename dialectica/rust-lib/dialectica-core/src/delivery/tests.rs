@@ -116,16 +116,55 @@ enum Call {
     },
 }
 
+/// A door a fake delivery call waits at until the test opens it: delivery that
+/// has been asked and has not answered.
+///
+/// **Instead of a sleep**, so "the reply did not wait" is read off what has
+/// happened rather than off a clock: a call held here has not returned, however
+/// slow the machine, and one the test has not released cannot return by itself.
+/// The wait is capped only so a test that fails leaves no thread parked for
+/// good; the cap is longer than any `eventually` in this file, so a caller that
+/// waited on the call would still be waiting when the test gives up on it.
+struct Gate {
+    open: Mutex<bool>,
+    changed: Condvar,
+}
+
+impl Gate {
+    fn closed() -> Arc<Gate> {
+        Arc::new(Gate {
+            open: Mutex::new(false),
+            changed: Condvar::new(),
+        })
+    }
+
+    fn release(&self) {
+        *lock(&self.open) = true;
+        self.changed.notify_all();
+    }
+
+    fn wait(&self) {
+        let open = lock(&self.open);
+        let _ = self
+            .changed
+            .wait_timeout_while(open, Duration::from_secs(15), |open| !*open);
+    }
+}
+
 /// What the fake answers, set per test.
 struct Script {
     create_node: Result<Value, String>,
     start_node: Result<Value, String>,
     /// Channel ids whose creation is declined, with the reply to give.
     declined_channels: HashMap<String, Result<Value, String>>,
+    /// Replies to the next channel creations, in order, whichever channel; once
+    /// they run out a creation is answered as created.
+    create_replies: VecDeque<Result<Value, String>>,
     send: Option<Result<Value, String>>,
-    /// How long a call of this kind takes before it answers.
-    create_delay: Duration,
-    send_delay: Duration,
+    /// Held until released: a channel creation, or a send, delivery has not
+    /// answered.
+    create_gate: Option<Arc<Gate>>,
+    send_gate: Option<Arc<Gate>>,
     panic_on_create_node: bool,
 }
 
@@ -135,9 +174,10 @@ impl Default for Script {
             create_node: Ok(json!(true)),
             start_node: Ok(json!(true)),
             declined_channels: HashMap::new(),
+            create_replies: VecDeque::new(),
             send: None,
-            create_delay: Duration::ZERO,
-            send_delay: Duration::ZERO,
+            create_gate: None,
+            send_gate: None,
             panic_on_create_node: false,
         }
     }
@@ -147,6 +187,9 @@ impl Default for Script {
 struct FakeState {
     calls: Mutex<Vec<Call>>,
     script: Mutex<Script>,
+    /// How many channel creations and sends have answered, as opposed to been
+    /// asked: a call held at a [`Gate`] is in `calls` and not in these.
+    answered: Mutex<(usize, usize)>,
 }
 
 #[derive(Clone, Default)]
@@ -192,6 +235,16 @@ impl Fake {
     fn count(&self, wanted: &Call) -> usize {
         self.calls().iter().filter(|c| *c == wanted).count()
     }
+
+    /// Channel creations delivery has answered.
+    fn answered_creates(&self) -> usize {
+        lock(&self.0.answered).0
+    }
+
+    /// Sends delivery has answered.
+    fn answered_sends(&self) -> usize {
+        lock(&self.0.answered).1
+    }
 }
 
 impl Delivery for Fake {
@@ -221,15 +274,19 @@ impl Delivery for Fake {
             content_topic: content_topic.to_string(),
             sender_id: sender_id.to_string(),
         });
-        let (delay, declined) = {
-            let script = lock(&self.0.script);
+        let (gate, queued, declined) = {
+            let mut script = lock(&self.0.script);
             (
-                script.create_delay,
+                script.create_gate.clone(),
+                script.create_replies.pop_front(),
                 script.declined_channels.get(channel_id).cloned(),
             )
         };
-        std::thread::sleep(delay);
-        declined.unwrap_or_else(|| Ok(json!(channel_id)))
+        if let Some(gate) = gate {
+            gate.wait();
+        }
+        lock(&self.0.answered).0 += 1;
+        queued.or(declined).unwrap_or_else(|| Ok(json!(channel_id)))
     }
 
     fn channel_send(&self, channel_id: &str, payload: &[u8]) -> Result<Value, String> {
@@ -237,11 +294,14 @@ impl Delivery for Fake {
             channel_id: channel_id.to_string(),
             payload: payload.to_vec(),
         });
-        let (delay, scripted) = {
+        let (gate, scripted) = {
             let script = lock(&self.0.script);
-            (script.send_delay, script.send.clone())
+            (script.send_gate.clone(), script.send.clone())
         };
-        std::thread::sleep(delay);
+        if let Some(gate) = gate {
+            gate.wait();
+        }
+        lock(&self.0.answered).1 += 1;
         scripted.unwrap_or_else(|| Ok(json!(format!("request-{}", payload.len()))))
     }
 }
@@ -413,15 +473,15 @@ fn node_creation_is_requested_once_however_often_startup_runs() {
 
     assert_eq!(peer.fake.count(&Call::CreateNode(node_config())), 1);
     assert_eq!(peer.fake.count(&Call::StartNode), 1);
-    // NO SPEC: the spec pins only the node. A second startup here asks for no
-    // channel either; the first already asked for every membership's.
+    // `stoa-membership`, scenario "A second startup in one process requests no
+    // channel": the peer is in one Stoa, and its channel is requested once.
     assert_eq!(peer.fake.creates().len(), 1);
 }
 
 #[test]
 fn a_failed_subscription_leaves_sending_wired() {
-    // NO SPEC: the spec does not say what a failed subscription does. This logs
-    // it and still wires the node, the channels and the sends.
+    // `op-transport`, scenario "A peer that cannot subscribe still publishes": the
+    // failure is logged, channel creation is requested and the post is sent.
     let mut peer = Peer::new("no-subscription");
     let g = genesis("Agora");
     peer.join(&g);
@@ -439,8 +499,11 @@ fn a_failed_subscription_leaves_sending_wired() {
 
 #[test]
 fn a_publish_before_delivery_is_wired_is_logged_and_not_sent_later() {
-    // NO SPEC: a request made before `start` is dropped, not held. The next
-    // start asks for every membership's channel; the op is not re-sent.
+    // `op-transport`, scenario "A publish before delivery is wired is not sent
+    // when it is": the op id is logged as not sent, nothing is sent before or
+    // after startup, and startup requests the Stoa's channel once (that half is
+    // `stoa-membership`'s "A join before delivery is wired has its channel
+    // requested once, by startup").
     let mut peer = Peer::new("before-start");
     let g = genesis("Agora");
     peer.join(&g);
@@ -461,8 +524,12 @@ fn a_publish_before_delivery_is_wired_is_logged_and_not_sent_later() {
 
 #[test]
 fn a_declined_repeat_open_leaves_an_open_channel_open() {
-    // NO SPEC: the spec is silent on a REPEAT open delivery declines. Delivery
-    // created the channel once and nothing has closed it, so it stays open.
+    // `stoa-membership`, scenario "A declined repeat request leaves an open
+    // channel open", read off the channel book. **This alone cannot tell the
+    // right implementation from one that does nothing on a decline**; it goes red
+    // only against closing the channel, and
+    // `a_declined_repeat_open_leaves_the_channel_open_for_the_next_message` states
+    // the scenario through a message and is the one that reads as the spec does.
     let stoa = genesis("Agora").address().unwrap();
     let identity = ChannelIdentity::of(&stoa);
     let channels = open_for(&stoa);
@@ -472,7 +539,9 @@ fn a_declined_repeat_open_leaves_an_open_channel_open() {
 
 #[test]
 fn an_op_log_that_will_not_open_is_a_storage_refusal() {
-    // NO SPEC: the message is dropped and logged, not retried.
+    // `op-transport`, scenario "A message the op log cannot take is logged and
+    // not retried": the storage failure is logged. That the op is not in the log
+    // afterwards is `a_message_the_op_log_cannot_take_is_logged_and_not_retried`'s.
     let peer = Peer::new("recv-no-log");
     peer.dir
         .break_file(&crate::log::op_log_path_in(&peer.dir.0));
@@ -533,10 +602,8 @@ fn a_declined_node_creation_does_not_stop_the_module() {
             "{created:?}"
         );
     }
-    // NO SPEC: the spec says what a declined creation must not stop; it is
-    // silent on whether `start` is still asked for. This asks only after a
-    // creation delivery accepted: a decline most often means another module
-    // created the node, and that module owns its start.
+    // `op-transport`, "Start SHALL be requested only after delivery has accepted
+    // this application's creation": the scenario's "node start is not requested".
     assert_eq!(peer.fake.count(&Call::StartNode), 0);
 
     // A call that reads the op log answers as it would have otherwise.
@@ -552,17 +619,33 @@ fn the_adapter_never_stops_a_node_and_creates_one_at_one_site() {
     // checked by reading the application. This reads the one file that can make
     // a delivery call. Comments are stripped first, so prose saying "never
     // `stop()`" does not read as the call it forbids.
+    //
+    // **By the method's prefix and not its exact spelling**, over the call chain
+    // as rustfmt breaks it across lines: a generated `stop_async` or a renamed
+    // `stop_with_timeout` is still a stop, and a second `start_async` is still a
+    // second site that starts the node.
     let code = adapter_code();
+    let on_delivery = methods_called_on(&code, "delivery_module");
     assert!(
-        !code.contains(".stop(") && !code.contains(".stop_with_timeout("),
-        "the adapter calls delivery's stop"
+        !code.contains(".stop"),
+        "the adapter calls a stop: {on_delivery:?}"
     );
     assert_eq!(
-        code.matches(".create_node").count(),
+        on_delivery
+            .iter()
+            .filter(|m| m.starts_with("create_node"))
+            .count(),
         1,
-        "exactly one site asks delivery to create the node"
+        "exactly one site asks delivery to create the node: {on_delivery:?}"
     );
-    assert_eq!(code.matches(".start_with_timeout(").count(), 1);
+    assert_eq!(
+        on_delivery
+            .iter()
+            .filter(|m| m.starts_with("start"))
+            .count(),
+        1,
+        "exactly one site asks delivery to start the node: {on_delivery:?}"
+    );
     // And nothing on this side of the seam can stop one: `Delivery` has no
     // method for it, so the worker cannot be written to call it.
 }
@@ -582,6 +665,35 @@ fn only_reliable_channel_receipts_reach_the_op_log() {
         })
         .collect();
     assert_eq!(subscriptions, ["on_channel_message_received"]);
+    // A route that is not spelled `.on_…` — a differently named subscription, or
+    // a decoder for another event — still names the event it carries. Every
+    // mention of a received message in the adapter is the reliable channel's, and
+    // no report on a send or a failed one is named at all.
+    assert_eq!(
+        code.matches("message_received").count(),
+        code.matches("channel_message_received").count(),
+        "the adapter names a received message that is not a reliable channel's"
+    );
+    for other in ["message_sent", "message_error", "message_propagated"] {
+        assert!(!code.contains(other), "the adapter names `{other}`");
+    }
+}
+
+#[test]
+fn the_adapter_maps_each_event_field_to_the_field_of_the_same_name() {
+    // `channel_id` and `sender_id` are both `String`: a mapping that swapped them
+    // compiles, and `nix build ./dialectica#lgx` is the only gate that compiles
+    // the adapter at all, so a swap would refuse every message as arriving on an
+    // unknown channel with every gate green. This reads the mapping as text —
+    // whitespace removed, so rustfmt's wrapping does not matter — and is a pin
+    // on the pairing, not a substitute for a test that runs the decoder.
+    let code: String = adapter_code().split_whitespace().collect();
+    for field in ["channel_id", "sender_id", "payload", "timestamp"] {
+        assert!(
+            code.contains(&format!("{field}:m.{field},")),
+            "the adapter does not map `{field}` from the event's `{field}`"
+        );
+    }
 }
 
 /// The adapter's source without its comments.
@@ -591,6 +703,26 @@ fn adapter_code() -> String {
         .filter(|l| !l.trim_start().starts_with("//"))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// Every method called directly on `receiver` in `code`, as a call chain reads
+/// once its line breaks are joined: `receiver\n    .method(` is `receiver.method(`.
+fn methods_called_on(code: &str, receiver: &str) -> Vec<String> {
+    let joined = code
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .replace(" .", ".");
+    let head = format!("{receiver}.");
+    joined
+        .match_indices(&head)
+        .map(|(at, _)| {
+            joined[at + head.len()..]
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect()
+        })
+        .collect()
 }
 
 // ─── Opening channels ─────────────────────────────────────────────────────
@@ -728,18 +860,34 @@ fn a_channel_delivery_declines_does_not_fail_the_join() {
 
 #[test]
 fn an_unresponsive_delivery_does_not_delay_a_join() {
+    // Delivery is asked to open the channel and does not answer: the creation is
+    // held at a gate the test has not opened. What is asserted is not how long
+    // the join took but that it returned while delivery had still not answered,
+    // which no clock is needed to tell.
     let mut peer = Peer::new("join-slow");
-    peer.fake = peer
-        .fake
-        .script(|s| s.create_delay = Duration::from_secs(3));
+    let gate = Gate::closed();
+    let _ = peer.fake.script(|s| s.create_gate = Some(gate.clone()));
     peer.start();
 
-    let began = Instant::now();
-    let reply = peer.join(&genesis("Agora"));
-    let took = began.elapsed();
+    let g = genesis("Agora");
+    let reply = peer.join(&g);
 
     assert!(!reply.contains("error"), "{reply}");
-    assert!(took < Duration::from_secs(1), "the join waited {took:?}");
+    assert_eq!(
+        peer.fake.answered_creates(),
+        0,
+        "the join returned only after delivery answered the creation"
+    );
+    assert!(peer
+        .dir
+        .memberships()
+        .contains(&g.address().unwrap())
+        .unwrap());
+
+    // And the request was not lost by not waiting: released, it is answered.
+    gate.release();
+    peer.delivering.settle();
+    assert_eq!(peer.fake.answered_creates(), 1);
 }
 
 #[test]
@@ -851,6 +999,14 @@ fn two_stoas_get_two_sender_identifiers() {
 
 #[test]
 fn the_sender_identifier_is_not_the_authors_key() {
+    // **What this can and cannot see.** No key reaches the code that mints a
+    // sender identifier (`SenderStore::sender_for` takes a Stoa address), so an
+    // implementation that derived it from one could not be written without
+    // changing that signature, and this test could not be made to fail by any
+    // change that compiles. The property is held by construction; what this
+    // pins is the encoding check for a peer that signs as `key(7)` in the Stoa it
+    // joins. The tests that can fail on how the value is produced are the
+    // "two installations", "restart" and "two Stoas" ones beside it.
     let peer = Peer::new("sender-not-key");
     let sender = sender_supplied(&peer, &genesis("Agora").address().unwrap());
     let signing = key(7).public_key();
@@ -949,19 +1105,32 @@ fn a_send_delivery_declines_leaves_the_op_published() {
 
 #[test]
 fn an_unresponsive_delivery_does_not_delay_the_publish_reply() {
+    // Delivery is asked to send and does not answer: the send is held at a gate
+    // the test has not opened. `post` returning with the reply in hand while
+    // that send is still unanswered is the assertion, and it does not depend on
+    // how long anything took.
     let mut peer = Peer::new("send-slow");
-    peer.fake = peer.fake.script(|s| s.send_delay = Duration::from_secs(3));
+    let gate = Gate::closed();
+    let _ = peer.fake.script(|s| s.send_gate = Some(gate.clone()));
     peer.start();
     let g = genesis("Agora");
     peer.join(&g);
     peer.delivering.settle();
 
-    let began = Instant::now();
     let id = peer.post(&g.address().unwrap(), "not waited on");
-    let took = began.elapsed();
 
-    assert!(took < Duration::from_secs(1), "the publish waited {took:?}");
+    assert_eq!(
+        peer.fake.answered_sends(),
+        0,
+        "the reply came back only after delivery answered the send"
+    );
     assert!(stored(&peer, &id).is_some());
+
+    // And the send was not lost by not waiting: released, it is answered.
+    gate.release();
+    peer.delivering.settle();
+    assert_eq!(peer.fake.answered_sends(), 1);
+    assert_eq!(peer.fake.sends().len(), 1);
 }
 
 #[test]
@@ -1014,6 +1183,72 @@ fn a_publish_after_a_join_is_sent_on_the_channel_the_join_opened() {
         .expect("the op was sent");
     assert!(created_at < sent_at, "{calls:?}");
     assert_eq!(peer.fake.sends()[0].0, peer.fake.creates()[0].0);
+}
+
+#[test]
+fn sends_made_while_an_open_is_unanswered_wait_for_it_and_keep_their_order() {
+    // The two tests above let the worker finish each action before the next
+    // arrives, so they hold for any implementation that does things in the order
+    // it hears of them. Here the join's channel creation is held at a gate while
+    // a post and a reply to it are published: two sends are waiting behind an
+    // open delivery has not answered. Released, the open is answered first, and
+    // then the sends go out root-first.
+    //
+    // An implementation that sent without waiting for the open finds no channel
+    // open and sends nothing; one that took the waiting sends newest-first sends
+    // the reply before its post.
+    let mut peer = Peer::new("send-behind-open");
+    let gate = Gate::closed();
+    let _ = peer.fake.script(|s| s.create_gate = Some(gate.clone()));
+    peer.start();
+    let g = genesis("Agora");
+    let stoa = g.address().unwrap();
+    peer.join(&g);
+    eventually("the open to reach delivery", || {
+        !peer.fake.creates().is_empty()
+    });
+
+    let root = peer.post(&stoa, "a post");
+    let delivering = &peer.delivering;
+    let reply = crate::wire::publish_reply(
+        &json!({ "stoa": stoa.to_hex(), "parent": root.to_hex(), "body": "a reply" }).to_string(),
+        &mut peer.dir.op_log(),
+        &Authorship {
+            key: &key(7),
+            asserted_ms: NOW_MS,
+        },
+        &mut |id| delivering.published(id),
+    );
+    let child = op_id_of(&reply);
+    assert!(
+        peer.fake.sends().is_empty(),
+        "a send was made while the open was unanswered: {:?}",
+        peer.fake.calls()
+    );
+
+    gate.release();
+    peer.delivering.settle();
+
+    let calls = peer.fake.calls();
+    let answered_open = calls
+        .iter()
+        .position(|c| matches!(c, Call::ChannelCreate { .. }))
+        .expect("the channel was asked for");
+    let first_send = calls
+        .iter()
+        .position(|c| matches!(c, Call::ChannelSend { .. }))
+        .expect("the sends were made once the open was answered");
+    assert!(answered_open < first_send, "{calls:?}");
+    let sent: Vec<OpId> = peer
+        .fake
+        .sends()
+        .iter()
+        .map(|(channel, payload)| {
+            assert_eq!(channel, ChannelIdentity::of(&stoa).channel_id());
+            SignedOp::from_bytes(payload).unwrap().op.id()
+        })
+        .collect();
+    assert_eq!(sent, [root, child]);
 }
 
 // ─── Receiving ────────────────────────────────────────────────────────────
@@ -1124,9 +1359,9 @@ fn the_peer_keeps_processing_after_an_unreadable_message_and_a_refusal() {
 
 #[test]
 fn a_message_arriving_while_its_channel_opens_is_judged_after_the_answer() {
-    // NO SPEC: the spec says a channel is open only once delivery answers, and is
-    // silent on a message that arrives in the gap before the answer. This holds
-    // it until the open settles, so delivery's answer decides it — stored here,
+    // `op-transport`, scenario "A message arriving while its channel opens is
+    // stored once delivery reports the channel created": the message is held
+    // until the open settles, so delivery's answer decides it — stored here,
     // where refusing it as an unknown channel would lose an op SDS already
     // counts as delivered.
     let peer = Peer::new("recv-during-open");
@@ -1163,29 +1398,346 @@ fn a_message_arriving_while_its_open_is_declined_is_refused_after_the_answer() {
     let channels = Arc::new(Channels::default());
     let op = their_op(stoa, "raced a decline", 0);
 
-    // Timed around `decide` alone: the scope joins the answering thread on the
-    // way out, so a clock read after it would measure the sleep, not the wait.
-    let waited = std::thread::scope(|scope| {
+    // "After delivery's answer, not before it" is read off a flag the answering
+    // thread sets immediately before it answers, and `decide` is asked whether it
+    // had been set when it returned. A refusal made without waiting returns with
+    // the flag still down, however the threads happen to be scheduled.
+    let answered = std::sync::atomic::AtomicBool::new(false);
+    let answered_when_decided = std::thread::scope(|scope| {
         let opening = channels.opening(&identity);
-        scope.spawn(move || {
+        scope.spawn(|| {
             std::thread::sleep(Duration::from_millis(200));
+            answered.store(true, std::sync::atomic::Ordering::SeqCst);
             drop(opening); // settled, not created
         });
-        let began = Instant::now();
         peer.processor(Arc::clone(&channels)).decide(&arriving(
             identity.channel_id(),
             op.to_bytes().unwrap(),
             1,
         ));
-        began.elapsed()
+        answered.load(std::sync::atomic::Ordering::SeqCst)
     });
 
     assert!(
-        waited >= Duration::from_millis(150),
-        "it did not wait: {waited:?}"
+        answered_when_decided,
+        "the message was refused before delivery had answered the open"
     );
     assert!(stored(&peer, &op.op.id()).is_none());
     assert_eq!(peer.journal.with("(unknown-channel)").len(), 1);
+}
+
+/// Decide `message` on a thread of its own, so a test can watch whether it
+/// returns while an open is still unanswered.
+///
+/// Detached on purpose: a `decide` that waits when it should not waits up to
+/// [`SETTLE_LIMIT`], and the test must be able to fail long before that.
+fn decide_elsewhere(processor: Processor, message: Arriving) {
+    std::thread::spawn(move || processor.decide(&message));
+}
+
+#[test]
+fn a_message_on_a_channel_not_being_opened_does_not_wait_on_another_channels_open() {
+    let peer = Peer::new("recv-other-channel");
+    let opening = genesis("Agora").address().unwrap();
+    let elsewhere = genesis("Lyceum").address().unwrap();
+    let channels = Arc::new(Channels::default());
+    // Agora's open is requested and never answered in this test until the end.
+    let unanswered = channels.opening(&ChannelIdentity::of(&opening));
+    let op = their_op(elsewhere, "on a channel nobody asked for", 0);
+
+    decide_elsewhere(
+        peer.processor(Arc::clone(&channels)),
+        arriving(
+            ChannelIdentity::of(&elsewhere).channel_id(),
+            op.to_bytes().unwrap(),
+            1,
+        ),
+    );
+
+    // Judged, and refused, with Agora's open still unanswered: `unanswered` is
+    // dropped only below, so nothing but the refusal can end this wait.
+    eventually("the message to be refused without waiting", || {
+        !peer.journal.with("refused (unknown-channel)").is_empty()
+    });
+    assert!(stored(&peer, &op.op.id()).is_none());
+    drop(unanswered);
+}
+
+#[test]
+fn a_message_on_an_open_channel_does_not_wait_on_a_repeated_open() {
+    let peer = Peer::new("recv-repeated-open");
+    let stoa = genesis("Agora").address().unwrap();
+    let identity = ChannelIdentity::of(&stoa);
+    let channels = open_for(&stoa);
+    // The channel is open, and its opening is requested again and not answered.
+    let repeated = channels.opening(&identity);
+    let op = their_op(stoa, "on a channel that is open", 0);
+
+    decide_elsewhere(
+        peer.processor(Arc::clone(&channels)),
+        arriving(identity.channel_id(), op.to_bytes().unwrap(), 1),
+    );
+
+    // Stored with the repeat still unanswered: `repeated` is dropped only below.
+    eventually("the op to be stored without waiting", || {
+        stored(&peer, &op.op.id()).is_some()
+    });
+    drop(repeated);
+}
+
+/// The clock the next test hands its processor: an hour and a minute behind while
+/// an open is unanswered, and the right time once [`ANSWERED`] is set.
+static ANSWERED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn a_clock_that_is_wrong_until_the_open_is_answered() -> u64 {
+    if ANSWERED.load(std::sync::atomic::Ordering::SeqCst) {
+        NOW_MS
+    } else {
+        NOW_MS - crate::arrival::RECEIVE_WINDOW_MS - 60_000
+    }
+}
+
+#[test]
+fn the_clock_is_read_after_the_wait_for_an_open_and_not_before_it() {
+    // `op-transport`: the window is judged against this peer's clock "read when
+    // the payload is processed". A message that waits for an open is processed
+    // after the wait, so a clock read before it — at the moment the message is
+    // taken off the queue — is the wrong reading. This clock is wrong until the
+    // open is answered and right after, and the op's counter is `NOW_MS`: read
+    // early it is more than the window ahead and is refused; read after the wait
+    // it is within the window and is stored.
+    let peer = Peer::new("recv-clock-after-wait");
+    let stoa = genesis("Agora").address().unwrap();
+    let identity = ChannelIdentity::of(&stoa);
+    let channels = Arc::new(Channels::default());
+    let op = their_op(stoa, "on time once the open is answered", 0);
+    let mut processor = peer.processor(Arc::clone(&channels));
+    processor.clock = a_clock_that_is_wrong_until_the_open_is_answered;
+
+    std::thread::scope(|scope| {
+        let mut opening = channels.opening(&identity);
+        scope.spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            ANSWERED.store(true, std::sync::atomic::Ordering::SeqCst);
+            opening.created();
+        });
+        processor.decide(&arriving(identity.channel_id(), op.to_bytes().unwrap(), 1));
+    });
+
+    assert!(
+        stored(&peer, &op.op.id()).is_some(),
+        "{:?}",
+        peer.journal.lines()
+    );
+}
+
+#[test]
+fn a_declined_repeat_open_leaves_the_channel_open_for_the_next_message() {
+    // Through the whole wiring: the channel is opened, a second join asks for it
+    // again, delivery declines the repeat, and a message arriving afterwards on
+    // that channel is stored and not refused. A declined repeat that closed the
+    // channel is the change this fails on.
+    let mut peer = Peer::new("repeat-declined");
+    let g = genesis("Agora");
+    let stoa = g.address().unwrap();
+    let events = peer.start_listening();
+    peer.join(&g);
+    peer.delivering.settle();
+    let _ = peer.fake.script(|s| {
+        s.create_replies
+            .push_back(the_observed_decline("no reliable channel manager"))
+    });
+    peer.join(&g);
+    peer.delivering.settle();
+    assert_eq!(peer.fake.creates().len(), 2, "the repeat was not asked for");
+    assert_eq!(
+        peer.journal.with("no reliable channel manager").len(),
+        1,
+        "{:?}",
+        peer.journal.lines()
+    );
+
+    let their = their_op(stoa, "after a declined repeat", 0);
+    events
+        .send(Some(arriving(
+            ChannelIdentity::of(&stoa).channel_id(),
+            their.to_bytes().unwrap(),
+            1,
+        )))
+        .unwrap();
+    eventually("the op to be stored", || {
+        stored(&peer, &their.op.id()).is_some()
+    });
+    assert!(peer.journal.with("unknown-channel").is_empty());
+}
+
+#[test]
+fn a_message_the_op_log_cannot_take_is_logged_and_not_retried() {
+    // A log that can be opened again afterwards, and a queue that shows what was
+    // held. The first op is decided while the log cannot be opened; the log is
+    // then repaired, a second op is queued, and the processor runs until the queue
+    // is empty. Only the second is in the log: a first op held for another
+    // attempt — put back on the queue, or waited on — would be stored by the
+    // repair, or would keep `decide` from returning at all.
+    //
+    // The queue is the test's own and is drained by `run` rather than watched for
+    // a time, so an implementation that retries later than any pause a test could
+    // choose is still found: what it retries is on the queue when `run` starts.
+    let peer = Peer::new("recv-storage-not-retried");
+    let stoa = genesis("Agora").address().unwrap();
+    let channels = open_for(&stoa);
+    let queue = Arc::new(InboundQueue::with_bound(INBOUND_BOUND));
+    let processor = || Processor {
+        queue: Arc::clone(&queue),
+        channels: Arc::clone(&channels),
+        stores: peer.dir.stores(),
+        journal: peer.journal.clone(),
+        clock: now,
+    };
+    let channel = ChannelIdentity::of(&stoa);
+    let log_file = crate::log::op_log_path_in(&peer.dir.0);
+    peer.dir.break_file(&log_file);
+
+    let lost = their_op(stoa, "arrives while the log will not open", 0);
+    let lost_message = arriving(channel.channel_id(), lost.to_bytes().unwrap(), 1);
+    let first = processor();
+    let deciding = std::thread::spawn(move || first.decide(&lost_message));
+    eventually("the message to be decided and given up", || {
+        deciding.is_finished()
+    });
+    assert_eq!(
+        peer.journal.with("refused (storage").len(),
+        1,
+        "{:?}",
+        peer.journal.lines()
+    );
+
+    std::fs::remove_dir_all(&log_file).unwrap();
+    let after = their_op(stoa, "arrives once the log opens", 1);
+    queue.offer(arriving(channel.channel_id(), after.to_bytes().unwrap(), 2));
+    queue.close();
+    processor().run();
+
+    assert!(
+        stored(&peer, &after.op.id()).is_some(),
+        "{:?}",
+        peer.journal.lines()
+    );
+    assert!(
+        stored(&peer, &lost.op.id()).is_none(),
+        "the op that met the broken log was held and stored later"
+    );
+}
+
+#[test]
+fn taking_a_message_from_delivery_does_not_wait_on_the_boundary() {
+    // `op-transport`: "Taking a message from delivery MUST NOT wait on the
+    // boundary." The processor is held on the first message, whose channel is
+    // being opened and not yet answered; more messages follow and delivery's
+    // event stream then ends. The listener must take every one and reach the end
+    // while the boundary has decided nothing — it logs its end only when it has.
+    let mut peer = Peer::new("listener-not-held");
+    let g = genesis("Agora");
+    let stoa = g.address().unwrap();
+    let channel = ChannelIdentity::of(&stoa);
+    let gate = Gate::closed();
+    let _ = peer.fake.script(|s| s.create_gate = Some(gate.clone()));
+    let events = peer.start_listening();
+    peer.join(&g);
+    eventually("the open to reach delivery", || {
+        !peer.fake.creates().is_empty()
+    });
+
+    let ops: Vec<SignedOp> = (0..5)
+        .map(|n| their_op(stoa, &format!("waiting behind the open {n}"), n))
+        .collect();
+    for (n, op) in ops.iter().enumerate() {
+        events
+            .send(Some(arriving(
+                channel.channel_id(),
+                op.to_bytes().unwrap(),
+                n as i64,
+            )))
+            .unwrap();
+    }
+    drop(events);
+    eventually("the listener to take them all and end", || {
+        !peer.journal.with("inbound listener has ended").is_empty()
+    });
+    assert_eq!(peer.fake.answered_creates(), 0, "the open was answered");
+
+    // Nothing was lost by not waiting: once the open is answered, all five are
+    // judged against the channel it opened.
+    gate.release();
+    for op in &ops {
+        eventually("a waiting op to be stored", || {
+            stored(&peer, &op.op.id()).is_some()
+        });
+    }
+}
+
+#[test]
+fn every_refusal_is_logged_under_its_own_name_and_none_carries_what_the_sender_chose() {
+    // One case per refusal the boundary makes, through the processor. A table
+    // rather than a test each: the requirement is one sentence over all of them.
+    // The names are design.md's, hardcoded; `distinct` is the property that
+    // matters beyond the spelling — no two refusals share a name.
+    let stoa = genesis("Agora").address().unwrap();
+    let other = genesis("Lyceum").address().unwrap();
+    let identity = ChannelIdentity::of(&stoa);
+    let open = identity.channel_id();
+    let window = crate::arrival::RECEIVE_WINDOW_MS;
+    let mut forged = their_op(stoa, "a forgery", 0);
+    forged.op.author = key(9).public_key();
+    let cases: [(&str, &str, Vec<u8>); 6] = [
+        ("unknown-channel", "/elsewhere/zzyzx", vec![1, 2, 3]),
+        (
+            "too-long",
+            open,
+            vec![0; crate::transport::MAX_MESSAGE_BYTES + 1],
+        ),
+        ("undecodable", open, b"not an op".to_vec()),
+        ("fails-verification", open, forged.to_bytes().unwrap()),
+        (
+            "stoa-mismatch",
+            open,
+            their_op(other, "copied onto another channel", 0)
+                .to_bytes()
+                .unwrap(),
+        ),
+        (
+            "ahead-of-time",
+            open,
+            their_op(stoa, "from the future", window + 60_000)
+                .to_bytes()
+                .unwrap(),
+        ),
+    ];
+
+    let mut names = Vec::new();
+    for (kind, channel, payload) in cases {
+        let peer = Peer::new(&format!("recv-refusal-{kind}"));
+        peer.processor(open_for(&stoa)).decide(&Arriving {
+            channel_id: channel.to_string(),
+            sender_id: "zzyzx-sender".to_string(),
+            payload,
+            timestamp: 1,
+        });
+        let lines = peer.journal.lines();
+        assert_eq!(
+            peer.journal.with(&format!("refused ({kind})")).len(),
+            1,
+            "{kind}: {lines:?}"
+        );
+        for line in &lines {
+            assert!(!line.contains("zzyzx"), "{kind}: {line}");
+        }
+        names.push(kind);
+    }
+    let mut distinct = names.clone();
+    distinct.sort_unstable();
+    distinct.dedup();
+    assert_eq!(distinct.len(), names.len());
 }
 
 #[test]

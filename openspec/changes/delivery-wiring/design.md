@@ -86,8 +86,9 @@ from callbacks, and the code that advances it lives where no test reaches.
 
 What breaks without it: making the calls inline turns
 `an_unresponsive_delivery_does_not_delay_the_publish_reply` and
-`an_unresponsive_delivery_does_not_delay_a_join` red (each measures a 3 s delivery
-against a 1 s bound).
+`an_unresponsive_delivery_does_not_delay_a_join` red. Each holds the delivery call
+at a gate the test has not opened and asserts the reply came back while delivery
+had still not answered, so neither reads a clock.
 
 ### 4. Each call waits 35 s, past delivery's own 30 s
 

@@ -4,7 +4,7 @@
 
 - [x] spec — `spec-writer`
 - [x] design + code — `dev-writer`
-- [ ] tests — `tester`
+- [x] tests — `tester`
 - [ ] review: correctness — `code-reviewer`
 - [ ] review: security — `code-reviewer`
 - [ ] review: readability — `code-reviewer`
@@ -35,7 +35,7 @@
 - [x] 4.2 One worker thread: node first, then every membership's channel, then what handlers enqueue; `node_creation_precedes_every_channel_operation`, `node_creation_is_requested_once_however_often_startup_runs`, `a_declined_node_creation_does_not_stop_the_module`.
 - [x] 4.3 Channel opens with the retained sender identifier; `joining_requests_the_stoas_channel_after_the_membership_is_recorded`, `creating_a_stoa_requests_its_channel`, `a_refused_join_requests_no_channel`, `a_channel_delivery_declines_does_not_fail_the_join`, `a_repeated_join_requests_the_channel_again`, `a_restarted_peer_requests_every_stoas_channel_and_no_other`, `an_unreadable_membership_record_opens_nothing_and_stops_nothing`, and the four sender-identifier tests.
 - [x] 4.4 Sends read back by op id through `transport::handoff`; `an_op_published_on_an_open_channel_is_sent_as_its_stored_wire_form`, `an_op_the_peer_already_holds_published_again_is_sent_again`, `a_publish_into_a_stoa_with_no_open_channel_sends_nothing_and_opens_nothing`, `a_send_delivery_declines_leaves_the_op_published`, `sends_follow_the_order_of_their_publishes`, `a_publish_after_a_join_is_sent_on_the_channel_the_join_opened`.
-- [x] 4.5 Replies never wait: `an_unresponsive_delivery_does_not_delay_the_publish_reply` and `an_unresponsive_delivery_does_not_delay_a_join` (3 s delivery, 1 s bound).
+- [x] 4.5 Replies never wait: `an_unresponsive_delivery_does_not_delay_the_publish_reply` and `an_unresponsive_delivery_does_not_delay_a_join` (the call held at a gate until the test releases it).
 
 ## 5. Inbound: the queue, the listener, the processor
 

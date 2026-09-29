@@ -455,10 +455,12 @@ impl Channels {
                 book.pending.remove(identity.channel_id());
             }
         }
-        // NO SPEC: the spec says a channel is open once delivery reports creating
-        // it, and is silent on a REPEAT open that is declined. This leaves an
-        // already-open channel open: delivery created it once and nothing has
-        // closed it. `a_declined_repeat_open_leaves_an_open_channel_open`.
+        // `stoa-membership`, scenario "A declined repeat request leaves an open
+        // channel open": a repeat open that is declined leaves an already-open
+        // channel open, because delivery created it once and nothing has closed
+        // it. `a_declined_repeat_open_leaves_the_channel_open_for_the_next_message`
+        // states it through a message; `a_declined_repeat_open_leaves_an_open_channel_open`
+        // through this book.
         if created {
             book.open.open(identity);
         }
@@ -561,8 +563,10 @@ impl<D: Delivery> Worker<D> {
 
     /// Ask delivery to create and start the node.
     ///
-    /// NO SPEC: `start` is asked only when creation was not declined. A decline
-    /// most often means another module in this context created the node already
+    /// `op-transport`, "Start SHALL be requested only after delivery has accepted
+    /// this application's creation" (scenario "A declined node creation does not
+    /// stop the module": node start is not requested). A decline most often means
+    /// another module in this context created the node already
     /// (`"Context already initialized"`), and that module owns its start.
     fn start_node(&self) {
         let created = self.delivery.create_node(&node_config());
@@ -829,16 +833,20 @@ impl Processor {
     /// nanoseconds. `op-transport` requires the window be judged against this
     /// peer's own clock at processing time.
     fn decide(&self, message: &Arriving) {
-        // NO SPEC: a message on a channel still opening waits for delivery's
-        // answer. See `ChannelBook` for why, and design Decision 11.
+        // `op-transport`, "A message arriving on a channel that is not open, but
+        // whose opening this peer has requested and delivery has not yet answered,
+        // MUST be judged only once that open is settled" (scenarios "…is stored
+        // once delivery reports the channel created" and "…is refused once
+        // delivery declines the open"). See `ChannelBook` for why, and design
+        // Decision 11.
         self.channels
             .await_settled(&message.channel_id, SETTLE_LIMIT);
         let now_ms = (self.clock)();
         let mut log = match self.stores.op_log() {
             Ok(log) => log,
-            // NO SPEC: an op log that will not open is logged as a storage
-            // refusal and the message is dropped, not retried — the spec says a
-            // storage failure must not stop later messages, and nothing more.
+            // `op-transport`, scenario "A message the op log cannot take is logged
+            // and not retried": an op log that will not open is logged as a
+            // storage failure and the message is dropped, not held.
             Err(e) => {
                 let detail = e.to_string();
                 return record(&*self.journal, Note::Refused("storage", Some(&detail)));
@@ -923,10 +931,11 @@ impl Delivering {
         // leaves no outbox, and a second call must still do nothing rather than
         // start a second listener and processor.
         //
-        // NO SPEC: the spec requires the NODE be asked for once however often
-        // startup runs; it is silent on the rest. A second call here asks for
-        // nothing at all — no channel either — because the first call already
-        // asked for every membership's.
+        // `stoa-membership`, "Startup running again in the same module process
+        // MUST NOT request any channel" (scenario "A second startup in one
+        // process requests no channel"), beside `op-transport`'s node asked for
+        // once. A second call asks for nothing at all, because the first call
+        // already asked for every membership's.
         if self.started {
             record(&*self.journal, Note::AlreadyStarted);
             return false;
@@ -935,10 +944,10 @@ impl Delivering {
         let channels = Arc::new(Channels::default());
         let queue = Arc::new(InboundQueue::with_bound(INBOUND_BOUND));
 
-        // NO SPEC: the spec does not say what a failed subscription does. This
-        // logs it and carries on — sends and opens still happen — because a peer
-        // that cannot receive can still publish, and refusing to wire delivery
-        // at all would take that away too.
+        // `op-transport`, scenario "A peer that cannot subscribe still publishes":
+        // a failed subscription is logged and startup carries on — the node, the
+        // channels and the sends are still requested — because a peer that
+        // cannot receive can still publish.
         match subscribe() {
             Ok(events) => self.spawn_listener(events, Arc::clone(&queue)),
             Err(why) => record(&*self.journal, Note::NotSubscribed(&why)),
@@ -997,9 +1006,12 @@ impl Delivering {
 
     fn request(&self, action: Action, what: impl Fn() -> String) {
         match &self.outbox {
-            // NO SPEC: a join or publish before delivery is wired is logged and
-            // dropped, not held for later. The next start asks for every
-            // membership's channel anyway; an op published then is not re-sent.
+            // `op-transport`, scenario "A publish before delivery is wired is not
+            // sent when it is", and `stoa-membership`, "A join before delivery is
+            // wired has its channel requested once, by startup": a request made
+            // before delivery is wired is logged and dropped, not held. Startup
+            // asks for every membership's channel anyway; an op published then is
+            // not re-sent.
             None => record(&*self.journal, Note::NotStarted(&what())),
             Some(outbox) => {
                 if outbox.actions.send(action).is_err() {
