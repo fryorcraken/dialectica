@@ -309,11 +309,14 @@ TestCase {
     // failed an unwindowed version of this test. A disclaimer mentions both
     // halves and keeps them apart; a claim puts them side by side.
     //
-    // NO SPEC: `moderation-view` forbids the screen claiming a moderator status
-    // but does not say what linguistic form such a claim takes. Both the noun
-    // set and the window are this change's reading of it. If a future screen
-    // needs to place these words together innocently, this test is the thing to
-    // argue with rather than quietly widen.
+    // `moderation-view`'s "The screen does not state or imply that the user
+    // moderates the Stoa" forbids the claim (scenario "No moderator standing is
+    // claimed for the reader"). Its own text says it "fixes the claim that is
+    // forbidden, not the words a claim would use" — so the noun set and the
+    // window below are this test's reading of what that claim looks like in
+    // English, not a gap the requirement left open. If a future screen needs to
+    // place these words together innocently, this test is the thing to argue
+    // with rather than quietly widen.
     //
     // The limits, stated rather than left to be discovered: it is blind to a
     // claim using neither marker ("this peer governs here"), to one split

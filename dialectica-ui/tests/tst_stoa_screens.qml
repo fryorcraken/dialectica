@@ -2876,10 +2876,12 @@ TestCase {
 
         verify(spec.digitRunsIn(text).length === 0,
                "a placeholder carrying a numeral reads as a count: " + text)
-        // NO SPEC: the requirement says a placeholder must not be presented as
-        // this peer's measurement and does not fix the wording. This pins that
-        // it does not assert emptiness, which is the one substitute value that
-        // would be both digit-free and false.
+        // `stoa-navigation-view`'s "Every number rendered is one this peer can
+        // actually answer" bans a phrase asserting that nothing has been
+        // received for a Stoa, whether as a placeholder or otherwise (scenario
+        // "A row's placeholder does not assert emptiness"). This pins that ban:
+        // emptiness is the one substitute value that would be both digit-free
+        // and false.
         verify(text.toLowerCase().indexOf("nothing received") < 0
                && text.toLowerCase().indexOf("no posts") < 0,
                "asserting emptiness is a claim about a count nothing computed: "

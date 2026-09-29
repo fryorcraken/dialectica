@@ -1561,6 +1561,73 @@ mod tests {
         );
     }
 
+    // ─── The reserved author column ────────────────────────────────────────
+
+    /// Read the `author` column for one op, as it is actually stored.
+    ///
+    /// `Entry`'s decoded `op.author` comes from `op_bytes`, the full encoding —
+    /// so it cannot tell this column apart from a version that stored the wrong
+    /// bytes into it, or nothing at all. Reaching in directly, exactly as
+    /// `stored_score_epoch` does for its column, is the only way to test what
+    /// the reserved column itself holds.
+    fn stored_author(log: &SqliteOpLog, id: &OpId) -> Vec<u8> {
+        log.conn
+            .query_row(
+                "SELECT author FROM ops WHERE op_id = ?1",
+                rusqlite::params![id.as_bytes().as_slice()],
+                |row| row.get(0),
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn the_stored_author_is_the_signer_regardless_of_moderator_status() {
+        // op-log's ADDED "A persistent log stores the inputs a ranking is
+        // computed from, never a ranking": "the stored entry records which
+        // identity signed it, AND that record is independent of whether the
+        // signer is currently a moderator." The log holds no moderator set —
+        // that is resolved on read, from the Stoa's genesis record — so the
+        // column must hold whichever key signed, whether or not that key is
+        // the Stoa's own creator.
+        //
+        // This is the column `an_op_with_no_counter_and_one_at_the_maximal_counter…`'s
+        // comment warns about for `score_epoch`: "reserved" and "nothing
+        // queries it yet" is a comment that excuses a column from every
+        // behavioural test while the rows still go to every peer's disk. No
+        // test here read it back before this one.
+        let mut log = SqliteOpLog::in_memory().unwrap();
+        let creator = a_key(1); // `a_stoa`'s own fixture creator (see fixtures.rs).
+        let random_peer = a_key(9);
+
+        let from_creator = Op {
+            author: creator.public_key(),
+            ..a_post("from the Stoa's own creator")
+        }
+        .sign(&creator);
+        let from_random = Op {
+            author: random_peer.public_key(),
+            ..a_post("from a peer with no standing at all")
+        }
+        .sign(&random_peer);
+
+        log.append(from_creator.clone(), Arrival::unordered())
+            .unwrap();
+        log.append(from_random.clone(), Arrival::unordered())
+            .unwrap();
+
+        assert_eq!(
+            stored_author(&log, &from_creator.op.id()),
+            creator.public_key().to_bytes().to_vec(),
+            "the creator's own op must record the creator's key"
+        );
+        assert_eq!(
+            stored_author(&log, &from_random.op.id()),
+            random_peer.public_key().to_bytes().to_vec(),
+            "a random peer's op must record that peer's key, not the creator's — \
+             the log has no moderator set to consult and must not substitute one"
+        );
+    }
+
     // ─── The clock override ───────────────────────────────────────────────
 
     /// A log that reaches the SAME rows through the SAME reads, but inherits
