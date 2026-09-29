@@ -93,3 +93,7 @@ None. I found no security defect in this piece along the assigned dimension.
 
 Nothing under `.claude/` changes in this piece, and none should as far as I
 can tell from the security dimension.
+
+## Gate record
+
+- [x] **none** — re-checked on the current tree: every `wire.rs` hunk since `1fd91a4f` (`70bef050`, `4e2b8c0f`) lies at line 8558 or later, inside `mod tests` (opens at 3531), so `parse_index`, `keep_identity` and `thread_page_json` are unchanged and the verdict holds.
