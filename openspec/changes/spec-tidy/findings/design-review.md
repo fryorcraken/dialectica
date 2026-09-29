@@ -71,3 +71,50 @@ real commits in the right order) but the substance of each correction was not
 re-derived from the PRs it cites. Given time constraints this is a noted limit
 rather than a finding; nothing observed while reading the diffs contradicted
 the commit messages' claims.
+
+## Re-review round 1 `b4378cf5..218acde3`
+
+`153c4f5c` answers the finding above: `design.md`'s Non-Goals and
+`proposal.md`'s Impact were rewritten to name the two `sqlite.rs` tests, the
+one `tst_thread_reply.qml` test and the two reworded `NO SPEC:` comments, and
+to point at "the five open `tester` findings" as the tests still pending. That
+fix was accurate for the state at `153c4f5c`.
+
+`218acde3` then closed all five of those findings — four fixed (three new
+`tst_thread_reply.qml` tests plus one comment reword in `readability.md`'s
+target, plus the fourth spec-test gap) and one deferred with no test — but
+touched none of `design.md`, `proposal.md` or `tasks.md`. The inventory is
+stale again, in the same place it was stale before:
+
+- [ ] **`dev-writer`** — `design.md`'s Non-Goals (and `proposal.md`'s Impact,
+      which mirrors it) undercounts the tests this piece added and
+      misdescribes their status. Both say "one QML test" in
+      `tst_thread_reply.qml`; `218acde3` added four more there
+      (`test_no_reply_affordance_is_reachable_with_no_root_identifier`,
+      `test_a_root_items_own_missing_id_does_not_reach_the_reply_parent`,
+      `test_the_screen_threads_the_items_sanitiser_report_through_to_the_render`,
+      `test_the_marker_and_the_inert_row_state_nothing_about_earlier_content`
+      — confirmed by `git diff 153c4f5c 218acde3 --
+      dialectica-ui/tests/tst_thread_reply.qml`, all four inside `mod
+      tests`-equivalent QML test functions, no production QML touched). Both
+      documents also still say "Tests still pending from the five open
+      `tester` findings... until those boxes are closed, this inventory is
+      incomplete" — but `218acde3`'s own commit message reports all five
+      closed (four fixed, one deferred). The inventory needs a second pass
+      naming the four new tests and stating plainly that nothing is pending
+      any more.
+
+      Separately, the one deferred finding — "No ordering is offered as
+      vote-based" gets no test, because no ordering control of any kind
+      exists on the thread screen today, so a test for it cannot fail for the
+      reason it would name — is exactly the kind of reasoning `design.md`'s
+      Non-Goals should carry forward rather than leave only in
+      `findings/spec-test.md`: it is a decision not to add a test, argued
+      from a real alternative (write a vacuous test now vs. defer), and it
+      names its own trigger (whichever future change adds an ordering
+      control). Once findings files are read only by mutation-hunting
+      reviewers rather than by every future reader of this change, that
+      "why no test" reasoning is otherwise stranded. Recommend folding one
+      sentence into Non-Goals: the deferral, its reason, and its trigger,
+      the way the four-comments and tests-added bullets already do for the
+      rest of this inventory.
