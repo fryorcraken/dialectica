@@ -43,7 +43,7 @@ Checked and clean, with the command that confirmed each:
   so the tester's commit-message test counts are unverified rather than
   confirmed false.
 
-- [ ] **`tester`** — `dialectica/rust-lib/dialectica-core/src/log/sqlite.rs:1592-1597`
+- [x] **`tester`** — `dialectica/rust-lib/dialectica-core/src/log/sqlite.rs:1592-1597`
       — a quoted citation in `the_stored_author_is_the_signer_regardless_of_moderator_status`'s
       comment doesn't match the text it's attributed to, and names the wrong
       column.
@@ -73,3 +73,13 @@ Checked and clean, with the command that confirmed each:
       already in the commit message before it was copied into code.
 
 No other readability defect was found in this piece's own material.
+
+**fixed** — reworded the comment in
+`the_stored_author_is_the_signer_regardless_of_moderator_status` to quote
+`score_epoch`'s actual comment ("the column is reserved: 'nothing writes this
+and no read consults it' is a comment that excuses a column from every
+behavioural test", lines 1468-1469) instead of the fabricated paraphrase
+attributed to it. The misattributed phrase "nothing queries it yet" belongs to
+the unrelated `ops_by_target`-adjacent reserved index comment at line 557 and
+has been dropped from this citation. Comment-only change; no test or
+implementation behaviour affected.

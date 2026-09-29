@@ -123,7 +123,7 @@ not reviewed here.
 
 ## New findings from the completed coverage walk
 
-- [ ] **`tester`** — `thread-view`'s "The reply composer is wired to the
+- [x] **`tester`** — `thread-view`'s "The reply composer is wired to the
       publish call and names the parent it is under" has a scenario "A post
       carrying no identifier offers no working reply affordance" (`WHEN` the
       screen is given an item carrying no op id and its reply affordance is
@@ -136,7 +136,42 @@ not reviewed here.
       pass every existing test. Severity: moderate — this is the guard the
       requirement's own reasoning calls out ("no value derived from a
       missing field reach a core call").
-- [ ] **`tester`** — `thread-view`'s "Every string rendered from an item is
+
+      **fixed**, with a wrinkle the finding's literal framing did not
+      anticipate. `DThreadScreen.qml`'s composer binds `parentOp:
+      screen.threadId` — the screen's own navigation-supplied property,
+      which the file's header comment names "The ROOT POST's op id" — and
+      never reads the *read's* item shape at all. So the concrete rendering
+      of "the view holds no op id for [the root]" for this screen is
+      `threadId === ""`, not `items[0].id` being absent; a literal test that
+      set the root item's `id` to missing while leaving `threadId: "root1"`
+      still produces a well-formed `publish_reply` call (`parent: "root1"`),
+      because that value never touches the item's own field. Added two
+      tests in `tst_thread_reply.qml`, covering both readings so neither gap
+      is left open:
+
+      - `test_no_reply_affordance_is_reachable_with_no_root_identifier`
+        (`threadId: ""`, `stoaAddress` set): the literal scenario, translated
+        into this screen's own definition of "the op id it holds for the
+        root". **Predicted / observed:** removing the `screen.threadId ===
+        ""` guard from `reload()` together with the `&&
+        screen.threadId !== ""` clause on `replyComposerOpen`'s `visible`
+        turned it red (`'the open-gate composer group is not rendered...'
+        returned FALSE`) — predicted and observed match exactly. Restored
+        both lines; `git diff --stat` on `DThreadScreen.qml` is empty.
+      - `test_a_root_items_own_missing_id_does_not_reach_the_reply_parent`
+        (root item from `read_thread` carries no `id`, `threadId: "root1"`):
+        pins the actual regression risk the finding named — a future change
+        deriving `parentOp` from the item's own `id` instead of `threadId`.
+        **Predicted / observed:** rebinding `parentOp` to
+        `screen.items.length > 0 ? screen.itemId(screen.items[0]) :
+        screen.threadId` turned it red exactly as predicted (`Actual (): ` /
+        `Expected (): root1`), since `itemId` returns `""` for a missing
+        `id`. Restored; `git diff --stat` empty.
+
+      Both pass against the untouched implementation (16 passed, 0 failed,
+      `dialectica-ui/tests/tst_thread_reply.qml`).
+- [x] **`tester`** — `thread-view`'s "Every string rendered from an item is
       rendered as the read supplied it" (3 scenarios: a body rendered as
       returned, a sanitiser report renderable, a marked character not
       corrected) has no test in `tst_thread_states.qml`, `tst_thread_reply.
@@ -149,7 +184,28 @@ not reviewed here.
       behaviour" shape — a wiring defect between the item model and the
       render path would not be caught by either file alone. Severity:
       moderate.
-- [ ] **`tester`** — `thread-view`'s "A revised post is marked as revised…"
+
+      **fixed** — added
+      `test_the_screen_threads_the_items_sanitiser_report_through_to_the_render`
+      to `tst_thread_reply.qml`: a root item with `body: {text: "...",
+      removed: 2, marked: 3}`, rendered by the real `DThreadScreen`, and
+      asserts the `SanitisedText` instance it renders through carries
+      `removedCount === 2`, `markedCount === 3` and the body text unaltered.
+      Located it by a recursive walk over `toString()` for the type name
+      rather than `objectName` — `SanitisedText` carries none in
+      `DThreadScreen.qml`, and adding one would be an implementation change
+      made only to serve a test.
+
+      Passes against the untouched implementation (17 passed, 0 failed).
+      **Predicted / observed:** mutating the `value:` binding at
+      `DThreadScreen.qml`'s post-body `SanitisedText` from
+      `post.modelData.body` to `{ text: post.modelData.body.text, removed:
+      0, marked: 0 }` (the exact "body.text alone, dropping removed/marked"
+      defect the finding names) turned it red exactly as predicted — `the
+      item's own removed count reaches the shared component / Actual (): 0 /
+      Expected (): 2` — with every other test in the file still green.
+      Restored; `git diff --stat` on `DThreadScreen.qml` is empty.
+- [x] **`tester`** — `thread-view`'s "A revised post is marked as revised…"
       scenario "The marker claims nothing about the earlier version", and
       "The earlier-versions affordance is inert…" scenario "No earlier
       version text is rendered", have no explicit test. `test_a_revised_item_
@@ -163,7 +219,29 @@ not reviewed here.
       call exists, per the sibling requirement), so a violation would need a
       hardcoded string in the view rather than a data-flow bug — but the
       normative "SHALL NOT" is still unpinned.
-- [ ] **`tester`** — `thread-view`'s "No score, tally or vote count is
+
+      **fixed** — added
+      `test_the_marker_and_the_inert_row_state_nothing_about_earlier_content`
+      to `tst_thread_reply.qml`, covering both scenarios with hardcoded,
+      exact-match assertions (per the finding's own point that only a
+      hardcoded addition could violate either SHALL NOT):
+      - Counts exact occurrences of the literal string `"edited"` across the
+        whole screen and requires exactly 1 — not "does some Text say
+        edited", which a `"edited (from rev3)"` mutation would still satisfy.
+      - Collects every rendered string inside the affordance row
+        (`earlierVersionsInert`'s parent) and requires the set to be
+        exactly `{"read the earlier versions", "NOT YET AVAILABLE"}`.
+
+      Passes against the untouched implementation (18 passed, 0 failed).
+      **Predicted / observed, both mutations:**
+      - Changed `PostHeader.qml`'s marker text from `"edited"` to `"edited
+        (from an earlier version)"` — predicted the exact-count assertion
+        would go to 0; observed `Actual (): 0 / Expected (): 1`. Restored.
+      - Added a third `Text { text: "the previous text is no longer shown"
+        }` sibling inside `DThreadScreen.qml`'s affordance row — predicted
+        the row's text count would go to 3; observed `Actual (): 3 /
+        Expected (): 2`. Restored; `git diff --stat` on both files is empty.
+- [x] **`tester`** — `thread-view`'s "No score, tally or vote count is
       rendered on the thread screen" scenario "No ordering is offered as
       vote-based" has no test (checked `tst_thread_reply.qml`,
       `tst_thread_states.qml`, `tst_thread_nesting.qml` for
@@ -172,6 +250,22 @@ not reviewed here.
       why this is the lowest severity of the four: flagging it so it is not
       forgotten once ordering controls are built, not because a defect is
       suspected now.
+
+      **deferred** — confirmed by grepping `DThreadScreen.qml` and
+      `VoteControl.qml` for `reorder`/`sortBy`/`orderBy` and any second
+      `VoteControl`-like affordance: the only control on the thread screen is
+      the single, non-interactive `VoteControl` per row (`showScore: false,
+      interactive: false`), and there is no ordering mechanism of ANY kind —
+      vote-based or otherwise — anywhere in this screen. A test for "no
+      control orders items by votes" would necessarily pass today regardless
+      of whether a guard exists, because there is nothing to guard: it cannot
+      fail for the reason it would name, since the feature space it is
+      checking is empty. Writing it now would be exactly the "reports safety
+      that was never checked" case the brief warns against. Deferred to
+      whichever future change first adds an ordering or re-ordering control to
+      the thread screen — that change should add this test alongside the
+      control, at the point where "no ordering is vote-based" becomes a real
+      distinction to draw. No test added.
 
 ## Process finding — resolved by the runner
 

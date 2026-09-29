@@ -1590,11 +1590,11 @@ mod tests {
         // column must hold whichever key signed, whether or not that key is
         // the Stoa's own creator.
         //
-        // This is the column `an_op_with_no_counter_and_one_at_the_maximal_counter…`'s
-        // comment warns about for `score_epoch`: "reserved" and "nothing
-        // queries it yet" is a comment that excuses a column from every
-        // behavioural test while the rows still go to every peer's disk. No
-        // test here read it back before this one.
+        // This is the same trap `an_op_with_no_counter_and_one_at_the_maximal_counter…`'s
+        // comment warns about for `score_epoch`: "the column is reserved:
+        // 'nothing writes this and no read consults it' is a comment that
+        // excuses a column from every behavioural test" while the rows still
+        // go to every peer's disk. No test here read it back before this one.
         let mut log = SqliteOpLog::in_memory().unwrap();
         let creator = a_key(1); // `a_stoa`'s own fixture creator (see fixtures.rs).
         let random_peer = a_key(9);
