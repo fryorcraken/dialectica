@@ -274,3 +274,85 @@ contents, not taken on trust:
 
 No new architecture findings from this re-review round. Both boxes ticked in
 the first round remain correctly resolved.
+
+## Re-review after merging main
+
+Dimension: **architecture only**. Read issue #166 fresh
+(`gh issue view 166 --json body,comments`) and confirmed the owner's decision
+comment of 2026-09-25
+(https://github.com/fryorcraken/dialectica/issues/166#issuecomment-5832956024):
+malformed input is rejected and the refusal names `index`; leaving the message
+unspecified was explicitly ruled out. Read `docs/OPENSPEC-ARCHIVE.md` before
+mutating anything.
+
+Scope per `tasks.md`'s "Re-review after merging main": the merge `d0f56a14`,
+the `thread-read` delta rebase `7d587fd`, and the design/proposal citation fix
+`696d35f`. The question is whether archiving now loses nothing and restores
+nothing.
+
+**Safety check before mutating**, as required: `pwd` reported
+`.../.claude/worktrees/agent-ad91ddc5d528c9212`, and `git rev-parse
+--abbrev-ref HEAD` reported `worktree-agent-ad91ddc5d528c9212` — the tree the
+harness created for this dispatch, not `piece/166-position-and-index` and not
+the repository root. Confirmed clean (`git status`) before archiving.
+
+### What was checked, and how
+
+1. **What else moved in main.** `git log --oneline 8368b2f..d0f56a14^2` shows
+   four PRs landed after the piece's base: #181, #173, #172, #175. Of these,
+   only `2b53e6eb` (#173) touched a spec file this change asserts a rule in
+   (`openspec/specs/thread-read/spec.md`); it also touched
+   `openspec/specs/feed-view`, `op-format`, `op-ordering`, `op-transport` and
+   `post-revision`, none of which this change carries a delta for. #181
+   touched `feed-view`/`stoa-navigation-view` (UI/e2e), #172 touched
+   `view-navigation` and CI/test tooling, #175 touched CI/docs only — none
+   overlaps `thread-read` or `identity-onboarding`.
+2. **#173's code-level touch.** #173's Rust diff (`arrival.rs`, `authoring.rs`,
+   `moderation.rs`, `op.rs`, `revision.rs`, `transport.rs`) is doc-comment
+   rewording only, confirmed by #173's own commit message ("Impact said 'Code,
+   wire API, tests: none' ... every changed line a comment") and by reading the
+   `arrival.rs` hunk directly: it repoints a doc comment from `op-ordering` to
+   the archived `time-pegged-clock` design, no logic changed. `arrival::cmp_ops`
+   — which D5's fixture comment relies on for ascending-clock ordering — is
+   untouched. So the merge changes no behaviour this piece's tests or design
+   reasoning depend on.
+3. **The `thread-read` delta against the live text after #173, measured, not
+   read.** Ran `openspec archive position-and-index -y` in this worktree (a
+   real archive, not a inference from the CLI's documented behaviour).
+   `git diff` on the resulting `openspec/specs/thread-read/spec.md` shows
+   exactly three hunks, matching `tasks.md`'s claim and nothing more: the
+   uniqueness sentence narrowed from "for two distinct items of one thread" to
+   "for two distinct items returned by one read of a thread, taken across all
+   of that read's pages"; one new paragraph ("The position SHALL be determined
+   by the place alone..."); and one new scenario ("The item at a place carries
+   that place's position in every read") inserted between the existing
+   "Two items of one thread never share a position" and "The position is not
+   surfaced as a quantity" scenarios. Every other sentence and every other
+   scenario in the requirement — including the ones #173 left alone — came
+   through byte-for-byte. This is the specific "MODIFIED requirement replaces
+   the WHOLE block" trap `docs/OPENSPEC-ARCHIVE.md` warns about, and it does
+   not fire here.
+4. **The `identity-onboarding` ADDED requirement against whatever main now
+   holds.** The same archive run's diff on
+   `openspec/specs/identity-onboarding/spec.md` shows the requirement appended
+   verbatim at the end of the file, nothing else touched. No merged PR added a
+   competing `index`-refusal requirement under a different heading (checked
+   via `grep -n "^### Requirement" openspec/specs/identity-onboarding/spec.md`
+   before archiving — no such heading existed), so there is no duplicate to
+   reconcile. The live Purpose's forward-referencing "boundary with
+   `feed-read`" paragraph (from the earlier `b55d164` round, D6) is unaffected
+   by the merge and survived this archive run intact, matching the prior
+   re-review's finding.
+5. **Discarded the archive completely**, per the brief: `git checkout --
+   openspec/` followed by `rm -rf
+   openspec/changes/archive/2026-09-26-position-and-index`. `git status`
+   confirmed a clean tree afterward.
+
+### Result
+
+No architecture findings from this round. Archiving now loses nothing from
+the live `thread-read` requirement as #173 left it, and restores nothing that
+#173 removed on purpose (the "alternatives all invite arithmetic that means
+nothing" paragraph stays out, moved to #173's archived design as that piece
+intended). No other merged PR (#175, #172, #181) touches a capability this
+change asserts a rule in.
