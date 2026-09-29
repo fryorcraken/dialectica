@@ -243,7 +243,7 @@ A moderator's hide and an author's edit are about different things and do not co
 
 Where a target is subject to a binding moderation, the reader SHALL be able to identify the op that decided it, including its author and its action.
 
-A moderator acting on a post is acting on a judgement they can name, in the same way §5.7 gives an author's revisions a version a moderator can name. A bare boolean cannot support a moderator reversing a specific hide, a reader being shown who hid something, or an interface distinguishing "hidden by this Stoa's moderator" from any other reason content is absent.
+A moderator acting on a post is acting on a judgement they can name, in the same way `post-revision`'s requirement "A post is never edited in place" keeps every superseded version so that a moderator acting on a post acts on a version they can name by its own op id. A bare boolean cannot support a moderator reversing a specific hide, a reader being shown who hid something, or an interface distinguishing "hidden by this Stoa's moderator" from any other reason content is absent.
 
 #### Scenario: A hidden target names the op that hid it
 
