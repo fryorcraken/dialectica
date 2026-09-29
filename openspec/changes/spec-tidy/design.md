@@ -2,10 +2,12 @@
 
 See `proposal.md` for what was tidied and why. The spec work is five archives,
 each preceded where needed by a correction to its delta, then this change's own
-deltas and three in-place Purpose edits. Outside the specs, only four comments
-change, because this piece's own moves made them stale. No behaviour, test
-assertion or wire shape moves, so the design questions are about **how a live
-contract is changed safely**, not about how anything is built.
+deltas and three in-place Purpose edits. Outside the specs, four comments
+change because this piece's own moves made them stale, and the `tester` stage
+adds tests for requirements the archives promoted (Non-Goals lists both). No
+production code, existing test assertion or wire shape moves, so the design
+questions are about **how a live contract is changed safely**, not about how
+anything is built.
 
 Two facts about the tooling shape every decision below. Both are recorded in
 `docs/OPENSPEC-ARCHIVE.md`:
@@ -36,8 +38,24 @@ Two facts about the tooling shape every decision below. Both are recorded in
 - The "this change" wording sweep across the live specs is tracked in #186.
   It is out of scope so that this piece's review stays small.
 - `relevance-votes`.
-- Any code change beyond comments. The only non-spec edits are four comments
-  that this piece's own moves made stale. See Risks.
+- Any production-code change. Outside the specs, the piece edits comments and
+  adds tests, and nothing else:
+  - **Four comments** that this piece's own moves made stale. See Risks.
+  - **Tests the `tester` stage added**, because archiving promotes requirements
+    into the live contract, and a promoted requirement no test pins is an
+    obligation CI does not check. Every added line is test code:
+    - `sqlite.rs`: two `#[test]` functions and a `stored_author` helper, all
+      inside `mod tests`. One pins op-log's stored author column (`a98c434`),
+      the other a storage failure at read time (`5f95e7e`).
+    - `tst_thread_reply.qml`: one test that a successful publish inserts no
+      item (`5f95e7e`).
+    - `tst_moderation_screen.qml` and `tst_stoa_screens.qml`: two `NO SPEC:`
+      comments reworded to cite the requirements that now cover them
+      (`a98c434`). Comment-only; no existing assertion changes.
+  - **Tests still pending** from the five open `tester` findings in
+    `findings/readability.md` and `findings/spec-test.md`. Until those boxes
+    are closed, this inventory is incomplete; each box's outcome names what it
+    added.
 
 ## Decisions
 

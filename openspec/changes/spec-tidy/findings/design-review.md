@@ -23,7 +23,7 @@ side, and matches its own commit message. No finding there.
 
 One gap, below.
 
-- [ ] **`dev-writer`** — `design.md`'s Non-Goals and `proposal.md`'s Impact
+- [x] **`dev-writer`** — `design.md`'s Non-Goals and `proposal.md`'s Impact
       section both understate this piece's own footprint. Non-Goals says "Any
       code change beyond comments. The only non-spec edits are four comments
       that this piece's own moves made stale," and `proposal.md`'s Impact
@@ -46,6 +46,21 @@ One gap, below.
       commits and stating the "no production code changed" fact explicitly,
       the way the commit messages already argue it — the review currently
       has to reconstruct that from `git log`, not from `design.md`.
+      **Fixed** in the commit that ticks this box. `design.md`'s Non-Goals now
+      reads "Any production-code change" and inventories what the piece does
+      change outside the specs: the four comments; the tests from `a98c434`
+      and `5f95e7e`, each named with its file and why the stage added them;
+      the two reworded `NO SPEC:` comments; and the tests still pending from
+      the five open `tester` findings, pointed at by file rather than listed.
+      Its Context paragraph, `proposal.md`'s Why ("touches no code") and
+      Impact, and `tasks.md`'s Implementation preamble ("spec text only") are
+      corrected to match. One count correction: the diff adds **two**
+      `#[test]` functions to `sqlite.rs` plus a non-test helper
+      (`stored_author`), not three — `git diff d57edaf...HEAD --
+      dialectica/rust-lib/dialectica-core/src/log/sqlite.rs` shows it. The
+      "every added line is inside `mod tests`" claim holds. No test can show
+      a prose inventory is right; `git diff d57edaf...HEAD --stat --
+      dialectica dialectica-ui` is the check against it.
 
 **Not independently reverified in full:** the requirement-level correctness
 of each of the ~10 spec-delta corrections (blank-title refusal, `op-clock`

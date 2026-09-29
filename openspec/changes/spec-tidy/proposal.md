@@ -8,7 +8,7 @@ of the deleted `docs/PLAN.md`, closed GitHub issues, and a `design.md` with no
 path. One live spec contradicted itself.
 
 The owner asked for the specs to be tidied up. This change does that and
-touches no code.
+touches no production code.
 
 ## What Changes
 
@@ -160,11 +160,20 @@ None in this change's own deltas. `moderation-view` became live through
 
 ## Impact
 
-Spec text in `openspec/specs/` and `openspec/changes/`. Outside those, four
-comments change: two in `dialectica-ui/src/qml/` and the headers of two
-end-to-end specs under `dialectica-ui/tests/ui/`. Each cited a requirement this
-piece moved, or called a change this piece archives "unarchived". No behaviour,
-test assertion or wire contract changes.
+Spec text in `openspec/specs/` and `openspec/changes/`. Outside those:
+
+- **Four comments change**: two in `dialectica-ui/src/qml/` and the headers of
+  two end-to-end specs under `dialectica-ui/tests/ui/`. Each cited a requirement
+  this piece moved, or called a change this piece archives "unarchived".
+- **Tests are added** for requirements the archives promoted: two `#[test]`
+  functions and a helper in `sqlite.rs`'s `mod tests`, and one QML test in
+  `tst_thread_reply.qml`. Two `NO SPEC:` comments in `tst_moderation_screen.qml`
+  and `tst_stoa_screens.qml` are reworded to cite the requirements that now
+  cover them. `design.md`'s Non-Goals names the commits.
+- **More tests are pending** from the five open `tester` findings in
+  `findings/readability.md` and `findings/spec-test.md`.
+
+No production code, existing test assertion or wire contract changes.
 
 ## Tracked separately
 

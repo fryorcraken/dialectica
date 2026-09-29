@@ -18,9 +18,11 @@
 
 ## Implementation
 
-This piece is spec text only. The spec-writer did groups 1 to 3 before this
-checklist was written, and each item names the commit that did it. Group 4 is
-the dev-writer's. `design.md` says why the work took these shapes.
+This piece is spec text, plus comment edits and the `tester` stage's tests, and
+no production code (`design.md`, Non-Goals, has the inventory). The spec-writer
+did groups 1 to 3 before this checklist was written, and each item names the
+commit that did it. Group 4 is the dev-writer's. `design.md` says why the work
+took these shapes.
 
 ## 1. Archive the shipped changes, oldest merge first
 
