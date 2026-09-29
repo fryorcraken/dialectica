@@ -363,3 +363,87 @@ Checked commit `fd9aa9dfff71c217d4de4181e2b0c670f0dfc993` in isolation
   found. `design.md` itself carries no more occurrences.
 
 No new findings. Nothing to tick.
+
+## Re-review after merging main
+
+Dimension: **readability only**, per `tasks.md`'s "Re-review after merging
+main" row for `code-reviewer`/readability ("Quotes and citations in the
+rewritten prose"). I read issue #166 again (`gh issue view 166 --json
+body,comments`), including the owner's decision comment of 2026-09-25
+(https://github.com/fryorcraken/dialectica/issues/166#issuecomment-5832956024),
+which settles item 2: a malformed `index` is refused with an error that names
+`index`, and leaving the message unspecified is ruled out.
+
+Scope was the "Re-review after merging main" section of `tasks.md` itself
+(the new section, `04badb3a`), plus the two commits it names:
+`7d587fd7` (rebases the `thread-read` delta on the live text after #173,
+`proposal.md`) and `696d35f7` (`design.md` D2 and D5, and a further
+`proposal.md` wording fix). I confirmed my own tree is
+`.claude/worktrees/agent-ac30fdc732197921d` on branch
+`worktree-agent-ac30fdc732197921d` before starting — not
+`piece/166-position-and-index` and not the repo root.
+
+**Every checkable claim in the two commits, run rather than read:**
+
+- **The rebase itself.** #173 (`2b53e6eb`, confirmed by
+  `git log --oneline --all -- openspec/changes/archive/2026-09-26-time-pegged-clock-post-review/`)
+  did remove the "The alternatives all invite arithmetic that means nothing"
+  paragraph from `thread-read`'s position requirement: I read the live
+  `openspec/specs/thread-read/spec.md` (lines 704–778) and confirmed that
+  paragraph is absent. I then diffed that live text word-for-word against the
+  delta's MODIFIED block (`git show HEAD:openspec/changes/position-and-index/specs/thread-read/spec.md`):
+  the block is exactly the live text plus the three changes `7d587fd7` and
+  `proposal.md` claim — the narrowed uniqueness sentence ("for two distinct
+  items returned by one read of a thread, taken across all of that read's
+  pages"), the new "determined by the place alone" paragraph, and the new
+  scenario *The item at a place carries that place's position in every read* —
+  and nothing else. The removed paragraph is correctly not reintroduced.
+- **The archived-design citation.** `design.md`'s D2 now cites
+  `openspec/changes/archive/2026-09-26-time-pegged-clock-post-review/design.md`,
+  Decision 10, bullet H2, quoting it as ending "Contracting only that leaves a
+  later change free to alter the token's form without breaking a caller that
+  stayed inside the contract." I read that file directly: Decision 10, bullet
+  H2 ends with that exact sentence, word for word. I also confirmed
+  `2026-09-26-time-pegged-clock-post-review` is #173
+  (`git log --oneline --all -- <that path>` shows `2b53e6eb … (#173)`), so the
+  citation names the right PR.
+- **D2's live-spec quote.** D2 quotes the requirement's prohibition sentence as
+  ending "…or on two items' values being adjacent or any fixed distance apart,
+  …" — this is a verbatim substring of the live requirement's actual sentence
+  (line 714), confirmed by reading it directly.
+- **D5's two quotes.** D5 now quotes, instead of paraphrasing, "the live
+  sentence" — *"Two positions SHALL be unequal for two distinct items of one
+  thread"* — and "the delta's" — *"for two distinct items returned by one read
+  of a thread, taken across all of that read's pages"*. Both are exact
+  substrings of the live requirement (line 712) and the delta block
+  respectively, confirmed by direct comparison. The commit message's own claim
+  — that these used to be paraphrases in quotation marks ("No two items of a
+  thread ever share a position" / "no two items of one read") and are now
+  actual quotes — checks out against `git show 696d35f7`'s diff.
+- **The base commit and the PRs that landed after it.** `tasks.md` names
+  `8368b2f` as the piece's base and #175, #172, #173, #181 as having landed on
+  `main` after it. `git merge-base 0b2f2bda 2bda577f` (the piece tip before the
+  merge, and the `origin/main` tip merged in) returns `8368b2f1…` exactly, and
+  `git log --oneline 8368b2f..2bda577f` lists exactly those four PRs, in the
+  order given, and no others. `d0f56a14` is confirmed a real merge commit
+  (`Merge: 0b2f2bda 2bda577f`).
+- **`openspec validate` on the merged tree.** Ran `openspec validate
+  position-and-index --strict` myself: passes ("Change 'position-and-index' is
+  valid").
+- **The commit list `tasks.md` says this round covers.** `git log --oneline
+  d0f56a14..HEAD` (excluding the commit that adds the section itself) returns
+  exactly `7d587fd7` and `696d35f7` — matching the two bullets under "This
+  round covers".
+
+**Readability of the prose itself.** Both commit messages are self-contained:
+each states what changed, why (citing the specific upstream commit and what it
+did), and how the claim was checked (a word diff against the live spec), without
+depending on anything in `findings/`, which is deleted before archive. The new
+`tasks.md` section reads clearly on its own — it states why the first closer
+stopped, lists the three commits in the same order it discusses them, and gives
+a reason for each of the two rows it marks as not re-run, consistent in style
+with the file's two earlier re-review sections.
+
+**No findings.** Every quote, citation, file path and commit SHA in `7d587fd7`,
+`696d35f7`, `proposal.md`, `design.md` and the new `tasks.md` section checked
+out exactly as claimed. Nothing to tick.
