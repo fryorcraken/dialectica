@@ -1,3 +1,9 @@
+## Purpose
+
+Defines what the moderation screen renders and, more load-bearing than that, what its controls MUST NOT claim. Every control on the screen is inert in this build, because the core contract carries no moderation-publishing method, and an inert destructive control is a hazard rather than a neutral placeholder: a moderator who believes a post is hidden stops dealing with it. So this capability contracts the account the screen gives of its own inertness, the ceiling on what moderating can reach, and the separation between its two lists.
+
+`moderation-resolution` owns how a moderation is decided once one exists, and nothing below restates it; this screen publishes no moderation and resolves none. The address abbreviation belongs to the view's address component, which this screen uses and does not redefine.
+
 ## ADDED Requirements
 
 ### Requirement: The screen states that nothing it offers takes effect
@@ -85,6 +91,26 @@ test of whether a claim belongs in a contract or in a comment.
 - **THEN** what it states is that readers are asked to hide the post
 - **AND** nothing rendered states that a post is deleted or that a person is
   removed from the Stoa or the network
+
+### Requirement: The screen does not state or imply that the user moderates the Stoa
+
+Nothing the screen renders MUST state or imply that the user moderates the Stoa
+it was opened for, or holds any authority over it.
+
+The route to this screen is not gated on moderator standing, and nothing on the
+screen establishes that standing: `stoa-membership` states that a listed Stoa
+means the user chose it, not that the user governs it. A screen that addressed
+its reader as the Stoa's moderator would be asserting a fact nothing checked, on
+the one screen where a reader who believed it would act on it.
+
+This requirement fixes the claim that is forbidden, not the words a claim would
+use.
+
+#### Scenario: No moderator standing is claimed for the reader
+
+- **WHEN** the screen is rendered
+- **THEN** nothing rendered states that the user moderates the Stoa, or holds
+  authority or permission over it
 
 ### Requirement: The two lists are two decisions, and unmaking one does not unmake the other
 
