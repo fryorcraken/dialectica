@@ -981,6 +981,31 @@ mod tests {
     }
 
     #[test]
+    fn two_connections_appending_at_once_both_store_everything() {
+        // The inbound processor appends what arrives while a dispatch handler
+        // appends what the user publishes, each on its own connection. A
+        // connection that met the other's write lock and gave up at once would
+        // lose an op as "database is locked"; rusqlite's connections wait on a
+        // busy database instead, which is what this pins.
+        let dir = TempDir::new("two-writers");
+        let path = dir.file("ops.sqlite");
+        drop(SqliteOpLog::open(&path).unwrap());
+        std::thread::scope(|s| {
+            for writer in 0..2u64 {
+                let path = &path;
+                s.spawn(move || {
+                    let mut log = SqliteOpLog::open(path).unwrap();
+                    for n in 0..50 {
+                        let op = signed(a_post_at(&format!("writer {writer}"), n));
+                        log.append(op, Arrival::unordered()).unwrap();
+                    }
+                });
+            }
+        });
+        assert_eq!(SqliteOpLog::open(&path).unwrap().len().unwrap(), 100);
+    }
+
+    #[test]
     fn the_op_log_file_name_is_pinned() {
         // A persisted name: renaming it strands every existing peer's ops in a
         // file nothing opens any more. Hardcoded rather than read back from the

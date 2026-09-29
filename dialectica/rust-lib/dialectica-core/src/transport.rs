@@ -698,11 +698,41 @@ pub fn publish<L: OpLog>(
 
     // The channel is looked up AFTER the append, so that a Stoa with no channel
     // still stores the op. Checking first and returning early would lose it.
+    addressed(id, stoa, payload, channels)
+}
+
+/// Say what to send, and where, for an op this peer **already holds**.
+///
+/// # The half of [`publish`] that does not append
+///
+/// The module's publish handlers append through `authoring`, which stamps the
+/// op's clock and so is the only code that can make the op; the adapter then
+/// hands the op off after the reply. So the append and the handoff happen at two
+/// moments, and this is the second one on its own. Both go through
+/// [`addressed`], so "is a channel open for this Stoa, and which one" has one
+/// answer whichever way the op arrived here.
+///
+/// The payload is the stored op's wire form — `op-transport`'s "the payload
+/// handed to the transport is the op's wire form as stored" — and nothing is
+/// written: there is no `&mut` log here to write to.
+pub fn handoff(stored: &SignedOp, channels: &OpenChannels) -> Result<Publishable, PublishError> {
+    let payload = stored.to_bytes().map_err(PublishError::Unencodable)?;
+    addressed(stored.op.id(), stored.op.stoa, payload, channels)
+}
+
+/// The channel an op goes on, or [`PublishError::NoChannel`] when none is open.
+///
+/// Never opens one: `channels` is borrowed shared, so opening is unreachable.
+fn addressed(
+    id: OpId,
+    stoa: Address,
+    payload: Vec<u8>,
+    channels: &OpenChannels,
+) -> Result<Publishable, PublishError> {
     let identity = ChannelIdentity::of(&stoa);
     if !channels.is_open(identity.channel_id()) {
         return Err(PublishError::NoChannel { stoa, id });
     }
-
     Ok(Publishable {
         id,
         channel_id: identity.channel_id,
@@ -3371,5 +3401,41 @@ mod tests {
         assert_eq!(in_one.channel_id, ChannelIdentity::of(&one).channel_id());
         assert_eq!(in_two.channel_id, ChannelIdentity::of(&two).channel_id());
         assert_ne!(in_one.channel_id, in_two.channel_id);
+    }
+
+    // ─── Handing off an op already held ───────────────────────────────────
+
+    #[test]
+    fn a_handoff_carries_the_stored_wire_form_on_the_ops_own_channel() {
+        let one = a_stoa("Agora");
+        let two = a_stoa("Lyceum");
+        let mut channels = OpenChannels::new();
+        channels.open(&ChannelIdentity::of(&one));
+        channels.open(&ChannelIdentity::of(&two));
+        let op = signed_post_in(two, "held");
+
+        let handed = handoff(&op, &channels).unwrap();
+
+        assert_eq!(handed.id, op.op.id());
+        assert_eq!(handed.channel_id, ChannelIdentity::of(&two).channel_id());
+        assert_eq!(handed.payload, op.to_bytes().unwrap());
+    }
+
+    #[test]
+    fn a_handoff_with_no_open_channel_names_the_op_and_its_stoa() {
+        let stoa = a_stoa("Agora");
+        let op = signed_post_in(stoa, "held");
+        // Another Stoa's channel open, so "some channel is open" is not enough.
+        let mut channels = OpenChannels::new();
+        channels.open(&ChannelIdentity::of(&a_stoa("Lyceum")));
+
+        assert_eq!(
+            handoff(&op, &channels),
+            Err(PublishError::NoChannel {
+                stoa,
+                id: op.op.id()
+            })
+        );
+        assert_eq!(channels.len(), 1, "a handoff opened a channel");
     }
 }

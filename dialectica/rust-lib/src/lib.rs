@@ -26,6 +26,12 @@
 #[cfg(logos_scaffold)]
 use dialectica_core as core;
 
+// The generated delivery client, for its associated event decoder. The scaffold
+// emits one module per declared dependency at crate root, so the path exists only
+// in a builder build — gated with everything else that names it.
+#[cfg(logos_scaffold)]
+use crate::delivery_module::DeliveryModuleClient;
+
 // `RustModuleContext` is defined by the generated scaffold. The contract trait
 // below mentions it and must stay ungated (the generator reads this file as
 // text), so without the scaffold the trait would not compile and `cargo test`
@@ -562,6 +568,94 @@ struct Dialectica {
     /// it, because there was nothing compiled to see. See
     /// [`core::wire::OnboardingSession`] for the defect and the fix.
     onboarding: core::wire::OnboardingSession,
+    /// Delivery's wiring: started once from `on_context_ready`, then handed each
+    /// recorded membership and each published op. Every decision it makes is in
+    /// [`core::delivery`]; this file supplies the four calls ([`DeliveryModule`])
+    /// and the event subscription. `Default` like the fields above, so the one
+    /// parameterless constructor is unchanged.
+    delivery: core::delivery::Delivering,
+}
+
+/// The delivery module, as the seam [`core::delivery::Delivery`] names it.
+///
+/// **Four one-line calls and nothing else**, because nothing in this file is
+/// compiled by `cargo test`: whether a reply is a decline, what to call next and
+/// what to log are all [`core::delivery`]'s. Each call is bounded by
+/// [`core::delivery::CALL_TIMEOUT`], which outlasts delivery's own 30 s callback
+/// timeout — see its doc for why the default 20 s is the wrong bound.
+///
+/// There is no `stop` here, and there must never be: the node is shared by every
+/// module in the context (`op-transport`), and a core test reads this file to
+/// hold that.
+#[cfg(logos_scaffold)]
+struct DeliveryModule;
+
+#[cfg(logos_scaffold)]
+impl core::delivery::Delivery for DeliveryModule {
+    fn create_node(&self, config: &str) -> Result<serde_json::Value, String> {
+        modules()
+            .delivery_module
+            .create_node_with_timeout(config, core::delivery::CALL_TIMEOUT)
+            .map_err(|e| e.to_string())
+    }
+
+    fn start_node(&self) -> Result<serde_json::Value, String> {
+        modules()
+            .delivery_module
+            .start_with_timeout(core::delivery::CALL_TIMEOUT)
+            .map_err(|e| e.to_string())
+    }
+
+    fn channel_create(
+        &self,
+        channel_id: &str,
+        content_topic: &str,
+        sender_id: &str,
+    ) -> Result<serde_json::Value, String> {
+        modules()
+            .delivery_module
+            .channel_create_with_timeout(
+                channel_id,
+                content_topic,
+                sender_id,
+                core::delivery::CALL_TIMEOUT,
+            )
+            .map_err(|e| e.to_string())
+    }
+
+    fn channel_send(&self, channel_id: &str, payload: &[u8]) -> Result<serde_json::Value, String> {
+        modules()
+            .delivery_module
+            .channel_send_with_timeout(channel_id, payload, core::delivery::CALL_TIMEOUT)
+            .map_err(|e| e.to_string())
+    }
+}
+
+/// Subscribe to `channelMessageReceived` — the one delivery event this
+/// application listens to — and hand [`core::delivery`] each event as read by
+/// the generated decoder: `Some` fields, or `None` for an event that did not
+/// decode.
+///
+/// No other event is subscribed to, so neither a plain `messageReceived` nor a
+/// report on this peer's own send (`channelMessageSent`) has a route to the op
+/// log. A core test reads this file for that.
+#[cfg(logos_scaffold)]
+fn channel_messages(
+) -> Result<impl Iterator<Item = Option<core::delivery::Arriving>> + Send + 'static, String> {
+    let mut delivery = modules().delivery_module;
+    let subscription = delivery
+        .on_channel_message_received()
+        .map_err(|e| e.to_string())?;
+    Ok(subscription.map(|event| {
+        DeliveryModuleClient::decode_channel_message_received(&event).map(|m| {
+            core::delivery::Arriving {
+                channel_id: m.channel_id,
+                sender_id: m.sender_id,
+                payload: m.payload,
+                timestamp: m.timestamp,
+            }
+        })
+    }))
 }
 
 #[cfg(logos_scaffold)]
@@ -699,11 +793,10 @@ impl Dialectica {
     /// leaves the op published, and there is no outcome to wait for — so a call
     /// that hung on delivery cannot be written here.
     ///
-    /// **The channel identity is `op-transport`'s to settle, not this file's.**
-    /// Until that capability lands there is nothing to hand an op to, so the
-    /// sink is a no-op that logs. A no-op is honest; inventing a channel-naming
-    /// scheme here would be two peers computing different values and opening
-    /// channels nobody else is in — silently, and permanently.
+    /// The sink hands the op id to [`core::delivery::Delivering::published`],
+    /// which only enqueues: the send happens on the delivery worker after this
+    /// reply has gone, on the channel `op-transport` derives, with the op's wire
+    /// form read back from the log.
     fn publishing<F>(&mut self, request: &str, handler: F) -> String
     where
         F: FnOnce(
@@ -720,6 +813,7 @@ impl Dialectica {
             );
         };
         let dir = std::path::PathBuf::from(dir);
+        let delivery = &self.delivery;
 
         core::guarded("opening the publish path's stores", || {
             // The Stoa, read THROUGH `core` before anything is opened, so this is
@@ -792,16 +886,7 @@ impl Dialectica {
                 asserted_ms: now_ms(),
             };
 
-            handler(request, &mut log, &who, &mut |id| {
-                // `op-transport` owns what happens here. Logged rather than
-                // silent, so "the op was published and went nowhere" is visible
-                // in a daemon log rather than inferred from a peer never seeing
-                // it.
-                eprintln!(
-                    "dialectica published {} — delivery is not wired yet (op-transport)",
-                    id.to_hex()
-                );
-            })
+            handler(request, &mut log, &who, &mut |id| delivery.published(id))
         })
     }
 }
@@ -816,12 +901,14 @@ impl Dialectica {
 // and pass it in; it may not make a decision. `storage_dir()` plus one `core` call
 // is the shape.
 //
-// Counted rather than asserted, because the claim this replaces was a miscount.
-// Of the ten methods below, three — `version`, `ping`, `panic_probe` — are
-// single-line forwards, because they need no path. The other seven are multi-line:
-// five are `storage_dir()` plus a `core` call, `delivery_channel_exists` also
-// because `modules()` calls `lp_*` symbols undefined in a test binary (PLAN.md
-// §2.3), and `on_context_ready` because it is the one setter.
+// Which bodies are more than one line, and why — named rather than counted,
+// because a count here went stale as methods were added and nothing noticed.
+// `version`, `ping`, `panic_probe` and `display_name` forward with no path. Most
+// of the rest are `storage_dir()` plus a `core` call. `delivery_channel_exists` is
+// longer because `modules()` calls `lp_*` symbols undefined in a test binary
+// (PLAN.md §2.3), and `on_context_ready` because it is the one setter and the one
+// place delivery is started — with a host path, the host clock and the host's
+// delivery client, every decision on the far side in `core::delivery`.
 //
 // This used to say "if a body here ever grows past one line, that logic belongs in
 // `core`", with `delivery_channel_exists` excused as "the one place in this file
@@ -949,11 +1036,15 @@ impl DialecticaModule for Dialectica {
             // `core::keystore::creator_key_in` for why that distinction is the
             // whole point — and for why the pair it used to return collapsed to
             // one value when the author address was deleted.
+            //
+            // The sink asks for the Stoa's channel once the membership is
+            // recorded, and only then; it enqueues and returns, so the reply never
+            // waits on delivery (`stoa-membership`).
             core::create_stoa(
                 &request,
                 || core::keystore::creator_key_in(&dir),
                 store,
-                &mut |_| {},
+                &mut |stoa| self.delivery.joined(stoa),
             )
         })
     }
@@ -964,7 +1055,9 @@ impl DialecticaModule for Dialectica {
             Err(e) => return e,
         };
         core::with_membership_store(&core::membership_path_in(&dir), |store| {
-            core::join_stoa(&request, store, &mut |_| {})
+            // As `create_stoa` above: the channel is asked for after the
+            // membership is recorded, and a refused join never reaches the sink.
+            core::join_stoa(&request, store, &mut |stoa| self.delivery.joined(stoa))
         })
     }
 
@@ -1112,6 +1205,20 @@ impl DialecticaModule for Dialectica {
         // The ONLY place this is set. Every read this module serves needs it and
         // nothing else supplies it.
         self.persistence_path = Some(ctx.instance_persistence_path.clone());
+
+        // Delivery, once per process: subscribe, then ask for the node, then for
+        // every Stoa's channel — `core::delivery::Delivering::start` owns that
+        // order and the once-ness. It returns at once: every delivery call runs
+        // on its worker thread, which is what lets this hook, and every reply
+        // after it, never wait on delivery.
+        self.delivery.start(
+            DeliveryModule,
+            core::delivery::Stores::in_dir(std::path::PathBuf::from(
+                &ctx.instance_persistence_path,
+            )),
+            now_ms,
+            channel_messages,
+        );
     }
 }
 
