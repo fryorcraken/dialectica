@@ -144,3 +144,7 @@ This re-review covered correctness only, scoped to `70bef050` per
 `tasks.md`'s assignment. I did not re-review `b55d164`, `9e550eb`, or
 `4e2b8c0` — those are readability's, architecture's, and design's rows in
 this same re-review round.
+
+## Gate record
+
+- [x] **none** — `git diff origin/main...HEAD -- dialectica/` is `wire.rs` alone and `git diff 4c7b1422...HEAD -- dialectica/rust-lib/dialectica-core/src/wire.rs` is empty (the other files that diff touches came in with the main merge), and `cargo test -p dialectica -p dialectica-core` on the current tree passes 1185 unit and 30 e2e tests, so the earlier clean verdict holds.
