@@ -101,3 +101,50 @@ merge `cb46319d`. The merge resolution itself is in scope and was reviewed.
       spec, the shipped code, or both; the merge resolution loses nothing;
       the new tests pass for the reasons their comments give; both full test
       suites are green at the exact counts the piece's commits claim.
+
+## Re-review round 1 `b4378cf5..218acde3`
+
+Checked the four tests `218acde3` adds to `tst_thread_reply.qml` and the
+comment reword in `dialectica-core/src/log/sqlite.rs`'s test module (no
+behaviour change, not reviewed further). Ran the baseline suite (`sh
+dialectica-ui/tests/run-qml-tests.sh dialectica-ui/tests/tst_thread_reply.qml`
+→ 18/18 pass), then mutated `DThreadScreen.qml` and `PostHeader.qml` in turn
+and re-ran, restoring each mutation before the next:
+
+- `test_no_reply_affordance_is_reachable_with_no_root_identifier`: removing
+  the `screen.threadId !== ""` clause from `replyComposerOpen`'s `visible`
+  alone does not fail it (18/18 still pass) — `reload()`'s own early-return
+  for `threadId === ""` (line 258) independently keeps `readState` off
+  `"ok"`, so the two guards are defense in depth and the test can't
+  distinguish which one holds. Removing *both* (the `visible` clause and
+  `reload()`'s `threadId === ""` half of its early-return) together does
+  fail it, on the line the test itself names. The test's own comment
+  correctly attributes enforcement to `reload()`, so this is expected
+  behavior from redundant guards, not a test defect — recorded here so
+  whoever reads it doesn't rediscover the same single-guard mutation and
+  mistake it for a gap.
+- `test_a_root_items_own_missing_id_does_not_reach_the_reply_parent`:
+  rebinding `parentOp` from `screen.threadId` to
+  `screen.items.length > 0 ? screen.items[0].id : screen.threadId` (the
+  exact regression the test's own comment names) fails it — `Unable to
+  assign [undefined] to QString`, expected `"root1"` got `""`.
+- `test_the_screen_threads_the_items_sanitiser_report_through_to_the_render`:
+  rebinding the `SanitisedText.value` passed to the root row from
+  `post.modelData.body` to `{ text: post.modelData.body.text, removed: 0,
+  marked: 0 }` (dropping `removed`/`marked` on the way through, the wiring
+  defect the comment names) fails it — expected removed count 2, got 0.
+- `test_the_marker_and_the_inert_row_state_nothing_about_earlier_content`:
+  both halves verified independently. Changing `PostHeader.qml`'s marker
+  text from `"edited"` to `"edited (from rev3)"` fails the marker-count
+  assertion (expected 1, got 0). Adding a third `Text { text: "revision 3
+  of 5" }` inside the `earlierVersionsInert` row fails the row-text-count
+  assertion (expected 2, got 3).
+
+All four tests were restored to their unmutated source after each check;
+`git diff --stat` is empty for every file outside this findings file.
+
+- [x] **re-review round 1 `b4378cf5..218acde3`: no findings** — read the four
+      new tests, `DThreadScreen.qml`, `DComposer.qml`, `Core.qml`,
+      `PostHeader.qml` and the comment-only `sqlite.rs` reword, and mutated
+      each test's named target in turn; all four fail for the reason their
+      own comment gives, and the sqlite.rs change has no behaviour to break.
