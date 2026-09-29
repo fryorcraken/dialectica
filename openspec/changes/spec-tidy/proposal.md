@@ -19,29 +19,29 @@ main, not only against its `tasks.md`. A delta is corrected against the live spe
 before it is promoted, and each promoted spec was diffed against its delta.
 
 - **`sqlite-projection`: archived** (shipped in #20). Before promotion, its
-  op-log delta was rebased onto the live spec (`5abdf9a`). As written, it would
+  op-log delta was rebased onto the live spec (`1f5df8f`). As written, it would
   have deleted the blank-title encoding refusal, and it would have promoted a
   decay point taken from transport metadata, which `op-clock` had stopped using.
-  It was then archived (`01563a9`).
+  It was then archived (`0519416`).
 - **`first-run-identity`: archived** (shipped in #128). Before promotion, two
-  sentences that later merges had made false were corrected (`66fe538`). It was
-  then archived (`1f73bf7`).
+  sentences that later merges had made false were corrected (`b1d8966`). It was
+  then archived (`b545d3b`).
 - **`ui-thread-view`: archived** as a new `thread-view` capability (shipped in
-  #122). Before promotion (`fec783a`):
+  #122). Before promotion (`584359b`):
   - Two citations were moved to `view-navigation`, where the requirements they
     name now live.
   - Two `docs/PLAN.md` citations were dropped.
   - A scenario for a reply affordance the screen does not offer was taken out of
     scope.
 
-  It was then archived (`e519e8d`).
+  It was then archived (`d70f662`).
 - **`ui-remaining-screens`: archived** (shipped in #124), adding one
-  `stoa-navigation-view` requirement (`cd34e2b`).
+  `stoa-navigation-view` requirement (`2fa2b11`).
 - **`moderation-screen`: archived** as a new `moderation-view` capability, with
   one `stoa-navigation-view` requirement amended (shipped in #127). The screen,
   its tests, the route in and out, and the row placeholder are all on main. No
   moderation-publishing method exists, and the screen's inertness rests on that
-  absence. Before promotion, four corrections were made (`b6ff21e`):
+  absence. Before promotion, four corrections were made (`8e508d8`), and it was then archived (`eb8be6b`):
   - The `MODIFIED` block had silently dropped a live paragraph banning any phrase
     that asserts nothing has been received for a Stoa. `validate --strict`
     cannot see a dropped paragraph. The paragraph is restored, applied to a
@@ -120,11 +120,11 @@ lives here:
 A delta cannot carry a Purpose, so these are direct edits to the live specs:
 
 - **`view-navigation`'s Purpose** now names `thread-view` and `moderation-view`
-  where it said "the thread screen's own capability" (`eaea6d5`).
+  where it said "the thread screen's own capability" (`06bfd48`).
 - **`thread-view`'s and `moderation-view`'s Purposes** now say that
   `view-navigation` owns how their screen is entered and left. `thread-view` no
   longer lists "how the screen is entered and left" among what it defines
-  (`e4f9752`).
+  (`ff55cf7`).
 
 No requirement in this change's own deltas changes behaviour. Each one replaces
 a citation, removes a contradiction, fixes a sentence that said the opposite of
