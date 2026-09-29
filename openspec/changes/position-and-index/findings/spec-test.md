@@ -242,3 +242,107 @@ with nothing failed, confirming the refactor changed no other test's fixture
 behaviour. No mutation is left in the tree; `git diff` on `wire.rs` is empty.
 
 No findings from this round.
+
+## Re-review after merging main
+
+Scope: `tasks.md`'s "Re-review after merging main" section — the merge
+(`d0f56a14`), the `thread-read` delta's rebase onto the live text after #173
+(`7d587fd`), and the `design.md`/`proposal.md` quote corrections (`696d35f`),
+on this worktree (`worktree-agent-a5d9ecba45521f9b0`). Read the owner's
+2026-09-25 decision comment on issue #166
+(https://github.com/fryorcraken/dialectica/issues/166#issuecomment-5832956024)
+before starting: it settles item 2 (a malformed `index` is refused, naming
+`index`; leaving the message unspecified is ruled out) and leaves item 1
+unchanged, matching what both deltas already state.
+
+**1. Scenario coverage on the merged tree.** Read both delta files in full
+against the live `openspec/specs/thread-read/spec.md` (now carrying #173's
+removal) and confirmed nothing regressed:
+
+- `specs/identity-onboarding/spec.md` is untouched since its one commit
+  (`4960f249`), predates every main PR that landed (#172, #173, #175, #181),
+  and none of those touched `openspec/specs/identity-onboarding/spec.md` or
+  `openspec/specs/feed-read/spec.md` (`git log --oneline` on both, checked).
+  Its three scenarios are still pinned exactly as the first round recorded:
+  `each_malformed_kind_of_index_is_refused_by_name`,
+  `a_malformed_index_stores_nothing`,
+  `a_selection_outside_the_set_is_refused_and_stores_nothing`.
+- `specs/thread-read/spec.md`'s rebase (`7d587fd`) removes exactly one
+  paragraph — "The alternatives all invite arithmetic that means nothing...",
+  the same paragraph #173 removed from the live requirement (`git show
+  2b53e6eb -- openspec/specs/thread-read/spec.md`) — and changes nothing
+  else. Compared the full requirement block word by word against the live
+  file (`openspec/specs/thread-read/spec.md` lines 704-778): every paragraph
+  and every scenario the delta carries is either identical live text or one
+  of this piece's three own changes (the narrowed uniqueness sentence, the
+  place-rule paragraph, the new "item at a place" scenario). The removed
+  paragraph carried no SHALL/MUST and no scenario of its own — pure
+  reasoning — so no scenario lost its test. All 11 scenarios still resolve to
+  the same tests the first round found:
+  `a_position_is_the_same_whatever_page_size_the_read_used`,
+  `every_item_carries_its_index_in_the_whole_thread_as_its_position`,
+  `no_two_items_of_a_thread_share_a_position_even_when_they_share_an_author`,
+  `the_item_at_a_place_carries_that_places_position_in_every_read`, plus the
+  unchanged asserted-time tests already cited in the first round.
+- Confirmed `dialectica/rust-lib/dialectica-core/src/wire.rs` and
+  `dialectica/rust-lib/dialectica-core/src/thread.rs` carry no changes from
+  main between the piece's base and the merge (`git log --oneline
+  8368b2f..d0f56a14 -- <path>` on both lists only this piece's own #166
+  commits), so the merge could not have silently altered the code these
+  tests exercise.
+
+**2. Mutation re-measurement on the merged tree (budget: the three the brief
+named, all run and reverted).** Baseline: `cargo test --manifest-path
+dialectica/rust-lib/Cargo.toml -p dialectica -p dialectica-core` green, 1185
+passed (core) + 30 passed (end-to-end), 0 failed.
+
+- **Mutation 1 — position equal to the item's own op id, in
+  `thread_page_json`** (`wire.rs`): changed `"position": item.position,` to
+  `"position": item.id,`. Ran `cargo test --manifest-path
+  dialectica/rust-lib/Cargo.toml -p dialectica-core position`. **Result:
+  failed** —
+  `the_item_at_a_place_carries_that_places_position_in_every_read` panicked
+  ("sit at the same place but carry different positions"), because two
+  different items (different op ids) now claim different positions at a
+  shared place across the including/excluding-hidden reads.
+  `no_two_items_of_a_thread_share_a_position_even_when_they_share_an_author`
+  and `a_position_is_the_same_whatever_page_size_the_read_used` stayed green,
+  as expected — op ids are already unique and already page-size-stable, so
+  this mutation is invisible to those two. Reverted; `git diff` on the file
+  empty afterward.
+- **Mutation 2 — a per-page restarting index, in `thread_page_json`**:
+  added `.enumerate()` to the item iterator and set `"position":
+  mutation_index.to_string(),` instead of `item.position`. Ran the same
+  filtered command. **Result: failed** — both
+  `no_two_items_of_a_thread_share_a_position_even_when_they_share_an_author`
+  (two items at index 0 across the two authors' pairs) and
+  `a_position_is_the_same_whatever_page_size_the_read_used` (position "0" at
+  every `perPage` vs. "0".."4" at a single page) failed.
+  `the_item_at_a_place_carries_that_places_position_in_every_read` stayed
+  green, as expected — a per-page index restarts identically in both the
+  including- and excluding-hidden reads, and that test only compares those
+  two reads against each other. Reverted; `git diff` on the file empty
+  afterward.
+- **Mutation 3 — `{field}` dropped from `parse_index`'s wrong-type message**:
+  changed `Err(error_json(&format!("{field} must be a number")))` to
+  `Err(error_json("must be a number"))`. Ran `cargo test --manifest-path
+  dialectica/rust-lib/Cargo.toml -p dialectica-core
+  each_malformed_kind_of_index_is_refused_by_name`. **Result: failed** — "the
+  refusal of an index that is a string (\"two\") must name `index`:
+  {\"error\":\"must be a number\"}". Reverted; `git diff` on the file empty
+  afterward.
+
+Re-ran the full suite after all three reverts: `cargo test --manifest-path
+dialectica/rust-lib/Cargo.toml -p dialectica -p dialectica-core` green again,
+1185 + 30 passed, 0 failed. `git status --short` on the whole tree is empty —
+no mutation, and nothing else, is left in place.
+
+**3. Soundness of the rebase itself.** The MODIFIED block's uniqueness
+sentence ("...for two distinct items returned by one read of a thread, taken
+across all of that read's pages") and the place-rule paragraph it sits beside
+are unchanged by the rebase — the rebase touched only the removed paragraph,
+below both. No new self-consistency question is introduced by merging main.
+
+No findings from this round.
+
+- [x] **none** — no spec-test findings on the merged tree; all three named mutations (position = op id, per-page index, `{field}` dropped from `parse_index`) failed the tests that name them, and the full suite is green (1185 + 30).
