@@ -19,6 +19,16 @@ not reviewed here.
   own public key (hardcoded per-signer, not merely "differ"), and the fixture
   gives the non-creator author no standing — so it can't pass by the write
   accidentally storing a constant or the wrong field. Not tautological.
+- **op-log's "Every read is defined over the ops the peer happens to hold"**,
+  the storage-failure half: `a_read_against_storage_broken_after_open_is_a_
+  failure_not_an_empty_result` read in full. It first asserts the fixture is
+  genuinely non-empty (`len() == 1`), breaks storage through the log's own
+  already-open connection (`DROP TABLE ops`, bypassing `open`'s guard
+  entirely, which is necessary since `check_layout` would otherwise catch a
+  reopen first), then asserts `iter()` returns `Err(OpLogError::Storage(_))`
+  rather than `Ok(vec![])` or a panic. This cannot pass on an implementation
+  that swallows the error into an empty result, matching the scenario "A
+  storage failure is reported, not confused with emptiness" exactly.
 - **Both reworded `NO SPEC:` markers** cite requirements that say what they
   claim, checked verbatim against the live specs:
   - `tst_moderation_screen.qml:312` cites `moderation-view`'s "The screen does
@@ -64,55 +74,123 @@ not reviewed here.
   expected count (1) both before and after publish, separately asserts the
   re-read happened (`reads >= 2`), so it cannot pass on a screen that simply
   never reads again.
-
-## Not reached — noted as limits, not findings
-
-- **Mutation testing was attempted and blocked, not completed.** One `Edit`
-  attempt (flipping `sqlite.rs`'s `author` column write to store `stoa` bytes,
-  to independently reproduce the mutation `a98c434`'s commit message claims)
-  and one read-only `Grep` on the same file were both refused by the harness's
-  auto-mode classifier ("Modify Shared Resources") — the same failure mode
-  recorded in this repo's git history for `wire.rs` on a prior piece. I did not
-  retry through another route, per the standing instruction not to pursue a
-  denied outcome by another tool. This review therefore rests on the
-  self-reported mutation evidence in commits `a98c434` and `5f95e7e` (both
-  ancestors of `HEAD`, both describing a specific proved-red mutation and its
-  revert) rather than an independently reproduced one.
 - **`identity-onboarding`'s two requirements promoted from `first-run-identity`**
   ("A peer with no master key can obtain one without naming a Stoa" and
-  "Obtaining a master key never replaces one") were not checked against
-  `wire.rs`'s `mint_master_key` tests before time ran out. The commit message
-  for `a98c434` claims these are pinned by "wire.rs's mint_master_key tests";
-  not independently verified here.
-- **`thread-view`'s and `moderation-view`'s remaining requirements** (beyond
-  the two `NO SPEC` markers and the folded route requirements above) were not
-  individually walked against `tst_thread_nesting.qml` /
-  `tst_thread_states.qml` / `tst_moderation_screen.qml` scenario-by-scenario.
-  Relied on `a98c434`'s coverage survey plus the spot checks above.
+  "Obtaining a master key never replaces one"), checked scenario by scenario
+  against `wire.rs`'s mint tests:
+  - "A peer with no master key obtains one" →
+    `a_first_run_mint_writes_a_master_key_and_reports_it_as_new` — asserts
+    against the key derived independently from the file on disk, not an echo
+    of the reply.
+  - "The key obtained is the key a Stoa creation uses" →
+    `a_minted_key_is_the_one_a_stoa_creation_names_as_creator` — an
+    end-to-end relation (no hardcoded literal, since the root is generated).
+  - "Creation is still refused before a key exists" →
+    `creation_still_fails_before_a_mint`, explicitly paired with the test
+    above so the two-explanations trap can't hide a `create_stoa` that
+    succeeds unconditionally.
+  - "No per-Stoa choice is recorded" → `a_mint_records_no_per_stoa_choice`.
+  - "Protection at rest is reported" → `a_mint_with_no_passphrase_reports_
+    the_key_as_unencrypted` / `a_mint_under_a_passphrase_reports_the_key_as_
+    encrypted` (both directions, not just the constant one).
+  - "A second request replaces nothing" → `a_mint_over_an_existing_keystore_
+    replaces_nothing_and_reports_it_as_not_new` — compares the keystore
+    file's raw bytes, not just the reported key, specifically to catch a
+    same-root re-encrypt under a fresh salt; its own comment documents a
+    proved-red mutation (deleting the `exists()` guard).
+  - "A second request is a success, not a refusal" → same test,
+    `wasNew: false` and no error.
+  - "An existing key's protection is reported from the key itself" →
+    `an_existing_keystores_protection_is_read_off_the_file_and_not_off_the_
+    argument` — deliberately chose the direction that can actually
+    distinguish "read from file" from "read from argument" (the reverse
+    direction would be vacuously true, per its own comment), and documents a
+    proved-red mutation.
+  All scenarios covered, no tautological test found.
 - **`stoa-navigation-view`'s row-separator requirement** (from
-  `ui-remaining-screens`, task 1.4) was not independently checked against
-  `tst_stoa_screens.qml`.
-- **`sqlite.rs`'s second new test**,
-  `a_read_against_storage_broken_after_open_is_a_failure_not_an_empty_result`
-  (op-log's "Every read is defined over the ops the peer happens to hold"),
-  was not read in full; only its commit-message description was available.
+  `ui-remaining-screens`, promoted with no correction): all three scenarios
+  covered in `tst_stoa_screens.qml` — `test_every_rendered_row_is_separated_
+  from_the_next` (3 rows, count-against-count rather than existence, so it
+  can't be satisfied by a single separator for the whole list), `test_one_
+  row_draws_exactly_one_boundary` and `test_the_row_count_and_the_separator_
+  count_move_together` (the 1-row case specifically catches a separator
+  dropped on the last row, and the 1-vs-4 pairing catches a separator hoisted
+  out of the delegate into a fixed count), and `test_an_empty_list_draws_no_
+  row_boundary` (catches a separator hoisted to the list container, which
+  would render even with no rows). Well-reasoned test design; no gap. The
+  archive commit (`2fa2b11`) also records that a prior spec-test review
+  already reproduced both mutations tasks.md claims for this requirement.
 
-None of the above surfaced a suspected defect — they are unchecked, not
-flagged. Given the mutation-tooling block, I have one settled finding to
-report: the mutation-testing obligation in part 2 of this review could not be
-discharged independently this session.
+## New findings from the completed coverage walk
 
-- [ ] **runner** — mutation testing for this piece's spec-test review was
+- [ ] **`tester`** — `thread-view`'s "The reply composer is wired to the
+      publish call and names the parent it is under" has a scenario "A post
+      carrying no identifier offers no working reply affordance" (`WHEN` the
+      screen is given an item carrying no op id and its reply affordance is
+      acted on, `THEN` no publish call is made and no request is sent
+      omitting the field that would have named the parent). No test in
+      `tst_thread_reply.qml` gives the root item no `id` — every fixture
+      (`makeScreen`, `rootItem()`) sets one. This screen offers exactly one
+      composer, on the root, so the gap is concrete: a regression that made
+      the reply call fire with `parent: undefined` for a rootless item would
+      pass every existing test. Severity: moderate — this is the guard the
+      requirement's own reasoning calls out ("no value derived from a
+      missing field reach a core call").
+- [ ] **`tester`** — `thread-view`'s "Every string rendered from an item is
+      rendered as the read supplied it" (3 scenarios: a body rendered as
+      returned, a sanitiser report renderable, a marked character not
+      corrected) has no test in `tst_thread_states.qml`, `tst_thread_reply.
+      qml` or `tst_thread_nesting.qml` — none of the three files mentions
+      "sanitis" at all. `tst_sanitised_text.qml` proves a shared component
+      can render a sanitiser report correctly, but that is a component test,
+      not an integration one: it does not show the thread screen actually
+      passes a thread item's sanitiser-report fields through to that
+      component. This is the "test at a layer that cannot observe the
+      behaviour" shape — a wiring defect between the item model and the
+      render path would not be caught by either file alone. Severity:
+      moderate.
+- [ ] **`tester`** — `thread-view`'s "A revised post is marked as revised…"
+      scenario "The marker claims nothing about the earlier version", and
+      "The earlier-versions affordance is inert…" scenario "No earlier
+      version text is rendered", have no explicit test. `test_a_revised_item_
+      is_marked` / `test_an_unrevised_item_carries_no_marker` /
+      `test_the_marker_follows_isRevised_not_the_identifiers` only assert a
+      boolean `edited` flag, never that no text claiming to be prior content
+      is rendered; `test_the_earlier_versions_control_reaches_no_core_call`
+      proves no call is made but does not check what is rendered. Lower
+      severity than the two findings above, because there is currently no
+      data channel for earlier-version text to travel through at all (no
+      call exists, per the sibling requirement), so a violation would need a
+      hardcoded string in the view rather than a data-flow bug — but the
+      normative "SHALL NOT" is still unpinned.
+- [ ] **`tester`** — `thread-view`'s "No score, tally or vote count is
+      rendered on the thread screen" scenario "No ordering is offered as
+      vote-based" has no test (checked `tst_thread_reply.qml`,
+      `tst_thread_states.qml`, `tst_thread_nesting.qml` for
+      "vote"/"reorder"/"order" — no hit beyond the score-field check).
+      Likely vacuous today since no such control exists in this MVP, which is
+      why this is the lowest severity of the four: flagging it so it is not
+      forgotten once ordering controls are built, not because a defect is
+      suspected now.
+
+## Process finding — resolved by the runner
+
+- [x] **runner** — mutation testing for this piece's spec-test review was
       blocked both times it was attempted (`Edit` and `Grep` on `sqlite.rs`,
-      denied as "Modify Shared Resources"). The `the_stored_author_is_the_signer_regardless_of_moderator_status`
-      mutation this review most wanted to re-run independently (swap the
-      `author` column write for `stoa` bytes) rests entirely on `a98c434`'s
-      self-reported result. If an independent mutation run is needed before
-      merge, it needs a session whose permissions allow editing `sqlite.rs`,
-      or the runner's own confirmation that the self-reported evidence is
-      sufficient.
+      denied as "Modify Shared Resources"). **Runner's decision: sufficient.**
+      The tester independently ran the equivalent mutation in its own
+      session (swapping the `author`-column write for `stoa` bytes,
+      predicting and observing mismatched 32-byte arrays, then restoring),
+      recorded in the tester's hand-back and `tasks.md`'s tests row. That is
+      a second independent measurement of the same mutation my blocked
+      attempt would have been a third of.
 
 ## Verdict
 
-- [x] **none** — no test-vs-spec defect found in what this review reached
-      (see limits above for what was not reached under the time budget).
+Four new coverage-gap findings above (all `tester`'s, none blocking on their
+own reading of severity — three moderate/low, one low/vacuous), plus the
+resolved process finding. Everything else walked in this review — all five
+capabilities' promoted requirements, the two `NO SPEC` markers, the folded
+`view-navigation` requirements, the four prose-only deltas, and the two named
+`sqlite.rs`/`tst_thread_reply.qml` tests — held up with no test-vs-spec
+defect.
