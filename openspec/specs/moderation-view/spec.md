@@ -3,7 +3,7 @@
 ## Purpose
 Defines what the moderation screen renders and, more load-bearing than that, what its controls MUST NOT claim. Every control on the screen is inert in this build, because the core contract carries no moderation-publishing method, and an inert destructive control is a hazard rather than a neutral placeholder: a moderator who believes a post is hidden stops dealing with it. So this capability contracts the account the screen gives of its own inertness, the ceiling on what moderating can reach, and the separation between its two lists.
 
-`moderation-resolution` owns how a moderation is decided once one exists, and nothing below restates it; this screen publishes no moderation and resolves none. The address abbreviation belongs to the view's address component, which this screen uses and does not redefine.
+`moderation-resolution` owns how a moderation is decided once one exists, and nothing below restates it; this screen publishes no moderation and resolves none. `view-navigation` owns how the screen is reached and left. The address abbreviation belongs to the view's address component, which this screen uses and does not redefine.
 
 ## Requirements
 

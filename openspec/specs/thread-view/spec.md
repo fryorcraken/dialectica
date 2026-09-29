@@ -4,11 +4,11 @@
 Defines what the thread screen renders given one page of a thread read: the
 nesting it computes from a flat sequence, what it renders for an item whose
 parent it does not hold, how a revised post and a withheld body are presented,
-which affordances are inert because no call backs them, and how the screen is
-entered and left.
+and which affordances are inert because no call backs them.
 
-`thread-read` owns what the read returns and `composer-view` owns what the reply
-composer does once a reply is submitted or refused. Neither is restated here.
+`thread-read` owns what the read returns, `composer-view` owns what the reply
+composer does once a reply is submitted or refused, and `view-navigation` owns
+how the screen is entered and left. None of them is restated here.
 This capability contracts only the obligations that fall on the interface because
 the read's answer is flat, partial and peer-derived, and something has to decide
 what a reader is shown of that.
