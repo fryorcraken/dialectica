@@ -140,3 +140,25 @@ stale again, in the same place it was stale before:
       block is untouched. No test can show a prose inventory is right;
       `git diff origin/main...HEAD --stat -- dialectica dialectica-ui` is the
       check against it.
+
+## Re-review round 2 `cdc87c5c..55f73e39`
+
+- [x] **re-review round 2 `cdc87c5c..55f73e39`: no findings** — read `git diff
+      cdc87c5c..55f73e39` and independently re-derived every count and claim
+      it makes against the tree. `tst_thread_reply.qml` has exactly five test
+      functions (`git diff origin/main...HEAD -- dialectica-ui/tests/tst_thread_reply.qml`
+      confirms the five names and the three helpers `findByTypeName`,
+      `bodyTextOf`, `collectTexts`). `sqlite.rs` has exactly two `#[test]`
+      functions plus the `stored_author` helper, both hunks inside `mod
+      tests`. `218acde`'s reword of the stored-author test's comment is
+      comment-only, and the new quoted text ("the column is reserved:
+      'nothing writes this and no read consults it'...") now matches the real
+      `score_epoch` comment at `sqlite.rs:1468-1470` word for word — the
+      earlier fabricated citation this round's commit message says it fixed
+      is in fact fixed. `FeedScreen.qml` and `Main.qml` diffs are
+      comment-only, citing `view-navigation` requirements that exist. The
+      deferred-decision paragraph's factual claim — `DThreadScreen.qml`'s
+      only per-row control is `VoteControl { showScore: false; interactive:
+      false }` — is exactly what the file shows. `proposal.md` and
+      `tasks.md` mirror `design.md` and "No tests are pending" is true: all
+      five `tester` findings from round 1 are closed. Clean.
