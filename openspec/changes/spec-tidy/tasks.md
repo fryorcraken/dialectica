@@ -12,6 +12,7 @@
 - [x] review: spec-test — `spec-test-reviewer`
 - [x] review: design — `design-reviewer`
 - [ ] re-review: every commit after the review round — runner
+      round 1 `b4378cf5..218acde3` findings pass — spec-test, correctness, readability, design (role default models): 153c4f5 amended the design.md/proposal.md/tasks.md inventory; 218acde added four QML tests to tst_thread_reply.qml, deferred one finding, and reworded a sqlite.rs test comment; no production code, so security and architecture are not re-run
 - [ ] findings all ticked, `findings/` deleted — `closer`
 - [ ] `openspec validate --strict`, then `archive` — `closer`
 - [ ] CI green, title/body checked, PR merged — `closer`
