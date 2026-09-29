@@ -8,7 +8,7 @@
 - [x] review: correctness — `code-reviewer`
 - [x] review: security — `code-reviewer`
 - [x] review: readability — `code-reviewer`
-- [ ] review: architecture — `code-reviewer`
+- [x] review: architecture — `code-reviewer`
 - [ ] review: spec-test — `spec-test-reviewer`
 - [x] review: design — `design-reviewer`
 - [ ] re-review: every commit after the review round — runner
