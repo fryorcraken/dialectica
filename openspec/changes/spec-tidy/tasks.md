@@ -79,7 +79,10 @@ the dev-writer's. `design.md` says why the work took these shapes.
       piece touches no QML, so a green suite shows only that nothing in code
       moved. It cannot see the spec text, and no gate checks a code comment's
       citation against the live specs.
-- [ ] 4.7 Four code comments cite a route requirement this piece moved, or call
-      an archived change "unarchived" (`design.md`, Risks). Not ticked: code
-      is out of this piece's scope, so this is reported to the runner for a
-      decision and is not done here.
+- [x] 4.7 Four code comments cited a route requirement this piece moved, or
+      called an archived change "unarchived" (`design.md`, Risks). They now
+      point at `view-navigation`, `thread-view` or `moderation-view`, with
+      comment-only edits taken in on the runner's instruction. Verify:
+      `git grep -n "unarchived" -- dialectica-ui` finds nothing, the QML suite
+      passes, and `node dialectica-ui/tests/validate-ui-specs.mjs` accepts both
+      yaml files.

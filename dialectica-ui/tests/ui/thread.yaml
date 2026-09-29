@@ -6,9 +6,8 @@
 # What it observes: acting on the feed row opens its thread; the read succeeded
 # and holds the root with no replies; a reply submitted there leaves the thread,
 # read again, holding the root and the reply; the way back renders the feed.
-# The routes in and out are `view-navigation`'s. What the thread screen renders
-# is `thread-view`'s, which lives only in the unarchived
-# `openspec/changes/ui-thread-view/` — see this change's proposal.md.
+# The routes in and out are `view-navigation`'s "A thread is opened from a feed
+# row and can be left". What the thread screen renders is `thread-view`'s.
 #
 # The steps before "open its thread" only get there, and assert nothing about
 # the list or the feed; feed.yaml and create.yaml own those.

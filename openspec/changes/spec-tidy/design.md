@@ -1,10 +1,11 @@
 ## Context
 
-See `proposal.md` for what was tidied and why. This piece changes spec text
-only: five archives, each preceded where needed by a correction to its delta,
-then this change's own deltas and three in-place Purpose edits. No code, test or
-wire shape moves, so the design questions are about **how a live contract is
-changed safely**, not about how anything is built.
+See `proposal.md` for what was tidied and why. The spec work is five archives,
+each preceded where needed by a correction to its delta, then this change's own
+deltas and three in-place Purpose edits. Outside the specs, only four comments
+change, because this piece's own moves made them stale. No behaviour, test
+assertion or wire shape moves, so the design questions are about **how a live
+contract is changed safely**, not about how anything is built.
 
 Two facts about the tooling shape every decision below. Both are recorded in
 `docs/OPENSPEC-ARCHIVE.md`:
@@ -35,7 +36,8 @@ Two facts about the tooling shape every decision below. Both are recorded in
 - The "this change" wording sweep across the live specs is tracked in #186.
   It is out of scope so that this piece's review stays small.
 - `relevance-votes`.
-- Stale citations in code comments. See Risks.
+- Any code change beyond comments. The only non-spec edits are four comments
+  that this piece's own moves made stale. See Risks.
 
 ## Decisions
 
@@ -190,21 +192,24 @@ more.
     "`openspec validate --strict`, then `archive`" is that step. A merge that
     skipped it would leave main's Purposes contradicting their requirements.
 
-- **[Code comments cite requirements this piece moved]** This piece changes no
-  code, so no code comment was edited. Four comments are now stale:
-  - `Main.qml`'s comment on `openThread` cites `thread-view`'s "No thread is
-    rendered before one has been chosen". That scenario now lives in
-    `view-navigation`.
-  - `FeedScreen.qml`'s comment on the moderation route says `moderation-view`
-    contracts the reachability. `view-navigation` now does.
-  - The header comments of `dialectica-ui/tests/ui/thread.yaml` and
-    `moderation.yaml` say their capability "lives only in the unarchived"
-    change folder. The route claims in `moderation.yaml` are also now
-    `view-navigation`'s.
+- **[Code comments cite requirements this piece moved]** The archives and the
+  navigation move made four comments stale. They are fixed in this piece, as
+  comment-only edits that change no behaviour:
+  - `Main.qml`'s comment on `openThread` cited `thread-view` for "No thread is
+    rendered before one has been chosen". It now cites the `view-navigation`
+    requirement that holds that scenario.
+  - `FeedScreen.qml`'s comment on the moderation route credited
+    `moderation-view` with reachability. It now names `view-navigation`'s
+    moderation route requirement.
+  - The headers of `dialectica-ui/tests/ui/thread.yaml` and `moderation.yaml`
+    said their capability "lives only in the unarchived" change folder. They
+    now name the live requirements. `moderation.yaml` splits its route claims
+    (`view-navigation`'s) from its inertness claim (`moderation-view`'s).
 
-  Nothing enforces these citations, so no gate fails.
-  **Mitigation:** reported to the runner as a follow-up. Either extend this
-  piece's scope to comment-only edits, or fix them in a separate change.
+  **The residual risk is that nothing enforces these citations.** A later move
+  of a requirement leaves its comments stale again with every gate green.
+  `git grep -n -E "thread-view|moderation-view|view-navigation" -- dialectica-ui`
+  is the sweep that found these.
 
 - **[Short SHAs do not survive the squash]** The commits cited above and in
   `proposal.md` exist on `piece/spec-tidy` and in the PR's commit list, but

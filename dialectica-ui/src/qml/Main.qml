@@ -234,8 +234,9 @@ Item {
     // row, so this is the same judgement held a second time at the transition —
     // a guard is a job, and "is it applied everywhere?" stays a question with an
     // answer only if the navigator does not depend on every future caller having
-    // remembered it. `thread-view`'s *No thread is rendered before one has been
-    // chosen* requires that no read be made for a thread the user never asked
+    // remembered it. `view-navigation`'s *A thread is opened from a feed row and
+    // can be left*, in its scenario *No thread is rendered before one has been
+    // chosen*, requires that no read be made for a thread the user never asked
     // for, and this is where that is enforced for the route.
     function openThread(rootOp) {
         if (root.chosen === null || rootOp === "")

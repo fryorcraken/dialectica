@@ -160,8 +160,11 @@ None in this change's own deltas. `moderation-view` became live through
 
 ## Impact
 
-Spec text only: `openspec/specs/` and `openspec/changes/`. No code, tests or
-wire contract change.
+Spec text in `openspec/specs/` and `openspec/changes/`. Outside those, four
+comments change: two in `dialectica-ui/src/qml/` and the headers of two
+end-to-end specs under `dialectica-ui/tests/ui/`. Each cited a requirement this
+piece moved, or called a change this piece archives "unarchived". No behaviour,
+test assertion or wire contract changes.
 
 ## Tracked separately
 
