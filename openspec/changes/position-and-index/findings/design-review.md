@@ -273,3 +273,64 @@ No findings. D6 answers the finding it was written for, agrees with every
 document and spec text checked against it, and every citation checked
 (`docs/OPENSPEC-ARCHIVE.md`, `d8a56272`, `op-ordering`/`op-format`, the test
 name) is real and accurately characterised.
+
+## Re-review after merging main
+
+Read issue #166 fresh (`gh issue view 166 --json body,comments`), including
+the owner's decision comment of 2026-09-25
+(https://github.com/fryorcraken/dialectica/issues/166#issuecomment-5832956024):
+a malformed `index` is refused with an error naming `index`, and leaving the
+message unspecified is ruled out. Confirmed the `identity-onboarding` ADDED
+requirement (`openspec/changes/position-and-index/specs/identity-onboarding/spec.md`)
+still states exactly this and nothing more about the message's wording.
+
+Checked, on the merged tree (`d0f56a14`, plus `7d587fd7` and `696d35f7`):
+
+- **D2's rewritten "Ruled out" paragraph.** The quote *"Nor SHALL a caller
+  rely on the token being a number, on arithmetic over two of them meaning
+  anything, on two items' values being adjacent or any fixed distance apart,
+  …"* exists verbatim in the live `openspec/specs/thread-read/spec.md:714`
+  and is carried unchanged into this change's delta
+  (`specs/thread-read/spec.md:15`), matching D2's claim that the MODIFIED
+  block keeps it unchanged.
+- **D2's citation into #173's archived design.** Decision 10, bullet H2, of
+  `openspec/changes/archive/2026-09-26-time-pegged-clock-post-review/design.md:342-351`
+  exists and its closing sentence, *"Contracting only that leaves a later
+  change free to alter the token's form without breaking a caller that
+  stayed inside the contract,"* matches D2's quote verbatim. The bullet also
+  carries the "alternatives all invite arithmetic that means nothing"
+  reasoning D2 and the proposal both say moved there — confirmed, it is
+  there almost word for word ("The alternatives all invite arithmetic that
+  means nothing" is the sentence immediately preceding the quoted close).
+- **D5's two quotes.** The live sentence D5 quotes, *"Two positions SHALL be
+  unequal for two distinct items of one thread,"* matches
+  `openspec/specs/thread-read/spec.md:712` verbatim. The delta's replacement,
+  *"for two distinct items returned by one read of a thread, taken across
+  all of that read's pages,"* matches
+  `openspec/changes/position-and-index/specs/thread-read/spec.md:11`
+  verbatim.
+- **`proposal.md`'s rewritten note** (the #173 paragraph move, Decision 10
+  bullet H2, the "reworded" characterisation) agrees with what `7d587fd7`
+  and `696d35f7` actually did — the delta no longer carries the removed
+  paragraph, and the note says why in terms that match the diff.
+- **D1, D3, D4, D6 and Risks** were re-read against the merged tree. None
+  cites anything the merge touched: `d0f56a14` did not touch `wire.rs`,
+  `thread.rs`, `openspec/specs/feed-read/spec.md`,
+  `openspec/specs/module-wire-contract/spec.md` or
+  `openspec/specs/identity-onboarding/spec.md`'s Purpose (confirmed by `git
+  show d0f56a14 --stat` and a path-scoped `git log`). The live
+  `identity-onboarding` Purpose still carries the D6 boundary paragraph
+  (`openspec/specs/identity-onboarding/spec.md:25-30`) unchanged. The test
+  names D1 and D5 cite (`no_two_items_of_a_thread_share_a_position_even_when_they_share_an_author`,
+  `each_malformed_kind_of_index_is_refused_by_name`) are present on the
+  merged tree at `wire.rs`, consistent with tasks.md's re-review note that
+  this piece's code and tests are unchanged since their last review.
+- **The owner's decision comment** does not make anything in D1–D6 or Risks
+  untrue on the merged tree; nothing in the merge touches the decided
+  behaviour (the message names `index`) or the deliberately-unspecified
+  reason text.
+
+No findings. `design.md` still agrees with the code, tests and specs on the
+merged tree; every quote and citation checked exists verbatim where claimed;
+the new citation into #173's archived Decision 10, bullet H2, is accurate;
+and the merge made no recorded decision untrue that `696d35f7` missed.
