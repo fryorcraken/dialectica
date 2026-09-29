@@ -58,10 +58,10 @@ landed after the piece's base `8368b2f`, and #173 removed a paragraph from the
 - `696d35f`: `design.md` D2 and D5 and `proposal.md` quotes corrected against
   the merged tree.
 
-- [ ] re-review after merge: architecture — `code-reviewer`. The delta must replace the live requirement with nothing lost at archive.
-- [ ] re-review after merge: spec-test — `spec-test-reviewer`. The tests on the merged tree must still pin the reconciled delta.
-- [ ] re-review after merge: design — `design-reviewer`. D2 and D5 rewritten, proposal note changed.
-- [ ] re-review after merge: readability — `code-reviewer`. Quotes and citations in the rewritten prose.
+- [x] re-review after merge: architecture — `code-reviewer`. The delta must replace the live requirement with nothing lost at archive.
+- [x] re-review after merge: spec-test — `spec-test-reviewer`. The tests on the merged tree must still pin the reconciled delta.
+- [x] re-review after merge: design — `design-reviewer`. D2 and D5 rewritten, proposal note changed.
+- [x] re-review after merge: readability — `code-reviewer`. Quotes and citations in the rewritten prose.
 - [ ] ~~re-review after merge: correctness, security~~ Not re-run: this
   piece's code and tests are unchanged since their last review; the code the
   merge brought in was reviewed in its own PRs; cargo test is green on the
