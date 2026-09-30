@@ -172,3 +172,126 @@ not part of a wiring piece.
   layout-versioned SQLite scaffolding (`membership.rs`, `identity_store.rs`
   before it), a pre-existing pattern with a documented reason for its own file.
   `cargo mutants` was not run: this dimension reviews shape, not test strength.
+
+## Re-review round 1 `7a2a3335..369561d1`
+
+Read: the full range diff for `delivery.rs`, `transport.rs`, `wire.rs`, `sender.rs`
+and `CLAUDE.md`; `delivery.rs` whole at HEAD; the adapter's delivery hookups in
+`lib.rs` (unchanged in this range) and the text pins that read them; `design.md`
+Decisions 11 and 15. Confirmed by running, not reading: `cargo test -p dialectica
+-p dialectica-core` is green at `cd5d7c82` (1256 core tests), at `6111011b` (1269)
+and at HEAD (1286), each checked out on its own; `nix build ./dialectica#lgx`
+compiles the adapter at HEAD. Both refactor commits change no behaviour:
+`cd5d7c82` moves the body of `receive` into `judge`/`admit` verbatim and swaps two
+inline payload renderings for `panic_detail`; `6111011b` changes `Opening`'s borrow
+to an `Arc` and moves one `>` comparison into `refuse_oversized`.
+
+The four earlier findings are confirmed fixed: one non-test renderer of a panic
+payload remains (`wire::panic_detail`); `Channels::receive` is gone and `stoa_of`
+copies the Stoa out, so no lock spans a verify or an append; `Wiring` replaces the
+flag and the option, and a refused worker has its own arm; the outbound-argument
+text pin exists and pins the order.
+
+- [ ] **`dev-writer`** — `transport.rs:507-512`, `delivery.rs:1077-1092` —
+      `Processor::decide` spells the boundary's pipeline a second time, and
+      `transport::receive`, the spelling the ~55 boundary tests drive, has no
+      production caller.
+      **Scenario:** `git grep -n -E "\breceive\("` finds calls only in
+      `transport.rs`'s tests and `authoring.rs`'s test helper `deliver`. The
+      running module reaches the boundary through `stoa_of` -> `judge` -> `admit`
+      composed by hand in `decide`. `receive`'s doc says it "is what every other
+      caller uses" and `authoring.rs:1939` calls its helper "the real receive
+      boundary"; neither is what runs. A change that adds a step between the
+      lookup and `judge` (a per-channel rate check, a second lookup) goes in
+      `receive`, is covered by every transport test, and is absent from
+      production with every gate green. The `decide` comment ("`transport::receive`'s
+      order") is the reviewer's only link between the two, and it is a sentence.
+      **Fix:** make one spelling the only one. Either give `transport` a single
+      composition both call (for example `receive` taking the resolved
+      `Option<Address>` and an `impl FnOnce() -> Result<L, OpLogError>` that opens
+      the log only for a judged op, with the map lookup left to the caller), or
+      have `decide`'s three calls be a named method (`fn admit_inbound(&self, ..)
+      -> Result<Admitted, InboundRefusal>`) that a test compares with `receive` on
+      the same inputs. If the duplication is accepted, correct `receive`'s "every
+      other caller" sentence, since it has none. `decide` also carries the "and"
+      tell in its own doc ("Put one message through the boundary, and log what it
+      decided"): the extraction separates the boundary from the logging.
+      **Severity:** low. A shape and drift-risk finding, not a live defect; the two
+      spellings agree today.
+
+- [ ] **`dev-writer`** — `transport.rs:548-552` — `judge` takes the channel's Stoa
+      as a bare `Address` and never reads `message.channel_id`, so `Judged` no
+      longer certifies the channel check its doc says it certifies.
+      **Scenario:** `judge(message_on_channel_a, stoa_b, now)` accepts an op whose
+      Stoa is `stoa_b`, though the message arrived on `stoa_a`'s channel: nothing
+      in `judge` relates the id to the address. `receive` derived the Stoa from the
+      id inside one function; the split moved that tie to the caller. `Judged`'s
+      doc ("passed every check `receive` makes before it writes"; "`admit` cannot
+      be handed an op that skipped a check") is then true of checks 2-6 only. The
+      one caller today, `decide`, passes `stoa_of(&message.channel_id)`, so nothing
+      is wrong now; the property the type was introduced for holds by a caller's
+      convention, which is what CLAUDE.md's "invariant holds by construction"
+      rule is against. `judge` is `pub`.
+      **Fix:** either have `judge` refuse when `ChannelIdentity::of(&channel_stoa)
+      .channel_id() != message.channel_id` (cheap; it is a check, so it is
+      `UnknownChannel`), or make `OpenChannels::stoa_of` return a token type that
+      `judge` takes in place of an `Address`; or narrow the `Judged` and `judge`
+      docs to what they certify.
+      **Severity:** low. Public-surface shape; no reachable wrong result today.
+
+- [ ] **`dev-writer`** — `arrival.rs:221-223` — the doc on
+      `exceeds_receive_window` says "`crate::transport::receive` is its one
+      caller"; after `cd5d7c82` the caller is `judge`.
+      **Scenario:** `git grep -n -F "exceeds_receive_window" -- '*.rs'` outside
+      tests finds one call, `transport.rs:579`, inside `judge`. The section is the
+      one that says which paths may reach the window ("called from the receive
+      boundary and from nowhere else"), so a reader checking it against the code
+      lands in `judge`, not `receive`. **Severity:** low, a doc made false by this
+      round's split.
+
+- [ ] **`tester`** — `delivery/tests.rs:765` — the negative half of
+      `the_adapter_hands_delivery_every_recorded_membership_and_every_published_op`
+      is a hand-written list of five closure spellings, and a sixth passes.
+      **Scenario:** added to `lib.rs`, under `#[cfg(logos_scaffold)]`,
+      `let mut sink = |_x: &core::op::OpId| {};` — a closure that ignores its
+      argument, spelled `|_x|`, which the list (`|_id|`, `|_stoa|`, `|_|`, `|_op|`,
+      `|_op_id|`) does not name. **Measured:** `cargo test -p dialectica-core
+      the_adapter` runs 6 tests and all 6 pass with that line in the adapter. The
+      list is an enumeration of the spellings someone thought of; a prefix rule
+      is total over spellings nobody has typed yet, and `lib.rs` has no `|_`
+      anywhere today (`git grep -n -F "|_" -- dialectica/rust-lib/src/lib.rs`
+      finds nothing), so `code.contains("|_")` would pass now and fail on any
+      ignoring closure. The positive counts still pin the real sinks; this is the
+      guard for a *new* handler's sink. **Severity:** low.
+
+**Clean, in prose.**
+
+- **The `Opening` guard travelling inside `Action::Open`** is the right shape:
+  ownership, not a rule each path follows. Every route by which an open fails to
+  reach delivery (no worker, a worker gone, no sender identifier, a panic, a
+  refused send) ends in a `Drop`, and `request` builds the action only when an
+  outbox exists, so no open is marked for a request that is logged and dropped.
+  Holding an `Arc<Channels>` rather than a borrow is what that needs; no cycle
+  (`Channels` holds no sender), and the guard's drop takes the book lock through
+  `lock()`, poison-tolerant.
+- **`Wiring`** is the reshape that was asked for. `start` writes `NoWorker` before
+  any work and overwrites it with `Running` only on success, so a panic or an early
+  return leaves the state the log line describes.
+- **The adapter stays thin and no wire method was added.** `lib.rs` is unchanged
+  in this range; the `DialecticaModule` trait and `metadata.json` are untouched.
+  Every decision added this round (hand-over refusals, the settle limit, the
+  oversize predicate) is in `core::delivery` or `core::transport`, behind the
+  four-method seam, and tested by a driver that is not the adapter.
+- **`refuse_oversized`** is the right extraction: one predicate for `judge` and
+  the hand-over, so the two cannot disagree at exactly the limit; the
+  unknown-channel-first order in `refused_on_hand_over` is stated and pinned.
+- **`Judged`/`admit`** does hold the property it names for checks 2-6 (private
+  field, single constructor), and opening the log only for a judged op is a real
+  gain. The finding above is about the channel tie, not the split.
+- **The text pins of the adapter are the proportionate gate** for a file no
+  `cargo` gate compiles, and the piece says so; the one remaining weakness is the
+  list above. `CLAUDE.md`'s additions are pinned to `v0.2.1` and to named code,
+  so they invalidate visibly. Not raised: `delivery.rs` is 1366 lines with seven
+  commented sections and could be split into files along them; a preference. The
+  module doc's line 38 is one unwrapped 130-column line (rustfmt does not reflow
+  comments). `cargo mutants` was not run: this dimension reviews shape.
