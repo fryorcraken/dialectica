@@ -1259,3 +1259,44 @@ throughout).
       `"records of waits"` hit only the spec and this box), so no test needs
       updating; tests citing these scenarios cite them by title, which did not
       change.
+
+## Re-review round 7 `3d34f15e..ae44f364`
+
+Reviewed at `772e8a04` (range tip `ae44f364`; the tip adds only findings). Read:
+`git diff 3d34f15e ae44f364 -- openspec/changes/delivery-wiring/specs/` (three
+scenario THENs, nothing else in the spec), the requirement "Nothing of a message's
+wait on an open is kept once it is judged" whole, the three book-hygiene tests and
+`waits_in_the_book` in full, and my round-6 box. The implementation was not read and
+no mutation was run: no test changed in the range, so there is nothing new a
+mutation could measure, and the tests' behaviour stands as judged in rounds 5 and 6.
+
+**Round-6 box answered as its outcome says.** The three THENs now read "no record
+of that message's wait on that open", "no more records of messages' waits on that
+open than it held before those three arrived" and "no record of that message's wait
+on that open while the second request is still pending". None speaks of the open's
+own time, so the expiry paragraph's kept record of an expired open is no longer
+contradicted. The requirement text, the scenario titles and the consequence
+paragraph are unchanged. `git grep -n -E "record of a wait|records of waits"` finds
+the old wording nowhere outside this file, and the two test comments that cite
+scenarios cite them by title, which did not change.
+
+**Each reworded scenario still maps to a test that can fail for the reason it
+names.** (1) `a_message_that_waited_its_opens_time_out_leaves_no_wait_in_the_book`
+asserts `Some(0)` from `waits_in_the_book`, which counts `pending.waits` and so is
+a per-message count; a leaked message wait reads 1, and `Some(0)` rather than
+`None` shows the open was still pending. The open's own end is not in what it
+counts, which is the reading the reworded THEN asks for. (2)
+`messages_judged_at_once_after_an_opens_time_has_ended_leave_no_wait_in_the_book`
+asserts equality with `before` after three messages that each register a wait and
+are refused (and the four refusals), which is the "no more than before" of the
+THEN; a leak of one per message would read `before + 3`. (3)
+`a_message_whose_open_settles_held_leaves_no_wait_while_another_request_is_pending`
+asserts the op stored and `Some(0)` with the second request held. All three are
+driven through `Channels` and `Processor::decide` in `dialectica-core`, which
+`cargo test` compiles, so the layer can see what the scenarios describe.
+Self-consistency: the requirement's "no record of that message's wait" and the
+scenarios now use the same object, and the consequence paragraph's "at most one
+message's wait" agrees with scenario 2's difference. Issue #176 was not re-read;
+the range touches three THENs and adds nothing to the scope it states.
+
+- [x] **re-review round 7 `3d34f15e..ae44f364`: no findings** — read the spec diff of the three reworded THENs, the whole requirement and its consequence paragraph, the three tests and `waits_in_the_book`, and my round-6 box against `git grep` for the old wording; clean
