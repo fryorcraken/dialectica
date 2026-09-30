@@ -699,3 +699,38 @@ green (1305 + 30 + 3).
   waiting message's end (`a_request_made_while_a_message_waits_…` green), the
   poisoned-book loop (`into_inner` kept) and the `is_opening` single predicate all
   survive the rework.
+
+## Re-review round 5 `58460b02..1d5e2e37`
+
+Dimension: **correctness only**. Reviewed at `e5268cc2`.
+
+- [x] **re-review round 5 `58460b02..1d5e2e37`: no findings** — read the guard in
+      `Wait::extend_from` against `await_settled` and the `op-transport` delta, the
+      six new tests in `delivery/tests.rs`, and the Decision 11 and tasks 13.x
+      prose; both round-4 boxes answered as their outcomes say (guard disabled:
+      `an_ask_after_a_messages_wait_has_ended_does_not_make_it_wait_again` red,
+      "judged 1.000091038s after an ask"; `end_wait` body emptied: the three
+      `…leave(s) no wait…` tests red with `Some(1)`/`Some(1)`/`Some(4)`; both
+      restored); suite green (1311 + 30 + 3); clean
+
+Notes, none needing action:
+
+- **The boundary is consistent.** An ask at exactly `ends` does not extend, and
+  `await_settled` counts `left.is_zero()` (now at `ends`) as ended, so the two
+  sides read "ended" the same way, as the doc says. The spec reads it the same:
+  the time "ends that fixed time after it starts", and a message is judged "no
+  later than the end", so a message at its end is expired, not "waiting when the
+  ask is made". Not extending never breaks the "judged no later than" MUST in
+  either reading. Both instants are read under the book lock and `Instant` is
+  monotonic, so no ask can land "before the end" from the ask's view and "after"
+  from the waiter's.
+- **The "less than twice" claim now holds strictly.** An extended message has
+  `asked < ends0 <= began + limit`, so its new end `asked + limit` is before
+  `began + 2 × limit`. Without the guard it did not hold, which is what round 4
+  reported.
+- **`>=` against `>` is not testable and needs no test.** The two differ only when
+  the ask's `Instant::now()` equals the wait's end exactly; no test can aim at
+  that, and either choice is inside the spec there.
+- **An ended wait keeps its unused extension.** Harmless: the waiter breaks on
+  the wake-up that follows, since `wait_ends` returns a past instant and nothing
+  but an ask writes `ends`.
