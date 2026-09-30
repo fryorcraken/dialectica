@@ -391,10 +391,14 @@ the only closing keyword beside an issue number, `NO SPEC:` is None, the
 ask-after-end mutation is in the list, and questions 5, 6 and 7 stay open in it,
 `proposal.md` and `design.md`. One figure is wrong.
 
-- [ ] **`dev-writer`** — `design.md` (Decision 11's "What breaks without each
+- [x] **`dev-writer`** — `design.md` (Decision 11's "What breaks without each
       part", the new bullet) says the test is red "judged 1.00 s after the ask at a
       1 s limit, where the test allows 0.5". The test asserts
       `judged_after < limit * 3 / 4` (`delivery/tests.rs:2988`), and its own comment
       says "The bound is three quarters of a limit ... 0.75 s of slack". So the
       recorded allowance contradicts the code it describes. Change 0.5 to 0.75 (or
       say "three quarters of the limit"). **Verified:** read at `1d5e2e37`.
+      **Fixed** (`dev-writer`) in the commit `Correct the ask-after-end test's
+      allowance, and cite round 5's scenarios`: the bullet now reads "where the test
+      allows 0.75", matching `judged_after < limit * 3 / 4` at the test's 1 s limit.
+      Prose only; the assertion is unchanged.

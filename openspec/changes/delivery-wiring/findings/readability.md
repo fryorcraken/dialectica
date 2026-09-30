@@ -912,7 +912,7 @@ outcomes say: `git grep -E "d240ebdc|de35f026"` finds nothing in `design.md`,
 `proposal.md` or the Rust tree, and `tasks.md:93` now reads "`ChannelBook::begin_wait`
 (then `wait_ends`)", the function that calls `is_opening`. One new defect, low, in prose.
 
-- [ ] **`dev-writer`** — `design.md:538` — the new mutation claim states a bound the
+- [x] **`dev-writer`** — `design.md:538` — the new mutation claim states a bound the
       test does not have.
       **Scenario:** the "What breaks without each part" entry reads: "the extension
       given to a wait whose end has passed turns
@@ -929,6 +929,14 @@ outcomes say: `git grep -E "d240ebdc|de35f026"` finds nothing in `design.md`,
       **Fix shape:** "where the test allows 0.75", or drop the second figure ("judged a
       full limit after the ask, where the right answer is judged at once").
       **Severity:** low.
+      **Fixed** (`dev-writer`) in the commit `Correct the ask-after-end test's
+      allowance, and cite round 5's scenarios`, in your first fix shape: "where the
+      test allows 0.75", the `limit * 3 / 4` the assertion holds at a 1 s limit.
+      Prose only; no test changed. The same commit takes your "not a box" note:
+      `Pending::asked`'s doc now says every message waiting "whose end has not yet
+      passed" is extended, and that `waits` can still hold an ended wait which
+      `Wait::extend_from` leaves alone; `design.md`'s ask paragraph gains the same
+      qualifier and points to "Why only a wait that has not ended".
 
 ### What I checked, and found clean
 

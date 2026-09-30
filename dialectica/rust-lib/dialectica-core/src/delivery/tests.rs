@@ -2920,10 +2920,11 @@ fn a_second_ask_while_a_message_waits_does_not_extend_its_wait_again() {
 
 #[test]
 fn an_ask_after_a_messages_wait_has_ended_does_not_make_it_wait_again() {
-    // `op-transport`: "Once the open's time has ended with the open unanswered, the
-    // wait on it has expired: the message waiting then ... MUST be judged without
-    // waiting on that open". An ask extends a wait that has not ended, never one
-    // that has.
+    // `op-transport`, scenario "An ask made once a message's end has passed does
+    // not make it wait again": "A message whose end has already passed when the
+    // ask is made is not extended, even where it has not yet been judged: its wait
+    // has expired, and it MUST be judged without waiting on that open". An ask
+    // extends a wait that has not ended, never one that has.
     //
     // The race (correctness re-review round 4): the message's end passes while
     // the processor is blocked re-taking the book — behind the listener, a
@@ -3063,6 +3064,10 @@ fn waits_in_the_book(channels: &Channels, channel: &ChannelIdentity) -> Option<u
 
 #[test]
 fn a_message_that_waited_its_opens_time_out_leaves_no_wait_in_the_book() {
+    // `op-transport`, scenario "A message that waited its open's time out leaves
+    // no record of its wait", under "Nothing of a message's wait on an open is
+    // kept once it is judged".
+    //
     // A message's wait is held in the book from the moment it begins to wait and
     // removed when it stops, and only the removal frees it before the open's whole
     // entry goes — which can be long: an open queued behind others against a slow
@@ -3092,6 +3097,10 @@ fn a_message_that_waited_its_opens_time_out_leaves_no_wait_in_the_book() {
 
 #[test]
 fn messages_judged_at_once_after_an_opens_time_has_ended_leave_no_wait_in_the_book() {
+    // `op-transport`, scenario "Messages judged at once after an open's time has
+    // ended leave no record of their waits", under "Nothing of a message's wait on
+    // an open is kept once it is judged".
+    //
     // The second exit, and the one a sender drives: once the open's time has ended
     // every message on the channel is judged at once, and each still registers a
     // wait first. Read as a difference, so the message that waited the time out
@@ -3127,6 +3136,10 @@ fn messages_judged_at_once_after_an_opens_time_has_ended_leave_no_wait_in_the_bo
 
 #[test]
 fn a_message_whose_open_settles_held_leaves_no_wait_while_another_request_is_pending() {
+    // `op-transport`, scenario "A message whose open settles held leaves no record
+    // while another request for the channel is pending", under "Nothing of a
+    // message's wait on an open is kept once it is judged".
+    //
     // The third exit from a wait: the open is answered held while a second request
     // for the channel is still pending, so the book's entry for the channel stays
     // and only the message's own removal takes its wait out. `Some(0)` reads that

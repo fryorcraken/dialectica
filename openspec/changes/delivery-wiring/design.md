@@ -475,8 +475,10 @@ re-review. The worker marks the ask
 in the book (`Opening::asked`) immediately before `channelCreate`, and it does two
 things there: the open's time becomes *started at the ask*, whether or not it had
 ended, so the next message to wait ends the fixed time after the ask; and every
-message waiting at that moment gets a new end, the fixed time after the ask, in
-place of the one it began with — unless an earlier ask already gave it one.
+message waiting at that moment whose end has not yet passed gets a new end, the
+fixed time after the ask, in place of the one it began with — unless an earlier
+ask already gave it one. A message whose end has passed is not extended, even
+while its wait is still in the book ("Why only a wait that has not ended" below).
 
 *Why the ask, the finding it answers.* An open is pending from its request, so its
 time can start while the open is still queued behind other calls. When the worker
@@ -535,7 +537,7 @@ What breaks without each part:
   1.71 s after the first ask at a 1 s limit, where the test allows 1.4;
 - the extension given to a wait whose end has passed turns
   `an_ask_after_a_messages_wait_has_ended_does_not_make_it_wait_again` red —
-  judged 1.00 s after the ask at a 1 s limit, where the test allows 0.5;
+  judged 1.00 s after the ask at a 1 s limit, where the test allows 0.75;
 - the worker not marking its ask turns
   `the_worker_marks_its_ask_of_delivery_in_the_channel_book` red.
 

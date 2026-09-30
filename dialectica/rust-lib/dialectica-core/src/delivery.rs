@@ -628,7 +628,10 @@ impl Wait {
 impl Pending {
     /// This peer asked delivery to create the channel at `asked`: the open's
     /// time starts again, whether or not it had ended, and every message waiting
-    /// now is extended from the ask, if no earlier ask has extended it.
+    /// now whose end has not yet passed is extended from the ask, if no earlier ask
+    /// has extended it. `waits` can still hold a wait whose end has passed (it
+    /// leaves when its waiter re-takes the lock); [`Wait::extend_from`] leaves that
+    /// one alone.
     fn asked(&mut self, asked: Instant) {
         self.time = OpenTime::StartedAt(asked);
         for wait in self.waits.values_mut() {
