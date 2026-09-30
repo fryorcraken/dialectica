@@ -63,7 +63,11 @@ the design relies on.
   kept per open, not per message: once it has passed, later messages on that
   channel are judged without waiting until the channel is asked for again, so
   however many messages a sender puts on a channel whose open is stuck, they
-  hold every other Stoa up for one wait, not one each. A channel
+  hold every other Stoa up for one wait, not one each. Asking for the channel
+  again starts a new wait for the messages after it, and never lengthens the
+  wait of a message already waiting. Several opens stuck at once hold the other
+  Stoas up once each, in turn: a total this peer's own requests set, and no
+  sender can lengthen. A channel
   counts as being opened from the moment a create, a join or startup asks for
   it, including while that request waits behind others, not from when delivery
   is asked; and startup counts every Stoa's channel as being opened before it
