@@ -12,6 +12,7 @@
 - [x] review: spec-test — `spec-test-reviewer`
 - [x] review: design — `design-reviewer`
 - [ ] re-review: every commit after the review round — runner
+      round 1 `7a2a3335..369561d1` findings passes (spec-writer ×2, dev-writer ×2, tester): spec deltas, delivery.rs/transport.rs/wire.rs/sender.rs rewrite, tests, design.md, CLAUDE.md — all six lanes; security and correctness on the strongest model (opus), readability, architecture, spec-test and design on role defaults: a rewrite of hostile-input handling needs the full set
 - [ ] findings all ticked, `findings/` deleted — `closer`
 - [ ] `openspec validate --strict`, then `archive` — `closer`
 - [ ] CI green, title/body checked, PR merged — `closer`
