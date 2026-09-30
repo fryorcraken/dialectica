@@ -122,10 +122,16 @@ delivery v0.2.1 waits up to 30 s on its runtime before answering. With the defau
 a `channelCreate` completed at 25 s would be recorded here as unanswered — not
 open — while delivery holds it open and its messages arrive and are refused as
 arriving on an unknown channel. Past 30 s, delivery's answer decides. Nothing
-waits on this but the worker. **No test can see this constant**: it bounds a real
-IPC call, which only a live delivery has. Its value is argued here and in its
-doc; its relation to delivery's 30 s and to `SETTLE_LIMIT` is checked at compile
-time (Decision 11), so `CALL_TIMEOUT` set back to 20 s fails the build.
+waits on this but the worker. **No test waits it out**: it bounds a real IPC
+call, which only a live delivery has. Its value is argued here and in its doc,
+and `op-transport` now requires the order delivery's own < this < `SETTLE_LIMIT`
+without fixing the values. Two guards hold that order. Compile-time asserts
+beside `SETTLE_LIMIT` hold the constants against each other, so `CALL_TIMEOUT`
+set back to 20 s fails the build (Decision 11). They cannot hold delivery's real
+30 s, since `DELIVERY_CALLBACK_TIMEOUT` lowered with it still compiles;
+`the_call_timeout_outlasts_deliverys_own_and_the_settle_limit_outlasts_the_call`
+writes the 30 s as a literal and is red with `DELIVERY_CALLBACK_TIMEOUT` at
+10 s and `CALL_TIMEOUT` at 20 s, which compiles (re-run on the final tree).
 
 Delivery's own 30 s is not the end of a creation, though: its runtime completes
 the channel after the callback has given up, and says so only when asked again
@@ -190,10 +196,10 @@ body. An **empty** `error` is no reason: `StdLogosResult.error` defaults to `""`
 and logos-cpp-sdk's `lpPushExpr` serialises it verbatim, so a success can arrive as
 `{"success":true,"value":…,"error":""}`; counted as a reason, no channel would
 ever open. What breaks without each: making `declined` ignore the `error` field
-(its `callee_error` filter never matching) turns twelve delivery tests red,
+(its `callee_error` filter never matching) turns
 `declined_reads_delivery_s_three_shapes_of_no` and every "already exists" test
-among them — re-run on this change's last round, and a count that grows as tests
-are added; dropping the empty-string filter turns
+red, among others (a count is left out on purpose: it grows as tests are added);
+dropping the empty-string filter turns
 `an_empty_error_string_is_not_a_reason_to_decline` red.
 
 **The cost of "unanswered is a decline" for the node.** A `createNode` delivery
@@ -330,17 +336,17 @@ oldest first: dropping the oldest loses thread roots and keeps orphaned replies;
 dropping the arrival loses leaves and keeps every thread it holds whole. What
 breaks without it: discarding the oldest turned
 `a_full_queue_keeps_what_it_holds_and_discards_the_arrival` red, and `>=` → `>` in
-`InboundQueue::offer`'s bound check turns four delivery tests red, that one and
-`the_waiting_messages_never_exceed_the_bound` among them (re-run on this change's
-last round).
+`InboundQueue::offer`'s bound check turns that one,
+`the_waiting_messages_never_exceed_the_bound` and
+`the_queue_the_running_wiring_builds_is_bounded_at_the_pinned_count` red.
 
 **The clock is read when the message is processed**, after any wait, and never
 from the event's timestamp. Reading `now_ms` from `message.timestamp` in
-`Processor::pass` turns 27 delivery tests red, among them
-`the_window_is_judged_by_this_peers_clock_not_the_events_timestamp` (re-run on
-this change's last round; most refuse a valid op as ahead of a clock of a few
-milliseconds); `the_clock_is_read_after_the_wait_for_an_open_and_not_before_it`
-pins the "after any wait" half.
+`Processor::pass` turns
+`the_window_is_judged_by_this_peers_clock_not_the_events_timestamp` red, among
+many others (most refuse a valid op as ahead of a clock of a few milliseconds);
+`the_clock_is_read_after_the_wait_for_an_open_and_not_before_it` pins the "after
+any wait" half.
 
 **This decision and Decision 11 interact**: while the processor waits on a
 pending open, the queue behind it fills, and arrivals past 256 are discarded.
@@ -365,8 +371,9 @@ Removing the wait turns
 `a_message_arriving_while_its_channel_opens_is_judged_after_the_answer` red. The
 limit is a field of `Processor`, `SETTLE_LIMIT` in the running wiring, so the
 bounded cases run with a short one. Removing the bound altogether — no deadline,
-the wait ending only on a settle — turns six delivery tests red, each timing out
-in `eventually`: the four below, `a_message_waiting_on_an_open_delivery_never_answers_is_judged_after_a_bounded_wait`
+the wait ending only on a settle — turns red, each timing out in `eventually`,
+the four tests named below,
+`a_message_waiting_on_an_open_delivery_never_answers_is_judged_after_a_bounded_wait`
 and `opens_settling_for_other_channels_do_not_extend_the_bounded_wait`.
 
 **An open is pending from the request, not from the call.** `op-transport` says a
@@ -447,16 +454,20 @@ again, for a fresh `SETTLE_LIMIT`. What breaks without each part:
 first version started the clock afresh for every message (`started` was local to
 `await_settled`), which the spec's earlier wording ("no later than a fixed time
 after this peer began waiting on it") asked for. Since an open is pending from the
-request, one queued behind k others against an unresponsive delivery is pending
-for up to (k+1) × 35 s, and channel ids are public, so any peer can put messages on
-it; the payload need not even be an op. n such messages held the one processor —
-every Stoa — for n × 40 s: the reviewer's probe put 10 messages on a never-answered
-open at a 200 ms limit and the valid op behind them waited 2.01 s. For the 20th of
-20 Stoas at startup that is up to 21 × 35 s = 735 s pending, and ⌈735 / 40⌉ = 19
-messages keep every other Stoa's ops unjudged for about 12 minutes; 256 of them
-would be 256 × 40 s = 10,240 s, about 2 h 51 min, with every arrival on an open
-channel discarded for good once the queue is full. The sender chose the stall.
-The spec was changed to bound the time per open, and this is that.
+request, one queued behind k other calls against an unresponsive delivery is
+pending for up to (k+1) × 35 s, and channel ids are public, so any peer can put
+messages on it; the payload need not even be an op. n such messages held the one
+processor — every Stoa — for n × 40 s, capped only by how long the open stayed
+pending: the reviewer's probe put 10 messages on a never-answered open at a
+200 ms limit and the valid op behind them waited 2.01 s. For the 20th of 20 Stoas
+at startup that is up to 21 × 35 s = 735 s pending, which ⌈735 / 40⌉ = 19
+messages on that one channel filled, with every arrival on an open channel
+discarded for good once the queue was full; an open pending longer (one queued
+behind a backlog of sends, whose queue is unbounded) stretched further with every
+message. The sender chose the stall. The spec was changed to bound the time per
+open, and this is that. What it removes is a sender stretching **one** stuck
+open to its whole pending time; what it does not remove at startup, where every
+channel is stuck at once, is below.
 
 **What per open gives up.** A message on the stuck channel taken after the time
 has passed is judged at once and refused, where the per-message shape would have
@@ -464,12 +475,33 @@ given it its own 40 s and might have stored it. That loss is confined to the
 channel whose open is stuck; the per-message shape spread its cost to every Stoa
 through the shared queue.
 
-**What still bounds the stall, then.** One `SETTLE_LIMIT` for each open that stays
-unanswered while messages arrive on it — so at most `SETTLE_LIMIT` times the
-number of channels being opened at once, which this peer's memberships decide and
-no sender does. At startup against a delivery that answers nothing, a peer in K
-Stoas can be held up K × 40 s in all, one open after another, if messages arrive
-on every one of them.
+**What still bounds the stall, then: two bounds, and the smaller holds.**
+
+- **One `SETTLE_LIMIT` per open.** Each open that stays unanswered while
+  messages arrive on it holds every Stoa up at most once, for at most
+  `SETTLE_LIMIT` — so at most `SETTLE_LIMIT` times the number of channels being
+  opened at once, which this peer's memberships decide and no sender does.
+- **The last open's settle.** No wait outlasts its own open, and the waits run
+  one after another on one wall clock, so each ends by a fixed instant, the
+  moment its open settles. The stall therefore never extends past the moment the
+  last of those opens settles, `op-transport`'s own words for it. This is not a
+  sum of pending times: with opens settling at 70 s, 105 s, … the wait on the
+  last ends when it settles, however long the waits before it took.
+
+At startup against a delivery that answers nothing, open m of K settles by
+(m+1) × 35 s, counted from startup (node creation first). A sender putting one
+message on each stuck channel, in the order they settle, holds every Stoa up
+until min(40m, (m+1) × 35) for the m-th. 40m reaches (m+1) × 35 at m = 7, where
+5m = 35 and both are 280 s, and from there each wait runs to its own open's
+settle. So K × 40 s is reachable only while K ≤ 7. For 20 Stoas the stall is
+21 × 35 = 735 s, not 800 s: the per-message shape's figure, unchanged, needing 20
+messages, one per channel, where it took 19 on one channel. The security
+re-review measured it scaled down, with 35 s → 100 ms and `SETTLE_LIMIT` →
+114 ms: node creation, then 8 opens settling at 200…900 ms, one message on each in
+settle order, then a valid op on an open channel. The op was stored after 914 ms
+at the per-open limit and 917 ms at a 10 s one. Three opens settling at 200, 400
+and 600 ms under a 10 s limit stored it at 612 ms, where waits summed in turn
+would have predicted 1200 ms.
 
 **`SETTLE_LIMIT` is 40 s: past `CALL_TIMEOUT`, so it outlasts one delivery
 call.** An open that is the worker's current call — a join, or a creation racing
@@ -478,25 +510,67 @@ an open queued behind others, which can be pending for node creation plus every
 earlier Stoa's creation, each up to 35 s against an unresponsive delivery; that
 channel's messages are then refused and lost until delivery answers or the channel
 is asked for again. The order delivery's own 30 s < `CALL_TIMEOUT` < `SETTLE_LIMIT`,
-on which this and Decision 4 rest, is checked by two compile-time assertions beside
-`SETTLE_LIMIT`: setting `SETTLE_LIMIT` to 10 s, or `CALL_TIMEOUT` back to the IPC
-default of 20 s, fails the build (both tried). No test can see either value — none
-waits 30 s — so without them both changes together passed every test, which the
-correctness re-review measured.
+on which this and Decision 4 rest, is now `op-transport`'s requirement (the values
+are left to design), and two guards hold it. Two compile-time assertions beside
+`SETTLE_LIMIT` hold the constants against each other: setting `SETTLE_LIMIT` to
+10 s, or `CALL_TIMEOUT` back to the IPC default of 20 s, fails the build (both
+tried). Before them, both changes together passed every test, which the
+correctness re-review measured, because no test waits out either value.
+`the_call_timeout_outlasts_deliverys_own_and_the_settle_limit_outlasts_the_call`
+holds them against delivery's own 30 s as a literal, which the asserts cannot
+(Decision 4).
 
-**Rejected: a limit sized for a queue of opens** (35 s × the Stoas ahead of it).
-The earlier rejection said the wait was per message, so every message on a
-still-queued channel would hold every Stoa up for that long, one after another.
-The security re-review showed the argument cut both ways: with a limit that
-outlasts the pending time only the first message waits, since the open has
-settled by the second, so the worst case was the pending time under either limit,
-and 40 s only turned later messages into refusals. With the time now per open, the
-question is how long one stuck open may hold every Stoa up once: a limit sized for
-the queue makes that up to (k+1) × 35 s for the k-th open, and startup's K opens,
-each held in turn, grow as the square of K where 40 s grows as K. What 40 s gives
-up is the messages on a channel whose open is queued behind an unresponsive
-delivery, a state in which delivery is handing messages over while not answering
-calls.
+**Rejected: a limit sized for a queue of opens** (35 s × the calls ahead of the
+open, plus its own). Its case has been argued wrongly twice, and both are
+recorded because each is the intuitive reading.
+
+- *Withdrawn, first:* that under the per-message clock every message on a
+  still-queued channel would hold every Stoa up for that long, one after another.
+  The security re-review showed that with a limit outlasting the pending time only
+  the first message waits, since the open has settled by the second.
+- *Withdrawn, second:* that under per open, startup's K opens held in turn would
+  grow as the square of K under a queue-sized limit where 40 s grows as K. Each
+  wait ends when its open settles, a fixed instant on one wall clock, so the
+  total is the last open's settle, (K+1) × 35 s, under either limit (above), and
+  the round-2 readability re-review worked it by hand and the security
+  re-review measured it.
+
+What the two limits actually differ in:
+
+- **How far one stuck open can hold every Stoa.** A queue-sized limit lets a
+  single message on the deepest pending open hold every Stoa for that open's
+  whole pending time. 40 s holds it once, for 40 s. The two agree when a sender
+  puts a message on enough stuck channels, which at startup, where every channel
+  is stuck, means K ≥ 7 of them. They differ where an open's pending time is
+  longer than the number of stuck opens × 40 s: a peer in fewer Stoas at startup,
+  or a join made behind a backlog of sends against a hung delivery. The
+  outbound queue is unbounded (Risks), so that join's open can be pending for
+  many `CALL_TIMEOUT`s, and under a queue-sized limit one message on it holds
+  every Stoa that long.
+- **What 40 s loses.** A message on a channel whose open is still queued after
+  40 s is refused and lost, even when delivery then answers the open held; a
+  queue-sized limit would keep it. That needs delivery to be handing messages
+  over while its answers to this peer's calls take long enough to queue past
+  40 s.
+- **The spec asks for a fixed time.** `op-transport` bounds the wait by "a fixed
+  time for each open" and orders it against `CALL_TIMEOUT`; a limit that varies
+  with an open's queue position is not one, and adopting it would be a spec
+  change.
+
+**So 40 s stays, re-decided on those grounds.** Under a sender who puts a message
+on every stuck channel at startup, every fixed value from 40 s up gives the same
+stall once K ≥ 7, the last open's settle, and a longer one buys no smaller stall.
+A shorter one, down to `CALL_TIMEOUT`, trims little (at 36 s, 20 × 36 = 720 s
+against 735 s for 20 Stoas) and refuses more. The value only chooses, where an
+open's pending time outlasts the stuck opens × the limit, between holding every
+Stoa up longer and refusing more of the stuck channel's messages. 40 s takes the
+short hold. It is `CALL_TIMEOUT` plus a margin for a message that began waiting
+just before the worker reached the call, so it covers the ordinary cases (the
+open being the worker's current call), and it keeps one stuck channel's cost on
+that channel instead of spreading it to every Stoa through the shared queue
+(Decision 10). A longer value would put every Stoa's
+arrivals at risk — discarded once 256 are waiting — to save messages on a channel
+whose delivery is already not answering. That is a judgement, not a measurement.
 
 **The wait is its own loop, not `Condvar::wait_timeout_while`.** Once the book's
 mutex is poisoned — by a contained panic under it — `wait_timeout_while` returns
@@ -754,8 +828,11 @@ The reasoning that chose each is here; the contract is the requirement cited.
   the view, so it grows at the user's rate.
 - [A slow open stalls inbound processing for every Stoa for up to `SETTLE_LIMIT`,
   once per open however many messages arrive on it; K opens stuck at once can
-  cost K × 40 s in turn] → a sender cannot multiply it, and the peer's own
-  memberships bound K. Decision 11 records why a second queue was not worth it.
+  cost up to K × 40 s in turn, never past the last of them settling — at startup
+  against a delivery that answers nothing, (K+1) × 35 s once K ≥ 7, under this
+  limit or any longer one] → a sender cannot lengthen it, and the peer's own memberships
+  bound K. Decision 11 records why a second queue was not worth it, and why 40 s
+  over a limit sized for the queue.
 - [An open queued behind others can stay pending longer than `SETTLE_LIMIT`, so
   after one wait of 40 s every message on its channel is refused and lost until
   delivery answers or the channel is asked for again] → needs delivery to hand

@@ -457,7 +457,7 @@ Dimension: readability only. Reviewed at `0a8f8639` (the code is unchanged after
 fixed (see below). Four new defects, all low, all in prose or comments; none
 changes behaviour.
 
-- [ ] **`dev-writer`** — `design.md:493-496` — the argument that rejects "a limit sized
+- [x] **`dev-writer`** — `design.md:493-496` — the argument that rejects "a limit sized
       for a queue of opens" rests on a growth claim that is false, and the paragraph
       above it says why.
       **Scenario:** the text says a queue-sized limit makes one stuck open hold every
@@ -484,8 +484,20 @@ changes behaviour.
       opens bounded by the last open's pending time either way), or drop the
       comparison of growth rates.
       **Severity:** low (a design argument, not behaviour).
+      **Fixed** (`dev-writer`) in the commit `Re-argue why the settle limit is
+      40 s, and stop counting what grows`, along the first fix shape. Decision 11's
+      "What still bounds the stall" is now two bounds, the smaller holding: one
+      `SETTLE_LIMIT` per open, and the last open's settle, with your K = 20 working
+      (735 s, not 800 s; K × 40 s reachable only while K ≤ 7, from 5K ≤ 35). The
+      rejection records the square-of-K claim as withdrawn with your reason (each
+      wait ends at a fixed instant on one wall clock), and then says what the two
+      limits differ in: how far one stuck open can hold every Stoa, what 40 s
+      loses, and that the spec asks for a fixed time. The Risks line (`:757` then)
+      says "up to K × 40 s …, never past the last of them settling", the spec's
+      `de35f026` wording, and `SETTLE_LIMIT`'s doc says the same. The value was
+      re-decided and kept; see the security entry for the same box.
 
-- [ ] **`dev-writer`** — `design.md:193`, `design.md:339`, `tasks.md:84` — two mutation
+- [x] **`dev-writer`** — `design.md:193`, `design.md:339`, `tasks.md:84` — two mutation
       counts written as "re-run on this change's last round" are stale at the tip,
       the failure round 1's fifth entry was about.
       **Scenario:** `git checkout`-clean `2cb71aaf`, mutation as the text states it.
@@ -507,8 +519,24 @@ changes behaviour.
       tests go red"), or qualify as "at least"; do not re-run and re-write, since the
       next test added repeats this.
       **Severity:** low.
+      **Fixed** (`dev-writer`) in the commit `Re-argue why the settle limit is
+      40 s, and stop counting what grows`, by the first fix shape, and for all
+      four mutations rather than the two that had gone stale: Decision 6, both
+      Decision 10 claims and Decision 11's bound-removed claim now say the
+      mutation and name the tests that go red, with no count and no "re-run on
+      this change's last round" label (Decision 6 says why a count is left out).
+      `tasks.md` 10.4 points at Decision 11's named tests. The named tests were
+      re-run on this tree, each mutation reverted after: `.filter(|_| false)` on
+      the `callee_error` read reddens `declined_reads_delivery_s_three_shapes_of_no`
+      and every "already exists" test (13 red in all at this tree, the count you
+      measured); `now_ms` from `message.timestamp`
+      reddens `the_window_is_judged_by_this_peers_clock_not_the_events_timestamp`;
+      `>` in `InboundQueue::offer` reddens the three tests Decision 10 now names
+      (a fourth, `every_discard_is_counted_and_logged_apart_from_refusals`, also
+      goes red and is not named); the wait's `left` fixed at an hour reddens the
+      six tests Decision 11 names.
 
-- [ ] **`dev-writer`** — `delivery.rs:606-611`, `design.md:125`, `design.md:483` —
+- [x] **`dev-writer`** — `delivery.rs:606-611`, `design.md:125`, `design.md:483` —
       "neither value is visible to a test" is false since `a7d0beaa`, and the comment
       overclaims what the compile-time asserts hold.
       **Scenario:** `delivery/tests.rs:479`
@@ -531,6 +559,16 @@ changes behaviour.
       it; in `design.md` say "no test waits out either value" rather than "sees", and
       cite the test in Decision 4 and `tasks.md` 10.4.
       **Severity:** low.
+      **Fixed** (`dev-writer`) in the commit `Re-argue why the settle limit is
+      40 s, and stop counting what grows`, as the fix shape says. The comment
+      beside the asserts says they hold the constants against each other, that
+      lowering `DELIVERY_CALLBACK_TIMEOUT` with `CALL_TIMEOUT` compiles, and names
+      the test that holds both against the literal 30 s; `CALL_TIMEOUT`'s doc
+      names it too. `design.md` Decision 4 and Decision 11 say "no test waits it
+      out" and cite the test, and `tasks.md` 9.4 and 10.4 are corrected the same
+      way. Re-run on this tree: `DELIVERY_CALLBACK_TIMEOUT` at 10 s with
+      `CALL_TIMEOUT` at 20 s compiles, and the test goes red ("CALL_TIMEOUT (20s)
+      does not outlast delivery's own 30s").
 
 - [ ] **`tester`** — `delivery/tests.rs:2205` — a comment cites a test by a name that is
       a prefix of the real one.

@@ -374,7 +374,7 @@ clock. Two tests went red:
 `an_opens_time_is_the_same_for_every_message_that_waits_on_it_until_a_request_clears_it`.
 I restored it after. The Decision 11 text no longer says "one call long".
 
-- [ ] **`dev-writer`** — design.md Decision 11, "Rejected: a limit sized for a
+- [x] **`dev-writer`** — design.md Decision 11, "Rejected: a limit sized for a
       queue of opens" (`design.md:487-499`), and the Risks entry that leans on it
       (`design.md:755-758`). The rejection says that under a queue-sized limit
       "startup's K opens, each held in turn, grow as the square of K where 40 s
@@ -409,6 +409,31 @@ I restored it after. The Decision 11 text no longer says "one call long".
       loss-free alternative is wrong. Correct the rejection and the Risks line,
       then decide again whether 40 s is still the right value once the argument
       is true.
+      **Fixed** (`dev-writer`) in the commit `Re-argue why the settle limit is
+      40 s, and stop counting what grows`; `SETTLE_LIMIT` is **unchanged at
+      40 s**, re-decided. The rejection now records the square-of-K argument as
+      withdrawn with your reason, the stall under either limit as the last open's
+      settle, and your two probes with their figures (914/917 ms; 612 ms against
+      a predicted 1200). The Risks line says "up to K × 40 s …, never past the
+      last of them settling", and (K+1) × 35 s once K ≥ 7 at startup.
+      Why 40 s still, argued in Decision 11 "So 40 s stays": you are right that
+      at startup, with every channel stuck, no fixed value from 40 s up buys a
+      smaller stall once K ≥ 7, and I say so. What 40 s does buy is outside that
+      case: where one open's pending time is longer than the stuck opens × 40 s —
+      a peer in fewer than seven Stoas, or a join queued behind a backlog of sends
+      against a hung delivery (the outbound queue is unbounded) — a queue-sized
+      limit lets **one** message on that open hold every Stoa for its whole
+      pending time, and 40 s holds it once, for 40 s. The price is the stuck
+      channel's own messages, refused after 40 s even when delivery then answers
+      held; I kept the loss on that channel rather than spread the stall to every
+      Stoa through the shared queue. Two further reasons recorded: `op-transport`
+      asks for "a fixed time for each open", which a queue-position limit is not
+      (adopting one is a spec change), and a shorter fixed value down to
+      `CALL_TIMEOUT` trims little (36 s: 720 s against 735 s at K = 20) while
+      refusing more. The spec's new order (delivery's own < `CALL_TIMEOUT` <
+      `SETTLE_LIMIT`) still holds, by the existing asserts and test. This is a
+      judgement, and the decision says so; if the owner prefers the loss-free
+      shape it goes to the `spec-writer` first.
 
 ## Round 2 clean areas
 

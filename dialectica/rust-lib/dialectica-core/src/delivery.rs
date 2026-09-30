@@ -93,7 +93,8 @@ pub trait Delivery: Send + 'static {
 ///
 /// Nothing waits on this but the worker thread, so its length costs no reply.
 /// That it outlasts delivery's 30 s, and that `SETTLE_LIMIT` outlasts it, is
-/// checked at compile time beside `SETTLE_LIMIT`.
+/// checked at compile time beside `SETTLE_LIMIT`, and against delivery's 30 s
+/// itself by `the_call_timeout_outlasts_deliverys_own_and_the_settle_limit_outlasts_the_call`.
 pub const CALL_TIMEOUT: Duration = Duration::from_secs(35);
 
 /// The configuration handed to `createNode`.
@@ -587,10 +588,11 @@ struct Channels {
 ///
 /// **What it bounds is a stall of every Stoa.** There is one processor, so while
 /// it waits, messages on every other channel wait behind it and the queue fills.
-/// Kept per open, that stall is this long once for each open that stays
+/// Kept per open, that stall is at most this long once for each open that stays
 /// unanswered, whatever a sender puts on its channel — so at most this times the
 /// number of channels being opened at once, which this peer's memberships bound
-/// and no sender chooses.
+/// and no sender chooses, and never past the moment the last of those opens
+/// settles, since each wait ends by its own open's settle.
 ///
 /// **Past [`CALL_TIMEOUT`], so it outlasts one delivery call**: an open that is
 /// the worker's current call — a join, or a creation racing its own answer, the
@@ -608,12 +610,16 @@ const SETTLE_LIMIT: Duration = Duration::from_secs(40);
 /// answers a channel call. Named only so the relation below can be checked.
 const DELIVERY_CALLBACK_TIMEOUT: Duration = Duration::from_secs(30);
 
-// The order both limits' docs rest on, held at compile time rather than argued:
-// delivery's own timeout < `CALL_TIMEOUT` (or an answer delivery gives at 25 s is
-// recorded here as none) < `SETTLE_LIMIT` (or a message racing its own join's
-// creation is refused before the creation is answered). Neither value is visible
-// to a test — no test waits 30 s — so a build that breaks either relation fails
-// to compile instead of passing every test.
+// The order both limits' docs rest on, and `op-transport` requires: delivery's
+// own timeout < `CALL_TIMEOUT` (or an answer delivery gives at 25 s is recorded
+// here as none) < `SETTLE_LIMIT` (or a message racing its own join's creation is
+// refused before the creation is answered). These asserts hold the three
+// constants against each other, so a `CALL_TIMEOUT` or `SETTLE_LIMIT` shortened
+// past its neighbour fails to compile. They cannot hold delivery's real 30 s:
+// lowering `DELIVERY_CALLBACK_TIMEOUT` along with `CALL_TIMEOUT` compiles.
+// `the_call_timeout_outlasts_deliverys_own_and_the_settle_limit_outlasts_the_call`
+// holds both limits against delivery's 30 s, written there as a literal. No test
+// waits out any of the three.
 const _: () = assert!(DELIVERY_CALLBACK_TIMEOUT.as_millis() < CALL_TIMEOUT.as_millis());
 const _: () = assert!(CALL_TIMEOUT.as_millis() < SETTLE_LIMIT.as_millis());
 
