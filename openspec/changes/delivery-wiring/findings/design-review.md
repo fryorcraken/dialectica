@@ -138,3 +138,96 @@ decision not recorded. A suggestion is a thin entry.
       gains "The format" (32 bytes, the structured head, `p`, the newtype).
       Decision 6 gains the cost of an unanswered `createNode`, and why a node has
       no "already exists" recovery the way a channel does (Decision 14).
+
+## Re-review round 1 `7a2a3335..369561d1`
+
+Read: `design.md` in full at `369561d1`, `proposal.md`, `tasks.md`, the
+`op-transport` delta's inbound requirement and scenarios, `delivery.rs` (seam,
+`node_config`, `declined`, `channel_answer`, `Channels`, `Opening`, `Worker`,
+`InboundQueue`, `listen`, `hand_over`, `Processor`, `Delivering`), issue #176 (body
+and comment, fresh), and `gh pr view 190`. I re-read delivery's source at
+`bfdb5afd` for Decision 14's two quotations (`channel_lifecycle.nim:43`,
+`channel_api.nim:24`): both are as cited.
+
+**Earlier findings.** All confirmed fixed in the text. The PR body's Receive
+bullet no longer contains "closed #30" (it now says "the reverse of #30's choice"),
+and the only keyword-plus-number is `Closes #176`; that box above is the closer's
+to tick. The live-verification departure is now argued in `design.md` Open
+Questions and put to the owner, with 7.3 open, and `proposal.md`, `design.md`, the
+PR body and `tasks.md` all say "not run".
+
+**The code takes the decisions.** `CALL_TIMEOUT` 35 s, `SETTLE_LIMIT` 40 s,
+`INBOUND_BOUND` 256, the `channels` / `logos.test` / `Edge` node config,
+`ALREADY_EXISTS` as a substring of the decline reason, `>=` in the queue bound,
+the unknown-channel check before the size check in `refused_on_hand_over`, startup
+marking its opens before `subscribe()`, the `Opening` guard travelling in
+`Action::Open`, the per-event `catch_unwind` in `listen`, and the wait as its own
+loop in `await_settled` are each in the code as recorded. No code contradicts a
+recorded decision.
+
+**The owner's three open questions** are each stated as open, in `design.md` Open
+Questions and the PR body, and the code does what each says today: `logos.test` and
+`Edge` (`node_config`); one 256-deep queue shared by every open Stoa
+(`InboundQueue::offer`); the sender identifier held at whatever length arrives
+(`Arriving.sender_id: String`, no bound anywhere on the inbound path). One
+disagreement between documents is the first box below.
+
+- [ ] **`spec-writer`** (gap, documents disagree) — `proposal.md`'s "Open questions
+      for the owner" lists six, and the sender identifier's length is not among them.
+      `design.md` Open Questions and the PR body's "Open for the owner" both carry it
+      as an owner question, and no spec text mentions it. The proposal is where the
+      owner reads the list, and it says the sixth "was raised in review" as if that
+      were the last. Add it as a seventh (the security review raised it; the spec
+      does not bound it; the code holds it at delivery's length), or `design.md` and
+      the PR body are listing a question the proposal does not know exists.
+- [ ] **`dev-writer`** (gap, cost recorded but not sized, and a rejected alternative
+      whose reasoning applies to the chosen one) — Decision 11 and Risks say the
+      wait costs "up to `SETTLE_LIMIT` per message". The aggregate is what an owner
+      needs and is not stated. `await_settled` restarts its clock for each message
+      (`started` is local to the call, `delivery.rs:588`), and the channel stays
+      pending until the worker reaches it, so *N* messages on one still-pending
+      channel stall every Stoa for *N* × 40 s: 256 of them, the whole queue, is
+      10,240 s, about 2 h 51 min, with every other Stoa's arrivals discarded for good
+      once the queue is full. Decision 11 rejects "a limit sized for a queue of opens"
+      with exactly that argument ("every message on a still-queued channel would hold
+      every Stoa up for that long, one after another, and 256 of them fill the queue
+      into discards"), then accepts the same shape at 40 s instead of 35 s × the Stoas
+      ahead. State the multiplied figure, and say why the per-message shape is
+      accepted (the spec's "no later than a fixed time after this peer began waiting
+      **on it**" says per message) rather than implying the limit is what bounds the
+      stall. Also unrecorded, and compatible with that wording ("no later than"): a
+      wait that is *remembered per channel*, so a channel whose wait has already
+      timed out is judged at once until its open settles, which bounds the stall at
+      one limit per open instead of one per message. Record it as an alternative and
+      what ruled it out, or put it to the owner with Question 6, since the attacker
+      who can flood a channel this peer is opening is the same one.
+- [ ] **`dev-writer`** (gap, mutation evidence and an unpinned relation) — Decision
+      11's "Removing the wait turns … red" lines cover the wait, the poisoned book and
+      the guard placement. Nothing says what turns red when the **bound** is removed:
+      `tasks.md` 8.6 records that
+      `a_message_waiting_on_an_open_delivery_never_answers_is_judged_after_a_bounded_wait`
+      "passed before the change too", and 9.4 says "No test can see the value". Decision
+      4 says the same of `CALL_TIMEOUT` in the design ("argued here and in its doc, not
+      pinned"); Decision 11 does not say it of `SETTLE_LIMIT`. The relation the whole
+      of the "one call, always settles within it" argument rests on, `SETTLE_LIMIT >
+      CALL_TIMEOUT`, is checkable without a live delivery, and `tests.rs` uses
+      `SETTLE_LIMIT` only to build a `Processor`
+      (`git grep -n -F SETTLE_LIMIT`), so lowering it to 10 s changes nothing red.
+      Either pin the relation (a compile-time assert beside the constant, or a test)
+      and record it, or write in Decision 11 that the value and the relation are not
+      pinned; and record what removing the bound (an unbounded wait) does to the
+      bounded-wait test, having run it.
+- [ ] **`dev-writer`** (suggestion, a checkable claim that is false, and an
+      unrecorded wait) — Decision 3 says "the processor, the listener and the worker
+      share only the channel book's mutex". They also share `InboundQueue`'s mutex
+      (`offer` on the listener, `take` on the processor, `delivery.rs:875-902`), and
+      the dispatch thread takes the book's lock too (`Delivering::joined`,
+      `startup_opens`). The conclusion holds, since none of it waits on the worker. The
+      one real wait between threads is left out: the dispatch thread's publish
+      appends to `ops.sqlite` (Decision 13 names it as one of the threads that opens
+      it), so a reply can wait behind the processor's append for as long as the
+      SQLite busy timeout, which is rusqlite's five-second default
+      (`delivery/tests.rs:1705`; no code sets it). Decision 13 says appends "wait
+      rather than fail" and not for how long, nor that this is the library default
+      rather than a choice. Correct the sentence, and record the figure and that it
+      bounds a publish reply during an inbound append.
