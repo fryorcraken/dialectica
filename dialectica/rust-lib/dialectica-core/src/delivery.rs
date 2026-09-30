@@ -102,9 +102,11 @@ pub const CALL_TIMEOUT: Duration = Duration::from_secs(35);
 /// - **`preset: "logos.test"`**: the Logos Test Network, cluster 2. It is the
 ///   network whose 150 KiB maximum message size
 ///   [`crate::transport::MAX_MESSAGE_BYTES`] pins, and the one #30 used.
-///   `logos.dev` is cluster 3 with the transport's default size; peers on the
-///   two presets never meet, so this value is part of the interop contract in
-///   practice even though the spec leaves it to design.
+///   `logos.dev` is cluster 3 with the transport's default size (also 150 KiB)
+///   — both read at `logos-delivery` `bfdb5afd`, `networks_config.nim`, the rev
+///   delivery v0.2.1 pins. Peers on two clusters are on two networks, so this
+///   value is part of the interop contract in practice even though the spec
+///   leaves it to design.
 /// - **`mode: "Edge"`**: a light node. It does not relay other peers' traffic;
 ///   it publishes and receives through the preset's service nodes. `Core` would
 ///   make every dialectica peer a relay, contributing bandwidth and not depending
@@ -188,7 +190,8 @@ pub fn channel_answer(reply: &Result<serde_json::Value, String>) -> ChannelAnswe
 /// The words delivery answers a `channelCreate` with when its manager already
 /// holds the channel: `logos-delivery` `channel_lifecycle.nim`,
 /// `err("channel already exists: " & channelId)`, which delivery v0.2.1 passes
-/// through behind a `"ChannelCreate failed: "` prefix.
+/// through behind a `"ChannelCreate failed: "` prefix — read at `bfdb5afd`, the
+/// `logos-delivery` rev v0.2.1's `flake.lock` pins.
 ///
 /// Matched as a substring of the reason, not the whole reason: the prefix and
 /// the trailing channel id are the C API's and the manager's, and neither is

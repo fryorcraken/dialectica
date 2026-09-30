@@ -860,9 +860,10 @@ fn a_channel_delivery_declines_does_not_fail_the_join() {
 }
 
 /// Delivery's answer to a `channelCreate` for a channel its manager already
-/// holds, as delivery v0.2.1 words it: `logos-delivery` `4a85db1b`,
-/// `channel_lifecycle.nim` ("channel already exists: " & channelId) behind the
-/// C API's "ChannelCreate failed: " prefix (`library/channels_api/channel_api.nim`).
+/// holds, as delivery v0.2.1 words it: at `logos-delivery` `bfdb5afd` (the rev
+/// v0.2.1's `flake.lock` pins), `channel_lifecycle.nim` ("channel already exists:
+/// " & channelId) behind the C API's "ChannelCreate failed: " prefix
+/// (`library/channels_api/channel_api.nim`).
 fn the_already_exists_answer(stoa: &Address) -> Result<Value, String> {
     the_observed_decline(&format!(
         "ChannelCreate failed: channel already exists: {}",
@@ -2153,6 +2154,43 @@ fn traffic_on_a_channel_this_peer_is_not_opening_takes_no_place_in_the_queue() {
         "{:?}",
         peer.journal.with("discarded")
     );
+}
+
+// NO SPEC: a channel counts as "being opened" from the moment the worker asks
+// delivery for it, not from the moment a join or startup enqueues the request. A
+// message handed over while its channel's open still waits behind another action
+// in the worker's queue is refused as an unknown channel, and lost. The spec says
+// the question is asked "when delivery hands the message over"; it does not say
+// when an open counts as requested.
+#[test]
+fn a_message_on_a_channel_whose_open_is_still_queued_is_refused_on_hand_over() {
+    let mut peer = Peer::new("handover-open-queued");
+    let first = genesis("Agora");
+    let queued = genesis("Lyceum");
+    let gate = Gate::closed();
+    let _ = peer.fake.script(|s| s.create_gate = Some(gate.clone()));
+    let events = peer.start_listening();
+    peer.join(&first);
+    eventually("the first open to reach delivery", || {
+        peer.fake.creates().len() == 1
+    });
+    peer.join(&queued); // enqueued behind the unanswered first open
+
+    let op = their_op(queued.address().unwrap(), "ahead of its open", 0);
+    events
+        .send(Some(arriving(
+            ChannelIdentity::of(&queued.address().unwrap()).channel_id(),
+            op.to_bytes().unwrap(),
+            1,
+        )))
+        .unwrap();
+    eventually("the message to be refused on hand-over", || {
+        !peer.journal.with("refused (unknown-channel)").is_empty()
+    });
+    assert_eq!(peer.fake.creates().len(), 1, "the queued open was asked for");
+    gate.release();
+    peer.delivering.settle();
+    assert!(stored(&peer, &op.op.id()).is_none());
 }
 
 #[test]
