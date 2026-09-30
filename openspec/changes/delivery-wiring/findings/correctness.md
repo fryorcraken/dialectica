@@ -232,7 +232,7 @@ earlier outcomes hold. Suites green: `cargo test … -p dialectica -p dialectica
 (1286 + 30 + 3), the `delivery::` tests serially (`--test-threads=1`), and
 `nix build ./dialectica#lgx`.
 
-- [ ] **`tester`** — `delivery.rs:542` (`Channels::opening`, the per-channel
+- [x] **`tester`** — `delivery.rs:542` (`Channels::opening`, the per-channel
       count) — the count is untested, and it now matters: two opens of one channel
       can be pending at once.
       **Why this supersedes round 0.** My clean-prose entry above ("at most one
@@ -263,8 +263,24 @@ earlier outcomes hold. Suites green: `cargo test … -p dialectica -p dialectica
       opened").
       **Severity:** low. The code is correct today. The gap is that nothing
       stops a regression to a flag, which is the shape round 0 called harmless.
+      **Outcome (`tester`): fixed**, two tests, at the two layers the count can be
+      seen from. `a_channel_asked_for_twice_is_being_opened_until_both_requests_settle`
+      asks the book, for each order the two requests can settle in: after one
+      settles the channel is still known, after both it is not (so it also fails a
+      count that never comes down). `a_message_waits_for_the_last_of_two_requests_for_its_channel`
+      is your probe as a message sees it, with its `sleep` replaced by a flag raised
+      just before the second request is answered, read when `decide` returns.
+      Mutations, each restored: `pending.requests += 1` to `*= 1` — predicted red in
+      both, observed red in both, and a third the prediction missed, the dev-writer's
+      `a_request_made_while_a_message_waits_does_not_extend_that_messages_wait`,
+      which under this mutant passed without ever waiting (the storm's requests
+      removed the pending entry, so the message was refused at once) until its
+      refusal was required to come no sooner than the limit; and
+      `saturating_sub(1)` to `saturating_sub(0)` — predicted red at the "both
+      settled" assertion of the first test only, observed exactly that. This
+      supersedes the round-0 entry's "equivalent, not a gap" for the `*=` mutant.
 
-- [ ] **`tester`** — `delivery.rs:96` (`CALL_TIMEOUT`) and `delivery.rs:531`
+- [x] **`tester`** — `delivery.rs:96` (`CALL_TIMEOUT`) and `delivery.rs:531`
       (`SETTLE_LIMIT`) — the ordering both docs rest on is pinned nowhere:
       delivery's own 30 s < `CALL_TIMEOUT` < `SETTLE_LIMIT`.
       **Scenario:** `CALL_TIMEOUT` set back to the IPC default of 20 s. A
@@ -280,6 +296,21 @@ earlier outcomes hold. Suites green: `cargo test … -p dialectica -p dialectica
       `const`. The docs name both relations, and one assertion over the two
       constants and a hardcoded 30 s would hold them.
       **Severity:** low. Nothing is wrong at the shipped values.
+      **Outcome (`tester`): fixed, on top of the dev-writer's compile-time asserts
+      (`DELIVERY_CALLBACK_TIMEOUT < CALL_TIMEOUT < SETTLE_LIMIT`), which stay.**
+      Those compare the constants with each other, so they agree with whatever
+      `DELIVERY_CALLBACK_TIMEOUT` says delivery's timeout is. The gap they leave:
+      `DELIVERY_CALLBACK_TIMEOUT` lowered to fit a shortened `CALL_TIMEOUT`.
+      `the_call_timeout_outlasts_deliverys_own_and_the_settle_limit_outlasts_the_call`
+      is the assertion your fix shape names, with the 30 s written in the test
+      (delivery v0.2.1's `CALLBACK_TIMEOUT{30}`) rather than read from the code.
+      Mutation: `DELIVERY_CALLBACK_TIMEOUT` to 10 s and `CALL_TIMEOUT` to 20 s
+      together. Predicted: the build compiles (10 < 20 < 40 satisfies both
+      asserts) and only this test is red. Observed exactly that: "CALL_TIMEOUT
+      (20s) does not outlast delivery's own 30s". Restored. The two single edits
+      your finding describes (`CALL_TIMEOUT` back to 20 s alone, `SETTLE_LIMIT`
+      under `CALL_TIMEOUT`) fail the build through the dev-writer's asserts, as
+      the dev-writer recorded, and were not re-run.
 
 ### Clean in this round
 

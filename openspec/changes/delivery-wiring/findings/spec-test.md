@@ -409,7 +409,7 @@ payload at the limit (all three hold the boundary up on an unanswered open and
 assert the refusals land while it is still held, via `answered_creates() == 1`).
 No `NO SPEC:` marker appears in the range's tests.
 
-- [ ] **`spec-writer`** (then `tester`) — a requirement clause with no scenario, whose
+- [x] **`spec-writer`** (then `tester`) — a requirement clause with no scenario, whose
       tests pin an internal rather than what the clause says.
       **Where:** `op-transport`, "Every payload the reliable channel delivers passes
       the inbound boundary", the two sentences "or given up by this peer without
@@ -447,6 +447,33 @@ No `NO SPEC:` marker appears in the range's tests.
       "an open this peer never goes on to ask delivery for is given up", which no
       scenario can enumerate in advance. The requirement text is unchanged apart
       from the settled-by list, reworded for the security entry's per-open wait.
+      **Outcome (`tester`): fixed, both give-up paths now checked from a message.**
+      The scenario's own path, the running wiring with an unretainable sender
+      identifier (`an_open_this_peer_gives_up_without_asking_delivery_does_not_hold_a_message_up`),
+      is first made to prove the open was pending — the worker is held at node
+      creation and the book asked, so a join that never marked its open cannot
+      pass it by being refused at once — and then the message is sent as soon as
+      the log says the open was given up, and must be refused inside
+      `eventually`'s ten seconds where the running wiring's wait is forty. The test
+      had carried a `started.elapsed() < SETTLE_LIMIT` assertion after
+      `eventually`, which could not fail independently and is dropped. The two
+      `is_known` tests you named (`a_sender_identifier_that_cannot_be_retained_opens_no_channel`,
+      `a_join_the_worker_cannot_take_is_given_up_and_not_left_opening`, the worker
+      that cannot take a join, which the spec-writer left for this box) keep
+      their book assertion and gain your fix shape: a message decided by a
+      processor whose limit is a minute is refused inside ten seconds
+      (`refused_without_waiting_out_the_limit`). Mutations, each restored:
+      the guard forgotten on the no-sender path (`mem::forget(opening)` before the
+      return) — predicted red in the wiring test and in the sender-identifier
+      test, observed both (the wiring test at "timed out waiting: the message to be
+      refused", 10 s; the other at its book assertion, which fires before the new
+      message check); the refused action forgotten in `request` with the
+      `is_known` assertion of the worker-gone test neutralised, to see the message
+      check alone — predicted red, observed "timed out waiting: the message to be
+      refused without waiting", so the new check can fail without the internal
+      one; and `is_known` narrowed to open channels only, for the pre-check —
+      observed red at "the join's open was not counted as being opened while it
+      waited on the worker".
 
 - [x] **`spec-writer`** — the rule that recognises "already exists" is unspecified,
       and its negative side has one test row.
@@ -489,6 +516,16 @@ No `NO SPEC:` marker appears in the range's tests.
       something else already exists does not open the channel" (the `Context
       already initialized` wording among its rows). **For the `tester`:** rows
       for both scenarios, since no box of theirs carries this.
+      **Follow-up (`tester`):** the dev-writer added the rows to the recogniser's
+      own test (`only_delivery_s_already_exists_answer_opens_a_declined_channel`,
+      on `channel_answer`), which cannot see the scenarios' THENs (a message
+      stored or refused, a post sent or not). `what_delivery_says_of_a_channel_decides_whether_the_channel_opens_and_a_post_is_sent`
+      is one table through the whole wiring, a peer per row: no id in the answer
+      (opens: message stored, post sent), `Context already initialized` and
+      "content topic already exists" (do not: message refused as unknown, post
+      not sent). Mutations, restored: matching `already` instead of the
+      words, red at the `Context already initialized` row; requiring the
+      channel id (a second colon) in the answer, red at the no-id row.
 
 **Areas that were clean, and one observation with no box.** Scenario coverage
 for the range is complete apart from the two boxes above. The self-consistency

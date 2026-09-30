@@ -274,7 +274,7 @@ text pin exists and pins the order.
       caller, says it is private and reached only through `receive_via`, and
       that `receive` and the delivery processor both go through that.
 
-- [ ] **`tester`** — `delivery/tests.rs:765` — the negative half of
+- [x] **`tester`** — `delivery/tests.rs:765` — the negative half of
       `the_adapter_hands_delivery_every_recorded_membership_and_every_published_op`
       is a hand-written list of five closure spellings, and a sixth passes.
       **Scenario:** added to `lib.rs`, under `#[cfg(logos_scaffold)]`,
@@ -288,6 +288,18 @@ text pin exists and pins the order.
       finds nothing), so `code.contains("|_")` would pass now and fail on any
       ignoring closure. The positive counts still pin the real sinks; this is the
       guard for a *new* handler's sink. **Severity:** low.
+      **Outcome (`tester`): fixed.** The negative half of
+      `the_adapter_hands_delivery_every_recorded_membership_and_every_published_op`
+      is now the prefix rule, `|_` (a closure opens with `|` and a discarded
+      parameter starts with `_`), plus `,_|` for a discarded second parameter, in
+      place of the list of five spellings. Mutation: your own line,
+      `let mut sink = |_x: &core::op::OpId| {};` added to `lib.rs` under
+      `#[cfg(logos_scaffold)]`. Predicted red, observed red ("the adapter contains a
+      closure that ignores its argument: `|_`"); the five-spelling list passes it, as
+      measured in this finding. Restored (`git diff --stat` on `lib.rs` empty). Not
+      covered, by design: a sink that ignores its argument by using it in a way
+      that changes nothing (`|id| drop(id)`), which no text pin can tell from a
+      real one.
 
 **Clean, in prose.**
 
