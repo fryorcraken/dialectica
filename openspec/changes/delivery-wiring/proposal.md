@@ -56,7 +56,14 @@ the design relies on.
   log never carries the payload, the sender identifier, or a channel identifier
   this peer has not opened. A message on a channel whose open is still
   unanswered is judged once the open settles, not refused in the gap, and that
-  wait is bounded by a fixed time even if delivery never answers. A message
+  wait is bounded by a fixed time even if delivery never answers. A channel
+  counts as being opened from the moment a create, a join or startup asks for
+  it, including while that request waits behind others, not from when delivery
+  is asked; and startup counts every Stoa's channel as being opened before it
+  checks any message. Otherwise a module restarted while delivery kept running
+  refuses, and loses, what delivery hands it before each open reaches delivery.
+  A message whose fields cannot be read, a panic while reading them included,
+  is logged and discarded, and reception carries on. A message
   the op log cannot take is logged as a storage failure and not retried. A
   failed subscription is logged, and opens and sends still happen.
 - **The inbound bound.** Payloads waiting for the boundary are capped at a fixed
@@ -67,6 +74,10 @@ the design relies on.
   neither open nor being opened is refused when delivery hands it over and
   takes no place in the queue, so traffic on other applications' channels, or
   on any identifier a sender picks, cannot force discards of a Stoa's ops.
+  Likewise a payload over the 150 KiB message limit, on a channel open or being
+  opened, is refused as over-long on hand-over and takes no place, so the
+  queue's memory is bounded by this application's own limit rather than by the
+  largest message a node another module created will carry.
 - **The sender identifier** differs between installations, including two holding
   the same identity. It is the same for one installation across restarts. It
   differs between two Stoas. It is made from nothing that is, or is computed

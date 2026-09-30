@@ -181,13 +181,17 @@ No other delivery event is an arrival. A message delivered outside a reliable ch
 
 Each refusal MUST be recorded in the module's log naming which refusal it was. **The log MUST NOT carry the payload, the sender identifier, or a channel identifier this peer has no channel open under**: whoever sent the message chose each of them, and a channel identifier this peer did not open may belong to another application sharing the node.
 
-A delivered message whose fields cannot be read MUST be discarded and recorded in the module's log. A refusal, a discarded message, or a failure to store MUST NOT stop the peer from processing the messages that follow.
+A delivered message whose fields cannot be read MUST be discarded and recorded in the module's log, however the reading fails, a panic in the code that reads them included. A refusal, a discarded message, or a failure to store MUST NOT stop the peer from processing the messages that follow.
 
 **A message the op log cannot take is not decided again.** When the op log cannot be opened, or the append fails, the module's log MUST record it as a storage failure, and the message MUST NOT be held for another attempt: its op is in the log afterwards only if it arrives again.
 
-**A message arriving on a channel that is not open, but whose opening this peer has requested and delivery has not yet answered, MUST be judged only once that open is settled** — reported held (created, or already existing, as `stoa-membership`'s requirement "Creating or joining a Stoa opens its reliable channel" says), declined, failed, or given up as unanswered — and against the channels open then. Delivery can hand over a message on a channel before its answer to the creation reaches this peer. A message on any other channel identifier, an open one included, MUST be judged without waiting on any open.
+**A message arriving on a channel that is not open, but is being opened, MUST be judged only once that open is settled** — reported held (created, or already existing, as `stoa-membership`'s requirement "Creating or joining a Stoa opens its reliable channel" says), declined, failed, given up as unanswered, or given up by this peer without delivery being asked — and against the channels open then. Delivery can hand over a message on a channel before its answer to the creation reaches this peer. A message on any other channel identifier, an open one included, MUST be judged without waiting on any open.
 
 **That wait is bounded by a fixed time.** A message waiting on an open MUST be judged no later than a fixed time after this peer began waiting on it, whether or not delivery ever answers the open. When that time passes with the open unanswered, the open is given up as unanswered for that message, and the message is judged against the channels open then.
+
+**A channel is being opened from the moment a create, a join or the module's startup asks for it, not from the moment delivery is asked.** An open that waits behind other requests this peer has made of delivery is being opened while it waits. It stays so until delivery's answer settles it, or until this peer gives up asking for it, and an open this peer never goes on to ask delivery for is given up. Delivery can hand over a message on a channel before this peer has asked delivery for that channel at all: a module restarted while delivery kept running is handed messages on its Stoas' channels from the moment it subscribes, while its own requests for those channels still wait behind node creation and behind each other.
+
+**The module's startup MUST count the channel of every Stoa it asks for as being opened before it checks any message delivery hands over**, whether that check is made on hand-over or at the boundary.
 
 **If this peer cannot subscribe to the messages delivery hands over on reliable channels, the module's log MUST record that this peer will not receive ops from other peers**, and node creation, channel creation and sends MUST still be requested as they would have been otherwise.
 
@@ -218,6 +222,12 @@ A delivered message whose fields cannot be read MUST be discarded and recorded i
 
 - **WHEN** a message whose fields cannot be read is followed by one carrying a valid op on an open channel
 - **THEN** the valid op is stored
+
+#### Scenario: A panic reading one message does not end reception
+
+- **WHEN** reading one delivered message's fields panics, and a message carrying a valid op then arrives on a channel this peer has open
+- **THEN** the module's log records the failure
+- **AND** the valid op is stored
 
 #### Scenario: A message the op log cannot take is logged and not retried
 
@@ -253,6 +263,18 @@ A delivered message whose fields cannot be read MUST be discarded and recorded i
 - **WHEN** a Stoa's channel is open, its opening is requested again and not yet answered, and a message carrying a valid op for that Stoa arrives on it
 - **THEN** the op is stored before the repeated open is answered
 
+#### Scenario: A message on a channel whose open waits behind another is judged once that open settles
+
+- **WHEN** this peer has asked delivery for one Stoa's channel and delivery has not answered, a second Stoa is then joined, a message carrying a valid op for the second Stoa arrives on its channel identifier before delivery has been asked to create that channel, and delivery then reports both channels created
+- **THEN** the op is stored
+- **AND** it is not refused as arriving on an unknown channel
+
+#### Scenario: A restarted peer keeps what delivery hands over before startup asks for its channel
+
+- **WHEN** the module starts while the peer is in a Stoa and delivery has not yet answered node creation, a message carrying a valid op for that Stoa is the first thing delivery hands over after this peer subscribes, and delivery then answers node creation and answers that channel's creation that the channel already exists
+- **THEN** the op is stored
+- **AND** it is not refused as arriving on an unknown channel
+
 #### Scenario: A peer that cannot subscribe still publishes
 
 - **WHEN** subscribing to reliable-channel messages fails at startup, the peer is in a Stoa, and a post is then published into it
@@ -268,13 +290,17 @@ A delivered message whose fields cannot be read MUST be discarded and recorded i
 
 ### Requirement: Inbound payloads waiting for the boundary are bounded
 
-The payloads this peer holds between delivery handing them over and the boundary deciding them MUST be bounded by a fixed count. Taking a message from delivery MUST NOT wait on the boundary deciding any payload, the refusal below included.
+The payloads this peer holds between delivery handing them over and the boundary deciding them MUST be bounded by a fixed count. Taking a message from delivery MUST NOT wait on the boundary deciding any payload, the refusals below included.
 
 Waiting payloads MUST be decided in the order they arrived. When the bound is reached, a payload arriving MUST be discarded, and the payloads already waiting MUST be kept.
 
 A discarded payload is not stored. Every discard MUST be counted from the module's start, and each MUST be recorded in the module's log with the running count. A discard's log record MUST be distinguishable from a refusal's, and MUST NOT carry the payload or the sender identifier.
 
-**A message on a channel identifier this peer has neither open nor being opened MUST NOT take a place among the waiting payloads.** It MUST be refused as arriving on an unknown channel when delivery hands it over, and recorded in the module's log as that refusal is recorded by "Every payload the reliable channel delivers passes the inbound boundary". It MUST NOT count towards the bound and MUST NOT be counted or logged as a discard. Whether a channel is open or being opened is judged when delivery hands the message over.
+**A message on a channel identifier this peer has neither open nor being opened MUST NOT take a place among the waiting payloads.** It MUST be refused as arriving on an unknown channel when delivery hands it over, and recorded in the module's log as that refusal is recorded by "Every payload the reliable channel delivers passes the inbound boundary". It MUST NOT count towards the bound and MUST NOT be counted or logged as a discard. Whether a channel is open or being opened — "being opened" as "Every payload the reliable channel delivers passes the inbound boundary" defines it — is judged when delivery hands the message over.
+
+**A payload larger than the message limit MUST NOT take a place among the waiting payloads either**, on a channel that is open or being opened. It MUST be refused as over-long when delivery hands it over, as "An oversized payload is refused, against a limit pinned at 150 KiB" contracts, and recorded in the module's log as that refusal is recorded. It MUST NOT count towards the bound and MUST NOT be counted or logged as a discard. A payload of exactly the limit is not refused for its size. The payload bytes held waiting are therefore bounded by the bound times 150 KiB, whatever the largest message the node carries. A message on a channel identifier neither open nor being opened is refused as arriving on an unknown channel, as above, whatever its size.
+
+A message refused when delivery hands it over is not among the waiting payloads, and "decided in the order they arrived" does not order its refusal against their decisions.
 
 #### Scenario: The waiting payloads never exceed the bound
 
@@ -299,6 +325,19 @@ A discarded payload is not stored. Every discard MUST be counted from the module
 - **THEN** each of the messages on the channel identifier this peer is not opening is recorded as refused as arriving on an unknown channel, before the boundary is released
 - **AND** no discard is recorded
 - **AND** the valid op is stored once the boundary is released
+
+#### Scenario: An oversized payload on an open channel takes no place in the queue
+
+- **WHEN** the boundary is held up deciding one payload, more payloads than the bound then arrive on a channel this peer has open, each one byte larger than the message limit, and a message carrying a valid op then arrives on that channel
+- **THEN** each oversized payload is recorded as refused as over-long, before the boundary is released
+- **AND** no discard is recorded
+- **AND** the valid op is stored once the boundary is released
+
+#### Scenario: A payload at the limit waits its turn
+
+- **WHEN** the boundary is held up deciding one payload, and a payload of exactly the message limit then arrives on a channel this peer has open
+- **THEN** no refusal is recorded for it before the boundary is released
+- **AND** it is not refused as over-long after the boundary is released
 
 ### Requirement: The sender identifier this peer supplies is its own, stable, and says nothing about its author
 

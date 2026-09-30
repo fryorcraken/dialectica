@@ -111,6 +111,20 @@ probe did so it can be re-run.
       they arrived" would need saying for it), so it is not built. It now lives in
       design.md's Open Questions ("For the spec-writer: oversized payloads on
       hand-over") and in this round's hand-back.
+      **Spec outcome (`spec-writer`): the first direction is now required; the
+      `dev-writer` builds it.** `op-transport`, "Inbound payloads waiting for the
+      boundary are bounded", now says a payload larger than the message limit, on
+      a channel open or being opened, "MUST NOT take a place among the waiting
+      payloads": it is refused as over-long on hand-over, logged as that refusal
+      is, and neither counts towards the bound nor is a discard. A message on a
+      channel neither open nor being opened is still refused as an unknown
+      channel whatever its size, which answers "say which it is logged as". A
+      hand-over refusal is not among the waiting payloads, so "decided in the
+      order they arrived" does not order it. New scenarios: "An oversized payload
+      on an open channel takes no place in the queue" and "A payload at the limit
+      waits its turn". Not decided: the sender identifier is still held at
+      whatever length arrives (bounded only by delivery's own message maximum);
+      that is in the hand-back for the owner, not in the spec.
 
 - [x] **`dev-writer`** — `delivery.rs:1030` — the listener runs its **whole loop**
       under one `catch_unwind`, so a single panic while reading one event ends
