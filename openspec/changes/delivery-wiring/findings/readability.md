@@ -783,7 +783,7 @@ unchanged by the findings commits after `58460b02`): the range's diff of `delive
 Round 3's three entries are all confirmed answered as their outcomes say. Two new
 defects, both low, both stale references in prose; neither changes behaviour.
 
-- [ ] **`dev-writer`** — `design.md:473`, `design.md:733` — two citations of a commit
+- [x] **`dev-writer`** — `design.md:473`, `design.md:733` — two citations of a commit
       that will not exist on `main`.
       **Scenario:** Decision 11 says the ask's requirement is "from the spec-writer's
       `d240ebdc`" and that the narrower promise was "rejected ... in `d240ebdc`".
@@ -801,8 +801,16 @@ defects, both low, both stale references in prose; neither changes behaviour.
       heading does with `de35f026`; those are a task log, not an argument, and I do
       not box them.)
       **Severity:** low.
+      **Fixed** (`dev-writer`) in the commit `Extend only a wait that has not
+      ended, and drop two stale references`: the first now reads "added by the
+      spec-writer after the round-3 security re-review", the second "The
+      spec-writer rejected it in its callback after that round". `git grep -E`
+      for a backticked hex string in `design.md` finds only upstream revisions
+      (`logos-delivery`, the builder pin, the `logos_protocol.h` header), none a
+      commit on this branch. `tasks.md`'s section headings keep theirs, as you
+      said.
 
-- [ ] **`dev-writer`** — `tasks.md:92` — task 11.1 describes `ChannelBook::wait_ends`
+- [x] **`dev-writer`** — `tasks.md:92` — task 11.1 describes `ChannelBook::wait_ends`
       as a function that "asks `is_opening`"; `wait_ends` no longer does.
       **Scenario:** 11.1 reads "`ChannelBook::wait_ends` asks `is_opening` rather than
       spelling 'pending and not open' a second time, so whether a message waits and
@@ -816,6 +824,9 @@ defects, both low, both stale references in prose; neither changes behaviour.
       nothing), so this is the one site a rename sweep missed.
       **Fix shape:** "`ChannelBook::begin_wait` (then `wait_ends`) asks `is_opening`".
       **Severity:** low.
+      **Fixed** (`dev-writer`) in the commit `Extend only a wait that has not
+      ended, and drop two stale references`, in your fix shape's words:
+      "`ChannelBook::begin_wait` (then `wait_ends`) asks `is_opening`".
 
 ### What I checked, and found clean
 

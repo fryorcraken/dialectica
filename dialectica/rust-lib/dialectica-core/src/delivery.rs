@@ -606,7 +606,19 @@ impl Wait {
     /// its wait" would be false. `Option::take` is the cap: a second ask finds
     /// nothing to take. `a_second_ask_while_a_message_waits_does_not_extend_its_wait_again`
     /// is red without it.
+    ///
+    /// **Only a wait that has not ended.** A wait stays in the book after its end
+    /// until the waiter re-takes the lock, and the ask can take it first — behind
+    /// the listener, a settle or a hand-over, an ordinary interleaving. Extended
+    /// then, a message whose wait had expired would wait again for a full limit,
+    /// against "the message waiting then ... MUST be judged without waiting on that
+    /// open". `an_ask_after_a_messages_wait_has_ended_does_not_make_it_wait_again`
+    /// is red without the check. An ask at the end itself counts as after it, as
+    /// [`Channels::await_settled`] counts no time left as ended.
     fn extend_from(&mut self, asked: Instant) {
+        if asked >= self.ends {
+            return;
+        }
         if let Some(limit) = self.extension.take() {
             self.ends = asked + limit;
         }

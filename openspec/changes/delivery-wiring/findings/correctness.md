@@ -558,7 +558,7 @@ Dimension: **correctness only**. Read `git diff 7462ded8 58460b02` for
 `d240ebdc`. Reviewed at `adba1a22`. `cargo test … -p dialectica -p dialectica-core`
 green (1305 + 30 + 3).
 
-- [ ] **`dev-writer`** — `delivery.rs:609` `Wait::extend_from` — an ask landing
+- [x] **`dev-writer`** — `delivery.rs:609` `Wait::extend_from` — an ask landing
       after a message's end has passed, but before the processor has re-taken the
       book, revives that message's wait for a full limit
       **What is wrong:** `extend_from` moves `ends` to `asked + limit` whenever the
@@ -599,6 +599,23 @@ green (1305 + 30 + 3).
       book at the moment of the end, only this peer's ask opens it, and a sender cannot
       aim at it. It is still a reachable violation of a MUST this range added, and
       the fix is one line.
+      **Fixed** (`dev-writer`) in the commit `Extend only a wait that has not
+      ended, and drop two stale references`: the guard as measured,
+      `if asked >= self.ends { return; }` at the top of `Wait::extend_from` (an
+      ask at the end itself counts as after it, as `await_settled` counts no time
+      left as ended). The probe is ported as
+      `an_ask_after_a_messages_wait_has_ended_does_not_make_it_wait_again`, with
+      the limit at 1 s and the outcome read by time rather than by storage: the
+      open is never answered, and the deciding thread returns the instant it
+      judged, so a stall of the test thread after the ask cannot move it. It
+      also asserts the wait is still in the book when the test takes it, so a
+      stall before then cannot pass it vacuously. Red before the fix ("judged
+      1.000128897s after an ask made once its wait had ended: the ask made it
+      wait again", against a bound of 0.5 s), green after; the whole suite green
+      (1306 + 30 + 3). Decision 11 gains "Why only a wait that has not ended",
+      with the rejected alternative (the waiter dropping its own `Wait` at its
+      end, which needs the lock the ask holds) and the test in its "what breaks
+      without each part" list; tasks 13.1.
 - [ ] **`tester`** — `delivery.rs:667` `ChannelBook::end_wait` — nothing pins
       that a decided message's `Wait` leaves the book
       **Measured:** `cargo mutants --file dialectica-core/src/delivery.rs` scoped to

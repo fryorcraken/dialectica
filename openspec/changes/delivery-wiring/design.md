@@ -470,7 +470,8 @@ puts the time back to not started, so the next message waits again, for a fresh
 
 **This peer's ask of delivery starts the open's time again, and extends a waiting
 message once.** `op-transport`, "Asking delivery to create a channel starts the
-open's time again", from the spec-writer's `d240ebdc`. The worker marks the ask
+open's time again", added by the spec-writer after the round-3 security
+re-review. The worker marks the ask
 in the book (`Opening::asked`) immediately before `channelCreate`, and it does two
 things there: the open's time becomes *started at the ask*, whether or not it had
 ended, so the next message to wait ends the fixed time after the ask; and every
@@ -500,6 +501,20 @@ cap is what keeps "Requests made while a message waits do not lengthen its wait"
 true now that an ask can move an end. It is `Option::take` on the `Wait`'s
 remaining extension: a second ask finds nothing to take.
 
+*Why only a wait that has not ended.* A message's `Wait` stays in the book past
+its end until the waiter re-takes the lock, and the ask can take the lock first —
+the waiter wakes at its end and queues behind whoever holds the book (the
+listener's `is_known`, a settle, a hand-over), an ordinary interleaving. Extended
+then, a wait that had expired would run a full limit again, against the spec's
+"the message waiting then ... MUST be judged without waiting on that open", and
+the "less than twice `SETTLE_LIMIT`" below would not hold: the stall would be the
+overshoot plus a limit. So `Wait::extend_from` extends only when the ask is before
+the wait's end, reading the end as the waiter does (no time left is ended). The
+correctness re-review (round 4) found it with a probe that holds the book across
+the end and asks inside it. *Rejected: have the waiter drop its own `Wait` at its
+end* — it cannot, since dropping needs the lock the ask is holding; the check has
+to be where the ask is applied.
+
 *What still loses a message.* One whose wait ended before this peer asked delivery
 at all — an open queued behind more than `SETTLE_LIMIT` of other calls — and the
 channel's messages after it until the ask; and a message already extended once,
@@ -518,6 +533,9 @@ What breaks without each part:
 - the extension uncapped (every ask moving the end) turns
   `a_second_ask_while_a_message_waits_does_not_extend_its_wait_again` red — refused
   1.71 s after the first ask at a 1 s limit, where the test allows 1.4;
+- the extension given to a wait whose end has passed turns
+  `an_ask_after_a_messages_wait_has_ended_does_not_make_it_wait_again` red —
+  judged 1.00 s after the ask at a 1 s limit, where the test allows 0.5;
 - the worker not marking its ask turns
   `the_worker_marks_its_ask_of_delivery_in_the_channel_book` red.
 
@@ -730,8 +748,8 @@ good.
 - **Narrow the spec's promise instead of restarting at the ask** (the other
   direction the security re-review offered, round 3): keep the time from the first
   message and guarantee only waits that began after the ask. The spec-writer
-  rejected it in `d240ebdc`: it keeps the loss in exactly the race this wait
-  exists for.
+  rejected it in its callback after that round: it keeps the loss in exactly the
+  race this wait exists for.
 - **Let every ask extend a waiting message.** Rejected by the once-only cap
   above: asks chained against a hung delivery would postpone one message, and
   every Stoa behind it, for as long as they came.
