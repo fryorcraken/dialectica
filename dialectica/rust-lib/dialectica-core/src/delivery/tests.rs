@@ -2386,8 +2386,9 @@ fn handed_over(asked: &std::sync::atomic::AtomicUsize, n: usize) {
 #[test]
 fn a_message_on_a_channel_whose_open_waits_behind_another_is_judged_once_that_open_settles() {
     // `op-transport`, scenario "A message on a channel whose open waits behind
-    // another is judged once that open settles" — this test's old `NO SPEC`
-    // marker, with the opposite expectation. The second Stoa's open is queued
+    // another is judged once that open settles" — the spec's answer to the
+    // question this test used to leave open, with the opposite expectation to
+    // the one it first pinned. The second Stoa's open is queued
     // behind the first's, which delivery has not answered, when a message on
     // the second channel is handed over. Red while an open counted as being
     // opened only once the worker asked delivery: the message was refused as an
@@ -2569,6 +2570,41 @@ fn a_worker_that_could_not_start_is_named_as_such_and_startup_does_not_run_again
     assert!(!delivering.start(Fake::default(), dir.stores(), now, || {
         Ok(std::iter::empty::<Option<Arriving>>())
     }));
+}
+
+#[test]
+fn a_join_the_worker_cannot_take_is_given_up_and_not_left_opening() {
+    // `op-transport`: an open this peer never goes on to ask delivery for is
+    // given up, and settled rather than left pending. The worker is gone — its
+    // end of the queue dropped — so the join's open is refused by the send and
+    // handed back inside its error. Red with that error forgotten in `request`:
+    // the channel stays counted as being opened, and every message on it waits
+    // out `SETTLE_LIMIT` before being refused.
+    let journal = Arc::new(Recorder::default());
+    let channels = Arc::new(Channels::default());
+    let (actions, worker_end) = mpsc::channel();
+    drop(worker_end);
+    let delivering = Delivering {
+        journal: journal.clone(),
+        wiring: Wiring::Running(Outbox {
+            actions,
+            channels: Arc::clone(&channels),
+        }),
+    };
+    let stoa = genesis("Agora").address().unwrap();
+
+    delivering.joined(&stoa);
+
+    assert_eq!(
+        journal.with("worker has stopped").len(),
+        1,
+        "{:?}",
+        journal.lines()
+    );
+    assert!(
+        !channels.is_known(ChannelIdentity::of(&stoa).channel_id()),
+        "the open the worker never took is still counted as being opened"
+    );
 }
 
 #[test]

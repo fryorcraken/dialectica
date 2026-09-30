@@ -1060,8 +1060,8 @@ impl Processor {
     /// peer's own clock at processing time.
     fn decide(&self, message: &Arriving) {
         // `op-transport`, "A message arriving on a channel that is not open, but
-        // whose opening this peer has requested and delivery has not yet answered,
-        // MUST be judged only once that open is settled" (scenarios "…is stored
+        // is being opened, MUST be judged only once that open is settled"
+        // (scenarios "…is stored
         // once delivery reports the channel created" and "…is refused once
         // delivery declines the open"). See `ChannelBook` for why, and design
         // Decision 11.
