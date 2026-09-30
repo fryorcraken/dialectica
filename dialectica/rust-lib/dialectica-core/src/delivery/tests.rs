@@ -399,7 +399,7 @@ fn op_id_of(reply: &str) -> OpId {
 fn open_for(stoa: &Address) -> Arc<Channels> {
     let channels = Arc::new(Channels::default());
     let mut opening = channels.opening(&ChannelIdentity::of(stoa));
-    opening.created();
+    opening.held();
     drop(opening);
     channels
 }
@@ -856,6 +856,150 @@ fn a_channel_delivery_declines_does_not_fail_the_join() {
         !peer.journal.with("(unknown-channel)").is_empty()
     });
     assert!(stored(&peer, &their.op.id()).is_none());
+}
+
+/// Delivery's answer to a `channelCreate` for a channel its manager already
+/// holds, as delivery v0.2.1 words it: `logos-delivery` `4a85db1b`,
+/// `channel_lifecycle.nim` ("channel already exists: " & channelId) behind the
+/// C API's "ChannelCreate failed: " prefix (`library/channels_api/channel_api.nim`).
+fn the_already_exists_answer(stoa: &Address) -> Result<Value, String> {
+    the_observed_decline(&format!(
+        "ChannelCreate failed: channel already exists: {}",
+        ChannelIdentity::of(stoa).channel_id()
+    ))
+}
+
+#[test]
+fn a_channel_delivery_reports_already_existing_is_open() {
+    // `stoa-membership`, scenario "A channel delivery reports already existing is
+    // open": a message on it afterwards is stored, and a post afterwards is sent
+    // on it. Red while "already exists" was read as a decline.
+    let mut peer = Peer::new("join-already-exists");
+    let g = genesis("Agora");
+    let stoa = g.address().unwrap();
+    let _ = peer
+        .fake
+        .script(|s| s.create_replies.push_back(the_already_exists_answer(&stoa)));
+    let events = peer.start_listening();
+    peer.join(&g);
+    peer.delivering.settle();
+
+    let their = their_op(stoa, "on a channel delivery already held", 0);
+    events
+        .send(Some(arriving(
+            ChannelIdentity::of(&stoa).channel_id(),
+            their.to_bytes().unwrap(),
+            1,
+        )))
+        .unwrap();
+    eventually("the op to be judged", || {
+        !peer.journal.with("inbound").is_empty()
+    });
+    assert!(
+        stored(&peer, &their.op.id()).is_some(),
+        "{:?}",
+        peer.journal.lines()
+    );
+
+    peer.post(&stoa, "sent on the channel delivery already held");
+    peer.delivering.settle();
+    let sends = peer.fake.sends();
+    assert_eq!(sends.len(), 1, "{:?}", peer.journal.lines());
+    assert_eq!(sends[0].0, ChannelIdentity::of(&stoa).channel_id());
+}
+
+#[test]
+fn a_creation_delivery_did_not_complete_in_time_opens_on_the_next_request() {
+    // `stoa-membership`, scenario "A creation delivery did not complete in time
+    // opens on the next request" — the correctness review's probe. delivery
+    // v0.2.1 gives up on its own 30 s callback and answers a timeout while its
+    // runtime creates the channel anyway; the repeated join is then answered
+    // "already exists". Red while that answer was read as a decline: the
+    // channel stayed shut for as long as delivery ran.
+    let mut peer = Peer::new("join-timeout-then-exists");
+    let g = genesis("Agora");
+    let stoa = g.address().unwrap();
+    let _ = peer.fake.script(|s| {
+        s.create_replies
+            .push_back(the_observed_decline("channel_create callback timeout"));
+        s.create_replies.push_back(the_already_exists_answer(&stoa));
+    });
+    let events = peer.start_listening();
+    peer.join(&g);
+    peer.delivering.settle();
+    peer.join(&g);
+    peer.delivering.settle();
+    assert_eq!(peer.fake.creates().len(), 2);
+
+    let their = their_op(stoa, "delivered on the channel delivery holds", 0);
+    events
+        .send(Some(arriving(
+            ChannelIdentity::of(&stoa).channel_id(),
+            their.to_bytes().unwrap(),
+            1,
+        )))
+        .unwrap();
+    eventually("the op to be judged", || {
+        !peer.journal.with("inbound").is_empty()
+    });
+    assert!(
+        stored(&peer, &their.op.id()).is_some(),
+        "{:?}",
+        peer.journal.lines()
+    );
+    assert!(peer.journal.with("unknown-channel").is_empty());
+}
+
+#[test]
+fn a_module_restarted_while_delivery_kept_running_has_its_channels_open() {
+    // `stoa-membership`, scenario "A module restarted while delivery kept
+    // running has its channels open": startup's creation is answered "already
+    // exists", because delivery kept the channel from the module's last run.
+    let mut peer = Peer::new("restart-already-exists");
+    let g = genesis("Agora");
+    let stoa = g.address().unwrap();
+    peer.join(&g); // the previous run's membership
+    let _ = peer
+        .fake
+        .script(|s| s.create_replies.push_back(the_already_exists_answer(&stoa)));
+    let events = peer.start_listening();
+    peer.delivering.settle();
+
+    let their = their_op(stoa, "after the restart", 0);
+    events
+        .send(Some(arriving(
+            ChannelIdentity::of(&stoa).channel_id(),
+            their.to_bytes().unwrap(),
+            1,
+        )))
+        .unwrap();
+    eventually("the op to be judged", || {
+        !peer.journal.with("inbound").is_empty()
+    });
+    assert!(
+        stored(&peer, &their.op.id()).is_some(),
+        "{:?}",
+        peer.journal.lines()
+    );
+}
+
+#[test]
+fn only_delivery_s_already_exists_answer_opens_a_declined_channel() {
+    // The other half of the rule: an error envelope for any other reason is
+    // still a decline, and the log still records delivery's reason.
+    let stoa = genesis("Agora").address().unwrap();
+    assert_eq!(
+        channel_answer(&the_already_exists_answer(&stoa)),
+        ChannelAnswer::AlreadyHeld
+    );
+    assert_eq!(
+        channel_answer(&the_observed_decline("channel_create callback timeout")),
+        ChannelAnswer::Declined("channel_create callback timeout".to_string())
+    );
+    assert_eq!(
+        channel_answer(&Ok(json!(ChannelIdentity::of(&stoa).channel_id()))),
+        ChannelAnswer::Created
+    );
 }
 
 #[test]
@@ -1430,7 +1574,7 @@ fn a_message_arriving_while_its_channel_opens_is_judged_after_the_answer() {
         let mut opening = channels.opening(&identity);
         scope.spawn(move || {
             std::thread::sleep(Duration::from_millis(200));
-            opening.created();
+            opening.held();
         });
         peer.processor(Arc::clone(&channels)).decide(&arriving(
             identity.channel_id(),
@@ -1575,7 +1719,7 @@ fn the_clock_is_read_after_the_wait_for_an_open_and_not_before_it() {
         scope.spawn(move || {
             std::thread::sleep(Duration::from_millis(200));
             ANSWERED.store(true, std::sync::atomic::Ordering::SeqCst);
-            opening.created();
+            opening.held();
         });
         processor.decide(&arriving(identity.channel_id(), op.to_bytes().unwrap(), 1));
     });

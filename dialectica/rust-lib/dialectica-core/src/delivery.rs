@@ -143,6 +143,49 @@ pub fn declined(reply: &Result<serde_json::Value, String>) -> Option<String> {
     failed.then(|| "delivery reported failure and gave no reason".to_string())
 }
 
+/// What delivery's answer to `channelCreate` says about the channel.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChannelAnswer {
+    /// Delivery created it.
+    Created,
+    /// Delivery already held it: it answered that the channel already exists.
+    AlreadyHeld,
+    /// Delivery does not hold it, for this reason.
+    Declined(String),
+}
+
+/// Read delivery's answer to `channelCreate`.
+///
+/// # "Already exists" is delivery holding the channel, not declining it
+///
+/// `stoa-membership` requires that answer open the channel exactly as a report
+/// of creation does. Delivery gives it in two cases this peer really meets: its
+/// own 30 s callback gave up on a creation that its runtime then completed, and
+/// this module restarted while delivery kept running. Read as a decline, either
+/// left the Stoa's channel shut for as long as delivery ran — messages refused as
+/// an unknown channel, sends never made.
+///
+/// Recognised by [`ALREADY_EXISTS`] in delivery's reason. design.md Decision 14
+/// says why the wording and not a `channelExists` confirmation, and what a change
+/// to that wording would cost.
+pub fn channel_answer(reply: &Result<serde_json::Value, String>) -> ChannelAnswer {
+    match declined(reply) {
+        None => ChannelAnswer::Created,
+        Some(why) if why.contains(ALREADY_EXISTS) => ChannelAnswer::AlreadyHeld,
+        Some(why) => ChannelAnswer::Declined(why),
+    }
+}
+
+/// The words delivery answers a `channelCreate` with when its manager already
+/// holds the channel: `logos-delivery` `channel_lifecycle.nim`,
+/// `err("channel already exists: " & channelId)`, which delivery v0.2.1 passes
+/// through behind a `"ChannelCreate failed: "` prefix.
+///
+/// Matched as a substring of the reason, not the whole reason: the prefix and
+/// the trailing channel id are the C API's and the manager's, and neither is
+/// what says the channel is held.
+pub const ALREADY_EXISTS: &str = "channel already exists";
+
 // ─── The module's log ─────────────────────────────────────────────────────
 
 /// Where this module's log lines go.
@@ -176,6 +219,7 @@ enum Note<'a> {
     NodeCreationDeclined(&'a str),
     NodeStartDeclined(&'a str),
     ChannelOpened(&'a Address),
+    ChannelAlreadyHeld(&'a Address),
     ChannelDeclined(&'a Address, &'a str),
     SenderNotRetained(&'a Address, &'a SenderError),
     Sent(&'a OpId, &'a Address),
@@ -215,6 +259,11 @@ impl std::fmt::Display for Note<'_> {
             Note::ChannelOpened(stoa) => {
                 write!(f, "dialectica: channel open for Stoa {}", stoa.to_hex())
             }
+            Note::ChannelAlreadyHeld(stoa) => write!(
+                f,
+                "dialectica: channel open for Stoa {}: delivery already held it",
+                stoa.to_hex()
+            ),
             Note::ChannelDeclined(stoa, why) => write!(
                 f,
                 "dialectica: channel NOT open for Stoa {}: {why}; it is requested again at \
@@ -393,7 +442,8 @@ const MEMBERSHIP_PAGE: usize = 100;
 ///
 /// # Pending is its own state, because of a race delivery really has
 ///
-/// A channel counts as open only once delivery answers that it created it. But
+/// A channel counts as open only once delivery answers that it holds it —
+/// created it, or already had it ([`channel_answer`]). But
 /// delivery v0.2.1 emits `channelMessageReceived` from its runtime's callback
 /// thread whenever SDS hands it one — including after the runtime has created the
 /// channel and before the `channelCreate` answer has reached this peer. A message
@@ -435,11 +485,11 @@ impl Channels {
         Opening {
             channels: self,
             identity: identity.clone(),
-            created: false,
+            held: false,
         }
     }
 
-    fn settle(&self, identity: &ChannelIdentity, created: bool) {
+    fn settle(&self, identity: &ChannelIdentity, held: bool) {
         let mut book = lock(&self.book);
         if let Some(count) = book.pending.get_mut(identity.channel_id()) {
             *count = count.saturating_sub(1);
@@ -453,7 +503,7 @@ impl Channels {
         // it. `a_declined_repeat_open_leaves_the_channel_open_for_the_next_message`
         // states it through a message; `a_declined_repeat_open_leaves_an_open_channel_open`
         // through this book.
-        if created {
+        if held {
             book.open.open(identity);
         }
         self.settled.notify_all();
@@ -490,24 +540,25 @@ impl Channels {
     }
 }
 
-/// An open in flight. Dropping it settles the open — as created only if
-/// [`Opening::created`] was called — so no path out of the worker, a panic
+/// An open in flight. Dropping it settles the open — as open only if
+/// [`Opening::held`] was called — so no path out of the worker, a panic
 /// included, can leave the channel pending.
 struct Opening<'a> {
     channels: &'a Channels,
     identity: ChannelIdentity,
-    created: bool,
+    held: bool,
 }
 
 impl Opening<'_> {
-    fn created(&mut self) {
-        self.created = true;
+    /// Delivery reported that it holds the channel: created it, or already had it.
+    fn held(&mut self) {
+        self.held = true;
     }
 }
 
 impl Drop for Opening<'_> {
     fn drop(&mut self) {
-        self.channels.settle(&self.identity, self.created);
+        self.channels.settle(&self.identity, self.held);
     }
 }
 
@@ -594,12 +645,18 @@ impl<D: Delivery> Worker<D> {
             identity.content_topic(),
             sender.as_str(),
         );
-        match declined(&reply) {
-            None => {
-                opening.created();
+        match channel_answer(&reply) {
+            ChannelAnswer::Created => {
+                opening.held();
                 record(&*self.journal, Note::ChannelOpened(stoa));
             }
-            Some(why) => record(&*self.journal, Note::ChannelDeclined(stoa, &why)),
+            ChannelAnswer::AlreadyHeld => {
+                opening.held();
+                record(&*self.journal, Note::ChannelAlreadyHeld(stoa));
+            }
+            ChannelAnswer::Declined(why) => {
+                record(&*self.journal, Note::ChannelDeclined(stoa, &why))
+            }
         }
     }
 
