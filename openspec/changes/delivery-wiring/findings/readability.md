@@ -231,3 +231,183 @@ reader is told; none changes behaviour except entry 4's log wording.
   "removing the wait makes X red" and "zero busy timeout turns both red" claims
   in `delivery.rs`, `design.md` and `sqlite.rs` are **unverified by me**, not
   disproved. No mutation of any kind is left in the tree.
+
+## Re-review round 1 `7a2a3335..369561d1`
+
+Dimension: readability only. Reviewed at `f37c6cc4` (piece tip; the range's code is
+unchanged after `369561d1`): `delivery.rs`, `transport.rs`, `wire.rs`, `sender.rs`,
+`delivery/tests.rs`, the two spec deltas, `proposal.md`, `design.md`, `tasks.md`
+and `CLAUDE.md`'s five new trap entries. The nine entries of round 0 are all
+confirmed fixed (see "What I checked"). Five new defects, all low, all in prose or
+comments; none changes behaviour.
+
+- [ ] **`dev-writer`** — `delivery.rs:929-930`, `design.md:603` — "(logos-protocol 0.9)"
+      names a version that does not discriminate the thing it is offered as the
+      test for.
+      **Scenario:** `listen`'s doc says `recv()` fails on a dead provider "on a
+      runtime with the status channel (logos-protocol 0.9)", and the trap table in
+      `design.md` says the same. A reader checking "do I have the status channel?"
+      looks for 0.9. `logos_protocol.h` at `4638634`, the rev `dialectica/flake.lock`
+      pins for `logos-protocol` (`git -C ~/src/logos-co/logos-protocol show
+      4638634:cpp/logos_protocol.h`, lines 270-282), says the opposite: "Both 0.9
+      cuts report MINOR 9, so `MINOR >= 9` is true of a protocol that has these
+      four symbols and of one that does not. Guard on this instead:
+      `LOGOS_PROTOCOL_HAS_CLIENT_SUBSCRIPTION_STATE`", "Absent ... on the first
+      cut of 0.9". So a runtime at 0.9 can lack the channel, and on it `recv()`
+      parks forever, which is the leaked-thread case the same sentence describes.
+      **Fix shape:** name the feature, not the number: "a runtime that defines
+      `LOGOS_PROTOCOL_HAS_CLIENT_SUBSCRIPTION_STATE` (the symbol
+      `lp_client_set_subscription_status_cb`)", in both places. The number was
+      also in round 0's code; I did not run it down then and should have.
+      **Severity:** low (a comment, but it is a check a reader is told to make).
+
+- [ ] **`dev-writer`** — `design.md:537` — Decision 15 quotes Decision 3 in words
+      Decision 3 no longer contains.
+      **Scenario:** Decision 15 says the old locking behaviour was "contradicting
+      Decision 3's 'a mutex held for map lookups'". `git grep -F "map lookups"
+      openspec/changes/delivery-wiring/design.md` finds only that line: Decision 3
+      (`:84-86`) was rewritten this round to "share only the channel book's mutex,
+      which is never held while a payload is decoded ... (Decision 15)". A reader
+      following the quote to Decision 3 finds no such words, and Decision 3 now
+      points back at Decision 15 for its own justification, so each cites the
+      other for what the other does not say.
+      **Fix shape:** drop the quotation marks and say what Decision 3 claimed
+      ("Decision 3's claim that the book is only ever held for map lookups"), or
+      cut the clause: Decision 15's next sentence already states the defect.
+      **Severity:** low.
+
+- [ ] **`dev-writer`** — `design.md:84-86` — "share only the channel book's mutex" is
+      false as written, and it is the sentence Decision 3's event-loop argument
+      stands on.
+      **Scenario:** Decision 3 argues the event loop never waits on the worker
+      because "the processor, the listener and the worker share only the channel
+      book's mutex". Two other locks are shared: the listener and the processor
+      share `InboundQueue.waiting` (`offer` and `take`, `delivery.rs:875,888`), and
+      the **dispatch thread itself** takes the book's mutex, in
+      `Channels::opening` (`delivery.rs:539`) from `Delivering::joined` and
+      `startup_opens`. The second is the one the argument needs: it is why "the
+      book is never held across a decision" (Decision 15) is what keeps the event
+      loop from waiting, not merely the worker's opens. The prose omits the
+      dispatch thread from the sharers, so a later change that holds the book
+      across a slow step reads as safe for the event loop.
+      **Fix shape:** "the dispatch thread, the worker, the listener and the
+      processor share the channel book's mutex, and the listener and processor the
+      queue's; neither is held while a payload is decoded, verified or appended".
+      **Severity:** low.
+
+- [ ] **`dev-writer`** — `transport.rs:593-594` — a comment in `admit` names two
+      variables `admit` cannot see.
+      **Scenario:** after `receive` was split, `admit(judged: Judged, log)` has no
+      `message`. Its comment, carried over unchanged, says "`message.timestamp` and
+      `message.sender_id` reach nothing here, by design". In `admit` they are not
+      in scope, so the sentence reads as describing a variable that does not exist;
+      the property is now stronger and different (a `Judged` holds only the
+      `SignedOp`, so nothing else *can* reach the append), and it is true in
+      `judge`, where `message` is in scope and the two fields are never read.
+      **Fix shape:** "`Judged` carries only the op, so neither the event's timestamp
+      nor its sender identifier can reach the append, by design", or move the
+      sentence to `judge`.
+      **Severity:** low.
+
+- [ ] **`dev-writer`** — `design.md:178,316,320,674` — four pointers to provenance
+      that will not resolve once the change is archived.
+      **Scenario:** `tasks.md:16` has the closer delete `findings/` before archive,
+      and `design.md` is archived with the change. Line 674 ends "(`findings/security.md`)",
+      naming a file the closer removes. Lines 178, 316 and 320 give a mutation
+      result as "(the mutation list in PR #190's first pass)" / "(PR #190's first-pass
+      mutation list)"; that is the PR body, which is edited until merge (and
+      `tasks.md:56` has the same pointer, "listed in the PR body"). A future reader
+      of the archived design sees "turned three tests red" with no source they can
+      open. Each result is stated in the sentence, so only the parenthetical
+      fails; three of them (`declined`, the bound check, the window) are
+      re-derivable by the one-line mutation each names.
+      **Fix shape:** drop `findings/security.md` from `:674` (the sentence stands
+      without it), and either restate each mutation result as a command a reader
+      can run or mark it "as measured in PR #190 at the time, not re-run". The
+      rest of the tree already carries such pointers (`membership.rs:1114`,
+      `stoa.rs:1079`), so this is a defect of degree, not a new one.
+      **Severity:** low.
+
+### What I checked, and found clean
+
+- **Round 0's nine entries are fixed as recorded:** `wire::panic_detail` is the one
+  renderer (`guarded`, both sinks, the three delivery call sites); the module doc
+  says "Four threads" over four bullets; `refusal_kind`'s doc says "a new refusal
+  forces a name here"; the refusal table has seven rows with `storage`;
+  `Note::AlreadyStored` exists and the test asserts one "stored" and one "already
+  held" line; the processor-speed claim reads "has **not been measured**" in
+  `delivery.rs:815` and `design.md:308`; `Stores` names the thread per file;
+  `start`'s doc and early-return comment say why `true`; `create_schema` in
+  `sender.rs` carries the single-opener note.
+- **Claims a comment makes about a mutation, run.** Each "red without it" was made
+  true by a one-line mutation in this tree, restored with `git checkout`:
+  `await_settled` returning at once turns eight delivery tests red, including
+  `a_message_arriving_while_its_channel_opens_is_judged_after_the_answer` and
+  `a_poisoned_channel_book_still_waits_for_this_channels_open`;
+  `wait_timeout_while` in its place turns the poisoned-book test red (the two
+  other wait tests I ran with it stay green, as the comment implies);
+  `refused_on_hand_over` asking the size first turns
+  `an_oversized_payload_on_an_unknown_channel_is_refused_as_an_unknown_channel` red
+  (`TooLong` where `UnknownChannel` is expected); `>=` in `refuse_oversized` turns
+  `a_payload_at_the_limit_waits_its_turn` and
+  `transport::a_payload_at_the_limit_is_not_refused_for_its_size` red;
+  `listen` returning after a caught panic turns
+  `a_panic_reading_one_event_does_not_end_reception` red; moving
+  `startup_opens` after `subscribe()` turns
+  `a_restarted_peer_keeps_what_delivery_hands_over_before_startup_asks_for_its_channel`
+  red in round 0 on both runs I made; and a zero busy timeout in `SqliteOpLog::open`
+  turns both `two_connections_*` tests red with "database is locked", which round
+  0 left unverified. All 172 `delivery::`, `sender::` and `transport::` tests pass
+  at the tip.
+- **Sources cited in comments, re-read.** `channel already exists: ` at
+  `channel_lifecycle.nim:43` and the `"ChannelCreate failed: "` prefix at
+  `channel_api.nim:24`, both at `bfdb5afd`, which `dialectica/flake.lock:1086`
+  pins; cluster 2 for both presets at `4a85db1b` (`networks_config.nim:74,103`);
+  `" callback timeout"` built at `api_call_handler.h:159` and the `RET_STALE_WARN`
+  early returns at `api_call_handler.h:80,99` and `delivery_module_plugin.cpp:99,112`
+  at `v0.2.1`; `Context not initialized` in the decline envelope
+  (`PHASE0-FINDINGS.md:579`); "marshal onto it and block until it answers"
+  (`logos_protocol.h:41`); `9f420c2` is the pinned builder (`dialectica/flake.nix:40`);
+  `"≈ 400×"` and `Discarded(1)` are in `findings/security.md:26,60`. 256 x 150 KiB =
+  38,400 KiB = 37.5 MiB and 1024 x 150 KiB = 153,600 KiB = 150 MiB check by hand.
+- **Every test name a doc comment or `design.md` decision cites exists** (14 in
+  `delivery.rs`, checked with one `git grep -F -e`).
+- **`CLAUDE.md`'s five new entries against "Keeping this file true".** Each says why
+  and what a command cannot, names the version it was read at ("at v0.2.1"), and
+  the first says "Re-check when the pin moves", so all are self-invalidating; none
+  records a count, a version of the repo, or merge state. The `declined` example
+  envelope is `PHASE0-FINDINGS.md:579`'s. `cfg(logos_scaffold)` and the "only gate
+  that compiles it" claim match `lib.rs` (unchanged in this range).
+- **Spec deltas and `proposal.md`** agree with the code on each behaviour I traced
+  (Decisions 10, 11, 14, 15 against `delivery.rs`; the scenario names quoted in
+  test comments against the delta headings). MUST/SHALL stays uniform inside each
+  requirement, as round 0 found.
+- **Formatting.** `cargo fmt --manifest-path dialectica/rust-lib/Cargo.toml --check`
+  is clean; the `dialectica-core` crate alone reports only `identity.rs`, which this
+  range does not touch.
+
+### Not boxes (taste; say so and move on)
+
+- `delivery.rs:38` is the one over-long comment line in the three source files
+  (about 125 columns among 80-column neighbours), an edit residue: the `catch_unwind`
+  paragraph was extended in place. `delivery.rs:1062-1067` and `proposal.md:22,37-38,65-66`
+  have the opposite artefact, a line broken short mid-sentence.
+- `design.md` Decision 11 states the cost of the wait three times (`:389-398`,
+  `:416-418`, `:433-435`) plus Decision 10's cross-reference; each is accurate, and
+  one paragraph would carry it.
+- The invariant "the book is never held across a decision" lives on
+  `Channels::stoa_of` (`delivery.rs:601-610`) although it governs every method; it is
+  found from two cross-references (`refused_on_hand_over`, Decision 15), so it is
+  discoverable, but `ChannelBook`'s own doc is where a reader of the type looks.
+- Several test comments open "Security review:", "Architecture review:",
+  "Readability review:" (`tests.rs:1656,1678,2987,3024,3260`). Each carries its own
+  reason, so nothing is lost when `findings/` is deleted; the label is what will
+  read oddly. `tests.rs:1678` also names `Channels::receive`, a method that no
+  longer exists (it is the defect being described, in the past tense).
+- `tests.rs:1315-1317` breaks the test name `sender::tests::nothing_a_sender_...`
+  across a comment line, so a `grep` for the name misses the citation.
+  `sender_supplied`'s doc (`tests.rs:1266`) says "a worker over `dir`"; its parameter
+  is `peer`.
+- Mutation testing was run by hand on the claims above, not with `cargo mutants`;
+  this is the readability lane. No mutation is left in the tree: every one was
+  reverted with `git checkout -- <file>`, and `git status` shows only this file.
