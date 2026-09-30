@@ -11,7 +11,7 @@
 - [x] review: architecture — `code-reviewer`
 - [x] review: spec-test — `spec-test-reviewer`
 - [x] review: design — `design-reviewer`
-- [ ] re-review: every commit after the review round — runner
+- [x] re-review: every commit after the review round — runner
       round 1 `b4378cf5..218acde3` findings pass — spec-test, correctness, readability, design (role default models): 153c4f5 amended the design.md/proposal.md/tasks.md inventory; 218acde added four QML tests to tst_thread_reply.qml, deferred one finding, and reworded a sqlite.rs test comment; no production code, so security and architecture are not re-run
       round 2 `cdc87c5c..55f73e39` findings pass — design (role default model): 55f73e3 answered round 1's design finding, re-counting the test inventory in design.md, proposal.md and tasks.md (preamble and 4.6) and folding the vote-ordering deferral into Non-Goals; prose only, answered as that reviewer asked, so only design confirms
       round 3 `218acde3..cdc87c5c` chain repair — design (role default model): round 2 started at the runner's HEAD, not at round 1's end, so the chain from `b4378cf5` did not reach it; the gap holds only round 1's line and the four round-1 records, and one lane confirms nothing that merges is in it
