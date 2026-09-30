@@ -354,7 +354,7 @@ of lookup-judge-write remains), `judge` is private so `Judged` certifies the cha
 tie by construction, and `arrival.rs:223` names `judge` reached through
 `receive_via`.
 
-- [ ] **`dev-writer`** — `delivery.rs:559-567` — `ChannelBook::wait_ends` spells
+- [x] **`dev-writer`** — `delivery.rs:559-567` — `ChannelBook::wait_ends` spells
       "this channel is being opened" a second time, one commit after
       `ff3eba85` extracted `is_opening` to be its one spelling.
       **Scenario:** `is_opening` is `!self.open.is_open(id) && self.pending.contains_key(id)`
@@ -376,6 +376,13 @@ tie by construction, and `arrival.rs:223` names `judge` reached through
       **Measured:** `git grep -n -E "is_open\(channel_id\)" -- dialectica/rust-lib/dialectica-core/src/delivery.rs`
       finds the `!open` half at `:554` (`is_opening`), `:561` (`wait_ends`) and
       `:672` (`is_known`, a different predicate); the first two are the same one.
+      **Fixed** (`dev-writer`) in the commit `Ask whether a message waits on its
+      open through one predicate`, as the fix shape says: `ChannelBook::wait_ends`
+      returns `None` unless `is_opening`, then takes the pending record, and its
+      doc names `is_opening` as the one question both it and `await_settled`'s
+      loop ask. No behaviour change, so no test can show it red: the 94
+      `delivery::` tests pass before and after, and the `git grep` above now
+      finds `is_open(channel_id)` only in `is_opening` and `is_known`.
 
 **Judged and left without a box (taste).**
 

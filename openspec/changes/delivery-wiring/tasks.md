@@ -84,3 +84,7 @@ Each regression test below was seen red before its change.
 - [x] 10.4 `DELIVERY_CALLBACK_TIMEOUT < CALL_TIMEOUT < SETTLE_LIMIT` asserted at compile time; `SETTLE_LIMIT` at 10 s or `CALL_TIMEOUT` at 20 s fails the build (both tried). Removing the bound altogether turns six delivery tests red (Decision 11).
 - [x] 10.5 The "already exists" recogniser the spec now states needed no code: `only_delivery_s_already_exists_answer_opens_a_declined_channel` gains the two new `stoa-membership` scenarios' rows, red for the "something else already exists" row with the match loosened to `already exists` (Decision 14).
 - [x] 10.6 `design.md`: Decision 3's thread and mutex sentence corrected and the 5 s publish-behind-append wait measured and recorded; Decision 15 no longer quotes words Decision 3 lacks; the status channel is named by its feature macro, not "0.9"; mutation results re-run in place of pointers to the PR body and `findings/`.
+
+## 11. Re-review round 2, and the spec-writer's callback (`de35f026`)
+
+- [x] 11.1 Make room, no behaviour change: `ChannelBook::wait_ends` asks `is_opening` rather than spelling "pending and not open" a second time, so whether a message waits and whether it keeps waiting are one predicate; the `delivery::` tests pass unchanged.

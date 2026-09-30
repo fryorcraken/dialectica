@@ -557,8 +557,13 @@ impl ChannelBook {
     /// When a message on this channel must stop waiting for its open — or
     /// `None` when it does not wait at all: the channel is open, or no open for
     /// it is pending.
+    ///
+    /// Guarded by [`ChannelBook::is_opening`], the question
+    /// [`Channels::await_settled`] asks again on each wake-up, so "does this
+    /// message wait" and "does it keep waiting" are one predicate and cannot
+    /// drift apart.
     fn wait_ends(&mut self, channel_id: &str, limit: Duration) -> Option<Instant> {
-        if self.open.is_open(channel_id) {
+        if !self.is_opening(channel_id) {
             return None;
         }
         self.pending
