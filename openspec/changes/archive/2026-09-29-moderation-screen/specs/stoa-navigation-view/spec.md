@@ -46,6 +46,13 @@ MUST hold:
   A count is a fixture in this build; nothing about the rendering may assert
   otherwise.
 
+A phrase asserting that nothing has been received for a Stoa MUST NOT be rendered
+in the list either, whether as a placeholder or otherwise, for the same reason
+and not for the global one: it is a claim about a count nothing computed, so this
+build cannot distinguish a Stoa this peer holds nothing for from one it has not
+counted. A placeholder stating emptiness is named here because it is the one
+substitute that would be digit-free and constant and still false.
+
 **The scenario "A row renders no count of held posts" is narrowed rather than
 dropped**, and keeping its name is deliberate. It required that a row carry no
 held-post count at all; it now requires that a row carry no count *this peer
@@ -58,9 +65,10 @@ unable to tell an amendment from an oversight.
 the contract answers how many posts this peer holds for a Stoa, the placeholder
 is replaced by that answer and this amendment's permission is spent — a
 placeholder surviving beside a call that could answer it is a defect, not a
-phase. Until then this change's own `design.md` carries the entry in its
-documented list of what core cannot yet serve, which is what makes the
-placeholder documented rather than merely tolerated.
+phase. Until then the `moderation-screen` change's `design.md`, archived under
+`openspec/changes/archive/`, carries the entry in its case-2 list of what core
+cannot yet serve, which is what makes the placeholder documented rather than
+merely tolerated.
 
 **An unread count is permitted on the same terms and for a different reason**,
 and the distinction matters because the two are worked off differently. Unread is
@@ -96,6 +104,12 @@ condition above.
   of content
 - **THEN** nothing rendered attributes either row's count to a read this peer
   performed
+
+#### Scenario: A row's placeholder does not assert emptiness
+
+- **WHEN** the list renders a Stoa and a count appears on its row
+- **THEN** nothing rendered on the row states that nothing has been received for
+  that Stoa or that it holds no posts
 
 #### Scenario: Nothing global is rendered
 

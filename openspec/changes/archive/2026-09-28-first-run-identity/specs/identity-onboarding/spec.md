@@ -5,16 +5,15 @@
 The module SHALL provide an operation that creates this peer's master key and
 that requires no Stoa.
 
-Every other operation in this capability takes a Stoa, and a peer's first run has
-none. Creating a Stoa requires a creator key and creates none; the operations
-that write a master key all require a Stoa first. A peer in that state can reach
-neither, and it is the state every peer starts in — so the operation that resolves
-it cannot itself require a Stoa.
+A peer's first run has no Stoa. Creating a Stoa requires a creator key and
+creates none, and every other operation of this capability that writes a master
+key requires a Stoa first. A peer in that state can reach neither, and it is the
+state every peer starts in — so the operation that resolves it cannot itself
+require a Stoa.
 
 The operation SHALL write the master key only, and SHALL NOT record a chosen path
-for any Stoa. Recording one would name a Stoa the peer has not created: creation
-would then succeed while posting stayed refused for want of a choice in the real
-Stoa, which is a failure that presents as a success.
+for any Stoa. Recording one would record, for a Stoa the peer has not created, a
+choice the user never made.
 
 The reply SHALL name the resulting key, SHALL state whether that key is protected
 at rest, and SHALL state whether this call created it.

@@ -6,9 +6,11 @@
 # The screen shipped inert (#127): no control on it publishes anything. What
 # this observes: the feed's moderation affordance renders the screen; the
 # screen states that its controls publish nothing; acting on one of them leaves
-# the way out offered; and the way out renders the feed. Those are
-# `moderation-view`'s, which lives only in the unarchived
-# `openspec/changes/moderation-screen/` — see this change's proposal.md.
+# the way out offered; and the way out renders the feed. The route in and out,
+# the inert control included, is `view-navigation`'s "The moderation screen is
+# reachable, and leaving it returns where the user was". That the screen states
+# its controls publish nothing is `moderation-view`'s "The screen states that
+# nothing it offers takes effect".
 #
 # The steps before "open moderation" only get there, and assert nothing about
 # the list or the feed.
