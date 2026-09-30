@@ -735,3 +735,52 @@ regress unnoticed.
 - **`Processor::new`.** The running wiring's limit is `SETTLE_LIMIT`, set in one
   place. `settle_limit` is changed only by tests.
 - **What reaches the log, dependencies.** No new `Note`, and no dependency.
+
+## Re-review round 5 `58460b02..1d5e2e37`
+
+- [x] **re-review round 5 `58460b02..1d5e2e37`: no findings** — read the
+      `delivery.rs` diff (the guard in `Wait::extend_from` and its doc), the five
+      new tests and the guard's regression test in `delivery/tests.rs`, and the
+      design.md Decision 11 diff, at `e5268cc2` (the range's code is `1d5e2e37`'s);
+      clean
+
+Dimension: **security** only.
+
+**Both round-4 boxes are answered as their outcomes say.** Hand mutation
+`OpenTime::StartedAt(asked) => asked + limit` replaced by
+`StartedAt(_) => Instant::now() + limit` (applied together with the guard
+mutation below): `an_ask_starts_the_opens_time_from_the_ask_not_from_the_next_message`
+red, "ended 500.08ms past a limit after the ask", so the time after an ask stays
+out of a sender's hands. `end_wait` emptied
+is caught by `cargo mutants` (below), so a sender flooding a pending open's
+channel can no longer grow `Pending::waits` unnoticed.
+
+**The guard shortens waits and never lengthens one, and no peer reaches it.**
+`asked` is `Instant::now()` taken under the book lock by `Channels::asked`, which
+only the worker calls; `self.ends` was fixed by this peer's request, ask, or the
+first waiter after them, as in round 4. It reads "ended" the way
+`await_settled` does (`left.is_zero()` ⇔ `ends <= now`), so the ask and the waiter
+cannot disagree on whether a wait is over. It restores the "less than twice
+`SETTLE_LIMIT`" stall bound Decision 11 states: before it, an ask landing between
+a wait's end and the waiter re-taking the lock gave a sender's junk message a
+second full limit. The message it now leaves unextended is the spec's named loss
+("a message whose wait expired before delivery was asked"), and the open's time
+still restarts at that ask, so an honest op behind it is given `ask + limit`. An
+ended wait keeps its unused `extension`; nothing reads it again, since every later
+ask also finds `asked >= ends`. No arithmetic, indexing or `unwrap` added outside
+tests.
+
+Hand mutation with the guard's three lines deleted:
+`an_ask_after_a_messages_wait_has_ended_does_not_make_it_wait_again` red, "judged
+1.000111268s after an ask made once its wait had ended". With both hand
+mutations in place, those two tests are the only red of 108 in
+`delivery::tests`.
+
+`cargo mutants --file delivery.rs --re "extend_from|OpenTime::end|end_wait|Pending::asked" -- --lib`,
+unmutated tree: 11 mutants, **7 caught, 4 unviable, 0 missed** — `>=` → `<` in
+`extend_from` and `end_wait` → `()` among the caught. `>=` against `>` at the
+exact end instant is not generated and is not a security property.
+
+Outside this lane, for whoever holds readability or design: design.md's new
+"What breaks" line (`design.md:538`) says the guard's test "allows 0.5"; the test
+asserts `judged_after < limit * 3 / 4`, and its comment says why it is 0.75.
