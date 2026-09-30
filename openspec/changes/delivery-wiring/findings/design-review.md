@@ -376,3 +376,25 @@ keyword; `NO SPEC:` is None; open questions 5, 6 and 7 stay open in all three. N
 contradicts #176.
 
 - [x] **re-review round 4 `7462ded8..58460b02`: no findings** — read the round's design.md, proposal.md, spec deltas, tasks.md, delivery.rs diff, PR #190's body and the test names Decision 11 cites; clean
+
+## Re-review round 5 `58460b02..1d5e2e37`
+
+The guard in `Wait::extend_from` (`asked >= self.ends` returns before the
+`Option::take`) is what Decision 11's new "Why only a wait that has not ended"
+records, including the boundary (an ask at the end counts as after it). The entry
+has the constraint (the wait stays in the book past its end until the waiter
+re-takes the lock), the rejected alternative (the waiter dropping its own `Wait`
+cannot, since the ask holds the lock), what breaks without it, and the effect on
+the under-twice-`SETTLE_LIMIT` claim. The test exists. The two `d240ebdc`
+references were replaced by prose. PR #190's body still agrees: `Closes #176` is
+the only closing keyword beside an issue number, `NO SPEC:` is None, the
+ask-after-end mutation is in the list, and questions 5, 6 and 7 stay open in it,
+`proposal.md` and `design.md`. One figure is wrong.
+
+- [ ] **`dev-writer`** — `design.md` (Decision 11's "What breaks without each
+      part", the new bullet) says the test is red "judged 1.00 s after the ask at a
+      1 s limit, where the test allows 0.5". The test asserts
+      `judged_after < limit * 3 / 4` (`delivery/tests.rs:2988`), and its own comment
+      says "The bound is three quarters of a limit ... 0.75 s of slack". So the
+      recorded allowance contradicts the code it describes. Change 0.5 to 0.75 (or
+      say "three quarters of the limit"). **Verified:** read at `1d5e2e37`.
