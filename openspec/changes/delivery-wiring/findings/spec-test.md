@@ -540,3 +540,99 @@ began waiting on it"), so N messages behind one never-answered open stall the
 processor N limits in a row; `design.md` (Decisions around lines 395-435) records
 this as accepted, and no test holds more than one waiting message, which is
 consistent with the spec as written.
+
+## Re-review round 2 `369561d1..2cb71aaf`
+
+Reviewed at `2cb71aaf` (tree at `0a8f8639`, which adds only findings). Read: the
+range's diffs of `specs/op-transport/spec.md`, `specs/stoa-membership/spec.md`
+and `proposal.md`; the whole `delivery/tests.rs` diff; the `mod tests` hunk of
+`transport.rs` and the comment-only `arrival.rs` hunk; my round-1 boxes above.
+The implementation was read only at the two lines each mutation touched, plus
+the doc comment on the function they sit in. `dialectica/logos-rust-sdk-src` was
+missing and staged with the `nix build --inputs-from` command; baseline
+`cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p dialectica -p dialectica-core`
+exited 0 on the restored tree.
+
+**Round-1 outcomes confirmed.** The "given up without asking delivery" box: the
+scenario now exists and is tested from a message in both give-up paths
+(`refused_without_waiting_out_the_limit`, limit 60 s inside `eventually`'s 10 s),
+and the wiring test first proves the open pending, so a join that never marks its
+open cannot pass it. The "already exists" recogniser box: two scenarios, rows
+through `channel_answer` and through the whole wiring
+(`what_delivery_says_of_a_channel_decides_whether_the_channel_opens_and_a_post_is_sent`,
+message stored or refused and post sent or not, one peer per row, both
+"something else already exists" and "already initialized" rows present).
+
+**Mutations run (two; both restored, `git status --short` empty afterwards).**
+Command for both: `cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p dialectica-core delivery::tests`.
+
+1. `Pending::wait_ends`, `*self.wait_ends.get_or_insert_with(|| Instant::now() + limit)`
+   replaced by `Instant::now() + limit` (the time kept per message, not per open).
+   **Killed**, by exactly the two tests written for it: `many_messages_on_one_unanswered_open_…`
+   ("the op behind the stuck open waited 4.015s: more than one wait of 1s") and
+   `an_opens_time_is_the_same_for_every_message_that_waits_on_it_until_a_request_clears_it`
+   ("a later message on the same open was given its own time"). The other 92 passed,
+   so no other test was carrying this property.
+2. `Channels::opening`, the line `pending.wait_ends = None;` deleted (a new request
+   no longer starts a new wait). **Killed**, by exactly two:
+   `a_new_request_for_a_channel_whose_wait_has_expired_lets_a_message_wait_again`
+   ("judged without waiting on the new request") and the relation test again
+   ("a request for the channel did not start a new wait"). Not mutated, read only:
+   the storm test `a_request_made_while_a_message_waits_does_not_extend_that_messages_wait`
+   (deadline re-read on each wake-up) is a probe that can fail as designed: the
+   storm outlives the wait and `eventually` has ten seconds against a 300 ms limit;
+   it also asserts the refusal came no sooner than the limit, so a message that
+   never waited cannot pass it.
+
+**Scenarios added or changed, each mapped to a test that fails for the reason it
+names:** many messages on one open (test 1 above); wait expired then delivery
+answers (`an_open_whose_wait_has_expired_still_opens_…`: asserts the queue holds
+the message after hand-over, so a refusal-on-hand-over fails there, then that it is
+stored); new request after expiry (mutation 2); requests while a message waits
+(the storm test); give-up without asking (above); the two "already exists"
+wordings (above). Self-consistency read: the per-open time, the "a request starts a
+new wait for later messages and does not lengthen a wait under way" paragraph and
+the "expired" paragraph agree once "the time starts when a message first begins
+waiting after the latest request" is read as one time per request. The
+`transport.rs` test (`the_boundary_looks_a_channel_up_under_the_messages_own_identifier`)
+is a structure pin for the existing stoa-mismatch scenario, not a new behaviour.
+Nothing in the range is out of scope of #176 (reliable channel throughout); I did
+not re-read the issue's comments since round 1, and its state is unchanged in what
+this range touches.
+
+- [ ] **`tester`** — "Opens left unanswered at the same time hold the messages on
+      every other channel up once each, one after another" has no test, and no
+      scenario. **Where:** `op-transport`, the paragraph after "That wait is bounded
+      by a fixed time for each open". Every test in the range holds one channel
+      stuck (`many_messages_on_one_unanswered_open_…` uses one stuck Stoa; the
+      relation test reads one channel's book entry). **Failure scenario:** the time
+      moved from the per-channel `Pending` to a single value shared by the
+      processor (or keyed by the first channel that ever waited) makes a second
+      stuck channel's messages judged early, which breaks "judged only once that
+      open is settled, unless that channel's own wait expires first". Both mutation
+      kills above would still hold, as would every other test here, because none
+      has a second pending open with a message waiting on each. **Fix shape:** two
+      stuck opens, a message on each, then a valid op on an open channel; assert
+      the second stuck message is refused no earlier than the limit after it began
+      waiting and the valid op is stored within about two limits, not four; or, if
+      the paragraph is a description and not a requirement, the `spec-writer` says
+      so and no test is owed. **Not measured** (the mutation was not run; the
+      budget was spent on the two above). **Severity:** low.
+
+- [ ] **`spec-writer`** — the relation `delivery's own timeout < CALL_TIMEOUT <
+      SETTLE_LIMIT` is pinned by a test and stated nowhere in the spec.
+      **Where:** `delivery::tests::the_call_timeout_outlasts_deliverys_own_and_the_settle_limit_outlasts_the_call`
+      hardcodes delivery's 30 s and compares the two constants. No scenario or
+      requirement says the fixed time a message may wait must exceed the longest
+      this peer waits for delivery's answer to a creation, and "a fixed time" as
+      the spec writes it is satisfied by one second. **Failure scenario:** a fixed
+      time under delivery's own 30 s meets every requirement and scenario here (the
+      scenarios use an injected limit of 100 ms to 1 s) while reopening in
+      production the race the requirement exists to close: a message handed over
+      before its join's creation answers is refused as an unknown channel and lost,
+      the very case the "waits behind" and "racing its own join" scenarios describe.
+      Only the test, which is `design.md`'s pin and maps to no scenario, holds the
+      line. **Fix shape:** either say in the requirement that the fixed time
+      outlasts the longest this peer waits on delivery for a creation (leaving the
+      value in `design.md`), or record in the change that the relation is a design
+      choice the spec deliberately does not contract. **Severity:** low.
