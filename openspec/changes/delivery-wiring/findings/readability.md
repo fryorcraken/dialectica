@@ -976,3 +976,65 @@ outcomes say: `git grep -E "d240ebdc|de35f026"` finds nothing in `design.md`,
   close it; I did not box it.
 - Decision 11 grew again, with another paragraph of the same shape as the rounds
   before; every figure I checked is accurate.
+
+## Re-review round 6 `1d5e2e37..3d34f15e`
+
+Dimension: readability only. Read at `63989d66`: the range's `delivery.rs` diff
+(`Pending::asked`'s doc), `tests.rs` (the ask-after-end test's comment and the
+four new scenario citations), `design.md` (the ask paragraph, "Why only a wait that
+has not ended", "What breaks without each part"), `proposal.md`, the `op-transport`
+spec delta (the ask paragraph, the timeout-order paragraph, the amended and the four
+new scenarios, the new requirement), `tasks.md`. Round 5's box is confirmed answered
+as its outcome says: `design.md:540` reads "where the test allows 0.75", which is
+`limit * 3 / 4` at `tests.rs:2990`; `Pending::asked`'s doc and `design.md:478-481`
+now carry the "whose end has not yet passed" qualifier and the pointer. All four
+scenario names cited in `tests.rs` (2923, 3067, 3100, 3139) and the requirement
+name match `spec.md` character for character, and the long quotation at `tests.rs:2924-2926`
+is verbatim from `spec.md:192`. One new defect, low, in prose.
+
+- [ ] **`dev-writer`** — `design.md:547-549` — the closing count of tests "red
+      against a no-op ask" now takes in a test that is green against one.
+      **Scenario:** the paragraph reads "The five tests named in this paragraph and
+      the list above — the four new scenarios' and the worker's — were each red
+      against a no-op ask before the change." The list above gained
+      `an_ask_after_a_messages_wait_has_ended_does_not_make_it_wait_again` in round 5,
+      so "this paragraph and the list above" now names six tests, not five. That sixth
+      is not red against a no-op ask: with `Pending::asked` doing nothing no wait is
+      extended, so the message is judged at the end it began with and `judged_after`
+      reads about zero against the `limit * 3 / 4` bound (reasoned from
+      `delivery.rs:618-625` and the test's own comment, "Right: judged as soon as the
+      processor has the book"; I tried to confirm by mutating `Pending::asked` to a
+      no-op and the edit was refused by the harness, so this is **not measured**).
+      It is red only against the mutation the list already states for it, the guard
+      removed. A reader who takes the sentence at its word and runs all six against a
+      no-op ask finds one passing, and cannot tell from the page which one the five
+      exclude.
+      **Fix shape:** name the five, or say "the five ... other than the ask-after-end
+      test, which is red only with the guard removed".
+      **Severity:** low.
+
+### What I checked, and found clean
+
+- **`Pending::asked`'s doc** says what the loop does: `extend_from` is what skips an
+  ended wait (`delivery.rs:619`), `waits` is what holds it until the waiter
+  re-takes the lock (`end_wait` after the loop), and `[`Wait::extend_from`]` resolves.
+- **The test comment at `tests.rs:2944-2950`** agrees with the assertion and with
+  `design.md:540`: three quarters of a limit, 0.75 s of slack.
+- **The spec delta** is self-consistent: the amended scenario "A message waiting when
+  this peer asks delivery for its channel is judged after delivery answers" adds "before
+  the message's end has passed", which the timeout-order paragraph's "where its end has
+  not yet passed" mirrors; the new scenario's two THEN lines are what the test asserts
+  (refused unknown-channel, and before the bound); the new requirement's consequence
+  ("at most one message's wait at any time") follows from "a message waits on an open
+  only while it is the one being judged". `proposal.md`'s ADDED list names the
+  requirement as `spec.md:424` does.
+- **`tasks.md`** says nothing of round 6 yet, which is the runner's row.
+- **Unrun:** `cargo test` of the one test passes on the unmutated tree; no mutation
+  landed.
+
+### Not boxes (taste)
+
+- `proposal.md:70-71`: the amended sentence runs one line past the file's wrap
+  width ("whose end has not yet passed, once for that message; a message so extended
+  holds the other Stoas up for"), where the paragraph before is wrapped at about 75.
+  Formatting only.
