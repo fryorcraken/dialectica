@@ -418,3 +418,23 @@ tie by construction, and `arrival.rs:223` names `judge` reached through
 - **The adapter is untouched in the range** (`lib.rs` not in the diff); no wire
   method, no `metadata.json` change. `cargo mutants` was not run: this dimension
   reviews shape.
+
+## Re-review round 3 `2cb71aaf..7462ded8`
+
+Read: the `delivery.rs` diff of the range in full, `Pending::wait_ends`,
+`ChannelBook::{is_opening, wait_ends}` and their one caller `await_settled` at
+HEAD, and the `delivery/tests.rs` diff. The round-2 box is answered as its outcome
+says: `cda4827d` changes `ChannelBook::wait_ends` from `if open.is_open(id)` to
+`if !self.is_opening(id)`, and the two guards are equal (`!open` alone returned
+`Some` exactly when `pending` held the id, which is `is_opening`'s `!open &&
+pending`), so the `.get_mut().map(..)` that follows is unchanged in effect and the
+change alters no behaviour; `is_open(channel_id)` now appears only in `is_opening`
+and `is_known`. The rest of the `delivery.rs` range is comment text (the settle
+limit's order and each open's own wait, the compile-time-assert paragraph naming the
+test that holds delivery's real 30 s), and the tests added hold each open's own
+wait and the decline's prompt refusal with no new production shape. The adapter,
+`wire`, `transport` and `metadata.json` are not in the range.
+
+- [x] **re-review round 3 `2cb71aaf..7462ded8`: no findings** — read the range's
+      `delivery.rs` and `tests.rs` diffs and `wait_ends`/`is_opening`/`await_settled`
+      at HEAD; clean
