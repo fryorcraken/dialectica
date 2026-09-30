@@ -402,3 +402,36 @@ ask-after-end mutation is in the list, and questions 5, 6 and 7 stay open in it,
       allowance, and cite round 5's scenarios`: the bullet now reads "where the test
       allows 0.75", matching `judged_after < limit * 3 / 4` at the test's 1 s limit.
       Prose only; the assertion is unchanged.
+
+## Re-review round 6 `1d5e2e37..3d34f15e`
+
+Read: the round's diff of `design.md`, `proposal.md`, the `op-transport` delta,
+`delivery.rs` (`Pending::asked` comment, `begin_wait` / `wait_ends` / `end_wait`) and
+`delivery/tests.rs`, issue #176 scope, and `gh pr view 190`. Round 5's box is answered
+as its outcome says (`design.md` reads 0.75 and the test asserts `limit * 3 / 4`).
+`design.md`, `proposal.md` and the spec delta agree on "whose end has not yet passed";
+the PR body still says "whose wait has not yet ended". `Closes #176` is the only
+closing keyword, `NO SPEC:` is None, and questions 5, 6 and 7 stay open. The code
+contradicts no recorded decision. One gap.
+
+- [ ] **`dev-writer`** (gap, a decision not recorded, with its mutation evidence only
+      in a findings file) — the round added the requirement "Nothing of a message's wait
+      on an open is kept once it is judged" (spec delta, `proposal.md:168`), and
+      `design.md` has no entry for it. `git grep -n -i -E "end_wait|no record|leaves_no_wait"`
+      over `design.md` finds nothing; the only mention of a wait leaving the book is
+      "A wait gone from the book ends the wait" (`design.md:573`), which is about the
+      open's entry going, not about the waiter removing its own. The code makes a
+      choice a reader would make differently: every message that waits is a
+      `WaitId`-keyed entry in `Pending::waits` (`begin_wait`, `delivery.rs:658`), removed
+      by `ChannelBook::end_wait` (`:682`) on each of three exits (the open settled
+      held, the time ended while waiting, judged at once after the time ended), because
+      `settle` alone removes the entry and a stuck open can live for a long time. The
+      entry should say what was chosen, the constraint (waits grew with a sender's
+      messages on a stuck open), the alternative (no per-message records: the ask
+      extending a count or a single `ends`, which the once-only cap rules out, as
+      Decision 11's "Why the book holds each waiting message's end" already argues),
+      and the cost. Its mutation evidence exists only at `findings/correctness.md:648`
+      (`end_wait` body replaced by `()` turns the three `..._leave_no_wait_in_the_book`
+      tests red); a findings file is not kept after archive, and this is the guard
+      whose purpose is least visible to the next reader. Move it into Decision 11 beside
+      the other "What breaks without each part" lines. **Verified:** read at `3d34f15e`.
