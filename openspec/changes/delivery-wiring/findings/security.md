@@ -35,7 +35,7 @@ probe did so it can be re-run.
       **Direction:** decide channel and size before opening storage (open the
       log lazily, or split `receive` so the pre-storage checks run first).
 
-- [ ] **`spec-writer`** — `op-transport` "Inbound payloads waiting for the
+- [x] **`spec-writer`** — `op-transport` "Inbound payloads waiting for the
       boundary are bounded" / `delivery.rs:729` — every message delivery emits
       takes a slot in the one shared queue before anything is judged, so traffic
       on **any** channel makes discards of **every** Stoa's ops final.
@@ -56,6 +56,24 @@ probe did so it can be re-run.
       takes a slot (logged as `unknown-channel`, without the id), and/or give
       each open channel its own share of the bound. design.md's Risks entry on
       foreign-channel messages records the log line they cost, not the slots.
+      **Outcome (`spec-writer`): fixed in part; the rest deferred to the owner.**
+      Fixed: `op-transport`, "Inbound payloads waiting for the boundary are
+      bounded", now requires that a message on a channel identifier this peer has
+      neither open nor being opened "MUST NOT take a place among the waiting
+      payloads": it is refused as an unknown channel when delivery hands it over,
+      logged as that refusal is, and neither counts towards the bound nor is
+      counted as a discard. New scenario "Traffic on a channel this peer is not
+      opening takes no place in the queue" is this finding's probe with the
+      opposite expectation. The requirement's "MUST NOT wait on the boundary" now
+      reads "deciding any payload, the refusal below included", so the hand-over
+      check may not take a lock the boundary holds while it decodes, verifies and
+      appends. "The waiting payloads never exceed the bound" now says its payloads
+      arrive on an open channel. Deferred: a peer flooding the channel of a Stoa
+      this peer *is* in still fills the shared bound and forces discards in every
+      other Stoa. Which remedy (keep it shared, a fixed per-channel share, or
+      discard the newest of the channel holding the most) trades burst depth
+      against isolation, and one amends the spec's position on Open Question 3, so it
+      is `proposal.md` Open Question 6 for the owner, with the options.
 
 - [ ] **`dev-writer`** — `delivery.rs:670` (doc) / `delivery.rs:729` — the memory
       bound "256 × 150 KiB ≈ 37.5 MiB" is claimed but not enforced by this code.

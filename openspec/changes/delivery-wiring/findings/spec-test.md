@@ -119,7 +119,7 @@ passed (1256 + 30 + 3, 0 failed).
       other log assertions do for theirs.
       **Severity:** low.
 
-- [ ] **`spec-writer`** — a requirement clause with no scenario and no test: "given
+- [x] **`spec-writer`** — a requirement clause with no scenario and no test: "given
       up as unanswered". **Where:** `op-transport`, "Every payload the reliable
       channel delivers passes the inbound boundary", the sentence on a message
       arriving while its open is unanswered, lists "reported created, declined,
@@ -133,8 +133,19 @@ passed (1256 + 30 + 3, 0 failed).
       contracted; then the `tester` needs a matching test, which will want the
       limit injectable.
       **Severity:** medium.
+      **Outcome (`spec-writer`): fixed.** `op-transport`, "Every payload the
+      reliable channel delivers passes the inbound boundary", gains "That wait is
+      bounded by a fixed time": a waiting message "MUST be judged no later than a
+      fixed time after this peer began waiting on it, whether or not delivery ever
+      answers the open", and is then judged against the channels open then. The
+      value stays out of the spec (it is `design.md`'s, beside `CALL_TIMEOUT`).
+      New scenario "A message waiting on an open delivery never answers is judged
+      after a bounded wait": the create is never answered, the message is refused
+      as an unknown channel while delivery still has not answered, and a valid op
+      after it on an open channel is then stored. As you say, the `tester` will
+      want the limit injectable to run it without a 40 s wait.
 
-- [ ] **`spec-writer`** — the scenario "The sender identifier is not the author's key"
+- [x] **`spec-writer`** — the scenario "The sender identifier is not the author's key"
       can never fail. **Where:** `op-transport`, last requirement. The value is
       minted from a Stoa address and random bytes; no key reaches the function, so
       "compared with the public key … not that key, in any encoding" holds by
@@ -149,6 +160,19 @@ passed (1256 + 30 + 3, 0 failed).
       relabel the scenario. Same defect family as the stop prohibition, which the
       spec already handles honestly.
       **Severity:** low.
+      **Outcome (`spec-writer`): fixed.** The fourth bullet of "The sender
+      identifier this peer supplies is its own, stable, and says nothing about its
+      author" now reads "be made from nothing that is a public key this peer holds
+      or signs with, or that is computed from one", followed by a paragraph saying
+      it "is checked by reading the code that makes a sender identifier, not by
+      comparing an identifier with a key", as the node-stop prohibition is, and
+      naming the two-installations scenario as the observable evidence beside it.
+      The scenario "The sender identifier is not the author's key" is replaced by
+      "Nothing a sender identifier is made from is a key" (WHEN the code that makes
+      one is examined for its inputs). `sender.rs`
+      `the_identifier_is_not_a_key_in_any_encoding` and `delivery/tests.rs`
+      `the_sender_identifier_is_not_the_authors_key` now map to no scenario; the
+      `tester` should retarget or drop them.
 
 ## Areas that were clean
 

@@ -8,7 +8,9 @@ The request MUST be made after the membership is recorded. A create or join that
 
 **The reply MUST NOT depend on the channel.** It MUST NOT wait for the channel to open. It MUST NOT report whether the channel opened. It MUST NOT be a failure because the channel did not open: membership is what the user chose, and the network's state at one instant does not change that.
 
-A channel is open only once delivery reports that it created the channel. If delivery answers the creation with its error shape, fails, or does not answer, a channel that was not already open is not open. The module's log MUST record the Stoa and delivery's reason, where delivery gave one. Such a Stoa's channel is requested again at the next module start, or when the Stoa is next created or joined.
+A channel is open only once delivery reports that it holds the channel: either that it created the channel, or that the channel already exists. **An answer reporting that the channel already exists MUST open the channel, exactly as a report that delivery created it does.** Delivery gives that answer when it already holds the channel, and a channel delivery holds is one whose messages it hands over.
+
+If delivery answers the creation with its error shape for any other reason, fails, or does not answer, a channel that was not already open is not open. The module's log MUST record the Stoa and delivery's reason, where delivery gave one. Such a Stoa's channel is requested again at the next module start, or when the Stoa is next created or joined, and that request opens it if delivery then reports that it holds the channel, in either form.
 
 **A repeated request that delivery declines, fails or does not answer MUST leave a channel that is already open open.** Delivery created it once, and nothing this change supplies closes it.
 
@@ -31,7 +33,7 @@ A channel is open only once delivery reports that it created the channel. If del
 
 #### Scenario: A channel delivery declines does not fail the join
 
-- **WHEN** a join succeeds for a Stoa whose channel is not open, and delivery answers the channel creation with its error shape
+- **WHEN** a join succeeds for a Stoa whose channel is not open, and delivery answers the channel creation with its error shape, for a reason other than that the channel already exists
 - **THEN** the join's reply is the one it would have been had the channel opened
 - **AND** the peer is in the Stoa
 - **AND** the module's log records the Stoa and delivery's reason
@@ -50,6 +52,18 @@ A channel is open only once delivery reports that it created the channel. If del
 #### Scenario: A declined repeat request leaves an open channel open
 
 - **WHEN** a Stoa's channel is open, the peer joins that Stoa again, and delivery answers the repeated channel creation with its error shape
+- **THEN** a message carrying a valid op for that Stoa, arriving afterwards on its channel identifier, is stored
+- **AND** it is not refused as arriving on an unknown channel
+
+#### Scenario: A channel delivery reports already existing is open
+
+- **WHEN** a Stoa's channel is not open, its creation is requested, and delivery answers that the channel already exists
+- **THEN** a message carrying a valid op for that Stoa, arriving afterwards on its channel identifier, is stored
+- **AND** a post published into that Stoa afterwards is sent on that channel identifier
+
+#### Scenario: A creation delivery did not complete in time opens on the next request
+
+- **WHEN** a join requests a Stoa's channel and delivery answers with its error shape saying the creation did not complete in time, the peer then joins that Stoa again, and delivery answers the repeated creation that the channel already exists
 - **THEN** a message carrying a valid op for that Stoa, arriving afterwards on its channel identifier, is stored
 - **AND** it is not refused as arriving on an unknown channel
 
@@ -72,6 +86,11 @@ If the record of the Stoas the peer is in cannot be read, no channel is requeste
 - **WHEN** a peer that created one Stoa and joined another is restarted
 - **THEN** channel creation is requested for each of the two
 - **AND** for no other Stoa
+
+#### Scenario: A module restarted while delivery kept running has its channels open
+
+- **WHEN** the module restarts while delivery keeps running, the peer is in a Stoa, and delivery answers startup's creation of that Stoa's channel that the channel already exists
+- **THEN** a message carrying a valid op for that Stoa, arriving afterwards on its channel identifier, is stored
 
 #### Scenario: A Stoa known only from ops gets no channel
 

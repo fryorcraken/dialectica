@@ -185,7 +185,9 @@ A delivered message whose fields cannot be read MUST be discarded and recorded i
 
 **A message the op log cannot take is not decided again.** When the op log cannot be opened, or the append fails, the module's log MUST record it as a storage failure, and the message MUST NOT be held for another attempt: its op is in the log afterwards only if it arrives again.
 
-**A message arriving on a channel that is not open, but whose opening this peer has requested and delivery has not yet answered, MUST be judged only once that open is settled** — reported created, declined, failed, or given up as unanswered — and against the channels open then. Delivery can hand over a message on a channel before its answer to the creation reaches this peer. A message on any other channel identifier, an open one included, MUST be judged without waiting on any open.
+**A message arriving on a channel that is not open, but whose opening this peer has requested and delivery has not yet answered, MUST be judged only once that open is settled** — reported held (created, or already existing, as `stoa-membership`'s requirement "Creating or joining a Stoa opens its reliable channel" says), declined, failed, or given up as unanswered — and against the channels open then. Delivery can hand over a message on a channel before its answer to the creation reaches this peer. A message on any other channel identifier, an open one included, MUST be judged without waiting on any open.
+
+**That wait is bounded by a fixed time.** A message waiting on an open MUST be judged no later than a fixed time after this peer began waiting on it, whether or not delivery ever answers the open. When that time passes with the open unanswered, the open is given up as unanswered for that message, and the message is judged against the channels open then.
 
 **If this peer cannot subscribe to the messages delivery hands over on reliable channels, the module's log MUST record that this peer will not receive ops from other peers**, and node creation, channel creation and sends MUST still be requested as they would have been otherwise.
 
@@ -231,9 +233,15 @@ A delivered message whose fields cannot be read MUST be discarded and recorded i
 
 #### Scenario: A message arriving while its channel opens is refused once delivery declines the open
 
-- **WHEN** this peer has requested a Stoa's channel, a message carrying a valid op for that Stoa arrives on it before delivery has answered, and delivery then answers the creation with its error shape
+- **WHEN** this peer has requested a Stoa's channel, a message carrying a valid op for that Stoa arrives on it before delivery has answered, and delivery then answers the creation with its error shape, for a reason other than that the channel already exists
 - **THEN** the message is refused as arriving on an unknown channel
 - **AND** the refusal is made after delivery's answer, not before it
+
+#### Scenario: A message waiting on an open delivery never answers is judged after a bounded wait
+
+- **WHEN** this peer has requested a Stoa's channel, delivery never answers the creation, and a message carrying a valid op for that Stoa arrives on it
+- **THEN** the message is refused as arriving on an unknown channel while delivery has still not answered
+- **AND** a message carrying a valid op, arriving after it on a channel this peer has open, is then stored
 
 #### Scenario: A message on a channel not being opened does not wait on another channel's open
 
@@ -260,15 +268,17 @@ A delivered message whose fields cannot be read MUST be discarded and recorded i
 
 ### Requirement: Inbound payloads waiting for the boundary are bounded
 
-The payloads this peer holds between delivery handing them over and the boundary deciding them MUST be bounded by a fixed count. Taking a message from delivery MUST NOT wait on the boundary.
+The payloads this peer holds between delivery handing them over and the boundary deciding them MUST be bounded by a fixed count. Taking a message from delivery MUST NOT wait on the boundary deciding any payload, the refusal below included.
 
 Waiting payloads MUST be decided in the order they arrived. When the bound is reached, a payload arriving MUST be discarded, and the payloads already waiting MUST be kept.
 
 A discarded payload is not stored. Every discard MUST be counted from the module's start, and each MUST be recorded in the module's log with the running count. A discard's log record MUST be distinguishable from a refusal's, and MUST NOT carry the payload or the sender identifier.
 
+**A message on a channel identifier this peer has neither open nor being opened MUST NOT take a place among the waiting payloads.** It MUST be refused as arriving on an unknown channel when delivery hands it over, and recorded in the module's log as that refusal is recorded by "Every payload the reliable channel delivers passes the inbound boundary". It MUST NOT count towards the bound and MUST NOT be counted or logged as a discard. Whether a channel is open or being opened is judged when delivery hands the message over.
+
 #### Scenario: The waiting payloads never exceed the bound
 
-- **WHEN** more payloads arrive than the bound while none is decided
+- **WHEN** more payloads than the bound arrive on a channel this peer has open while none is decided
 - **THEN** the number waiting equals the bound
 
 #### Scenario: A full queue keeps what it holds and discards the arrival
@@ -283,6 +293,13 @@ A discarded payload is not stored. Every discard MUST be counted from the module
 - **THEN** the running count recorded with the third discard is three
 - **AND** each discard's log record is distinguishable from a refusal's
 
+#### Scenario: Traffic on a channel this peer is not opening takes no place in the queue
+
+- **WHEN** the boundary is held up deciding one payload, more messages than the bound then arrive on a channel identifier this peer has neither open nor being opened, and a message carrying a valid op then arrives on a channel this peer has open
+- **THEN** each of the messages on the channel identifier this peer is not opening is recorded as refused as arriving on an unknown channel, before the boundary is released
+- **AND** no discard is recorded
+- **AND** the valid op is stored once the boundary is released
+
 ### Requirement: The sender identifier this peer supplies is its own, stable, and says nothing about its author
 
 When this peer opens a Stoa's channel, the sender identifier it supplies MUST:
@@ -290,7 +307,9 @@ When this peer opens a Stoa's channel, the sender identifier it supplies MUST:
 - differ from the one any other installation supplies for that Stoa, including an installation holding the same identity;
 - be the same every time this installation opens that Stoa's channel, across restarts;
 - differ between two Stoas for one installation;
-- be neither a public key this peer holds or signs with, nor computable from one.
+- be made from nothing that is a public key this peer holds or signs with, or that is computed from one.
+
+**The last property is checked by reading the code that makes a sender identifier, not by comparing an identifier with a key.** Where no key reaches that code, such a comparison cannot fail, and would read as a measurement while measuring nothing. It is an obligation on the code, of the same kind as the prohibition on stopping the node in "The delivery node is shared and is never stopped by this peer". The first property's scenario is the observable evidence beside it: two installations holding one identity supply different identifiers, so the identifier is not a function of that identity.
 
 If the sender identifier cannot be retained so that the next start supplies the same one, the channel MUST NOT be opened, and the module's log MUST record the Stoa.
 
@@ -311,10 +330,11 @@ Every participant in a channel sees the sender identifier. What a receiving peer
 - **WHEN** one installation opens the channels of two different Stoas
 - **THEN** the two sender identifiers differ
 
-#### Scenario: The sender identifier is not the author's key
+#### Scenario: Nothing a sender identifier is made from is a key
 
-- **WHEN** a sender identifier is compared with the public key the installation signs with
-- **THEN** it is not that key, in any encoding this application uses for a key
+- **WHEN** the code that makes a sender identifier is examined for what it takes as input
+- **THEN** none of its inputs is a public key this peer holds or signs with
+- **AND** none is a value computed from such a key
 
 #### Scenario: A sender identifier that cannot be retained opens no channel
 

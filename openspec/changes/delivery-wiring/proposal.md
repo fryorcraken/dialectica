@@ -30,7 +30,11 @@ the design relies on.
   Stoa's channel to be opened, using `ChannelIdentity::of` and a sender
   identifier of this installation's own. At start, the module does the same for
   every Stoa in the membership record. A channel counts as open only once
-  delivery reports that it created it. The create or join reply does not wait for
+  delivery reports that it holds it: that it created it, or that the channel
+  already exists. The second answer is what delivery gives when a creation it
+  stopped waiting on completed anyway, and when this module restarts while
+  delivery keeps running; read as a decline, it left the channel shut for as
+  long as delivery ran. The create or join reply does not wait for
   the open and does not report on it. A failed open is logged, and is attempted
   again at the next start or the next create or join of that Stoa. A repeated
   open that delivery declines leaves an already-open channel open. A create or
@@ -51,17 +55,23 @@ the design relies on.
   one-hour refusal applies on the live path. Each refusal is logged by kind. The
   log never carries the payload, the sender identifier, or a channel identifier
   this peer has not opened. A message on a channel whose open is still
-  unanswered is judged once the open settles, not refused in the gap. A message
+  unanswered is judged once the open settles, not refused in the gap, and that
+  wait is bounded by a fixed time even if delivery never answers. A message
   the op log cannot take is logged as a storage failure and not retried. A
   failed subscription is logged, and opens and sends still happen.
 - **The inbound bound.** Payloads waiting for the boundary are capped at a fixed
   count. When the cap is reached, the arriving payload is discarded and the
   waiting ones are kept. This **reverses #30**, which discarded the oldest.
   Discards are counted, and each is logged with the running total, in a form
-  that cannot be mistaken for a refusal.
+  that cannot be mistaken for a refusal. A message on a channel this peer has
+  neither open nor being opened is refused when delivery hands it over and
+  takes no place in the queue, so traffic on other applications' channels, or
+  on any identifier a sender picks, cannot force discards of a Stoa's ops.
 - **The sender identifier** differs between installations, including two holding
   the same identity. It is the same for one installation across restarts. It
-  differs between two Stoas. It is neither a public key nor computable from one.
+  differs between two Stoas. It is made from nothing that is, or is computed
+  from, a public key; that is checked by reading the code that makes it, since
+  comparing an identifier with a key cannot fail when no key reaches that code.
   If it cannot be retained, the channel is not opened.
 
 ### Core API: no new wire methods
@@ -153,8 +163,11 @@ requirements use `MUST`.
 
 ## Open questions for the owner
 
-The spec takes a position on each of the first four, and each can be reversed
-before the code lands. The fifth is not in the spec.
+The spec takes a position on each of the first four, and the code on this
+branch implements it. Reversing one is still possible, but it is now a spec
+change and a code change together, not an edit to this proposal. The fifth is
+not in the spec. The sixth was raised in review, after the code landed; the
+spec closes part of it and leaves the rest open.
 
 1. **A join or create whose channel fails to open.** The spec has the reply
    succeed unchanged and log the failure. The alternatives are to fail the join,
@@ -171,6 +184,27 @@ before the code lands. The fifth is not in the spec.
 5. **The node's preset (`logos.test` or `logos.dev`) and mode (`Edge` or
    `Core`).** #30 used `Edge` on `logos.test`. This decides which network
    dialectica peers meet on, and whether each peer relays traffic for others.
+6. **Whether one Stoa's traffic may crowd out another's in the inbound
+   queue.** The queue is one fixed-count bound shared by every channel, and a
+   discard is final. The spec now keeps traffic on channels this peer is not
+   opening out of the queue entirely. It does not stop a peer that floods the
+   channel of a Stoa this peer *is* in: channel identifiers are computable and
+   Stoas are permissionless, so anyone can post into one, and while that flood
+   fills the queue, valid ops arriving in every other Stoa are discarded. The
+   options, each keeping memory bounded:
+   - **Leave it shared** (the spec as written). Simplest, and a burst in one
+     Stoa can use the whole queue; the cost is that flooding any one Stoa the
+     victim is in suppresses the victim's receipt of every Stoa.
+   - **Give each open channel a fixed share of the one bound.** Floods stay in
+     their own Stoa. The cost is burst depth: with many Stoas open, each
+     share is small, so an ordinary backlog in one busy Stoa is discarded
+     sooner even while the queue is otherwise empty.
+   - **When the queue is full, discard the newest payload of whichever channel
+     holds the most waiting, the arrival included.** Floods stay in their own
+     Stoa and a lone burst keeps the whole queue. For a single busy channel it
+     is today's rule (the arrival is discarded); it changes which payload is
+     discarded only when another channel is the one holding the most, so it
+     amends question 3's answer rather than reversing it.
 
 ## Impact
 

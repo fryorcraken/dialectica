@@ -43,6 +43,26 @@ at `4a85db1b`). `cargo mutants` was run on `delivery.rs` (60 mutants: 38 caught,
       `stoa-membership`'s "requested again at the next module start, or when the
       Stoa is next created or joined" should then say what that request does when
       delivery already has the channel.
+      **Spec outcome (`spec-writer`): fixed; box left for the `dev-writer`.**
+      `stoa-membership`, "Creating or joining a Stoa opens its reliable channel",
+      now says a channel is open once delivery reports that it holds it, "either
+      that it created the channel, or that the channel already exists", and "An
+      answer reporting that the channel already exists MUST open the channel,
+      exactly as a report that delivery created it does"; a decline for any other
+      reason is still not open, and the re-request sentence now says it opens the
+      channel when delivery reports holding it. New scenarios: "A channel delivery
+      reports already existing is open", "A creation delivery did not complete in
+      time opens on the next request" (this finding's probe sequence), and, under
+      the startup requirement, "A module restarted while delivery kept running has
+      its channels open". "A channel delivery declines does not fail the join" and
+      `op-transport`'s "…refused once delivery declines the open" now exclude the
+      already-exists answer, and the pending-open sentence lists it as a way an
+      open settles. The requirement is phrased over what delivery reports, so it
+      admits either mechanism the finding names (reading the "already exists"
+      answer, or confirming with `channelExists`); which one is the `dev-writer`'s
+      Decision. Confirmed against source: `createReliableChannel` answers
+      `err("channel already exists: " & channelId)` exactly when the manager holds
+      the id (`logos-delivery` `4a85db1b`, `channel_lifecycle.nim`).
 
 - [ ] **`dev-writer`** — `delivery.rs:134` (`declined`, via `wire::callee_error`) —
       a success envelope that carries an empty `error` string is read as a decline.
