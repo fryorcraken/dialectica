@@ -1180,3 +1180,67 @@ test, not asked of the implementation); issue #176 (`gh issue view 176`: OPEN,
 last updated 2026-09-29, title still names the reliable channel; I did not
 re-read its body or comments this round, and the range adds nothing to the scope
 it states). No finding for the tester or dev-writer.
+
+## Re-review round 6 `1d5e2e37..3d34f15e`
+
+Reviewed at `63989d66` (range tip `3d34f15e`; the tip adds only findings). Read:
+the range's diff of `specs/op-transport/spec.md` and `proposal.md`; the range's
+diff of `delivery/tests.rs` (comments only, confirmed: four test comments and no
+code line); the three book-hygiene tests and the `waits_in_the_book` helper in
+full; my two round-5 boxes above. The implementation was not read and no mutation
+was run: the range changes no test logic, so there is nothing new that a mutation
+could measure, and the tests' behaviour is as judged in round 5.
+
+**Round-5 boxes confirmed answered as their outcomes say.**
+(1) The ask-after-end box: line 192 now extends only "a message waiting on the
+open when the ask is made, whose end has not yet passed", and states in bold that
+a message whose end has passed is not extended "even where it has not yet been
+judged". The qualifier is carried into the two places that lean on it (the
+covered set names "where its end has not yet passed"; the not-covered list says
+"whether or not it had been judged by the time of the ask"), and the scenario
+"A message waiting when this peer asks delivery for its channel is judged after
+delivery answers" now says the ask comes before the message's end has passed. The
+new scenario "An ask made once a message's end has passed does not make it wait
+again" has its three clauses (refused as unknown, refused before a limit from the
+ask, open unanswered) and is cited by
+`an_ask_after_a_messages_wait_has_ended_does_not_make_it_wait_again`, whose
+0.75-limit bound sits inside "before the fixed time has passed since the ask".
+(2) The book-hygiene box: the requirement "Nothing of a message's wait on an open
+is kept once it is judged" exists, lists the three exits, and its consequence
+paragraph is marked as adding nothing. Each of its three scenarios maps to the
+test that cites it, and each test asserts what its scenario says: `Some(0)` after
+a timed-out wait; a difference from `before` plus four refusals after three
+judged-at-once messages; the op stored and `Some(0)` with the second request
+still held. `proposal.md` lists the requirement under Capabilities and repeats the
+"whose end has not yet passed" qualifier without diverging from the spec.
+
+**Self-consistency.** Read line 190 to the consequence paragraph again with the
+new clause in place: the expiry sentence, the ask paragraph, the covered/not-covered
+lists and "less than twice" agree on which messages are extended. Issue #176 was
+not re-read; the range adds nothing to the scope it states (reliable channel
+throughout).
+
+- [ ] **`spec-writer`** — the scenario "A message that waited its open's time out
+      leaves no record of its wait" is worded more broadly than the requirement it
+      sits under, and read literally contradicts the expiry rule. **Where:**
+      `op-transport`, that scenario's THEN, "this peer holds no record of a wait on
+      that open", against the requirement's own "no record of *that message's*
+      wait" and the expiry paragraph ("Once the open's time has ended with the open
+      unanswered, the wait on it has expired ... every message on that channel
+      taken after it until a request or an ask starts the open's time again MUST be
+      judged without waiting on that open"). **Scenario:** after the open's time
+      ended and the channel is still being opened, this peer MUST keep something
+      that says the wait on that open has expired, or the next message on the
+      channel would wait a full time again; that is a record of the open's wait,
+      held on purpose. The scenario says it holds none. An implementer reading the
+      THEN as written clears the open's end along with the message's wait and
+      reopens the hold-up the expiry paragraph closes. No test catches that
+      reading: the scenario's test reads only the count of per-message waits
+      (`pending.waits.len()`), and the judged-at-once test, which would have
+      exposed it, still passes because each message it offers waits its 100 ms
+      limit and is then refused, leaving the count unchanged. **Fix shape:** word
+      the THEN as the requirement does, "this peer holds no record of that
+      message's wait on that open" (or "no record of any message's wait"), and keep
+      the open's own time out of the sentence. **Severity:** low; the requirement
+      is right and the tests pin the right property, the scenario's wording is the
+      only part that overreaches.
