@@ -1220,7 +1220,7 @@ lists and "less than twice" agree on which messages are extended. Issue #176 was
 not re-read; the range adds nothing to the scope it states (reliable channel
 throughout).
 
-- [ ] **`spec-writer`** — the scenario "A message that waited its open's time out
+- [x] **`spec-writer`** — the scenario "A message that waited its open's time out
       leaves no record of its wait" is worded more broadly than the requirement it
       sits under, and read literally contradicts the expiry rule. **Where:**
       `op-transport`, that scenario's THEN, "this peer holds no record of a wait on
@@ -1244,3 +1244,18 @@ throughout).
       the open's own time out of the sentence. **Severity:** low; the requirement
       is right and the tests pin the right property, the scenario's wording is the
       only part that overreaches.
+
+      **Outcome (`spec-writer`):** reworded as the fix shape asks. That scenario's
+      THEN now reads "this peer holds no record of that message's wait on that
+      open". The other two scenarios under the requirement carried the same slip
+      and are reworded to match: "Messages judged at once ..." now says "no more
+      records of messages' waits on that open than it held before those three
+      arrived", and "A message whose open settles held ..." now says "no record of
+      that message's wait on that open while the second request is still pending".
+      None of the three now speaks of the open's own time, so the expiry
+      paragraph's kept record of an expired open no longer reads as forbidden.
+      Requirement text, scenario titles and every other line are unchanged. No test
+      comment quotes the old THEN wording (`git grep -F "record of a wait"` and
+      `"records of waits"` hit only the spec and this box), so no test needs
+      updating; tests citing these scenarios cite them by title, which did not
+      change.

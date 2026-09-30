@@ -430,18 +430,18 @@ Once a message that waited on an open, as "Every payload the reliable channel de
 #### Scenario: A message that waited its open's time out leaves no record of its wait
 
 - **WHEN** a message has waited on a Stoa's unanswered channel open until the fixed time passed, and the channel is still being opened
-- **THEN** this peer holds no record of a wait on that open
+- **THEN** this peer holds no record of that message's wait on that open
 
 #### Scenario: Messages judged at once after an open's time has ended leave no record of their waits
 
 - **WHEN** a message has waited on a Stoa's unanswered channel open until the fixed time passed, and three more messages then arrive on that channel identifier and are each refused as arriving on an unknown channel while the channel is still being opened
-- **THEN** this peer holds no more records of waits on that open than it held before those three arrived
+- **THEN** this peer holds no more records of messages' waits on that open than it held before those three arrived
 
 #### Scenario: A message whose open settles held leaves no record while another request for the channel is pending
 
 - **WHEN** a Stoa's channel has been requested twice, a message carrying a valid op for that Stoa waits on the open, and delivery reports the first request's channel created while the second request is still pending
 - **THEN** the op is stored
-- **AND** this peer holds no record of a wait on that open while the second request is still pending
+- **AND** this peer holds no record of that message's wait on that open while the second request is still pending
 
 ### Requirement: The sender identifier this peer supplies is its own, stable, and says nothing about its author
 
