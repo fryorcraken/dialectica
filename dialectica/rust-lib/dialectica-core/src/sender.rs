@@ -184,6 +184,13 @@ impl SenderStore {
     /// The schema. `PRAGMA user_version` is last, as the other stores' is: it is
     /// the commit point of the layout claim, so a failure before it leaves a file
     /// at version 0 that the next open creates cleanly.
+    ///
+    /// **A plain `BEGIN` with the version read outside it, and safe only because
+    /// one thread opens this file** — the delivery worker (design Decision 13).
+    /// Two connections opening a fresh store at once would both read version 0
+    /// and both `CREATE`, the race the op log had. If a second thread ever opens
+    /// this store, take the op log's `create_schema` as the model: `BEGIN
+    /// IMMEDIATE`, then re-read the version under the write lock.
     fn create_schema(conn: &Connection) -> Result<(), SenderError> {
         let result = conn.execute_batch(&format!(
             "BEGIN;

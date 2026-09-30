@@ -2229,6 +2229,31 @@ fn a_panic_reading_one_event_does_not_end_reception() {
 }
 
 #[test]
+fn a_worker_that_could_not_start_is_named_as_such_and_startup_does_not_run_again() {
+    // Architecture review: the OS refusing the worker thread left `started` set
+    // and no outbox, and every later request was logged "has not started". The
+    // state is its own now; this is what it logs and that it counts as started.
+    let journal = Arc::new(Recorder::default());
+    let mut delivering = Delivering {
+        journal: journal.clone(),
+        wiring: Wiring::NoWorker,
+    };
+    let id = their_op(genesis("Agora").address().unwrap(), "unsendable", 0)
+        .op
+        .id();
+    delivering.published(&id);
+    let logged = journal.with("worker could not be started");
+    assert_eq!(logged.len(), 1, "{:?}", journal.lines());
+    assert!(logged[0].contains(&id.to_hex()));
+    assert!(journal.with("has not started").is_empty());
+
+    let dir = TempDir::new("no-worker-restart");
+    assert!(!delivering.start(Fake::default(), dir.stores(), now, || {
+        Ok(std::iter::empty::<Option<Arriving>>())
+    }));
+}
+
+#[test]
 fn a_panicking_join_sink_does_not_change_the_reply() {
     let g = genesis("Agora");
     let quiet = crate::wire::join_stoa(
@@ -2298,5 +2323,16 @@ fn an_appended_twice_arrival_is_reported_already_present() {
     processor.decide(&message);
     assert_eq!(peer.dir.op_log().len().unwrap(), 1);
     assert!(peer.journal.with("refused").is_empty());
-    assert_eq!(peer.journal.with("stored inbound op").len(), 2);
+    // Readability review: both arrivals were logged "stored inbound op", though
+    // the second stored nothing. Red while the log did not say which.
+    assert_eq!(
+        peer.journal.with("stored inbound op").len(),
+        1,
+        "{:?}",
+        peer.journal.lines()
+    );
+    let held = peer
+        .journal
+        .with(&format!("inbound op {} already held", op.op.id().to_hex()));
+    assert_eq!(held.len(), 1, "{:?}", peer.journal.lines());
 }

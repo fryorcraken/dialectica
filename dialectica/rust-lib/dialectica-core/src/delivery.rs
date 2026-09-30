@@ -10,7 +10,7 @@
 //! calls. What is left in the adapter is those calls and the event subscription;
 //! everything a test can see is on this side.
 //!
-//! # Three threads, and why the reply is never one of them
+//! # Four threads, and why the reply is never one of them
 //!
 //! - **Dispatch** (the module's event loop) only *enqueues*: a publish, create or
 //!   join hands [`Delivering`] an op id or a Stoa and returns. `content-authoring`
@@ -22,20 +22,23 @@
 //!   were enqueued. One FIFO consumer is what makes "sends are made in the order
 //!   their publishes were answered" and "a send after an open is made after that
 //!   open is answered" true by construction rather than by coordination.
-//! - **The listener** takes `channelMessageReceived` events and offers each to the
-//!   bounded [`InboundQueue`] without waiting; **the processor** takes them off in
-//!   arrival order and puts each through [`crate::transport::receive`].
+//! - **The listener** takes `channelMessageReceived` events, refuses one on a
+//!   channel this peer is neither holding nor opening, and offers the rest to the
+//!   bounded [`InboundQueue`] without waiting on the boundary.
+//! - **The processor** takes them off in arrival order and puts each through the
+//!   inbound boundary ([`crate::transport::judge`], then
+//!   [`crate::transport::admit`]).
 //!
 //! # Nothing here may unwind
 //!
 //! A panic on a dispatch thread aborts the module process (`PHASE0-FINDINGS`
 //! §3), and a panic on the worker or the processor would silently end delivery.
-//! Each action and each message is run under `catch_unwind` and a panic is
-//! logged; a pending channel open is cleared by a `Drop` guard so a panic cannot
+//! Each action, each event the listener reads and each message decided is run
+//! under its own `catch_unwind`, and a panic is logged; a pending channel open is cleared by a `Drop` guard so a panic cannot
 //! leave the processor waiting on it.
 
 use crate::identity::Address;
-use crate::log::{OpLog, OpLogError, SqliteOpLog};
+use crate::log::{Appended, OpLog, OpLogError, SqliteOpLog};
 use crate::membership::{membership_path_in, MembershipError, MembershipStore};
 use crate::op::OpId;
 use crate::sender::{sender_path_in, SenderError, SenderStore};
@@ -233,6 +236,7 @@ enum Note<'a> {
     NotSent(&'a OpId, &'a Address),
     NotHandedOff(&'a OpId, &'a str),
     Stored(&'a OpId),
+    AlreadyStored(&'a OpId),
     Refused(&'static str, Option<&'a str>),
     Discarded { total: u64, bound: usize },
     Unreadable,
@@ -241,6 +245,7 @@ enum Note<'a> {
     ListenerEnded,
     AlreadyStarted,
     NotStarted(&'a str),
+    NoWorker(&'a str),
     WorkerGone(&'a str),
     ThreadNotStarted(&'static str, &'a str),
     Panicked(&'static str, &'a str),
@@ -307,6 +312,11 @@ impl std::fmt::Display for Note<'_> {
                 op.to_hex()
             ),
             Note::Stored(op) => write!(f, "dialectica: stored inbound op {}", op.to_hex()),
+            Note::AlreadyStored(op) => write!(
+                f,
+                "dialectica: inbound op {} already held; nothing new was stored",
+                op.to_hex()
+            ),
             Note::Refused(kind, None) => write!(
                 f,
                 "dialectica: inbound message refused ({kind}); nothing was stored"
@@ -348,6 +358,11 @@ impl std::fmt::Display for Note<'_> {
                 f,
                 "dialectica: delivery wiring has not started, so {what} was not requested"
             ),
+            Note::NoWorker(what) => write!(
+                f,
+                "dialectica: the delivery worker could not be started, so {what} was not \
+                 requested"
+            ),
             Note::WorkerGone(what) => write!(
                 f,
                 "dialectica: the delivery worker has stopped, so {what} was not requested"
@@ -368,8 +383,8 @@ fn record(journal: &dyn Journal, note: Note<'_>) {
 
 /// The name a refusal is logged under.
 ///
-/// Exhaustive with no wildcard, so a seventh refusal forces a name here rather
-/// than being logged under one of these.
+/// Exhaustive with no wildcard, so a new refusal forces a name here rather than
+/// being logged under one of these.
 fn refusal_kind(refusal: &InboundRefusal) -> &'static str {
     match refusal {
         InboundRefusal::UnknownChannel => "unknown-channel",
@@ -395,8 +410,11 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 // ─── The stores ───────────────────────────────────────────────────────────
 
-/// The three files the delivery threads open, all in the host's directory.
+/// The three files delivery's code opens, all in the host's directory: the op log
+/// (worker and processor), the sender identifiers (worker only), and the
+/// memberships (dispatch, once, at start).
 ///
+/// Which threads open which file is what makes each safe: design Decision 13.
 /// A path and not open handles: a worker or processor opens what it needs per
 /// action, for the reason the adapter opens per call — a handle held for the
 /// module's lifetime would have to answer what happens when it goes stale.
@@ -744,15 +762,19 @@ struct Outbox {
 /// `op-transport` requires a fixed count, and leaves the number to design.
 /// 256, from two bounds pulling against each other:
 ///
-/// - **Memory.** A payload may be up to 150 KiB before the boundary refuses it,
-///   so the worst case is 256 × 150 KiB ≈ 37.5 MiB held in a module process that
-///   shares its host. #30 chose 1024 — ≈ 150 MiB worst case.
+/// - **Memory.** This queue bounds a count, not bytes: a payload is held at
+///   whatever size delivery handed over, and the boundary's 150 KiB refusal comes
+///   after it has waited. So the worst case is 256 × delivery's maximum message
+///   size. On the `logos.test` preset this application asks for, that maximum is
+///   150 KiB — 256 × 150 KiB ≈ 37.5 MiB in a module process sharing its host;
+///   #30's 1024 was ≈ 150 MiB. On a node another module created with a larger
+///   maximum, it is larger in proportion. design.md's Risks carries the gap.
 /// - **Loss.** A discard here is final for this peer: by the time
 ///   `channelMessageReceived` fires, SDS has treated the message as delivered and
 ///   will not repair it. #30's justification for discarding freely ("a dropped op
-///   is recoverable through retransmission") does not hold. The processor
-///   decides a typical op in about a millisecond, so 256 waiting is a burst
-///   hundreds of messages deep arriving faster than SQLite appends.
+///   is recoverable through retransmission") does not hold. 256 is meant to be a
+///   burst deeper than any SQLite append falls behind by; the processor's speed
+///   per op has **not been measured**, so that is a judgement, not a figure.
 pub const INBOUND_BOUND: usize = 256;
 
 /// One `channelMessageReceived`, owned, as the listener received it.
@@ -1006,7 +1028,12 @@ impl Processor {
                 transport::admit(judged, &mut log)
             });
         match decided {
-            Ok(admitted) => record(&*self.journal, Note::Stored(&admitted.id)),
+            Ok(admitted) => match admitted.appended {
+                Appended::Stored => record(&*self.journal, Note::Stored(&admitted.id)),
+                Appended::AlreadyPresent => {
+                    record(&*self.journal, Note::AlreadyStored(&admitted.id))
+                }
+            },
             Err(InboundRefusal::Storage(e)) => {
                 let detail = e.to_string();
                 record(&*self.journal, Note::Refused("storage", Some(&detail)))
@@ -1025,8 +1052,23 @@ impl Processor {
 /// constructor (`interface: "universal"` miscompiles any other).
 pub struct Delivering {
     journal: Arc<dyn Journal>,
-    started: bool,
-    outbox: Option<Outbox>,
+    wiring: Wiring,
+}
+
+/// Where startup has got to, as one value.
+///
+/// Three states, not a `started` flag beside an optional outbox: that pair had a
+/// fourth combination — started, with no worker — whose requests were logged as
+/// "has not started". Here that state is [`Wiring::NoWorker`], with a line of its
+/// own.
+enum Wiring {
+    /// Startup has not run: a request is logged and dropped.
+    NotStarted,
+    /// Startup ran and the OS refused the worker thread: nothing outbound can be
+    /// requested for the rest of the process.
+    NoWorker,
+    /// Startup ran; requests go to the worker.
+    Running(Outbox),
 }
 
 impl Default for Delivering {
@@ -1039,8 +1081,7 @@ impl Delivering {
     pub fn new(journal: Arc<dyn Journal>) -> Self {
         Delivering {
             journal,
-            started: false,
-            outbox: None,
+            wiring: Wiring::NotStarted,
         }
     }
 
@@ -1054,6 +1095,8 @@ impl Delivering {
     ///
     /// **A second call does nothing and returns `false`**, so node creation and
     /// start are requested at most once per process however often startup runs.
+    /// The first call returns `true` — it ran — whether or not every step it
+    /// took succeeded; a step that failed is in the log.
     ///
     /// A failure at any step is logged and the rest still happens: a declined
     /// subscription leaves sending working, an unreadable membership record leaves
@@ -1070,20 +1113,17 @@ impl Delivering {
         S: FnOnce() -> Result<I, String>,
         I: Iterator<Item = Option<Arriving>> + Send + 'static,
     {
-        // Its own flag, not `outbox.is_some()`: a worker that failed to start
-        // leaves no outbox, and a second call must still do nothing rather than
-        // start a second listener and processor.
-        //
         // `stoa-membership`, "Startup running again in the same module process
         // MUST NOT request any channel" (scenario "A second startup in one
         // process requests no channel"), beside `op-transport`'s node asked for
         // once. A second call asks for nothing at all, because the first call
-        // already asked for every membership's.
-        if self.started {
+        // already asked for every membership's. `NoWorker` counts as started: a
+        // second call must not start a second listener and processor.
+        if !matches!(self.wiring, Wiring::NotStarted) {
             record(&*self.journal, Note::AlreadyStarted);
             return false;
         }
-        self.started = true;
+        self.wiring = Wiring::NoWorker;
         let channels = Arc::new(Channels::default());
         let queue = Arc::new(InboundQueue::with_bound(INBOUND_BOUND));
 
@@ -1120,6 +1160,9 @@ impl Delivering {
         if !self.spawn("dialectica delivery worker", worker, move |w| {
             w.run(pending)
         }) {
+            // `true`, not `false`: this call ran, and the listener and processor
+            // it started are running. The wiring stays `NoWorker`, so every
+            // later request says the worker could not be started.
             return true;
         }
         let outbox = Outbox { actions };
@@ -1132,7 +1175,7 @@ impl Delivering {
             }
             Err(why) => record(&*self.journal, Note::MembershipUnreadable(&why)),
         }
-        self.outbox = Some(outbox);
+        self.wiring = Wiring::Running(outbox);
         true
     }
 
@@ -1151,15 +1194,16 @@ impl Delivering {
     }
 
     fn request(&self, action: Action, what: impl Fn() -> String) {
-        match &self.outbox {
+        match &self.wiring {
             // `op-transport`, scenario "A publish before delivery is wired is not
             // sent when it is", and `stoa-membership`, "A join before delivery is
             // wired has its channel requested once, by startup": a request made
             // before delivery is wired is logged and dropped, not held. Startup
             // asks for every membership's channel anyway; an op published then is
             // not re-sent.
-            None => record(&*self.journal, Note::NotStarted(&what())),
-            Some(outbox) => {
+            Wiring::NotStarted => record(&*self.journal, Note::NotStarted(&what())),
+            Wiring::NoWorker => record(&*self.journal, Note::NoWorker(&what())),
+            Wiring::Running(outbox) => {
                 if outbox.actions.send(action).is_err() {
                     record(&*self.journal, Note::WorkerGone(&what()));
                 }
@@ -1211,7 +1255,7 @@ impl Delivering {
     #[cfg(test)]
     fn settle(&self) {
         let (done, wait) = mpsc::channel();
-        if let Some(outbox) = &self.outbox {
+        if let Wiring::Running(outbox) = &self.wiring {
             let _ = outbox.actions.send(Action::Settle(done));
             wait.recv_timeout(Duration::from_secs(30))
                 .expect("the worker settles");
