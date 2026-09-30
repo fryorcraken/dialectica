@@ -1008,3 +1008,126 @@ the range reads consistently with itself (the "one extension" carve-out in the
 judged-no-later-than MUST, the ask paragraph, the not-covered list and the
 consequence paragraph agree on which messages are covered), and issue #176 is
 unchanged in scope (reliable channel throughout; state OPEN).
+
+## Re-review round 5 `58460b02..1d5e2e37`
+
+Reviewed at `e5268cc2` (range tip `1d5e2e37`; the spec did not change in the
+range). Read: the range's diff of `delivery/tests.rs` (six new tests and one
+helper), `op-transport/spec.md` lines 190 and 192 and the scenario list, and my
+round-4 box and its outcome. The implementation was read only at
+`Wait::extend_from` and `Pending::asked`, the lines a mutation would touch, and at
+`begin_wait`/`end_wait`. Baseline, from its own output:
+`cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p dialectica-core delivery`,
+119 passed, 0 failed. `dialectica/logos-rust-sdk-src` was missing and staged with
+the `nix build --inputs-from` command.
+
+**Mutations: none ran.** I tried one (delete the `if asked >= self.ends { return; }`
+guard in `Wait::extend_from`, to see
+`an_ask_after_a_messages_wait_has_ended_does_not_make_it_wait_again` go red); the
+harness's permission classifier denied the edit, and I did not look for another
+route to the same edit. The tree is unmodified, nothing is left behind. So every
+"can fail" statement below is from reading the test against the spec sentence and
+the lines above, **not measured**; the tests' own comments and the tester's
+outcome notes claim red-before-fix measurements that I did not reproduce.
+
+**Round-4 box confirmed answered as its outcome says.**
+`a_second_ask_restarts_the_open_time_for_the_messages_taken_after_the_one_waiting`
+is the scenario the box gave: A waits, B queued behind it, ask 1 at 0.3 limit into
+A's wait, ask 2 at 0.6 limit later, answer at 1.3 limits after ask 1, B must be
+stored. Its WHEN is asserted, not assumed (A not refused at ask 2, A refused
+before the answer, answer inside the time ask 2 gave), and the refusal count is
+`>= 1` for the stated reason. Read against the mutation in my round-4 box (restart
+only when `waits.is_empty()`): A's first wait fixes the time, B begins waiting at
+ask 1 + limit with the time already ended, is judged at once against an open not
+yet answered, and is refused, so the final `stored(...)` fails for the reason the
+test names. It cannot pass on the wrong answer, and the right answer has 0.3 of a
+limit each side.
+
+**The six new tests, read.**
+- `an_ask_after_a_messages_wait_has_ended_does_not_make_it_wait_again`: asserts
+  against a clock the implementation did not produce (`asked` and the deciding
+  thread's return instant are both taken by the test; `began` is taken no earlier
+  than the wait began). Holding the book from 0.5 to 1.5 limits forces the
+  processor to wake at the message's end and block on the lock, which is the
+  stated race, and the preconditions (wait still in the book at 0.5, end passed
+  at the ask) are asserted. A revived wait ends a full limit after the ask, so it
+  reads at least 1.0 against a 0.75 bound; the right answer's cost is one lock
+  take and one journal line. The bound is one-sided, as its comment says. Reads as
+  able to fail and not to flake.
+- `an_ask_starts_the_opens_time_from_the_ask_not_from_the_next_message`: read from
+  the book, no sleeping on the answer. A wait counted from the message ends at
+  least 0.5 s past the 0.25 s upper bound, whatever this thread did. The lower
+  bound is exact. Its one flake path (a 250 ms stall between `Instant::now()` and
+  the ask's own clock read) is stated in its comment; recorded, not boxed.
+- `a_message_that_waited_its_opens_time_out_leaves_no_wait_in_the_book`,
+  `messages_judged_at_once_after_an_opens_time_has_ended_leave_no_wait_in_the_book`
+  and `a_message_whose_open_settles_held_leaves_no_wait_while_another_request_is_pending`:
+  each reads `waits.len()` as `Some(n)` and not `None`, so a dropped entry cannot
+  read as "nothing left", and each covers one of the three exits from a wait. The
+  second reads a difference against the first's leftover, and asserts four
+  refusals so the three judged-at-once messages really ran. The third stores the
+  message, which shows the wait ended on the answer and not on a time running out
+  (limit 20 s). A leak on any exit would read `Some(1)` or `Some(before + 3)`.
+- `a_second_ask_restarts_...`: above. Its `refusals() >= 1` at the answer leaves
+  the processor 0.3 of a limit to wake and write the refusal; on a runner that
+  stalls a thread for more than 300 ms it reads as a wrong answer where the
+  comment says a stall reads as a failed precondition. Same allowance as the
+  other ask tests in this file; recorded, not boxed.
+
+**Scenario mapping.** The range's tests map to sentences of the requirement, not to
+a scenario: `an_ask_after_..._has_ended...` to "Once the open's time has ended ...
+the wait on it has expired" (line 190), `an_ask_starts_the_opens_time_from_the_ask...`
+to "the open's time MUST start again at that ask" (line 192) and to the "no later
+than the end of the open's time as it stood when the message began waiting" MUST,
+and `a_second_ask_restarts_...` to the last sentence of the ask paragraph, which
+also has no scenario of its own. The three book-hygiene tests map to nothing in
+the spec; see the second box. No `NO SPEC:` marker in the range's tests.
+
+- [ ] **`spec-writer`** — the ask paragraph and the expiry sentence can be read as
+      contradicting each other for a message whose own end has passed but which the
+      waiter has not yet taken out of the book. **Where:** `op-transport`, "That
+      wait is bounded by a fixed time for each open" (line 190: once the time has
+      ended "the message waiting then ... MUST be judged without waiting on that
+      open") against "Asking delivery to create a channel starts the open's time
+      again" (line 192: "A message waiting on the open when the ask is made MUST
+      then be judged no later than that fixed time after the ask, in place of the
+      end it began waiting with, and its wait expires then rather than earlier").
+      **Scenario:** a message began waiting, its end passed, the processor has not
+      yet re-taken the book, and this peer asks. Is it "waiting on the open when
+      the ask is made"? Read literally it is, and "its wait expires then" says it
+      now waits a full limit from the ask; line 190 says it is judged at once. The
+      test `an_ask_after_a_messages_wait_has_ended_does_not_make_it_wait_again`
+      pins the second reading, which is the right one (a revived wait holds every
+      other Stoa up again), but it is pinned by a test comment and not by the spec,
+      and it is a race that is invisible to a reader of the scenarios. **Fix
+      shape:** one clause in line 192 ("a message whose own end has already passed
+      is not extended, and is judged as line 190 says") and a scenario for it, then
+      this test maps to a scenario. Severity: low; the tests and the code agree, the
+      spec is silent on which wins.
+- [ ] **`spec-writer`** — three new tests pin a property no requirement states:
+      that the channel book holds no record of a message once its wait has ended.
+      **Where:** `a_message_that_waited_its_opens_time_out_leaves_no_wait_in_the_book`,
+      `messages_judged_at_once_after_an_opens_time_has_ended_leave_no_wait_in_the_book`,
+      `a_message_whose_open_settles_held_leaves_no_wait_while_another_request_is_pending`.
+      **Scenario:** none in the spec describes it. The tests' comments give the
+      reason (an open queued behind others stays pending for many `CALL_TIMEOUT`s
+      and every message a sender puts on it registers a wait, so a leak is an
+      entry per message the sender chose to send, walked under the book's lock by
+      every ask), which is a bound on state a sender can grow, and that is
+      something the spec bounds elsewhere for payloads ("The waiting payloads never
+      exceed the bound") but not here. The tests read the private field
+      `pending.waits`, so they fail on a rename and not on a change of behaviour a
+      caller could see. **Fix shape:** either add the bound to the spec (the
+      book's per-open state does not grow with the messages a sender sends once
+      they have been judged), so the tests have a requirement to cite, or record
+      in the change that this is an implementation property deliberately kept out
+      of the spec. Severity: low; nothing is wrong with the tests, the gap is that
+      nobody decided on purpose.
+
+**Clean:** the round-4 box; the layer (the book and the processor are in
+`dialectica-core`, which `cargo test` compiles, and no test depends on the
+`cfg(logos_scaffold)` adapter); the three clocks the ask tests read (taken by the
+test, not asked of the implementation); issue #176 (`gh issue view 176`: OPEN,
+last updated 2026-09-29, title still names the reliable channel; I did not
+re-read its body or comments this round, and the range adds nothing to the scope
+it states). No finding for the tester or dev-writer.
