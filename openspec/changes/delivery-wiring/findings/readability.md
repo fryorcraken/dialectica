@@ -639,3 +639,120 @@ changes behaviour.
   `transport.rs` (54), not tests; it is approximate by its own mark.
 - Mutation testing was by hand on the claims above, not `cargo mutants`; no mutation
   is left in the tree (every one reverted with `git checkout`).
+
+## Re-review round 3 `2cb71aaf..7462ded8`
+
+Dimension: readability only. Reviewed at `ea37a706` (the range's code and prose are
+unchanged by the findings commits after `7462ded8`): the range's diff of `delivery.rs`,
+`delivery/tests.rs`, `design.md` (Decisions 4, 6, 10, 11 and Risks), `proposal.md`,
+`tasks.md` and the `op-transport` delta. Round 2's four entries are all confirmed
+fixed (see below). Three new defects, all low or nit, all in comments or prose; none
+changes behaviour.
+
+- [ ] **`tester`** — `delivery/tests.rs:2299` — "the work of four small decisions" in
+      `each_unanswered_opens_wait_is_its_own_and_not_one_shared_across_opens`: the test
+      decides three.
+      **Scenario:** the comment justifies the three-limit bound on the valid op ("the
+      right answer takes two [limits] plus the work of four small decisions, leaving a
+      limit of slack"). The test offers three messages (`:2317-2331`: `on_first`,
+      `on_second`, `after`), so the processor makes three decisions, two of them
+      refusals. "Four" is the count in
+      `many_messages_on_one_unanswered_open_hold_other_channels_up_for_one_wait_not_one_each`
+      (four stuck messages), carried over. The margin argument is the comment's reason
+      for the bound, and it cites a number of decisions the test does not contain.
+      **Fix shape:** "three small decisions", or drop the count ("plus the work of
+      deciding three messages").
+      **Severity:** nit.
+
+- [ ] **`tester`** — `delivery/tests.rs:2289-2290` — a quotation of the spec that is
+      not in the spec.
+      **Scenario:** the comment quotes `op-transport`'s MUST as "judged only once that
+      open is settled … unless that channel's own wait expires first". The delta
+      (`spec.md:188`) ends "and against the channels open then, unless the wait below
+      expires first"; `git grep -F "own wait expires"` finds the phrase only in the
+      test comment and in `findings/spec-test.md:612`, which paraphrased it. A reader
+      searching the spec for the quoted words finds none, in a comment whose job is to
+      say which sentence the test enforces. (`findings/spec-test.md:630` has the real
+      words.)
+      **Fix shape:** quote the spec's words ("unless the wait below expires first"),
+      or drop the quotation marks.
+      **Severity:** nit.
+
+- [ ] **`dev-writer`** — `design.md:134` — "(re-run on the final tree)" is the stale-label
+      shape round 2's second entry removed everywhere else.
+      **Scenario:** Decision 4's new sentence says
+      `the_call_timeout_outlasts_deliverys_own_and_the_settle_limit_outlasts_the_call` "is
+      red with `DELIVERY_CALLBACK_TIMEOUT` at 10 s and `CALL_TIMEOUT` at 20 s, which
+      compiles (re-run on the final tree)". "The final tree" is whichever tree its reader
+      thinks it is; it names no commit, and it is the same relative label
+      ("re-run on this change's last round") that went stale within a round before.
+      The claim itself holds (10 < 20 < 40 satisfies both compile-time asserts; the test's
+      literal 30 s fails against a `CALL_TIMEOUT` of 20 s) and needs no label.
+      **Fix shape:** drop the parenthesis; the mutation is stated as a command a reader
+      can run.
+      **Severity:** low.
+
+### What I checked, and found clean
+
+- **Round 2's four entries are fixed as their outcomes say.** Decision 11's "What still
+  bounds the stall" is two bounds with the K = 20 working (735 s, not 800 s); the
+  rejection marks the square-of-K claim withdrawn and says what the limits differ in;
+  the arithmetic holds by hand: 40m = 35(m+1) at m = 7 (5m = 35, both 280 s); 21 x 35 =
+  735; at a 36 s limit 20 x 36 = 720 against 735; K x 40 s reachable only while
+  K <= 7. The 914 / 917 / 612 ms figures match `findings/security.md:403-406`. The
+  counts are gone from Decisions 6, 10 and 11 (`git grep` for "twelve", "27", "last
+  round", "re-run on this change" finds none; the one survivor is entry 3 above).
+  "Neither value is visible to a test" and "No test can see" appear nowhere now; the
+  comment beside the asserts, `CALL_TIMEOUT`'s doc, Decision 4, Decision 11, `tasks.md`
+  9.4 and 10.4 name the test that holds delivery's 30 s. `tests.rs:2228` gives the full
+  test name.
+- **Mutation claims, run (each restored with `git checkout -- <file>`; 95
+  `delivery::tests::` tests, all green unmutated):**
+  - `declined` ignoring `error` (`.filter(|_| false)` on the `callee_error` read):
+    13 red, among them `declined_reads_delivery_s_three_shapes_of_no` and the
+    "already exists" tests, as Decision 6 says (and it names no count).
+  - `>=` to `>` in `InboundQueue::offer`: four red, the three Decision 10 names
+    (`a_full_queue_keeps_what_it_holds_and_discards_the_arrival`,
+    `the_waiting_messages_never_exceed_the_bound`,
+    `the_queue_the_running_wiring_builds_is_bounded_at_the_pinned_count`) and
+    `every_discard_is_counted_and_logged_apart_from_refusals`, which the text does not
+    name and does not claim to be alone.
+  - `now_ms` from `message.timestamp as u64` in `Processor::pass`:
+    `the_window_is_judged_by_this_peers_clock_not_the_events_timestamp` red.
+  - the wait's `left` fixed at an hour: seven red, each timing out in `eventually`;
+    the six Decision 11 and `tasks.md` 10.4 name, plus the new
+    `each_unanswered_opens_wait_is_its_own_and_not_one_shared_across_opens`, which no
+    prose cites and which the prose does not claim is absent.
+  - the loop condition `!open || pending` in `await_settled`: the reworked
+    `a_message_arriving_while_its_open_is_declined_is_refused_after_the_answer` red,
+    timing out at ten seconds ("the message to be refused once the open is declined"),
+    as its comment says; `a_message_arriving_while_its_channel_opens_is_judged_after_the_answer`
+    stays green, which is why the declined case is the one that pins it.
+- **The one-predicate claim is true.** `wait_ends` guards on `!self.is_opening(..)` and
+  `await_settled` loops on `book.is_opening(..)`; the doc's "the question
+  `Channels::await_settled` asks again on each wake-up" is what the code does.
+- **Prose matches across the three places that state it.** `SETTLE_LIMIT`'s doc, Decision 11
+  and the spec's "consequence" paragraph agree on "at most ... once each" and "never past
+  the moment the last of those opens settles"; the new spec paragraph says it adds no
+  requirement and uses no MUST; the two new requirements' MUST stays uniform inside their
+  block. `proposal.md`'s rewritten sentence and its fifth open question ("`logos.test`
+  and `Edge`", `delivery.rs:120-121`) are true. Scenario names quoted in test comments
+  (`A message's wait outlasts ...`, `Each unanswered open's wait is its own`) match the
+  delta headings exactly.
+- **Gates.** `openspec validate delivery-wiring --strict` passes;
+  `cargo fmt --manifest-path dialectica/rust-lib/Cargo.toml --check` is clean.
+
+### Not boxes (taste; say so and move on)
+
+- `tasks.md` section 11 lists the refactor and the design change, and not the two test
+  changes in `7462ded8` (the new two-open test and the reworked decline test), although
+  the file's own header says each regression test is "seen red". The tests cite their
+  scenarios, so nothing is lost; a reader going tasks to test misses them.
+- Decision 11 (`design.md:374-377`) reads "the four tests named below, `a_message...` and
+  `opens_settling...`": it means four plus two, and the comma list could be read as
+  naming four in all. Clear from the list at `:435-451`.
+- `design.md` Decision 11 is now long (about 160 lines) with the same cost figures
+  worked in three places; one place would carry them. Round 1 said the same about the
+  wait's cost, and the rewrite added a section rather than merging.
+- Mutation testing was by hand on the claims above, not `cargo mutants`. No mutation
+  is left in the tree: each was reverted with `git checkout -- <file>`.
