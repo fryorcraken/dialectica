@@ -469,3 +469,97 @@ I restored it after. The Decision 11 text no longer says "one call long".
 `Processor::{decide,pass,record_decision}`, `dialectica-core` lib tests: 16
 mutants, **11 caught, 5 unviable, 0 missed**. My three probes were in the tree
 during that run. They add tests and change no mutated function.
+
+## Re-review round 3 `2cb71aaf..7462ded8`
+
+Dimension: **security** only. Read at `ea37a706` (the range's code is
+`7462ded8`'s): the `delivery.rs` diff (`cda4827d`'s predicate and the limits'
+comments), the three new or reworked tests, design.md Decision 11 and the Risks,
+the `op-transport` delta and `proposal.md`. One probe was run in the reviewer's
+tree only and then removed. The scenario below says what it did, so it can be
+re-run.
+
+**The round-2 outcome holds.** Decision 11 withdraws the square-of-K argument and
+gives my reason. It records both probes with their figures. The Risks line now
+reads "never past the last of them settling", with (K+1) × 35 s once K ≥ 7.
+`SETTLE_LIMIT` is 40 s (`delivery.rs:606`). I checked the arithmetic behind the
+re-decision. With a limit L, wait m ends at min(L·m, 35(m+1)). At L = 36 that
+switches only at m = 35, so for K = 20 the stall is 20 × 36 = 720 s. At L = 40 it
+switches at m = 7, giving 21 × 35 = 735 s. Both match the text. **Against a
+sender, the stall half of the corrected argument holds.** Only this peer's
+requests start or clear a wait. One message on a long-pending open holds every
+Stoa for 40 s rather than for the open's whole pending time. Below 7 stuck opens,
+40 s is strictly shorter than a queue-sized limit. The loss half does not hold,
+as the entry below shows.
+
+- [ ] **`spec-writer`** — `specs/op-transport/spec.md:192` (and `proposal.md:72-74`,
+      "never judged before that creation is answered or given up") — the new
+      paragraph says the order delivery < `CALL_TIMEOUT` < fixed time means "a
+      message waiting on the open whose creation is the one this peer is
+      currently waiting on delivery to answer is then judged only after delivery
+      has answered that creation or this peer has given up". That does not follow
+      from the requirements above it. The open's time starts when a message
+      *first* waits on it after the request, and an open is pending from the
+      request, so it can start while the open is still queued. When the worker
+      later reaches the open, the time left is 40 s minus however long it waited
+      in the queue. That can be less than the call. The paragraph's exclusion
+      covers only a wait that expires "before delivery is asked". It does not
+      cover one that started in the queue and expires while delivery is being
+      asked. That is exactly the race this wait exists for.
+      **Scenario:** a peer starts up in several Stoas against a slow but working
+      delivery. Node creation and the earlier Stoas' creations take 24 s between
+      them, each well inside delivery's 30 s. As soon as the peer subscribes, a
+      sender puts one junk payload on a later Stoa's channel id. Channel ids are
+      public, and the payload need not be an op. That starts the open's 40 s at
+      t = 0. At t = 24 s the worker asks delivery to create the channel. At
+      t = 32 s delivery hands over an honest op on it, before its answer, which
+      is the documented v0.2.1 race. At t = 40 s the wait expires and both
+      messages are refused as `unknown-channel`. At t = 44 s delivery answers
+      "created", 20 s after it was asked and inside its own 30 s. SDS has counted
+      the honest op as delivered, so it is lost for good. With no sender
+      involved, honest traffic arriving during the queue does the same. The
+      sender adds control over timing: it can start every later Stoa's time at
+      the earliest possible moment. Decision 11's "40 s … covers the ordinary
+      cases (the open being the worker's current call)" rests on the same
+      sentence. It needs no more than 5 s (40 − 35) of calls ahead of the open.
+      **Measured:** a processor-level probe, scaled 40 s → 1000 ms. It opened
+      the channel with `channels.opening`, queued a junk payload at t = 0 and an
+      honest op at 800 ms, and settled the open `held` at 1100 ms. That models a
+      call begun at 600 ms and answered 500 ms later, which is 20 s against
+      delivery's own 750 ms. Result: the honest op was **not stored**, and the
+      journal showed two `refused (unknown-channel)` lines.
+      **Severity:** low. The loss stays on the Stoa whose open is late, and it
+      needs more than 5 s of delivery calls queued ahead of that open. But the
+      spec states a guarantee that its own rules break, and a sender can trigger
+      the breach deliberately.
+      **Direction (spec decision):** either narrow the sentence, so the guarantee
+      covers only a wait that began after the worker asked delivery, and record
+      the loss for an open that sat in the queue first; or restart an open's time
+      when this peer asks delivery for it. That second option bounds the stall
+      per call rather than per request, and reopens part of Decision 11's
+      "Start an open's time at the request" alternative, so it has to be argued
+      against the stall bound.
+
+## Round 3 clean areas
+
+- **`cda4827d` is a pure refactor.** `wait_ends` now returns `None` on
+  `!is_opening`, where it used to return `None` on `is_open`. The difference is
+  the not-open, not-pending case. That case used to fall through to
+  `pending.get_mut`, which returns `None`, so the result is the same. The two
+  questions (whether a message waits, and whether it keeps waiting) now share
+  one predicate. Nothing a peer controls reaches it other than the channel id
+  used as a `HashMap` key.
+- **The reworked decline test.** It now has a two-minute limit and runs `decide`
+  on its own thread. It pins that a declined open ends the wait at once, rather
+  than holding every Stoa for the whole limit. So it guards the stall bound in
+  the `!open && pending` loop condition.
+- **`each_unanswered_opens_wait_is_its_own…`.** It pins the per-open deadline
+  against being shared across opens. A shared deadline would shorten a wait
+  rather than lengthen one, so it would cost messages rather than stall time.
+- **Panics, log lines, dependencies.** The range adds no arithmetic, indexing or
+  `unwrap` outside tests, no new `Note`, and no dependency.
+
+`cargo mutants` on `dialectica-core/src/delivery.rs`, scoped with
+`--re "is_opening|wait_ends|await_settled"`, `dialectica-core` lib tests: 11
+mutants, **8 caught, 3 unviable, 0 missed**. My probe was not in the tree during
+that run.
