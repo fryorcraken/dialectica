@@ -1546,6 +1546,7 @@ fn the_peer_keeps_processing_after_an_unreadable_message_and_a_refusal() {
             Some(arriving(channel.channel_id(), valid.to_bytes().unwrap(), 2)),
         ]
         .into_iter(),
+        &processor.channels,
         &processor.queue,
         &*peer.journal,
     );
@@ -2004,11 +2005,83 @@ fn a_full_queue_keeps_what_it_holds_and_discards_the_arrival() {
 }
 
 #[test]
+fn traffic_on_a_channel_this_peer_is_not_opening_takes_no_place_in_the_queue() {
+    // `op-transport`, scenario "Traffic on a channel this peer is not opening
+    // takes no place in the queue" — the security review's probe, with the
+    // opposite expectation. The boundary is held up on a message whose channel
+    // is still opening; more messages than the bound then arrive on another
+    // application's channel, and a valid op on an open one. Red while every
+    // message took a place: the foreign ones filled the queue, the valid op was
+    // discarded, and nothing was refused until the boundary was released.
+    let mut peer = Peer::new("handover-foreign-traffic");
+    let open = genesis("Agora");
+    let opening = genesis("Lyceum");
+    let events = peer.start_listening();
+    peer.join(&open);
+    peer.delivering.settle();
+
+    let gate = Gate::closed();
+    let _ = peer.fake.script(|s| s.create_gate = Some(gate.clone()));
+    peer.join(&opening);
+    eventually("the second open to reach delivery", || {
+        peer.fake.creates().len() == 2
+    });
+    let held_up = their_op(opening.address().unwrap(), "holds the boundary up", 0);
+    events
+        .send(Some(arriving(
+            ChannelIdentity::of(&opening.address().unwrap()).channel_id(),
+            held_up.to_bytes().unwrap(),
+            1,
+        )))
+        .unwrap();
+
+    let foreign = INBOUND_BOUND + 5;
+    for n in 0..foreign {
+        events
+            .send(Some(arriving(
+                "/another-application/channel",
+                vec![n as u8],
+                1,
+            )))
+            .unwrap();
+    }
+    eventually("every foreign message to be refused on hand-over", || {
+        peer.journal.with("refused (unknown-channel)").len() == foreign
+    });
+    assert_eq!(
+        peer.fake.answered_creates(),
+        1,
+        "the refusals waited on the boundary"
+    );
+
+    let valid = their_op(open.address().unwrap(), "arrives behind the flood", 0);
+    events
+        .send(Some(arriving(
+            ChannelIdentity::of(&open.address().unwrap()).channel_id(),
+            valid.to_bytes().unwrap(),
+            1,
+        )))
+        .unwrap();
+    gate.release();
+    eventually("the valid op to be stored", || {
+        stored(&peer, &valid.op.id()).is_some()
+    });
+    assert!(
+        peer.journal.with("discarded").is_empty(),
+        "{:?}",
+        peer.journal.with("discarded")
+    );
+}
+
+#[test]
 fn every_discard_is_counted_and_logged_apart_from_refusals() {
     let journal = Recorder::default();
     let queue = InboundQueue::with_bound(1);
+    let stoa = genesis("Agora").address().unwrap();
+    let channel = ChannelIdentity::of(&stoa);
     listen(
-        (0..4).map(|n| Some(arriving("c", vec![n], 0))),
+        (0..4).map(|n| Some(arriving(channel.channel_id(), vec![n], 0))),
+        &open_for(&stoa),
         &queue,
         &journal,
     );

@@ -515,6 +515,13 @@ impl Channels {
         self.settled.notify_all();
     }
 
+    /// Whether a channel is open or being opened: what the listener asks before
+    /// a message may take a place in the queue.
+    fn is_known(&self, channel_id: &str) -> bool {
+        let book = lock(&self.book);
+        book.open.is_open(channel_id) || book.pending.contains_key(channel_id)
+    }
+
     /// Wait, up to `limit`, while a channel is pending and not open.
     fn await_settled(&self, channel_id: &str, limit: Duration) {
         let book = lock(&self.book);
@@ -843,25 +850,48 @@ impl InboundQueue {
 /// 0.9). On an older runtime there is no status and `recv()` parks forever: the
 /// thread is then leaked, but it is this thread alone, holding nothing any other
 /// thread waits on.
-fn listen<I>(events: I, queue: &InboundQueue, journal: &dyn Journal)
+fn listen<I>(events: I, channels: &Channels, queue: &InboundQueue, journal: &dyn Journal)
 where
     I: Iterator<Item = Option<Arriving>>,
 {
     for event in events {
         match event {
-            Some(message) => {
-                if let Offered::Discarded(total) = queue.offer(message) {
-                    record(
-                        journal,
-                        Note::Discarded {
-                            total,
-                            bound: queue.bound,
-                        },
-                    );
-                }
-            }
+            Some(message) => hand_over(message, channels, queue, journal),
             None => record(journal, Note::Unreadable),
         }
+    }
+}
+
+/// Offer one message to the queue — unless its channel is neither open nor
+/// being opened, when it is refused here and takes no place.
+///
+/// # Why an unknown channel is refused before the queue
+///
+/// `op-transport`: such a message "MUST NOT take a place among the waiting
+/// payloads", is refused as an unknown channel "when delivery hands it over",
+/// and is neither counted towards the bound nor as a discard. The node is shared,
+/// so another application's channel traffic arrives here, and any peer may send
+/// on any identifier it picks; queued, that traffic filled the queue and forced
+/// final discards of every Stoa's ops (design Decision 10).
+/// `traffic_on_a_channel_this_peer_is_not_opening_takes_no_place_in_the_queue`
+/// is red without it.
+///
+/// The check takes the channel book's lock, which is never held while a
+/// payload is decided ([`Channels::stoa_of`]), so taking a message from delivery
+/// still does not wait on the boundary.
+fn hand_over(message: Arriving, channels: &Channels, queue: &InboundQueue, journal: &dyn Journal) {
+    if !channels.is_known(&message.channel_id) {
+        let refusal = refusal_kind(&InboundRefusal::UnknownChannel);
+        return record(journal, Note::Refused(refusal, None));
+    }
+    if let Offered::Discarded(total) = queue.offer(message) {
+        record(
+            journal,
+            Note::Discarded {
+                total,
+                bound: queue.bound,
+            },
+        );
     }
 }
 
@@ -1010,7 +1040,9 @@ impl Delivering {
         // channels and the sends are still requested — because a peer that
         // cannot receive can still publish.
         match subscribe() {
-            Ok(events) => self.spawn_listener(events, Arc::clone(&queue)),
+            Ok(events) => {
+                self.spawn_listener(events, Arc::clone(&channels), Arc::clone(&queue))
+            }
             Err(why) => record(&*self.journal, Note::NotSubscribed(&why)),
         }
         self.spawn(
@@ -1082,15 +1114,15 @@ impl Delivering {
         }
     }
 
-    fn spawn_listener<I>(&self, events: I, queue: Arc<InboundQueue>)
+    fn spawn_listener<I>(&self, events: I, channels: Arc<Channels>, queue: Arc<InboundQueue>)
     where
         I: Iterator<Item = Option<Arriving>> + Send + 'static,
     {
         let journal = Arc::clone(&self.journal);
         self.spawn("dialectica inbound listener", events, move |events| {
-            if let Err(payload) =
-                catch_unwind(AssertUnwindSafe(|| listen(events, &queue, &*journal)))
-            {
+            if let Err(payload) = catch_unwind(AssertUnwindSafe(|| {
+                listen(events, &channels, &queue, &*journal)
+            })) {
                 record(
                     &*journal,
                     Note::Panicked("the inbound listener", &panic_detail(&*payload)),
