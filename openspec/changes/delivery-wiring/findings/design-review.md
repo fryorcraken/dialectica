@@ -355,3 +355,24 @@ four tests named below" with no names at the sentence, so the reader must find t
 four bullets at `design.md:435-447`.
 
 - [x] **re-review round 3 `2cb71aaf..7462ded8`: no findings** — read the round's design.md, proposal.md, spec delta, tasks.md, delivery.rs diff, the new order test, issue #176 and PR #190's body; clean
+
+## Re-review round 4 `7462ded8..58460b02`
+
+Decision 11 records the ask choice with its reason (the round-3 probe), the once-only
+cap with the alternatives it rules out (every ask extending; a log of asks; storing
+only the start; moving the limit into the book; narrowing the spec), and the cost (a
+wait that ran out before the ask, and a message already extended, are still lost).
+Hand checks: a message extended at an ask before its end stalls under 80 s; 40 + 35 =
+75 s in practice; m = 1..6 gives (m+1) x 35 above 40m, equal at 7. The claim that
+`an_earlier_message_on_a_queued_open...` is red only with both halves gone holds by
+hand (extension alone: the junk waits to the settle and the op is then judged on an
+open channel; restart alone: the op waits from the ask). The code takes the decisions:
+`Opening::asked` is called once, immediately before `channel_create`; `Wait::extend_from`
+is the `Option::take` cap; `Processor::new` is the only construction outside a
+struct literal, guarded by the test's count. Every test named in Decision 11 and
+tasks.md 12.2 exists. Proposal, design, spec deltas and the PR #190 body agree on the
+ask, the under-twice bound and the remaining loss; `Closes #176` is the only closing
+keyword; `NO SPEC:` is None; open questions 5, 6 and 7 stay open in all three. Nothing
+contradicts #176.
+
+- [x] **re-review round 4 `7462ded8..58460b02`: no findings** — read the round's design.md, proposal.md, spec deltas, tasks.md, delivery.rs diff, PR #190's body and the test names Decision 11 cites; clean
