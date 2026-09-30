@@ -332,3 +332,82 @@ text pin exists and pins the order.
   commented sections and could be split into files along them; a preference. The
   module doc's line 38 is one unwrapped 130-column line (rustfmt does not reflow
   comments). `cargo mutants` was not run: this dimension reviews shape.
+
+## Re-review round 2 `369561d1..2cb71aaf`
+
+Read: the full source diff of the range (`delivery.rs`, `transport.rs`,
+`arrival.rs`), `Channels`/`ChannelBook`/`Pending`/`Processor` whole at HEAD, the
+new tests that read the book (`delivery/tests.rs:2256`, `:2299`, `:2364`, `:2417`),
+and `design.md` for the two refactors. Confirmed by running, not reading: each
+refactor commit checked out on its own and `cargo test -p dialectica-core --lib`
+run: green at `7c9d6cd6` (1287 tests) and at `ff3eba85` (1287), and
+`cargo clippy -p dialectica-core --all-targets -- -D warnings` is clean at HEAD.
+Neither refactor changes behaviour: `7c9d6cd6` moves the two halves' composition
+into `receive_via` and splits `decide` into `pass` and `record_decision` with the
+same calls in the same order (the one added test pins the lookup key, and passes
+on the commit that adds it); `ff3eba85` wraps the count in `Pending { requests }`
+and names `!open && pending` as `is_opening`, and adds no field beyond the count.
+
+The round-1 outcomes are confirmed: `receive` has a production caller through
+`receive_via` (`Processor::pass` and `receive` both call it, and no other spelling
+of lookup-judge-write remains), `judge` is private so `Judged` certifies the channel
+tie by construction, and `arrival.rs:223` names `judge` reached through
+`receive_via`.
+
+- [ ] **`dev-writer`** — `delivery.rs:559-567` — `ChannelBook::wait_ends` spells
+      "this channel is being opened" a second time, one commit after
+      `ff3eba85` extracted `is_opening` to be its one spelling.
+      **Scenario:** `is_opening` is `!self.open.is_open(id) && self.pending.contains_key(id)`
+      (`:553-555`). `wait_ends` is `if self.open.is_open(id) { return None }` followed by
+      `self.pending.get_mut(id).map(..)`, which returns `Some` exactly when
+      `!open && pending`. `await_settled` (`:696-699`) then asks the two in sequence
+      about the same channel: `wait_ends` decides whether to wait, `is_opening`
+      decides whether to keep waiting, and the two agree only because both
+      conditions were typed the same way. A change to what "being opened" means (a
+      third state, say "held but not yet subscribed") goes into `is_opening`, is
+      covered by every test that drives the loop, and leaves `wait_ends` starting a
+      clock for a channel the loop will not wait on, or the reverse.
+      **Fix:** `wait_ends` guards with `if !self.is_opening(channel_id) { return None; }`
+      and then takes the pending record, so the predicate is written once. The
+      `Option` from `get_mut` is then unreachable-`None`, which `.and_then` on the
+      lookup already handles without a new branch.
+      **Severity:** low. A defect against the refactor's own rationale ("the fourth
+      slightly-different copy of a guard"), not a live bug: the two agree today.
+      **Measured:** `git grep -n -E "is_open\(channel_id\)" -- dialectica/rust-lib/dialectica-core/src/delivery.rs`
+      finds the `!open` half at `:554` (`is_opening`), `:561` (`wait_ends`) and
+      `:672` (`is_known`, a different predicate); the first two are the same one.
+
+**Judged and left without a box (taste).**
+
+- **`wait_ends` names a field, a `Pending` method and a `ChannelBook` method,
+  and both methods mutate.** `Pending::wait_ends(&mut self, limit)` and
+  `ChannelBook::wait_ends(&mut self, ..)` read as accessors and start the open's
+  clock on first call; the test at `delivery/tests.rs:2275` uses the call as though it
+  were a read (`ends_at`). The doc says what it does, and `&mut self` shows it, so
+  it is a naming preference (`begin_or_get_deadline`, say), not a defect; noted
+  because the rustdoc link `[`Pending::wait_ends`]` in three docs has a field and a
+  method for it to mean.
+- **The compile-time asserts and `the_call_timeout_outlasts_deliverys_own_...`
+  overlap by design** (the test comment says why the test writes `30` itself, not
+  reading `DELIVERY_CALLBACK_TIMEOUT`, which exists only to feed the asserts). That
+  is the right split for a fact about a file this repo does not hold; not a finding.
+- **`limit` is passed on every `wait_ends` call but used on the first only.** It
+  is the processor's field and the per-open deadline ignores a later, different
+  limit; harmless with one caller, and the doc states "one fixed time".
+
+**Clean, in prose.**
+
+- **The per-open deadline is in the data, not the loop.** `Pending::wait_ends` holds
+  the one instant, `opening` clears it, and an expired wait needs no state of its
+  own because every later message gets the same past instant back: the invariant
+  ("the time passes once per open") holds by construction, with no flag to keep in
+  step. The four tests read the book or race a clock they control, and each names the
+  mutation that reddens it.
+- **`await_settled` reads the deadline once**, before the loop, so a request made
+  meanwhile cannot extend a message already waiting; the doc says so and the storm
+  test pins it.
+- **`decide` is now three calls**, the "and" in its old doc is gone, and `pass` carries
+  the clock-read comment beside the one place the clock is read.
+- **The adapter is untouched in the range** (`lib.rs` not in the diff); no wire
+  method, no `metadata.json` change. `cargo mutants` was not run: this dimension
+  reviews shape.
