@@ -482,6 +482,20 @@ const MEMBERSHIP_PAGE: usize = 100;
 /// wait on an open channel, or on one nobody asked for. Removing the wait makes
 /// `a_message_arriving_while_its_channel_opens_is_judged_after_the_answer` red.
 ///
+/// # Pending from the request, not from the call
+///
+/// An open is pending from the moment a create, a join or startup asks for it —
+/// while it still waits in the worker's queue behind node creation and other
+/// opens — because delivery can hand over a message on a channel before this peer
+/// has asked delivery for it at all: a module restarted under a running delivery
+/// is handed its Stoas' messages as soon as it subscribes. The [`Opening`] guard
+/// is made where the request is made and travels to the worker inside
+/// [`Action::Open`], so every path that never reaches delivery — no worker, a
+/// worker gone, no sender identifier — settles the open by dropping it.
+/// `a_message_on_a_channel_whose_open_waits_behind_another_is_judged_once_that_open_settles`
+/// and `a_restarted_peer_keeps_what_delivery_hands_over_before_startup_asks_for_its_channel`
+/// are red while the worker made the guard as it called delivery.
+///
 /// A count per channel id rather than a flag, because a repeated join can put a
 /// second open in the queue before the first is answered.
 #[derive(Default)]
@@ -498,12 +512,21 @@ struct Channels {
 
 /// How long the processor waits on a pending open before judging anyway.
 ///
-/// `op-transport` requires the wait be "bounded by a fixed time … whether or not
-/// delivery ever answers the open", and leaves the value to design. Past
-/// [`CALL_TIMEOUT`], so it outlasts the call it is waiting on: the worker always
-/// settles the open within that — a `Drop` guard settles it even on a panic — so
-/// this bound is reached only if that guarantee is broken. What reaching it costs
-/// is in design.md Decision 11.
+/// `op-transport` requires the wait be "bounded by a fixed time after this peer
+/// began waiting … whether or not delivery ever answers the open", and leaves the
+/// value to design.
+///
+/// **It bounds a stall of every Stoa, not an open.** There is one processor, so
+/// while it waits, messages on every other channel wait behind it and the queue
+/// fills. Past [`CALL_TIMEOUT`], so it outlasts **one** delivery call: an open
+/// that is the worker's current call — a join, or a creation racing its own
+/// answer, the ordinary cases — is always settled within it. It does **not**
+/// outlast an open queued behind others: an open is pending from when it is asked
+/// for, so at startup against an unresponsive delivery one can wait behind node
+/// creation and every earlier Stoa's creation, each up to [`CALL_TIMEOUT`]. A
+/// message on such a channel is judged when this passes, against what is open
+/// then — refused, and lost. design.md Decision 11 says why a limit long enough
+/// for a queue of opens was not chosen.
 const SETTLE_LIMIT: Duration = Duration::from_secs(40);
 
 impl Channels {
@@ -597,9 +620,10 @@ impl Channels {
     }
 }
 
-/// An open in flight. Dropping it settles the open — as open only if
-/// [`Opening::held`] was called — so no path out of the worker, a panic
-/// included, can leave the channel pending.
+/// An open asked for and not yet settled. Dropping it settles the open — as open
+/// only if [`Opening::held`] was called — so no path between the request and
+/// delivery's answer, a panic, a refused send to the worker or a worker that
+/// never takes it included, can leave the channel pending.
 struct Opening {
     channels: Arc<Channels>,
     identity: ChannelIdentity,
@@ -625,8 +649,9 @@ impl Drop for Opening {
 enum Action {
     /// `createNode`, then `start` if creation was not declined.
     StartNode,
-    /// `channelCreate` for a Stoa.
-    Open(Address),
+    /// `channelCreate` for a Stoa, carrying the guard that has counted its
+    /// channel as being opened since the request was made. See [`Opening`].
+    Open(Opening),
     /// `channelSend` for an op the log holds.
     Send(OpId),
     /// A test's barrier: answered once everything queued before it is done.
@@ -656,7 +681,7 @@ impl<D: Delivery> Worker<D> {
     fn perform(&self, action: Action) {
         match action {
             Action::StartNode => self.start_node(),
-            Action::Open(stoa) => self.open(&stoa),
+            Action::Open(opening) => self.open(opening),
             Action::Send(id) => self.send(&id),
             #[cfg(test)]
             Action::Settle(done) => {
@@ -687,7 +712,13 @@ impl<D: Delivery> Worker<D> {
 
     /// Ask delivery to open a Stoa's channel under this installation's sender
     /// identifier for it — or, with no identifier retained, ask for nothing.
-    fn open(&self, stoa: &Address) {
+    ///
+    /// Every return settles the open, by dropping `opening`: as held only on
+    /// delivery's report that it holds the channel, and otherwise as given up —
+    /// the no-identifier return included, which never asks delivery at all.
+    fn open(&self, mut opening: Opening) {
+        let identity = opening.identity.clone();
+        let stoa = identity.stoa();
         let sender = match self.stores.senders().and_then(|mut s| s.sender_for(stoa)) {
             Ok(sender) => sender,
             Err(why) => {
@@ -695,8 +726,6 @@ impl<D: Delivery> Worker<D> {
                 return;
             }
         };
-        let identity = ChannelIdentity::of(stoa);
-        let mut opening = self.channels.opening(&identity);
         let reply = self.delivery.channel_create(
             identity.channel_id(),
             identity.content_topic(),
@@ -757,8 +786,12 @@ impl<D: Delivery> Worker<D> {
 }
 
 /// The dispatch side's handle on the worker: enqueue, never wait.
+///
+/// It holds the channel book too, because a request for a channel marks the open
+/// pending here, on the dispatch side, before it is queued.
 struct Outbox {
     actions: mpsc::Sender<Action>,
+    channels: Arc<Channels>,
 }
 
 // ─── Inbound: the bounded queue ───────────────────────────────────────────
@@ -1093,11 +1126,12 @@ impl Delivering {
 
     /// Wire delivery, once per process.
     ///
-    /// In order: subscribe to `channelMessageReceived` (so nothing a channel
+    /// In order: count the channel of every Stoa the membership record holds as
+    /// being opened, subscribe to `channelMessageReceived` (so nothing a channel
     /// receives can precede the listener), start the processor and the worker,
-    /// ask for the node, then ask for the channel of every Stoa the membership
-    /// record holds. The node is first in the worker's queue, so its creation is
-    /// requested before any channel operation.
+    /// ask for the node, then ask for each of those channels. The node is first
+    /// in the worker's queue, so its creation is requested before any channel
+    /// operation.
     ///
     /// **A second call does nothing and returns `false`**, so node creation and
     /// start are requested at most once per process however often startup runs.
@@ -1133,6 +1167,15 @@ impl Delivering {
         let channels = Arc::new(Channels::default());
         let queue = Arc::new(InboundQueue::with_bound(INBOUND_BOUND));
 
+        // `op-transport`: "The module's startup MUST count the channel of every
+        // Stoa it asks for as being opened before it checks any message delivery
+        // hands over" (scenario "A restarted peer keeps what delivery hands over
+        // before startup asks for its channel"). Marked here, before the
+        // subscription exists, rather than as the worker reaches each open behind
+        // node creation — a delivery that kept running hands those channels'
+        // messages over from the first event.
+        let opens = self.startup_opens(&stores, &channels);
+
         // `op-transport`, scenario "A peer that cannot subscribe still publishes":
         // a failed subscription is logged and startup carries on — the node, the
         // channels and the sends are still requested — because a peer that
@@ -1157,8 +1200,8 @@ impl Delivering {
         let (actions, pending) = mpsc::channel();
         let worker = Worker {
             delivery,
-            channels,
-            stores: stores.clone(),
+            channels: Arc::clone(&channels),
+            stores,
             journal: Arc::clone(&self.journal),
         };
         if !self.spawn("dialectica delivery worker", worker, move |w| {
@@ -1166,38 +1209,65 @@ impl Delivering {
         }) {
             // `true`, not `false`: this call ran, and the listener and processor
             // it started are running. The wiring stays `NoWorker`, so every
-            // later request says the worker could not be started.
+            // later request says the worker could not be started. `opens` is
+            // dropped with this return, so every startup open is given up — none
+            // will ever be asked of delivery — and no message waits on one.
             return true;
         }
-        let outbox = Outbox { actions };
+        let outbox = Outbox { actions, channels };
         let _ = outbox.actions.send(Action::StartNode);
-        match stores.memberships() {
-            Ok(stoas) => {
-                for stoa in stoas {
-                    let _ = outbox.actions.send(Action::Open(stoa));
-                }
-            }
-            Err(why) => record(&*self.journal, Note::MembershipUnreadable(&why)),
+        for opening in opens {
+            // A refused send hands the action back inside its error, and
+            // dropping that settles the open.
+            let _ = outbox.actions.send(Action::Open(opening));
         }
         self.wiring = Wiring::Running(outbox);
         true
     }
 
+    /// Count the channel of every Stoa the membership record holds as being
+    /// opened, returning the guards that settle each.
+    ///
+    /// An unreadable record is logged and marks nothing: later joins still work.
+    fn startup_opens(&self, stores: &Stores, channels: &Arc<Channels>) -> Vec<Opening> {
+        match stores.memberships() {
+            Ok(stoas) => stoas
+                .iter()
+                .map(|stoa| channels.opening(&ChannelIdentity::of(stoa)))
+                .collect(),
+            Err(why) => {
+                record(&*self.journal, Note::MembershipUnreadable(&why));
+                Vec::new()
+            }
+        }
+    }
+
     /// A membership was recorded: ask for its Stoa's channel.
+    ///
+    /// The channel counts as being opened from here — `op-transport`, "A channel
+    /// is being opened from the moment a create, a join or the module's startup
+    /// asks for it" — not from when the worker reaches the request.
     pub fn joined(&self, stoa: &Address) {
-        self.request(Action::Open(*stoa), || {
-            format!("the channel for Stoa {}", stoa.to_hex())
-        });
+        self.request(
+            |channels| Action::Open(channels.opening(&ChannelIdentity::of(stoa))),
+            || format!("the channel for Stoa {}", stoa.to_hex()),
+        );
     }
 
     /// An op was published: ask for it to be sent on its Stoa's channel.
     pub fn published(&self, id: &OpId) {
-        self.request(Action::Send(*id), || {
-            format!("the send of op {}", id.to_hex())
-        });
+        self.request(
+            |_| Action::Send(*id),
+            || format!("the send of op {}", id.to_hex()),
+        );
     }
 
-    fn request(&self, action: Action, what: impl Fn() -> String) {
+    /// Queue what `action` makes, when there is a worker to take it.
+    ///
+    /// `action` is only called then, so no open is marked pending for a request
+    /// that is logged and dropped; and one the worker refuses is handed back
+    /// inside the send's error and dropped, which settles it.
+    fn request(&self, action: impl FnOnce(&Arc<Channels>) -> Action, what: impl Fn() -> String) {
         match &self.wiring {
             // `op-transport`, scenario "A publish before delivery is wired is not
             // sent when it is", and `stoa-membership`, "A join before delivery is
@@ -1208,7 +1278,7 @@ impl Delivering {
             Wiring::NotStarted => record(&*self.journal, Note::NotStarted(&what())),
             Wiring::NoWorker => record(&*self.journal, Note::NoWorker(&what())),
             Wiring::Running(outbox) => {
-                if outbox.actions.send(action).is_err() {
+                if outbox.actions.send(action(&outbox.channels)).is_err() {
                     record(&*self.journal, Note::WorkerGone(&what()));
                 }
             }

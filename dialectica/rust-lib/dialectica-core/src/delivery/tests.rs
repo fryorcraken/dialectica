@@ -161,8 +161,9 @@ struct Script {
     /// they run out a creation is answered as created.
     create_replies: VecDeque<Result<Value, String>>,
     send: Option<Result<Value, String>>,
-    /// Held until released: a channel creation, or a send, delivery has not
-    /// answered.
+    /// Held until released: a node creation, a channel creation, or a send,
+    /// delivery has not answered.
+    node_gate: Option<Arc<Gate>>,
     create_gate: Option<Arc<Gate>>,
     send_gate: Option<Arc<Gate>>,
     panic_on_create_node: bool,
@@ -176,6 +177,7 @@ impl Default for Script {
             declined_channels: HashMap::new(),
             create_replies: VecDeque::new(),
             send: None,
+            node_gate: None,
             create_gate: None,
             send_gate: None,
             panic_on_create_node: false,
@@ -250,12 +252,21 @@ impl Fake {
 impl Delivery for Fake {
     fn create_node(&self, config: &str) -> Result<Value, String> {
         lock(&self.0.calls).push(Call::CreateNode(config.to_string()));
-        let script = lock(&self.0.script);
-        if script.panic_on_create_node {
-            drop(script);
+        let (gate, panics, reply) = {
+            let script = lock(&self.0.script);
+            (
+                script.node_gate.clone(),
+                script.panic_on_create_node,
+                script.create_node.clone(),
+            )
+        };
+        if panics {
             panic!("the fake delivery panicked creating a node");
         }
-        script.create_node.clone()
+        if let Some(gate) = gate {
+            gate.wait();
+        }
+        reply
     }
 
     fn start_node(&self) -> Result<Value, String> {
@@ -1109,8 +1120,17 @@ fn an_unreadable_membership_record_opens_nothing_and_stops_nothing() {
 /// The sender identifier a worker over `dir` supplies for `stoa`.
 fn sender_supplied(peer: &Peer, stoa: &Address) -> String {
     let before = peer.fake.creates().len();
-    peer.worker().perform(Action::Open(*stoa));
+    peer.worker().open_now(stoa);
     peer.fake.creates()[before].2.clone()
+}
+
+impl Worker<Fake> {
+    /// Ask for a Stoa's channel as a create or join would, and perform it now.
+    fn open_now(&self, stoa: &Address) {
+        self.perform(Action::Open(
+            self.channels.opening(&ChannelIdentity::of(stoa)),
+        ));
+    }
 }
 
 #[test]
@@ -1165,12 +1185,22 @@ fn a_sender_identifier_that_cannot_be_retained_opens_no_channel() {
     let peer = Peer::new("sender-unretainable");
     peer.dir.break_file(&sender_path_in(&peer.dir.0));
     let stoa = genesis("Agora").address().unwrap();
-    peer.worker().perform(Action::Open(stoa));
+    let worker = peer.worker();
+    worker.open_now(&stoa);
 
     assert!(peer.fake.creates().is_empty());
     let logged = peer.journal.with("no sender identifier could be retained");
     assert_eq!(logged.len(), 1, "{:?}", peer.journal.lines());
     assert!(logged[0].contains(&stoa.to_hex()));
+    // `op-transport`: an open this peer never goes on to ask delivery for is
+    // given up, and settled rather than left pending — or every message on the
+    // channel would wait out `SETTLE_LIMIT` before being refused.
+    assert!(
+        !worker
+            .channels
+            .is_known(ChannelIdentity::of(&stoa).channel_id()),
+        "the open this peer gave up is still counted as being opened"
+    );
 }
 
 // ─── Publishing ───────────────────────────────────────────────────────────
@@ -2156,20 +2186,77 @@ fn traffic_on_a_channel_this_peer_is_not_opening_takes_no_place_in_the_queue() {
     );
 }
 
-// NO SPEC: a channel counts as "being opened" from the moment the worker asks
-// delivery for it, not from the moment a join or startup enqueues the request. A
-// message handed over while its channel's open still waits behind another action
-// in the worker's queue is refused as an unknown channel, and lost. The spec says
-// the question is asked "when delivery hands the message over"; it does not say
-// when an open counts as requested.
+/// An event stream that counts how often the listener has asked it for an event.
+///
+/// The listener hands one event over — queues or refuses it — before it asks for
+/// the next, so once the count reaches `n + 1` the first `n` events have been
+/// handed over. That is how a test says "handed over before delivery answered"
+/// without reading a clock or a log line: a hand-over that queues a message
+/// logs nothing.
+struct Counted<I> {
+    events: I,
+    asked: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl<I: Iterator> Iterator for Counted<I> {
+    type Item = I::Item;
+
+    fn next(&mut self) -> Option<I::Item> {
+        self.asked.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.events.next()
+    }
+}
+
+impl Peer {
+    /// Start the wiring with a listener fed from the returned sender, and a count
+    /// of the events the listener has asked for ([`Counted`]).
+    ///
+    /// `waiting` is handed over the moment the subscription exists: sent before
+    /// startup runs, as a delivery that kept running would have it ready.
+    fn start_counted(
+        &mut self,
+        waiting: Vec<Arriving>,
+    ) -> (
+        mpsc::Sender<Option<Arriving>>,
+        Arc<std::sync::atomic::AtomicUsize>,
+    ) {
+        let (events, feed) = mpsc::channel();
+        for message in waiting {
+            events.send(Some(message)).unwrap();
+        }
+        let asked = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counted = Counted {
+            events: feed.into_iter(),
+            asked: Arc::clone(&asked),
+        };
+        self.delivering
+            .start(self.fake.clone(), self.dir.stores(), now, move || Ok(counted));
+        (events, asked)
+    }
+}
+
+/// Wait until the listener has handed over the first `n` events it was sent.
+fn handed_over(asked: &std::sync::atomic::AtomicUsize, n: usize) {
+    eventually("the listener to hand the events over", || {
+        asked.load(std::sync::atomic::Ordering::SeqCst) > n
+    });
+}
+
 #[test]
-fn a_message_on_a_channel_whose_open_is_still_queued_is_refused_on_hand_over() {
+fn a_message_on_a_channel_whose_open_waits_behind_another_is_judged_once_that_open_settles() {
+    // `op-transport`, scenario "A message on a channel whose open waits behind
+    // another is judged once that open settles" — this test's old `NO SPEC`
+    // marker, with the opposite expectation. The second Stoa's open is queued
+    // behind the first's, which delivery has not answered, when a message on
+    // the second channel is handed over. Red while an open counted as being
+    // opened only once the worker asked delivery: the message was refused as an
+    // unknown channel on hand-over, and never stored.
     let mut peer = Peer::new("handover-open-queued");
     let first = genesis("Agora");
     let queued = genesis("Lyceum");
     let gate = Gate::closed();
     let _ = peer.fake.script(|s| s.create_gate = Some(gate.clone()));
-    let events = peer.start_listening();
+    let (events, asked) = peer.start_counted(vec![]);
     peer.join(&first);
     eventually("the first open to reach delivery", || {
         peer.fake.creates().len() == 1
@@ -2184,13 +2271,63 @@ fn a_message_on_a_channel_whose_open_is_still_queued_is_refused_on_hand_over() {
             1,
         )))
         .unwrap();
-    eventually("the message to be refused on hand-over", || {
-        !peer.journal.with("refused (unknown-channel)").is_empty()
+    handed_over(&asked, 1);
+    assert_eq!(
+        peer.fake.creates().len(),
+        1,
+        "the queued open was asked of delivery before the message was handed over"
+    );
+
+    gate.release(); // delivery reports both channels created
+    eventually("the op to be stored once its open settles", || {
+        stored(&peer, &op.op.id()).is_some()
     });
-    assert_eq!(peer.fake.creates().len(), 1, "the queued open was asked for");
-    gate.release();
-    peer.delivering.settle();
-    assert!(stored(&peer, &op.op.id()).is_none());
+    assert!(
+        peer.journal.with("unknown-channel").is_empty(),
+        "{:?}",
+        peer.journal.lines()
+    );
+}
+
+#[test]
+fn a_restarted_peer_keeps_what_delivery_hands_over_before_startup_asks_for_its_channel() {
+    // `op-transport`, scenario "A restarted peer keeps what delivery hands over
+    // before startup asks for its channel". Delivery kept running, so the first
+    // thing it hands over is a message on this peer's Stoa — ready the moment the
+    // subscription exists — while node creation is still unanswered and the
+    // channel's open waits behind it. Red while startup marked its opens only as
+    // the worker reached them: the message was refused as an unknown channel.
+    let mut peer = Peer::new("handover-restart");
+    let g = genesis("Agora");
+    let stoa = g.address().unwrap();
+    peer.join(&g); // before startup: the membership a restart finds
+    let node = Gate::closed();
+    let _ = peer.fake.script(|s| {
+        s.node_gate = Some(node.clone());
+        s.create_replies
+            .push_back(the_already_exists_answer(&stoa));
+    });
+    let op = their_op(stoa, "handed over before the channel was asked for", 0);
+    let (_events, asked) = peer.start_counted(vec![arriving(
+        ChannelIdentity::of(&stoa).channel_id(),
+        op.to_bytes().unwrap(),
+        1,
+    )]);
+    handed_over(&asked, 1);
+    assert!(
+        peer.fake.creates().is_empty(),
+        "the channel was asked of delivery before the message was handed over"
+    );
+
+    node.release(); // node creation answered; the channel "already exists"
+    eventually("the op to be stored once its open settles", || {
+        stored(&peer, &op.op.id()).is_some()
+    });
+    assert!(
+        peer.journal.with("unknown-channel").is_empty(),
+        "{:?}",
+        peer.journal.lines()
+    );
 }
 
 #[test]
