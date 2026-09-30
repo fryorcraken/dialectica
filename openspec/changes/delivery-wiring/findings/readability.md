@@ -899,3 +899,72 @@ defects, both low, both stale references in prose; neither changes behaviour.
   figure I checked is accurate.
 - Mutation testing was by hand on the claims above, not `cargo mutants`. No mutation
   is left in the tree: each was reverted with `git checkout -- <file>`.
+
+## Re-review round 5 `58460b02..1d5e2e37`
+
+Dimension: readability only. Read at `e5268cc2`: the range's `delivery.rs` diff
+(`Wait::extend_from`'s guard and doc), the new test
+`an_ask_after_a_messages_wait_has_ended_does_not_make_it_wait_again` and its
+comment, `design.md` Decision 11 (the ask paragraph, the new "Why only a wait that
+has not ended" paragraph, the "What breaks without each part" list, the rejected
+alternatives), `tasks.md` 13. Round 4's two entries are confirmed answered as their
+outcomes say: `git grep -E "d240ebdc|de35f026"` finds nothing in `design.md`,
+`proposal.md` or the Rust tree, and `tasks.md:93` now reads "`ChannelBook::begin_wait`
+(then `wait_ends`)", the function that calls `is_opening`. One new defect, low, in prose.
+
+- [ ] **`dev-writer`** — `design.md:538` — the new mutation claim states a bound the
+      test does not have.
+      **Scenario:** the "What breaks without each part" entry reads: "the extension
+      given to a wait whose end has passed turns
+      `an_ask_after_a_messages_wait_has_ended_does_not_make_it_wait_again` red — judged
+      1.00 s after the ask at a 1 s limit, where the test allows 0.5". The test asserts
+      `judged_after < limit * 3 / 4` (`tests.rs:2989`), which is 0.75 s at a 1 s limit,
+      and its own comment says "The bound is three quarters of a limit ... 0.75 s of
+      slack". A reader reproducing the mutation and checking the design against the
+      test, or re-tuning the test from the design's number, finds 0.5 against 0.75.
+      The red reading (1.00 s) fails either bound, so nothing is hidden; the sentence
+      is wrong about the test it cites, in the one list whose job is to say what each
+      test is held by. It looks like the first draft's bound, left when the comment
+      argued for three quarters.
+      **Fix shape:** "where the test allows 0.75", or drop the second figure ("judged a
+      full limit after the ask, where the right answer is judged at once").
+      **Severity:** low.
+
+### What I checked, and found clean
+
+- **`Wait::extend_from`'s doc** says what the code does: the guard is `asked >=
+  self.ends`, so "an ask at the end itself counts as after it"; `await_settled` does
+  break on `left.is_zero()` (`delivery.rs:864-867`), so "counts no time left as ended"
+  is the same reading. The cited test exists (`tests.rs:2922`) and is cited nowhere
+  else outside `design.md` and `tasks.md`.
+- **The new `design.md` paragraph** matches the code and the spec: the `Wait` stays in
+  the book until the waiter re-takes the lock (`end_wait` runs after the loop);
+  "less than twice `SETTLE_LIMIT`" resolves to the bound at `:607-613` and
+  `SETTLE_LIMIT`'s doc, which says "under it before the ask, or its wait would have
+  expired"; the spec quotation ("MUST be judged without waiting on that open") is
+  verbatim in `spec.md:190`; the correctness re-review's round 4 entry
+  (`findings/correctness.md:561`) describes the same probe, which the test ports. The
+  rejected alternative (the waiter dropping its own `Wait`) gives a reason that holds:
+  dropping needs the lock the ask holds.
+- **The test's comment** agrees with its arithmetic: the book taken at 0.5 of a limit,
+  held 1.0 more (1.5 total, asserted `> 1.25`), past the message's end at 1.0; "three
+  quarters of a limit" and "0.75 s of slack" are the same bound as the assertion; the
+  spec phrase it quotes is verbatim. `Pending::asked` is what `Channels::asked` runs
+  under the lock (`delivery.rs:813-819`), as the comment says.
+- **`tasks.md` 13.1 and 13.2** say what the commits did (the guard, the test, the two
+  stale references) with no SHA of this branch.
+- **Not run:** no mutation or test run this round; the one new mutation claim
+  (extension given to an expired wait) is the guard removed, which the correctness
+  reviewer's probe measured red in round 4.
+
+### Not boxes (taste; say so and move on)
+
+- `Pending::asked`'s doc (`delivery.rs:630-631`) and `design.md:478` still say "every
+  message waiting" is extended, and the only exception they list is the once-only cap;
+  the expired-wait exception is on `extend_from` and in the paragraph 25 lines on.
+  Read with "waiting" meaning not yet ended, which the spec does, they are true; but
+  `Pending::waits` now holds expired waits too, so a reader of the loop in
+  `Pending::asked` alone could take it to extend them. One clause at each site would
+  close it; I did not box it.
+- Decision 11 grew again, with another paragraph of the same shape as the rounds
+  before; every figure I checked is accurate.
