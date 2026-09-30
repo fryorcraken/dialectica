@@ -220,3 +220,116 @@ at `4a85db1b`). `cargo mutants` was run on `delivery.rs` (60 mutants: 38 caught,
 - **Panics.** No `unwrap`, `expect` or indexing on a non-test path in `delivery.rs` or
   `sender.rs`. Worker, processor and listener items all run under
   `catch_unwind`.
+
+## Re-review round 1 `7a2a3335..369561d1`
+
+Dimension: **correctness only**. Read `git diff 7a2a3335 369561d1` for
+`delivery.rs`, `transport.rs`, `wire.rs` and `sender.rs`, with the adapter's
+`channel_messages` / `on_context_ready` in `dialectica/rust-lib/src/lib.rs` and
+delivery v0.2.1's `delivery_module_plugin.cpp` and `api_call_handler.h`. The code
+reviewed is at `f37c6cc4`, identical to `369561d1` outside `tasks.md`. All five
+earlier outcomes hold. Suites green: `cargo test … -p dialectica -p dialectica-core`
+(1286 + 30 + 3), the `delivery::` tests serially (`--test-threads=1`), and
+`nix build ./dialectica#lgx`.
+
+- [ ] **`tester`** — `delivery.rs:542` (`Channels::opening`, the per-channel
+      count) — the count is untested, and it now matters: two opens of one channel
+      can be pending at once.
+      **Why this supersedes round 0.** My clean-prose entry above ("at most one
+      open is ever pending … the `+= → *=` mutant … is equivalent, not a gap")
+      was true while the worker made the guard as it called delivery. Since
+      `560e39f0`/`641cae31` the guard is made when the request is made, and it
+      waits in the worker's queue. So a startup open plus a join, or two joins,
+      are pending together. `ChannelBook`'s own doc says so: "a repeated join can
+      put a second open in the queue before the first is answered".
+      **Scenario:** a peer joins Stoa S. Delivery answers the create
+      `"channel_create callback timeout"` after its 30 s, and its runtime then
+      creates the channel anyway. During those 30 s the peer joins S again, so a
+      second open is queued. Under `*entry.or_insert(0) *= 1`, the first
+      decline's `settle` finds a count of 0 and removes S from `pending` while
+      the second open is still unanswered. Messages delivery now hands over on S
+      are refused `unknown-channel` on hand-over and lost for good, until the
+      second open's "already exists" opens the channel. With the shipped `+= 1`
+      they pass hand-over and wait for the second open, as `op-transport` requires
+      ("It stays so until delivery's answer settles it").
+      **Measured:** `cargo mutants` MISSED `replace += with *= in
+      Channels::opening`. All 84 of 84 `delivery::` tests pass with it applied by
+      hand. A reviewer probe in my tree
+      (`reviewer_probe_a_second_pending_open_keeps_the_channel_opening_after_the_first_declines`)
+      makes two `opening`s for one channel, drops the first, and asserts that the
+      channel `is_known` and that a message waits and is stored once the second is
+      `held`. The probe is green on the shipped code and red under the mutation
+      ("the second open is still unanswered, so the channel is still being
+      opened").
+      **Severity:** low. The code is correct today. The gap is that nothing
+      stops a regression to a flag, which is the shape round 0 called harmless.
+
+- [ ] **`tester`** — `delivery.rs:96` (`CALL_TIMEOUT`) and `delivery.rs:531`
+      (`SETTLE_LIMIT`) — the ordering both docs rest on is pinned nowhere:
+      delivery's own 30 s < `CALL_TIMEOUT` < `SETTLE_LIMIT`.
+      **Scenario:** `CALL_TIMEOUT` set back to the IPC default of 20 s. A
+      `channelCreate` that delivery completes at 25 s is then declined here, and
+      the Stoa is shut until the next request. That is `CALL_TIMEOUT`'s own doc
+      example. Or `SETTLE_LIMIT` set below `CALL_TIMEOUT`. A message racing its
+      own join's creation, answered after the limit and before the call timeout,
+      is then refused `unknown-channel` and lost. That is the race Decision 11
+      exists to close, and `SETTLE_LIMIT`'s doc says it is "always settled within
+      it".
+      **Measured:** with `CALL_TIMEOUT = 20 s` and `SETTLE_LIMIT = 10 s` together,
+      all 1319 of 1319 tests pass (1286 + 30 + 3). `cargo mutants` cannot see a
+      `const`. The docs name both relations, and one assertion over the two
+      constants and a hardcoded 30 s would hold them.
+      **Severity:** low. Nothing is wrong at the shipped values.
+
+### Clean in this round
+
+- **"Already exists" opens the channel** (`5fb435f9`). `channel_answer` maps a
+  decline containing `channel already exists` to `AlreadyHeld`, and `Worker::open`
+  calls `held()` on it exactly as it does on `Created`. This holds after a
+  timed-out create (the next join, `a_creation_delivery_did_not_complete_in_time_…`)
+  and after a restart under a running delivery. On a restart, the startup open is
+  queued behind a `createNode` that v0.2.1 declines at once with "Context already
+  initialized". The worker still asks for the channels after that decline, and
+  each is answered "already exists". v0.2.1's `"channel_create callback timeout"`
+  wording is confirmed at `api_call_handler.h:159`.
+- **The `Opening` guard.** Every path settles it, and none settles it twice. The
+  paths:
+  - it is made in `request` only under `Wiring::Running`;
+  - a refused `send` hands the `Action` back inside `SendError`, which is dropped;
+  - a worker that exits drops its `Receiver`, which drops what is still queued;
+  - a panic in `perform` unwinds through the guard owned by `open`;
+  - the no-sender return drops it;
+  - a failed worker spawn drops `opens` with `return true`.
+
+  Settling happens at the end of `open`, before the next action, so a `Send`
+  queued after the open sees the channel open. No guard is dropped while its
+  thread holds the book lock, so there is no self-deadlock.
+- **Startup order.** `startup_opens` runs before `subscribe()`, and `Channels`
+  exists only from `start`, so a join made before startup cannot mark an open that
+  nothing will settle.
+- **`judge` / `admit`.** `receive` is unchanged in behaviour: the channel is
+  checked, then `judge`'s size, decode, verify, Stoa and window checks, then the
+  one append. `Judged`'s private field makes skipping `judge` unrepresentable.
+  The book lock is held only for map operations and for `handoff`'s encode. It is
+  never held across a decode, a verify, an op-log open or an append.
+- **Hand-over.** Unknown channel first, then `refuse_oversized`, the same
+  predicate `judge` uses. A check-then-offer race only moves a message to the
+  processor's own unknown-channel refusal, which the spec permits.
+- **The settle-limit wait and its clock.** It uses a monotonic `Instant` taken per
+  message, and `checked_sub` ends it at the limit, so wake-ups caused by other
+  opens do not extend it. A poisoned wake-up recovers the guard. The loop's
+  condition is exactly "pending and not open", and the processor's clock is read
+  after the wait.
+- **`Wiring`.** `NoWorker` is set before any step can fail, so a second `start`
+  is refused in every state but `NotStarted`.
+- **Per-event containment.** Each `next()` and its hand-over is its own
+  `catch_unwind`. The adapter's iterator is `subscription.map(decode)`, so a
+  panicking decode has already consumed its event and the loop moves on.
+- `Stderr::record` → `()` is MISSED by `cargo mutants`. It is the adapter's log
+  sink, and no in-crate test can read stderr, so I opened no box for it.
+- **`cargo mutants` coverage was partial.** The run on `delivery.rs` (73 mutants,
+  `delivery::` tests, 120 s timeout) was stopped after 32: 18 caught, 10
+  unviable, 2 timeouts (the two `Stores::memberships` endless-loop mutants, which
+  are expected) and 2 missed (the two above). Several mutants were each hitting
+  the timeout, so the run went well past the time the role allows. The 41
+  unreached mutants, from `Channels::settle` onwards, are not reported on here.
