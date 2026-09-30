@@ -954,7 +954,7 @@ restart half has an observable case that no test pins, which is the box below.
 is waiting. The spec says it MUST start again "whether or not a message is
 waiting". **Survived:** 113 passed, 0 failed, in the delivery filter above.
 
-- [ ] **`tester`** — nothing pins that an ask restarts the open's time while a
+- [x] **`tester`** — nothing pins that an ask restarts the open's time while a
       message is waiting on it. **Where:** `op-transport`, "Asking delivery to
       create a channel starts the open's time again" ("whether or not a message is
       waiting on the open and whether or not its time had already ended"), and the
@@ -981,6 +981,21 @@ waiting". **Survived:** 113 passed, 0 failed, in the delivery filter above.
       low-medium; it is a stated MUST with a consequence sentence in the spec, and
       the spec-writer needs to act only if the owner would rather drop that
       sentence, which I do not recommend.
+      **Outcome (`tester`): fixed.** `a_second_ask_restarts_the_open_time_for_the_messages_taken_after_the_one_waiting`,
+      timed as the box says with a limit of 1 s: A waits, B is queued behind it;
+      ask 1 at 0.3 limit into A's wait; ask 2 at 0.6 limit after ask 1; delivery
+      answers at 1.3 limits after ask 1. Its WHEN is asserted, not assumed: A is not
+      refused at ask 2, A is refused before the answer, and the answer is inside the
+      time ask 2 gave (a stall reads as one of those, not as a wrong answer). B
+      must be stored. **Mutations, each restored (`git diff --stat` on
+      `delivery.rs` empty afterwards):** (1) the box's, `Pending::asked` restarts the
+      time only when `waits.is_empty()`: red, B refused as an unknown channel
+      (both journal lines `refused (unknown-channel)`); (2) a variant the box does
+      not name, restart only while every wait still holds its extension, so ask 1
+      restarts and ask 2 does not: red, same refusal. Both as predicted. The
+      precondition that A is refused before the answer is `>= 1` and not `== 1`:
+      under the mutation B is refused at once after A, and an exact count reported
+      the defect as a stalled test on the first run (seen, and changed).
 
 **Observation, no box.** `a_second_ask_while_a_message_waits_does_not_extend_its_wait_again`
 asserts refusal within 1.4 limits of the first ask where the scenario says no

@@ -616,7 +616,7 @@ green (1305 + 30 + 3).
       with the rejected alternative (the waiter dropping its own `Wait` at its
       end, which needs the lock the ask holds) and the test in its "what breaks
       without each part" list; tasks 13.1.
-- [ ] **`tester`** — `delivery.rs:667` `ChannelBook::end_wait` — nothing pins
+- [x] **`tester`** — `delivery.rs:667` `ChannelBook::end_wait` — nothing pins
       that a decided message's `Wait` leaves the book
       **Measured:** `cargo mutants --file dialectica-core/src/delivery.rs` scoped to
       this range's functions found 18 mutants: 11 caught, 6 unviable, and **1 missed**.
@@ -635,6 +635,20 @@ green (1305 + 30 + 3).
       waited its time out and after the open settled held with another request still
       pending, and then asserts the open's `waits` is empty. `a_message_waits_on`
       already reads that map.
+      **Outcome (`tester`): fixed**, three tests, one per exit the box names
+      (read through `waits_in_the_book`, which answers `Some(n)` while the open is
+      pending, so a pending entry that went away cannot read as "nothing left"):
+      `a_message_that_waited_its_opens_time_out_leaves_no_wait_in_the_book`;
+      `messages_judged_at_once_after_an_opens_time_has_ended_leave_no_wait_in_the_book`
+      (read as a difference against the count before, so the first test's message
+      is not charged to it); and
+      `a_message_whose_open_settles_held_leaves_no_wait_while_another_request_is_pending`
+      (two requests, the first answered held while a message waits; the message is
+      stored, so the wait ended on the answer and not on a time). **Mutation:**
+      `ChannelBook::end_wait` body replaced by `()`, restored. All three red as
+      predicted: `Some(1)` against `Some(0)` for the wait-out and the settle, and
+      `Some(4)` against `Some(1)` for the three judged at once. Also answers the
+      `security.md` round-4 box on the same function.
 
 ### Clean in this round
 

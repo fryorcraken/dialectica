@@ -646,7 +646,7 @@ most `SETTLE_LIMIT` after, and in practice until the call settles within
 test gaps: the code is right today, and the suite would let each property
 regress unnoticed.
 
-- [ ] **`tester`** — `delivery.rs:577` (`OpenTime::end`, the `StartedAt` arm) —
+- [x] **`tester`** — `delivery.rs:577` (`OpenTime::end`, the `StartedAt` arm) —
       no test pins that, after an ask, the open's time is counted **from the
       ask** rather than from the first message to wait after it. That is the
       spec's "the open's time MUST start again at that ask" and "judged no later
@@ -670,8 +670,22 @@ regress unnoticed.
       **Severity:** low. The code is correct; this guards the security bound
       against a one-token regression. No spec scenario names the case, so the
       test pins the requirement text quoted above.
+      **Outcome (`tester`): fixed, at the book and not through a decision.**
+      `an_ask_starts_the_opens_time_from_the_ask_not_from_the_next_message`: ask,
+      pause 0.5 s, begin a wait directly under the book lock, and read the end it
+      is given. Right is `ask + limit`: asserted no earlier than `asked + limit`
+      (`asked` taken before the ask, so this is exact) and no later than
+      0.25 s past it. The probe's decision-level timing (refused under 1.3 limits)
+      was not kept: read from the book, a stall of this thread during the pause can
+      only make the wrong answer later, so the right answer cannot flake except on
+      a 0.25 s stall between two adjacent statements. **Mutation:**
+      `OpenTime::StartedAt(asked) => asked + limit` replaced by
+      `StartedAt(_) => Instant::now() + limit` (the box's shape), restored. Red, and
+      the only red of the whole `delivery::tests` run: "ended 500.06495ms past a limit
+      after the ask: it was counted from the message that began waiting, not from
+      the ask". Predicted at least 0.5 s past; observed 0.5006 s.
 
-- [ ] **`tester`** — `delivery.rs:667` (`ChannelBook::end_wait`) / `:861` — no
+- [x] **`tester`** — `delivery.rs:667` (`ChannelBook::end_wait`) / `:861` — no
       test pins that a message's `Wait` leaves the book when its wait ends.
       `begin_wait` registers a `Wait` for **every** message on a channel being
       opened, including one whose open's time has already ended. `end_wait` is
@@ -693,6 +707,13 @@ regress unnoticed.
       `end_wait`: the loop has no `return` and no operation in it can panic. So
       this is regression cover for a sender-driven memory bound, not a live
       leak.
+      **Outcome (`tester`): fixed**, by the same three tests as the correctness
+      round-4 box on `end_wait` (see `findings/correctness.md`), which cover the
+      probe's exit (messages judged at once after the time has ended) and the two
+      others. The probe's 1000 messages became three: the count is linear in the
+      messages, so three show the growth as well as a thousand do, at a fraction
+      of the cost. **Mutation:** `end_wait` emptied, restored; the judged-at-once
+      test reads `Some(4)` against `Some(1)`.
 
 ## Round 4 clean areas
 
