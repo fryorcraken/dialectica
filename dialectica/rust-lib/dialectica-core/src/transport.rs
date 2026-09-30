@@ -507,7 +507,32 @@ pub fn receive<L: OpLog>(
     let channel_stoa = *channels
         .stoa_of(message.channel_id)
         .ok_or(InboundRefusal::UnknownChannel)?;
+    let judged = judge(message, channel_stoa, now_ms)?;
+    admit(judged, log)
+}
 
+/// An op that passed every check [`receive`] makes before it writes.
+///
+/// Its field is private and [`judge`] is the only constructor, so [`admit`]
+/// cannot be handed an op that skipped a check: "every check runs before anything
+/// is written" holds by the type, for a caller that runs the two halves apart.
+#[derive(Debug)]
+pub struct Judged(SignedOp);
+
+/// Checks 2–6 of [`receive`], for a message on the channel of `channel_stoa`.
+///
+/// # Why the halves are separate
+///
+/// The delivery wiring looks the channel up, judges, and only then opens the op
+/// log to [`admit`]: a payload refused on its bytes costs no database open, and
+/// the lock guarding the set of open channels is not held while a signature is
+/// verified or a row appended. [`receive`] is the two halves in the spec's order,
+/// and is what every other caller uses.
+pub fn judge(
+    message: InboundMessage<'_>,
+    channel_stoa: Address,
+    now_ms: u64,
+) -> Result<Judged, InboundRefusal> {
     // BEFORE the decode. The spec requires it, and the reason is that this is the
     // one bound whose input size an attacker chooses freely.
     if message.payload.len() > MAX_MESSAGE_BYTES {
@@ -543,7 +568,13 @@ pub fn receive<L: OpLog>(
             return Err(InboundRefusal::AheadOfTime { counter, now_ms });
         }
     }
+    Ok(Judged(signed))
+}
 
+/// Append an op [`judge`] passed: the one write [`receive`] makes, and its last
+/// statement.
+pub fn admit<L: OpLog>(judged: Judged, log: &mut L) -> Result<Admitted, InboundRefusal> {
+    let Judged(signed) = judged;
     let id = signed.op.id();
     // `Arrival::unordered()` and not `from_parts(None, None)`: the named
     // constructor is a statement that the transport supplied nothing, and

@@ -42,6 +42,7 @@ use crate::sender::{sender_path_in, SenderError, SenderStore};
 use crate::transport::{
     self, ChannelIdentity, InboundMessage, InboundRefusal, OpenChannels, PublishError,
 };
+use crate::wire::panic_detail;
 use std::collections::{HashMap, VecDeque};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
@@ -324,15 +325,6 @@ fn refusal_kind(refusal: &InboundRefusal) -> &'static str {
         InboundRefusal::AheadOfTime { .. } => "ahead-of-time",
         InboundRefusal::Storage(_) => "storage",
     }
-}
-
-/// A panic payload's message, for a log line.
-fn panic_detail(payload: &(dyn std::any::Any + Send)) -> String {
-    payload
-        .downcast_ref::<&str>()
-        .map(|s| (*s).to_string())
-        .or_else(|| payload.downcast_ref::<String>().cloned())
-        .unwrap_or_else(|| "non-string panic payload".to_string())
 }
 
 /// A mutex's guard, poisoned or not.

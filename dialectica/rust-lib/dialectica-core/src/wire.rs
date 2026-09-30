@@ -63,18 +63,11 @@ pub fn error_json(message: &str) -> String {
 pub fn guarded<F: FnOnce() -> String>(method: &str, f: F) -> String {
     match catch_unwind(AssertUnwindSafe(f)) {
         Ok(v) => v,
-        Err(payload) => {
-            // `panic!("literal")` yields a `&str` payload; `panic!("{}", x)`
-            // yields a `String`. Handling only one silently loses the message
-            // for every panic of the other kind — which is most of the
-            // interesting ones.
-            let detail = payload
-                .downcast_ref::<&str>()
-                .map(|s| (*s).to_string())
-                .or_else(|| payload.downcast_ref::<String>().cloned())
-                .unwrap_or_else(|| "non-string panic payload".to_string());
-            error_json(&format!("panic in {}: {}", method, detail))
-        }
+        Err(payload) => error_json(&format!(
+            "panic in {}: {}",
+            method,
+            panic_detail(&*payload)
+        )),
     }
 }
 
@@ -2624,11 +2617,16 @@ fn recorded_and_replied(
     stoa_reply(&membership.stoa, &membership.genesis)
 }
 
-/// A panic payload's message, for a log line.
+/// A panic payload's message, for a reply or a log line.
 ///
-/// Shared by the two sinks that contain a panic rather than let it reach the
-/// reply, so the two cannot come to render the same payload differently.
-fn panic_detail(payload: &(dyn std::any::Any + Send)) -> String {
+/// The one rendering of a panic payload in the crate: [`guarded`], the two sinks
+/// that contain a panic rather than let it reach the reply, and the delivery
+/// threads all call it, so none can come to render the same payload differently.
+///
+/// `panic!("literal")` yields a `&str` payload; `panic!("{}", x)` yields a
+/// `String`. Handling only one silently loses the message for every panic of the
+/// other kind — which is most of the interesting ones.
+pub(crate) fn panic_detail(payload: &(dyn std::any::Any + Send)) -> String {
     payload
         .downcast_ref::<&str>()
         .map(|s| (*s).to_string())
