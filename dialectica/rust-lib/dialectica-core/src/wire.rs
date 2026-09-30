@@ -63,11 +63,7 @@ pub fn error_json(message: &str) -> String {
 pub fn guarded<F: FnOnce() -> String>(method: &str, f: F) -> String {
     match catch_unwind(AssertUnwindSafe(f)) {
         Ok(v) => v,
-        Err(payload) => error_json(&format!(
-            "panic in {}: {}",
-            method,
-            panic_detail(&*payload)
-        )),
+        Err(payload) => error_json(&format!("panic in {}: {}", method, panic_detail(&*payload))),
     }
 }
 

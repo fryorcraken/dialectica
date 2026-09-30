@@ -1524,7 +1524,10 @@ fn the_channel_book_is_not_held_while_an_op_is_appended() {
     let free = channels.book.try_lock().is_ok();
     blocker.execute_batch("ROLLBACK").unwrap();
 
-    assert!(free, "the channel book was held while the op waited to be appended");
+    assert!(
+        free,
+        "the channel book was held while the op waited to be appended"
+    );
     eventually("the op to be stored once the database is free", || {
         stored(&peer, &op.op.id()).is_some()
     });

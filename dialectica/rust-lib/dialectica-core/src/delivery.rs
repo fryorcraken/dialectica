@@ -1132,9 +1132,7 @@ impl Delivering {
         // channels and the sends are still requested — because a peer that
         // cannot receive can still publish.
         match subscribe() {
-            Ok(events) => {
-                self.spawn_listener(events, Arc::clone(&channels), Arc::clone(&queue))
-            }
+            Ok(events) => self.spawn_listener(events, Arc::clone(&channels), Arc::clone(&queue)),
             Err(why) => record(&*self.journal, Note::NotSubscribed(&why)),
         }
         self.spawn(
