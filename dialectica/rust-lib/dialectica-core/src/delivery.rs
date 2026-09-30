@@ -23,8 +23,9 @@
 //!   their publishes were answered" and "a send after an open is made after that
 //!   open is answered" true by construction rather than by coordination.
 //! - **The listener** takes `channelMessageReceived` events, refuses one on a
-//!   channel this peer is neither holding nor opening, and offers the rest to the
-//!   bounded [`InboundQueue`] without waiting on the boundary.
+//!   channel this peer is neither holding nor opening, or one over the message
+//!   limit, and offers the rest to the bounded [`InboundQueue`] without waiting
+//!   on the boundary.
 //! - **The processor** takes them off in arrival order and puts each through the
 //!   inbound boundary ([`crate::transport::judge`], then
 //!   [`crate::transport::admit`]).
@@ -801,13 +802,11 @@ struct Outbox {
 /// `op-transport` requires a fixed count, and leaves the number to design.
 /// 256, from two bounds pulling against each other:
 ///
-/// - **Memory.** This queue bounds a count, not bytes: a payload is held at
-///   whatever size delivery handed over, and the boundary's 150 KiB refusal comes
-///   after it has waited. So the worst case is 256 × delivery's maximum message
-///   size. On the `logos.test` preset this application asks for, that maximum is
-///   150 KiB — 256 × 150 KiB ≈ 37.5 MiB in a module process sharing its host;
-///   #30's 1024 was ≈ 150 MiB. On a node another module created with a larger
-///   maximum, it is larger in proportion. design.md's Risks carries the gap.
+/// - **Memory.** This queue bounds a count, and a payload over the 150 KiB
+///   message limit is refused on hand-over ([`refused_on_hand_over`]) rather than
+///   held, so the payload bytes waiting are at most 256 × 150 KiB = 38,400 KiB
+///   = 37.5 MiB in a module process sharing its host, whatever the largest
+///   message the node carries. #30's 1024 would be 150 MiB by the same sum.
 /// - **Loss.** A discard here is final for this peer: by the time
 ///   `channelMessageReceived` fires, SDS has treated the message as delivered and
 ///   will not repair it. #30's justification for discarding freely ("a dropped op
@@ -972,8 +971,26 @@ where
     }
 }
 
-/// Offer one message to the queue — unless its channel is neither open nor
-/// being opened, when it is refused here and takes no place.
+/// Offer one message to the queue — unless [`refused_on_hand_over`] refuses it
+/// here, when it takes no place and is logged as the boundary logs that refusal.
+fn hand_over(message: Arriving, channels: &Channels, queue: &InboundQueue, journal: &dyn Journal) {
+    if let Some(refusal) = refused_on_hand_over(&message, channels) {
+        return record(journal, Note::Refused(refusal_kind(&refusal), None));
+    }
+    if let Offered::Discarded(total) = queue.offer(message) {
+        record(
+            journal,
+            Note::Discarded {
+                total,
+                bound: queue.bound,
+            },
+        );
+    }
+}
+
+/// The refusal a message meets before it may wait for the boundary, if any: a
+/// channel neither open nor being opened, whatever the payload's size; then a
+/// payload over the message limit.
 ///
 /// # Why an unknown channel is refused before the queue
 ///
@@ -989,20 +1006,27 @@ where
 /// The check takes the channel book's lock, which is never held while a
 /// payload is decided ([`Channels::stoa_of`]), so taking a message from delivery
 /// still does not wait on the boundary.
-fn hand_over(message: Arriving, channels: &Channels, queue: &InboundQueue, journal: &dyn Journal) {
+///
+/// # Why an oversized payload is refused before the queue
+///
+/// `op-transport`: a payload over the message limit, on a channel open or being
+/// opened, "MUST NOT take a place among the waiting payloads" either. The queue
+/// bounds a count, so without this its memory was the bound times the largest
+/// message the *node* carries — and the node may be one another module created.
+/// Refused here, what waits is bounded by [`INBOUND_BOUND`] ×
+/// [`crate::transport::MAX_MESSAGE_BYTES`], this application's own limit. The
+/// predicate is [`crate::transport::refuse_oversized`], the one the boundary
+/// asks, so the two cannot disagree about a payload of exactly the limit.
+/// `an_oversized_payload_on_an_open_channel_takes_no_place_in_the_queue` is red
+/// without it; `a_payload_at_the_limit_waits_its_turn` pins where it falls.
+///
+/// The unknown channel is asked first, so a message on a channel neither open
+/// nor being opened is refused as that whatever its size.
+fn refused_on_hand_over(message: &Arriving, channels: &Channels) -> Option<InboundRefusal> {
     if !channels.is_known(&message.channel_id) {
-        let refusal = refusal_kind(&InboundRefusal::UnknownChannel);
-        return record(journal, Note::Refused(refusal, None));
+        return Some(InboundRefusal::UnknownChannel);
     }
-    if let Offered::Discarded(total) = queue.offer(message) {
-        record(
-            journal,
-            Note::Discarded {
-                total,
-                bound: queue.bound,
-            },
-        );
-    }
+    transport::refuse_oversized(&message.payload).err()
 }
 
 struct Processor {

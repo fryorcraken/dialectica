@@ -2186,6 +2186,145 @@ fn traffic_on_a_channel_this_peer_is_not_opening_takes_no_place_in_the_queue() {
     );
 }
 
+/// A peer with one Stoa's channel open and the boundary held up: a message on a
+/// second Stoa's channel waits on that channel's open, which delivery does not
+/// answer until the returned gate is released. Returns the open Stoa.
+fn hold_the_boundary_up(
+    peer: &mut Peer,
+    events: &mpsc::Sender<Option<Arriving>>,
+) -> (Address, Arc<Gate>) {
+    let open = genesis("Agora");
+    let opening = genesis("Lyceum");
+    peer.join(&open);
+    peer.delivering.settle();
+    let gate = Gate::closed();
+    let _ = peer.fake.script(|s| s.create_gate = Some(gate.clone()));
+    peer.join(&opening);
+    eventually("the second open to reach delivery", || {
+        peer.fake.creates().len() == 2
+    });
+    let held_up = their_op(opening.address().unwrap(), "holds the boundary up", 0);
+    events
+        .send(Some(arriving(
+            ChannelIdentity::of(&opening.address().unwrap()).channel_id(),
+            held_up.to_bytes().unwrap(),
+            1,
+        )))
+        .unwrap();
+    (open.address().unwrap(), gate)
+}
+
+#[test]
+fn an_oversized_payload_on_an_open_channel_takes_no_place_in_the_queue() {
+    // `op-transport`, scenario "An oversized payload on an open channel takes no
+    // place in the queue". More payloads than the bound, each one byte over the
+    // message limit, arrive on an open channel while the boundary is held up.
+    // Red while a payload waited whatever its size: nothing was refused until the
+    // boundary was released, and the queue filled and discarded.
+    let mut peer = Peer::new("handover-oversized");
+    let events = peer.start_listening();
+    let (open, gate) = hold_the_boundary_up(&mut peer, &events);
+    let channel = ChannelIdentity::of(&open);
+
+    let oversized = INBOUND_BOUND + 5;
+    for n in 0..oversized {
+        events
+            .send(Some(arriving(
+                channel.channel_id(),
+                vec![n as u8; crate::transport::MAX_MESSAGE_BYTES + 1],
+                1,
+            )))
+            .unwrap();
+    }
+    eventually("every oversized payload to be refused on hand-over", || {
+        peer.journal.with("refused (too-long)").len() == oversized
+    });
+    assert_eq!(
+        peer.fake.answered_creates(),
+        1,
+        "the refusals waited on the boundary"
+    );
+
+    let valid = their_op(open, "arrives behind the oversized ones", 0);
+    events
+        .send(Some(arriving(
+            channel.channel_id(),
+            valid.to_bytes().unwrap(),
+            1,
+        )))
+        .unwrap();
+    gate.release();
+    eventually("the valid op to be stored", || {
+        stored(&peer, &valid.op.id()).is_some()
+    });
+    assert!(
+        peer.journal.with("discarded").is_empty(),
+        "{:?}",
+        peer.journal.with("discarded")
+    );
+}
+
+#[test]
+fn an_oversized_payload_on_an_unknown_channel_is_refused_as_an_unknown_channel() {
+    // `op-transport`: a message on a channel neither open nor being opened is
+    // refused as an unknown channel "whatever its size". Red with the size asked
+    // before the channel in `refused_on_hand_over`.
+    let stoa = genesis("Agora").address().unwrap();
+    let oversized = vec![0; crate::transport::MAX_MESSAGE_BYTES + 1];
+    assert_eq!(
+        refused_on_hand_over(
+            &arriving("/another-application/channel", oversized.clone(), 1),
+            &open_for(&stoa),
+        ),
+        Some(InboundRefusal::UnknownChannel)
+    );
+    // And on the open channel, the same payload is refused for its size.
+    assert!(matches!(
+        refused_on_hand_over(
+            &arriving(ChannelIdentity::of(&stoa).channel_id(), oversized, 1),
+            &open_for(&stoa),
+        ),
+        Some(InboundRefusal::TooLong { .. })
+    ));
+}
+
+#[test]
+fn a_payload_at_the_limit_waits_its_turn() {
+    // `op-transport`, scenario "A payload at the limit waits its turn". A payload
+    // of exactly the message limit is not refused on hand-over — it waits — and
+    // the boundary, once released, does not refuse it for its size either. It is
+    // zeros, so the boundary refuses it as undecodable: a decision, reached.
+    // Passed before the hand-over refusal existed; it is the pin on where the
+    // limit falls, red with `>=` in `transport::refuse_oversized`.
+    let mut peer = Peer::new("handover-at-limit");
+    let (events, asked) = peer.start_counted(vec![]);
+    let (open, gate) = hold_the_boundary_up(&mut peer, &events);
+
+    events
+        .send(Some(arriving(
+            ChannelIdentity::of(&open).channel_id(),
+            vec![0; crate::transport::MAX_MESSAGE_BYTES],
+            1,
+        )))
+        .unwrap();
+    handed_over(&asked, 2);
+    assert!(
+        peer.journal.with("refused").is_empty(),
+        "refused before the boundary was released: {:?}",
+        peer.journal.lines()
+    );
+
+    gate.release();
+    eventually("the payload at the limit to be decided", || {
+        !peer.journal.with("refused (undecodable)").is_empty()
+    });
+    assert!(
+        peer.journal.with("too-long").is_empty(),
+        "{:?}",
+        peer.journal.lines()
+    );
+}
+
 /// An event stream that counts how often the listener has asked it for an event.
 ///
 /// The listener hands one event over — queues or refuses it — before it asks for
@@ -2230,7 +2369,9 @@ impl Peer {
             asked: Arc::clone(&asked),
         };
         self.delivering
-            .start(self.fake.clone(), self.dir.stores(), now, move || Ok(counted));
+            .start(self.fake.clone(), self.dir.stores(), now, move || {
+                Ok(counted)
+            });
         (events, asked)
     }
 }
@@ -2304,8 +2445,7 @@ fn a_restarted_peer_keeps_what_delivery_hands_over_before_startup_asks_for_its_c
     let node = Gate::closed();
     let _ = peer.fake.script(|s| {
         s.node_gate = Some(node.clone());
-        s.create_replies
-            .push_back(the_already_exists_answer(&stoa));
+        s.create_replies.push_back(the_already_exists_answer(&stoa));
     });
     let op = their_op(stoa, "handed over before the channel was asked for", 0);
     let (_events, asked) = peer.start_counted(vec![arriving(
