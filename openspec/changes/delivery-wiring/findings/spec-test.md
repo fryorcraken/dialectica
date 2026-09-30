@@ -782,6 +782,16 @@ read from its own output (106 passed, 0 failed, in each run).
       **Severity:** medium for (a), which is the spec's new MUST and a one-token
       change; low-medium for (b), which the compile-time order does not cover and
       only `nix build ./dialectica#lgx` compiles.
+      **Part (a)'s code change (`dev-writer`), box left open for the `tester`:**
+      in the commit `Build the processor in one place`, no behaviour change.
+      `Processor::new` is the only place a `Processor` is built, with
+      `settle_limit: SETTLE_LIMIT`; `Delivering::start`, `Peer::processor` and
+      the fixture in `a_message_the_op_log_cannot_take_is_logged_and_not_retried`
+      all call it, and a test wanting a short limit sets `settle_limit` on what it
+      returns. `git grep -n -F "settle_limit: "` finds that one line. So a test
+      that reads `peer.processor(..).settle_limit` now reads the limit the running
+      module waits by, and your mutation 2 would move it. That test, and part
+      (b), are still the `tester`'s.
 
 **Observation, no box.** The scenario "Each unanswered open's wait is its own"
 says the second refusal comes "no sooner than the fixed time after the first";

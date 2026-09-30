@@ -1165,6 +1165,31 @@ struct Processor {
 }
 
 impl Processor {
+    /// The processor the running wiring runs, waiting on a pending open for
+    /// [`SETTLE_LIMIT`].
+    ///
+    /// **The one place a processor is built**, [`Delivering::start`] and the
+    /// tests' fixtures alike, so the limit a test reads here is the one the
+    /// running module waits by. Built separately, a wrong limit in `start` passed
+    /// every test (spec-test re-review round 3). A test of what happens when the
+    /// wait runs out shortens [`Processor::settle_limit`] on what this returns.
+    fn new(
+        queue: Arc<InboundQueue>,
+        channels: Arc<Channels>,
+        stores: Stores,
+        journal: Arc<dyn Journal>,
+        clock: fn() -> u64,
+    ) -> Self {
+        Processor {
+            queue,
+            channels,
+            stores,
+            journal,
+            clock,
+            settle_limit: SETTLE_LIMIT,
+        }
+    }
+
     fn run(self) {
         while let Some(message) = self.queue.take() {
             if let Err(payload) = catch_unwind(AssertUnwindSafe(|| self.decide(&message))) {
@@ -1345,14 +1370,13 @@ impl Delivering {
         }
         self.spawn(
             "dialectica inbound processor",
-            Processor {
+            Processor::new(
                 queue,
-                channels: Arc::clone(&channels),
-                stores: stores.clone(),
-                journal: Arc::clone(&self.journal),
+                Arc::clone(&channels),
+                stores.clone(),
+                Arc::clone(&self.journal),
                 clock,
-                settle_limit: SETTLE_LIMIT,
-            },
+            ),
             Processor::run,
         );
 

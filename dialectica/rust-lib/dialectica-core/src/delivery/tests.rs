@@ -390,14 +390,13 @@ impl Peer {
     }
 
     fn processor(&self, channels: Arc<Channels>) -> Processor {
-        Processor {
-            queue: Arc::new(InboundQueue::with_bound(INBOUND_BOUND)),
+        Processor::new(
+            Arc::new(InboundQueue::with_bound(INBOUND_BOUND)),
             channels,
-            stores: self.dir.stores(),
-            journal: self.journal.clone(),
-            clock: now,
-            settle_limit: SETTLE_LIMIT,
-        }
+            self.dir.stores(),
+            self.journal.clone(),
+            now,
+        )
     }
 }
 
@@ -2842,13 +2841,14 @@ fn a_message_the_op_log_cannot_take_is_logged_and_not_retried() {
     let stoa = genesis("Agora").address().unwrap();
     let channels = open_for(&stoa);
     let queue = Arc::new(InboundQueue::with_bound(INBOUND_BOUND));
-    let processor = || Processor {
-        queue: Arc::clone(&queue),
-        channels: Arc::clone(&channels),
-        stores: peer.dir.stores(),
-        journal: peer.journal.clone(),
-        clock: now,
-        settle_limit: SETTLE_LIMIT,
+    let processor = || {
+        Processor::new(
+            Arc::clone(&queue),
+            Arc::clone(&channels),
+            peer.dir.stores(),
+            peer.journal.clone(),
+            now,
+        )
     };
     let channel = ChannelIdentity::of(&stoa);
     let log_file = crate::log::op_log_path_in(&peer.dir.0);
