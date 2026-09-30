@@ -352,3 +352,125 @@ passed (1256 + 30 + 3, 0 failed).
   manager to file, which matches the wording. That is the runner's to route, not
   a box here. `tasks.md` 7.3 (the manual two-profile check) is still unticked,
   and no test here can stand in for it.
+
+## Re-review round 1 `7a2a3335..369561d1`
+
+Reviewed at `f37c6cc4` (the range's spec and test files only, plus the two
+mutated lines). Read: the two spec deltas and `proposal.md`'s diff, the whole
+`delivery/tests.rs` diff, the `mod tests` of `sender.rs`, the `wire.rs` test
+added for the already-held publish, `git diff` of `transport.rs` for the
+`refuse_oversized` predicate the tests name, issue #176 fresh (body and the
+owner's 2026-09-29 comment, state OPEN). `log/sqlite.rs` has no change in this
+range. Baseline: `cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p dialectica -p dialectica-core`
+exited 0.
+
+**Confirmed fixed, each by reading the named test against the spec:** the
+adapter-sink text pin and the argument-order pin; the inbound bound on the queue
+`start` builds; the discard, hand-over and refusal-table echo checks (sender,
+payload in three spellings); the already-held publish on all three handlers;
+the three shapes of "no" at node creation, channel creation and send; the
+subscription consequence's wording; the bounded wait (with the wait that a
+wake-up must not restart); and the sender-identifier scenario rewritten as a
+reading of the minting code. The test the spec-writer's rewrite orphaned
+(`the_sender_identifier_is_not_the_authors_key`) is deleted, and its sibling in
+`sender.rs` is split into a literal format pin and `nothing_a_sender_identifier_is_made_from_is_a_key`.
+
+**Mutations run (two; both restored, `git status --short` empty afterwards):**
+
+1. `Delivering::start`, the startup marking `let opens = self.startup_opens(..)`
+   moved to after the subscription. The spec's "startup MUST count every channel
+   as being opened before it checks any message" is a race, and the test says it
+   is not deterministic. Ran
+   `cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p dialectica-core a_restarted_peer_keeps_what_delivery_hands_over`
+   twice: **red both times**, round 0, "inbound message refused
+   (unknown-channel); nothing was stored". Killed.
+2. `startup_opens`, `.iter()` followed by `.take(1)` (only the first recorded
+   Stoa counted as being opened). Ran
+   `cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p dialectica-core delivery::tests`:
+   **5 red** (`a_restarted_peer_keeps_what_delivery_hands_over_…`,
+   `a_restarted_peer_requests_every_stoas_channel_and_no_other`,
+   `a_peer_in_more_stoas_than_a_page_requests_every_channel_at_startup`,
+   `node_creation_precedes_every_channel_operation`,
+   `a_declined_node_creation_does_not_stop_the_module`). Killed, but this
+   mutation also stops the requests, so it does not isolate the marking from the
+   asking; the first mutation is the one that does.
+
+**Every new or changed scenario maps to a test that fails for the reason it
+names.** By scenario: "already exists" opens (`a_channel_delivery_reports_already_existing_is_open`,
+which also asserts the send goes to that channel); timeout then "already exists"
+(`a_creation_delivery_did_not_complete_in_time_…`); restart keeps channels
+(`a_module_restarted_while_delivery_kept_running_…`, and the gated
+`a_restarted_peer_keeps_what_delivery_hands_over_…`); open waiting behind another
+(`a_message_on_a_channel_whose_open_waits_behind_another_…`, which proves the
+message was handed over before the queued open reached delivery by counting the
+listener's reads, not by a clock); bounded wait; panic reading one message;
+traffic on an unopened channel, an oversized payload on an open channel and a
+payload at the limit (all three hold the boundary up on an unanswered open and
+assert the refusals land while it is still held, via `answered_creates() == 1`).
+No `NO SPEC:` marker appears in the range's tests.
+
+- [ ] **`spec-writer`** (then `tester`) — a requirement clause with no scenario, whose
+      tests pin an internal rather than what the clause says.
+      **Where:** `op-transport`, "Every payload the reliable channel delivers passes
+      the inbound boundary", the two sentences "or given up by this peer without
+      delivery being asked" and "an open this peer never goes on to ask delivery for
+      is given up". No scenario names either. The two tests that cover it,
+      `a_sender_identifier_that_cannot_be_retained_opens_no_channel` and
+      `a_join_the_worker_cannot_take_is_given_up_and_not_left_opening`, assert
+      `channels.is_known(..)` is false, a read of the wiring's own book. What the
+      spec's clause is for is observable: a message on that channel is refused
+      promptly, not after `SETTLE_LIMIT` (the tests' own comments say so, "every
+      message on the channel would wait out `SETTLE_LIMIT`"). A change that kept
+      the channel counted while making `is_known` answer false, or the reverse,
+      would pass or fail on the internal and not on the behaviour.
+      **Failure scenario:** a give-up path added later (a third reason the worker
+      does not ask delivery) that forgets to settle: no scenario tells its author
+      the obligation exists, and `is_known` is only checked on the two paths that
+      exist today.
+      **Fix shape:** a scenario (WHEN an open is requested and this peer then
+      never asks delivery for it, AND a message arrives on that channel, THEN it
+      is refused as arriving on an unknown channel without the wait bound
+      elapsing), and a test through `decide` with the injectable limit set long,
+      asserting the refusal arrives inside a short time.
+      **Not measured**, read only. **Severity:** low.
+
+- [ ] **`spec-writer`** — the rule that recognises "already exists" is unspecified,
+      and its negative side has one test row.
+      **Where:** `stoa-membership`, "Creating or joining a Stoa opens its reliable
+      channel": "delivery answers that the channel already exists" MUST open the
+      channel; "delivery answers the creation with its error shape for any other
+      reason" does not. The spec does not say what makes an answer that one:
+      delivery's wording is free text (`ChannelCreate failed: channel already
+      exists: <id>`), and the tests build that exact string, including this
+      channel's id. The only negative row in
+      `only_delivery_s_already_exists_answer_opens_a_declined_channel` is
+      `channel_create callback timeout`. No test says whether an answer that says
+      "already exists" of a different subject or a different channel (or the
+      `Context already initialized` wording `CLAUDE.md` records for node creation)
+      opens this Stoa's channel, and the spec, which is the only place that can say,
+      is silent.
+      **Failure scenario:** a match on the substring `already exists` opens a channel
+      on delivery's answer about something else; a match that also required the
+      channel id would decline a genuine answer if delivery reworded. Both pass
+      every test here.
+      **Fix shape:** state the recognised form in the requirement (delivery's
+      answer that names this channel's identifier as already existing), add a
+      scenario for an "already exists" answer naming another channel (still a
+      decline), and have the tester add that row. If the intent is a looser match,
+      say so instead.
+      **Not measured** (the recogniser's code is outside what this role reads).
+      **Severity:** low.
+
+**Areas that were clean, and one observation with no box.** Scenario coverage
+for the range is complete apart from the two boxes above. The self-consistency
+read found no contradiction: the hand-over refusals, the being-opened rule, the
+bounded wait and the startup rule agree, and `proposal.md` repeats the
+requirement text without diverging from it. Nothing in the spec is now out of
+scope of #176 (reliable channel throughout; the owner's request for an
+automated two-peer test remains the project manager's follow-up, and `tasks.md`
+7.3 remains unrun, which `proposal.md` now says openly). Observation, no box:
+the bounded wait is per message ("no later than a fixed time after this peer
+began waiting on it"), so N messages behind one never-answered open stall the
+processor N limits in a row; `design.md` (Decisions around lines 395-435) records
+this as accepted, and no test holds more than one waiting message, which is
+consistent with the spec as written.
