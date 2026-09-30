@@ -106,7 +106,7 @@ at `4a85db1b`). `cargo mutants` was run on `delivery.rs` (60 mutants: 38 caught,
       piece) also reads it; that method has the same exposure, reported to the
       runner rather than changed here.
 
-- [ ] **`tester`** — `delivery.rs:945` (`Delivering::start`) — the running wiring's
+- [x] **`tester`** — `delivery.rs:945` (`Delivering::start`) — the running wiring's
       queue bound is unpinned. This is the tester's own limit 2, now measured.
       **Scenario:** changing `InboundQueue::with_bound(INBOUND_BOUND)` to
       `with_bound(usize::MAX)` in `start` removes the bound `op-transport` requires
@@ -115,8 +115,20 @@ at `4a85db1b`). `cargo mutants` was run on `delivery.rs` (60 mutants: 38 caught,
       **Measured:** all 57 of 57 `delivery::` tests pass under that mutation.
       (`with_bound(0)` is caught, by 4 tests.) The bound tests build their own queue,
       and `the_inbound_bound_is_pinned` pins the constant, not what `start` uses.
+      **Outcome (`tester`): fixed.**
+      `delivery::tests::the_queue_the_running_wiring_builds_is_bounded_at_the_pinned_count`
+      floods the queue `start` builds — through `start_counted`, the listener and
+      `hand_over`, with the processor held up by an unanswered open — with
+      `INBOUND_BOUND + 5` junk messages on an open channel. It asserts the bound's
+      arithmetic (at most 256 waiting and one held, so at least 5 discarded), that
+      every discard line reads `queue full at 256;`, that the last line's running
+      count equals the discards seen, and that every non-discarded message is decided
+      once the boundary is released. Mutation: `with_bound(usize::MAX)` in `start`.
+      Predicted red, observed red ("0 of 262 discarded"); it was the only test
+      that moved of the 78 `delivery::` tests. A bound of 0 or of any other number
+      would read "full at N" and fail the same test. Restored.
 
-- [ ] **`tester`** — `delivery.rs:378-390` (`Stores::memberships`) — paging past the
+- [x] **`tester`** — `delivery.rs:378-390` (`Stores::memberships`) — paging past the
       first page of memberships is untested, and a wrong step hangs startup on the
       dispatch thread.
       **Scenario:** a peer in more than `MEMBERSHIP_PAGE` (100) Stoas starts. Under
@@ -126,6 +138,19 @@ at `4a85db1b`). `cargo mutants` was run on `delivery.rs` (60 mutants: 38 caught,
       **Measured:** `cargo mutants` MISSED both `replace += with *=` and
       `replace += with -=` at `delivery.rs:388:18`. No test holds more than a few
       memberships (`git grep MEMBERSHIP_PAGE` finds no use in `delivery/tests.rs`).
+      **Outcome (`tester`): fixed.**
+      `a_membership_record_of_more_than_a_page_is_read_to_the_end` joins
+      `2 * MEMBERSHIP_PAGE + 5` Stoas, reads `Stores::memberships` on a thread the
+      test waits on for 5 s (so a step that never ends fails the test, not the
+      suite), and compares the sorted result with the sorted addresses joined;
+      `a_peer_in_more_stoas_than_a_page_requests_every_channel_at_startup` asserts
+      the same through `start` (one creation per membership, none twice). Three
+      mutations of `page += 1` at `delivery.rs:388`, each predicted red and
+      observed red: `-= 1` (panic "attempt to subtract with overflow", test sees a
+      disconnected thread), `*= 1` (timeout, "reading the memberships never ended"),
+      `+= 2` (`105` listed, `205` expected). Restored each time. The endless
+      variant grows a vector while the thread spins, which is why the limit is
+      5 s and not longer.
 
 - [x] **`dev-writer`** — `delivery.rs:471-476` (`Channels::await_settled`) — once
       the book mutex is poisoned, the wait ends at the first wake-up of any kind

@@ -286,7 +286,6 @@ fn storage(e: rusqlite::Error) -> SenderError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::identity::SecretKey;
 
     fn a_stoa(seed: u8) -> Address {
         Address::from_bytes([seed; 32])
@@ -368,16 +367,137 @@ mod tests {
     }
 
     #[test]
-    fn the_identifier_is_not_a_key_in_any_encoding() {
-        let key = SecretKey::from_bytes(&[9u8; 32]).unwrap().public_key();
+    fn a_sender_identifier_is_its_head_and_thirty_two_bytes_in_lowercase_hex() {
+        // design.md Decision 7's rendered form, hardcoded: the head names what
+        // minted the value beside the channel id's and the topic's, and the tail
+        // is the row's 32 bytes. Asserted against literals, not against
+        // `SENDER_PREFIX` and `SENDER_BYTES`, which would agree with any value
+        // they were changed to. (This is not a spec requirement: the spec asks
+        // nothing of the format, and its "nothing is a key" property is
+        // `nothing_a_sender_identifier_is_made_from_is_a_key`'s.)
         let mut store = SenderStore::in_memory().unwrap();
         let sender = store.sender_for(&a_stoa(1)).unwrap();
-        assert!(!sender.as_str().contains(&key.to_hex()));
-        assert!(sender.as_str().starts_with(SENDER_PREFIX));
-        assert_eq!(
-            sender.as_str().len(),
-            SENDER_PREFIX.len() + 2 * SENDER_BYTES
+        let tail = sender
+            .as_str()
+            .strip_prefix("/dialectica/1/p/")
+            .expect("the identifier starts with its head");
+        assert_eq!(tail.len(), 64);
+        assert!(
+            tail.chars()
+                .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)),
+            "{tail}"
         );
+    }
+
+    /// The source of this file outside its tests, with comments and whitespace
+    /// removed, so a check on it reads code and not prose.
+    fn minting_code() -> String {
+        include_str!("sender.rs")
+            // The attribute as it opens the test module, not as the header's prose
+            // mentions it.
+            .split("\n#[cfg(test)]\nmod tests")
+            .next()
+            .expect("the file has a non-test part")
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<String>()
+            .split_whitespace()
+            .collect()
+    }
+
+    #[test]
+    fn nothing_a_sender_identifier_is_made_from_is_a_key() {
+        // `op-transport`, scenario "Nothing a sender identifier is made from is a
+        // key", which the spec says is "checked by reading the code that makes a
+        // sender identifier, not by comparing an identifier with a key": no key
+        // reaches that code, so a comparison could not fail. This reads it.
+        //
+        // What it pins is the code's INPUTS, which is what the property is about:
+        //  - the minting function takes a Stoa address and nothing else;
+        //  - the value's only source is the OS random source;
+        //  - nothing in the module names a key, a keystore or a signature, and the
+        //    one thing imported from `identity` is `Address`.
+        // A change that gave the identifier a key to work from must add one of
+        // these, and fails here. It does not, and cannot, see a key laundered
+        // through the Stoa address — the address is the row's lookup key and takes
+        // no part in the value, which is what "two installations holding one
+        // identity supply different identifiers" observes.
+        let code = minting_code();
+        assert_eq!(
+            code.matches("pubfnsender_for(&mutself,stoa:&Address)")
+                .count(),
+            1,
+            "the minting function takes something other than a Stoa address"
+        );
+        assert_eq!(
+            code.matches("getrandom::fill(&mutbytes)").count(),
+            1,
+            "the value is not filled from the OS random source alone"
+        );
+        assert_eq!(
+            code.matches("crate::identity").count(),
+            1,
+            "the sender identifier code reaches into `identity` for more than `Address`"
+        );
+        assert!(code.contains("usecrate::identity::Address;"));
+        for key_word in [
+            "PublicKey",
+            "SecretKey",
+            "public_key",
+            "secret_key",
+            "keystore",
+            "Keystore",
+            "Signature",
+            "sign(",
+        ] {
+            assert!(
+                !code.contains(key_word),
+                "the sender identifier code mentions `{key_word}`"
+            );
+        }
+    }
+
+    #[test]
+    fn every_error_says_what_went_wrong_in_its_own_words() {
+        // The one thing these renderings do is fill the log line "no sender
+        // identifier could be retained (<reason>)", which is how an operator learns
+        // why a Stoa's channel was not requested. `cargo mutants` found `Display`
+        // replaced by an empty string surviving every test. Fragments hardcoded,
+        // one per variant, so no two can read alike.
+        let cases = [
+            (
+                SenderError::Storage("disk on fire".to_string()),
+                "sender identifier store could not be used: disk on fire",
+            ),
+            (
+                SenderError::UnknownLayoutVersion {
+                    found: 7,
+                    expected: 1,
+                },
+                "layout version 7, and this build understands version 1",
+            ),
+            (
+                SenderError::LayoutDoesNotMatchItsVersion {
+                    version: 1,
+                    why: "no column".to_string(),
+                },
+                "declares storage layout version 1 but does not have that layout: no column",
+            ),
+            (SenderError::NoRandomness, "random source did not answer"),
+            (
+                SenderError::CorruptEntry("short".to_string()),
+                "could not be read back: short",
+            ),
+        ];
+        let mut rendered = Vec::new();
+        for (error, fragment) in cases {
+            let text = error.to_string();
+            assert!(text.contains(fragment), "`{text}` lacks `{fragment}`");
+            rendered.push(text);
+        }
+        rendered.sort();
+        rendered.dedup();
+        assert_eq!(rendered.len(), 5, "two variants render alike");
     }
 
     #[test]

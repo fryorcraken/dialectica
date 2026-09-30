@@ -11007,6 +11007,105 @@ mod tests {
         }
     }
 
+    /// An `OpLog` whose every append reports that it found the op already held,
+    /// after storing it in the log it wraps.
+    ///
+    /// The only way to make a handler meet `Appended::AlreadyPresent`: two
+    /// authorings of one body differ in their counter, so publishing twice through
+    /// a real log stores two ops and never reports a duplicate.
+    struct AlwaysAlreadyHeld(MemoryOpLog);
+
+    impl crate::log::OpLog for AlwaysAlreadyHeld {
+        fn append(
+            &mut self,
+            op: crate::op::SignedOp,
+            arrival: crate::arrival::Arrival,
+        ) -> Result<crate::log::Appended, crate::log::OpLogError> {
+            self.0.append(op, arrival)?;
+            Ok(crate::log::Appended::AlreadyPresent)
+        }
+        fn get(
+            &self,
+            id: &crate::op::OpId,
+        ) -> Result<Option<crate::log::Entry>, crate::log::OpLogError> {
+            self.0.get(id)
+        }
+        fn iter(&self) -> Result<Vec<crate::log::Entry>, crate::log::OpLogError> {
+            self.0.iter()
+        }
+        fn iter_stoa(
+            &self,
+            stoa: &Address,
+        ) -> Result<Vec<crate::log::Entry>, crate::log::OpLogError> {
+            self.0.iter_stoa(stoa)
+        }
+        fn iter_target(
+            &self,
+            target: &crate::op::OpId,
+        ) -> Result<Vec<crate::log::Entry>, crate::log::OpLogError> {
+            self.0.iter_target(target)
+        }
+        fn len(&self) -> Result<usize, crate::log::OpLogError> {
+            self.0.len()
+        }
+    }
+
+    #[test]
+    fn a_publish_that_finds_the_op_already_held_is_still_handed_to_delivery_on_all_three_handlers()
+    {
+        // `op-transport`, "Every publish that succeeds … one that stored the op,
+        // and one that found the op already held", scenario "Re-publishing an op
+        // already held sends it again". The worker's own re-send is
+        // `an_op_the_peer_already_holds_published_again_is_sent_again` in
+        // `delivery`; this is the other half, which that test cannot see: that the
+        // HANDLER calls the sink when the append reports `AlreadyPresent`, and
+        // says `wasNew:false`. A handler that handed off only a new op passes every
+        // other test in the tree.
+        //
+        // The expected answers are hardcoded: one hand-off, of the id the reply
+        // names, and `wasNew:false`.
+        let key = publish_key();
+        let stoa = publish_stoa().to_hex();
+
+        for which in ["post", "reply", "vote"] {
+            let mut log = AlwaysAlreadyHeld(MemoryOpLog::new());
+            let seed = as_json(&publish_post(
+                &publish_request(r#""body":"the subject""#),
+                &mut log,
+                &by(&key),
+                &mut ignored_delivery,
+            ))["opId"]
+                .as_str()
+                .unwrap()
+                .to_string();
+
+            let request =
+                match which {
+                    "post" => serde_json::json!({"stoa": stoa, "body": "held"}).to_string(),
+                    "reply" => serde_json::json!({"stoa": stoa, "parent": seed, "body": "held"})
+                        .to_string(),
+                    _ => serde_json::json!({"stoa": stoa, "target": seed, "direction": "up"})
+                        .to_string(),
+                };
+            let mut handed: Vec<crate::op::OpId> = Vec::new();
+            let mut sink = |id: &crate::op::OpId| handed.push(*id);
+            let out = match which {
+                "post" => publish_post(&request, &mut log, &by(&key), &mut sink),
+                "reply" => publish_reply(&request, &mut log, &by(&key), &mut sink),
+                _ => publish_vote(&request, &mut log, &by(&key), &mut sink),
+            };
+            let reply = as_json(&out);
+            assert!(reply.get("error").is_none(), "for {which}: {out}");
+            assert_eq!(reply["wasNew"], false, "for {which}: {out}");
+            let id = crate::op::OpId::from_hex(reply["opId"].as_str().unwrap()).unwrap();
+            assert_eq!(
+                handed,
+                [id],
+                "for {which}: an op found already held must still be handed to delivery, once"
+            );
+        }
+    }
+
     #[test]
     fn a_refused_publish_reaches_neither_the_append_nor_delivery() {
         // The other half of the same requirement: "A publish that is refused

@@ -81,7 +81,7 @@ succeeds, so the `cfg(logos_scaffold)` adapter compiles.
       directly, so it was never run against the old shape and has not been seen
       red.
 
-- [ ] **`tester`** — `dialectica/rust-lib/src/lib.rs:609-625` (`DeliveryModule::channel_create`)
+- [x] **`tester`** — `dialectica/rust-lib/src/lib.rs:609-625` (`DeliveryModule::channel_create`)
       — the outbound forwarding of three adjacent `&str` arguments is unpinned,
       while the inbound mapping of two adjacent `String`s is pinned.
       **Scenario:** swap `channel_id` and `content_topic` in the call to
@@ -101,6 +101,19 @@ succeeds, so the `cfg(logos_scaffold)` adapter compiles.
       edit was refused by this session's permission classifier; it follows from
       the gated region being outside every `cargo` gate, which `design.md`
       states.
+      **Outcome (`tester`): fixed.**
+      `delivery::tests::the_adapter_forwards_each_delivery_argument_in_the_order_the_seam_names_them`
+      reads `lib.rs` (comments stripped, whitespace removed) for
+      `create_node_with_timeout(config,`,
+      `channel_create_with_timeout(channel_id,content_topic,sender_id,` and
+      `channel_send_with_timeout(channel_id,payload,`, each exactly once. Mutation:
+      `channel_id` and `content_topic` swapped in `lib.rs`'s `channel_create` (the
+      swap this finding describes; it compiles, all `&str`). Predicted red, observed
+      red, with the message "the adapter does not forward" and the
+      `channel_create_with_timeout(...)` text above. No other test moved.
+      Restored. It is a text pin, which is the only layer that can see
+      this file without `nix build`; it pins the order, not that the client is
+      called.
 
 ## Judged and left without a box
 

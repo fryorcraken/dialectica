@@ -504,7 +504,22 @@ fn a_failed_subscription_leaves_sending_wired() {
     peer.post(&g.address().unwrap(), "still sent");
     peer.delivering.settle();
 
-    assert_eq!(peer.journal.with("could not subscribe").len(), 1);
+    // The spec asks the log to record the *consequence* — "this peer will not
+    // receive ops from other peers" — and not only the failure, so a line that
+    // said "could not subscribe" alone would leave an operator not knowing what it
+    // cost. Asserted on the consequence's words, case-insensitively.
+    let logged: Vec<String> = peer
+        .journal
+        .lines()
+        .into_iter()
+        .filter(|l| {
+            l.to_lowercase()
+                .contains("will not receive ops from other peers")
+        })
+        .collect();
+    assert_eq!(logged.len(), 1, "{:?}", peer.journal.lines());
+    assert!(logged[0].contains("provider unavailable"), "{}", logged[0]);
+    assert_eq!(peer.fake.count(&Call::CreateNode(node_config())), 1);
     assert_eq!(peer.fake.creates().len(), 1);
     assert_eq!(peer.fake.sends().len(), 1);
 }
@@ -704,6 +719,76 @@ fn the_adapter_maps_each_event_field_to_the_field_of_the_same_name() {
         assert!(
             code.contains(&format!("{field}:m.{field},")),
             "the adapter does not map `{field}` from the event's `{field}`"
+        );
+    }
+}
+
+#[test]
+fn the_adapter_hands_delivery_every_recorded_membership_and_every_published_op() {
+    // `op-transport`, "Every publish that succeeds … is handed to delivery", and
+    // `stoa-membership`, "Creating or joining a Stoa opens its reliable channel":
+    // the central requirement of #176 ("No op ever leaves the authoring peer"),
+    // and the one place it can be lost with every gate cargo runs green.
+    //
+    // **Why a text pin.** Every test above drives `Delivering` through a sink the
+    // *test* writes (`|id| delivering.published(id)`); the closure the adapter
+    // passes is in `dialectica/rust-lib/src/lib.rs`, behind `cfg(logos_scaffold)`,
+    // which `cargo test` does not compile and `nix build ./dialectica#lgx` compiles
+    // without running. A sink replaced by `|_id| {}` compiles, links, and sends
+    // nothing. Reading the text is the one layer of this repo that can see it.
+    //
+    // Whitespace is removed, so rustfmt's wrapping does not matter; comments are
+    // stripped by `adapter_code`. The counts are hardcoded: three handlers reach
+    // `publishing`, one closure serves them, two handlers pass the join sink, and
+    // startup is one call site.
+    let code: String = adapter_code().split_whitespace().collect();
+    let expected = [
+        // The one helper every publish handler goes through, and its sink.
+        ("&mut|id|delivery.published(id)", 1),
+        ("self.publishing(&request,core::publish_post)", 1),
+        ("self.publishing(&request,core::publish_reply)", 1),
+        ("self.publishing(&request,core::publish_vote)", 1),
+        // The create and join handlers' sinks.
+        ("&mut|stoa|self.delivery.joined(stoa)", 2),
+        // Startup.
+        ("self.delivery.start(", 1),
+    ];
+    for (text, count) in expected {
+        assert_eq!(
+            code.matches(text).count(),
+            count,
+            "the adapter should contain `{text}` exactly {count} time(s)"
+        );
+    }
+    // A sink that ignores what it is handed: whatever its argument is called, a
+    // closure taking a discarded parameter is the shape of the defect.
+    for ignoring in ["|_id|", "|_stoa|", "|_|", "|_op|", "|_op_id|"] {
+        assert!(
+            !code.contains(ignoring),
+            "the adapter contains a closure that ignores its argument: `{ignoring}`"
+        );
+    }
+}
+
+#[test]
+fn the_adapter_forwards_each_delivery_argument_in_the_order_the_seam_names_them() {
+    // `channel_id`, `content_topic` and `sender_id` are three adjacent `&str`s:
+    // swapping two compiles, and the test doubles stand on the trait's side of the
+    // seam, so nothing observes what the adapter forwards to the generated client.
+    // A swap would create every channel under the topic's name and miss every
+    // send and receive, with every gate green; the inbound mapping has its own
+    // pin (`the_adapter_maps_each_event_field_to_the_field_of_the_same_name`), and
+    // this is the outbound one. Read as text, whitespace removed.
+    let code: String = adapter_code().split_whitespace().collect();
+    for forwarded in [
+        "create_node_with_timeout(config,",
+        "channel_create_with_timeout(channel_id,content_topic,sender_id,",
+        "channel_send_with_timeout(channel_id,payload,",
+    ] {
+        assert_eq!(
+            code.matches(forwarded).count(),
+            1,
+            "the adapter does not forward `{forwarded}`"
         );
     }
 }
@@ -1096,6 +1181,67 @@ fn a_restarted_peer_requests_every_stoas_channel_and_no_other() {
 }
 
 #[test]
+fn a_membership_record_of_more_than_a_page_is_read_to_the_end() {
+    // `stoa-membership`: startup requests the channel of EVERY Stoa the peer is in.
+    // Two full pages and five more, so the page loop must advance twice and stop:
+    // a step that never advances re-reads page 0 for ever inside
+    // `on_context_ready` (the module answers nothing after), a step that goes
+    // backwards underflows, and a step that skips a page loses Stoas — a peer in
+    // more than 100 Stoas was deaf in the rest. No other test holds more than a
+    // few memberships.
+    //
+    // The read runs on a thread and the test waits for it with a limit, so a step
+    // that never ends fails this test in seconds instead of hanging the suite.
+    // (An endless step also grows the vector it appends to, so the limit is short.)
+    let peer = Peer::new("memberships-paged");
+    let mut store = peer.dir.memberships();
+    let total = 2 * MEMBERSHIP_PAGE + 5;
+    let mut expected: Vec<Address> = (0..total)
+        .map(|n| {
+            let g = genesis(&format!("Stoa number {n}"));
+            let reply = crate::wire::join_stoa(&join_request(&g), &mut store, &mut |_| {});
+            assert!(!reply.contains("error"), "{reply}");
+            g.address().unwrap()
+        })
+        .collect();
+    expected.sort();
+
+    let stores = peer.dir.stores();
+    let (done, read) = mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = done.send(stores.memberships());
+    });
+    let mut listed = read
+        .recv_timeout(Duration::from_secs(5))
+        .expect("reading the memberships never ended, or panicked")
+        .expect("the membership record is readable");
+    listed.sort();
+    assert_eq!(listed.len(), total, "a Stoa was skipped or read twice");
+    assert_eq!(listed, expected);
+}
+
+#[test]
+fn a_peer_in_more_stoas_than_a_page_requests_every_channel_at_startup() {
+    // The same property through startup, where it matters: one channel creation
+    // per membership past the first page, and none twice.
+    let mut peer = Peer::new("start-more-than-a-page");
+    let mut store = peer.dir.memberships();
+    let total = MEMBERSHIP_PAGE + 3;
+    for n in 0..total {
+        let g = genesis(&format!("Stoa number {n}"));
+        crate::wire::join_stoa(&join_request(&g), &mut store, &mut |_| {});
+    }
+    peer.start();
+    peer.delivering.settle();
+
+    let mut asked: Vec<String> = peer.fake.creates().into_iter().map(|c| c.0).collect();
+    asked.sort();
+    asked.dedup();
+    assert_eq!(asked.len(), total);
+    assert_eq!(peer.fake.creates().len(), total);
+}
+
+#[test]
 fn an_unreadable_membership_record_opens_nothing_and_stops_nothing() {
     let mut peer = Peer::new("membership-broken");
     peer.dir.break_file(&membership_path_in(&peer.dir.0));
@@ -1135,9 +1281,12 @@ impl Worker<Fake> {
 
 #[test]
 fn two_installations_holding_one_identity_supply_different_sender_identifiers() {
-    // Two installations are two directories. The identity is irrelevant by
-    // construction — nothing an installation holds reaches the value — which is
-    // the point: two holding the SAME keystore still differ.
+    // Two installations are two directories, asked about one Stoa. **What can
+    // fail this:** any derivation from what the two share — the Stoa address, or a
+    // constant. The spec's "holding the same identity" is satisfied by
+    // construction, not exercised: no identity reaches this code, so putting one
+    // keystore in both directories would change nothing the code can see (see
+    // `sender::tests::nothing_a_sender_identifier_is_made_from_is_a_key`).
     let one = Peer::new("sender-install-one");
     let two = Peer::new("sender-install-two");
     let stoa = genesis("Agora").address().unwrap();
@@ -1163,22 +1312,12 @@ fn two_stoas_get_two_sender_identifiers() {
     );
 }
 
-#[test]
-fn the_sender_identifier_is_not_the_authors_key() {
-    // **What this can and cannot see.** No key reaches the code that mints a
-    // sender identifier (`SenderStore::sender_for` takes a Stoa address), so an
-    // implementation that derived it from one could not be written without
-    // changing that signature, and this test could not be made to fail by any
-    // change that compiles. The property is held by construction; what this
-    // pins is the encoding check for a peer that signs as `key(7)` in the Stoa it
-    // joins. The tests that can fail on how the value is produced are the
-    // "two installations", "restart" and "two Stoas" ones beside it.
-    let peer = Peer::new("sender-not-key");
-    let sender = sender_supplied(&peer, &genesis("Agora").address().unwrap());
-    let signing = key(7).public_key();
-    assert!(!sender.contains(&signing.to_hex()));
-    assert!(!sender.contains(&signing.to_hex().to_uppercase()));
-}
+// The spec's "Nothing a sender identifier is made from is a key" is checked by
+// reading `sender.rs`, and its test is `sender::tests::
+// nothing_a_sender_identifier_is_made_from_is_a_key`. A test here that compared
+// the value supplied to `channelCreate` with a key could not fail, because no key
+// reaches the code that makes it — the defect the spec-test review found in the
+// scenario this replaced.
 
 #[test]
 fn a_sender_identifier_that_cannot_be_retained_opens_no_channel() {
@@ -1192,6 +1331,13 @@ fn a_sender_identifier_that_cannot_be_retained_opens_no_channel() {
     let logged = peer.journal.with("no sender identifier could be retained");
     assert_eq!(logged.len(), 1, "{:?}", peer.journal.lines());
     assert!(logged[0].contains(&stoa.to_hex()));
+    // And the line says why: the store's own words, not an empty reason
+    // (`SenderError`'s rendering replaced by an empty string once passed every test).
+    assert!(
+        logged[0].contains("the sender identifier store could not be used"),
+        "{}",
+        logged[0]
+    );
     // `op-transport`: an open this peer never goes on to ask delivery for is
     // given up, and settled rather than left pending — or every message on the
     // channel would wait out `SETTLE_LIMIT` before being refused.
@@ -1551,13 +1697,35 @@ fn the_channel_book_is_not_held_while_an_op_is_appended() {
             1,
         ),
     );
-    std::thread::sleep(Duration::from_millis(300)); // judged, and waiting to append
-    let free = channels.book.try_lock().is_ok();
+    // **Watched, not sampled once after a sleep.** The processor takes the book
+    // for microseconds to look the channel up, judges, and then waits on the busy
+    // database; where old code went wrong it held the book from the lookup until
+    // the append finished. A single check after a fixed sleep passes that old code
+    // whenever the processor is slower to get going than the sleep. So the book is
+    // polled for a second (under rusqlite's five-second busy timeout, so the
+    // append is still waiting at the end), and the test fails on twenty polls in a
+    // row finding it held — a run long enough that the processor's own brief
+    // lookups cannot be it, and short enough that old code, which held it
+    // throughout, cannot miss it.
+    let mut held_in_a_row = 0;
+    let mut most_in_a_row = 0;
+    let until = Instant::now() + Duration::from_secs(1);
+    while Instant::now() < until {
+        match channels.book.try_lock() {
+            Err(std::sync::TryLockError::WouldBlock) => {
+                held_in_a_row += 1;
+                most_in_a_row = most_in_a_row.max(held_in_a_row);
+            }
+            _ => held_in_a_row = 0,
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
     blocker.execute_batch("ROLLBACK").unwrap();
 
     assert!(
-        free,
-        "the channel book was held while the op waited to be appended"
+        most_in_a_row < 20,
+        "the channel book was held while the op waited to be appended \
+         ({most_in_a_row} polls in a row)"
     );
     eventually("the op to be stored once the database is free", || {
         stored(&peer, &op.op.id()).is_some()
@@ -1719,26 +1887,59 @@ fn a_poisoned_channel_book_still_waits_for_this_channels_open() {
     .join();
     assert!(channels.book.is_poisoned());
 
+    // **Read off a flag, not off a pause.** Another channel's open settles every
+    // millisecond for as long as `decide` runs, each settle waking every waiter;
+    // this channel's own open is answered only after `decide` has had 200 ms to
+    // end early, and only after the flag saying so is raised. `decide` returns
+    // whether the flag was up when it did: a wait that ended at the first wake-up
+    // returns with the flag down, on however slow a machine, and one that waits
+    // for its own open cannot return before the flag is up. The 200 ms is the
+    // margin between `decide` being entered and it reaching its wait, which is its
+    // first statement; a stalled thread is the only way to pass wrongly.
     let mut opening = channels.opening(&identity);
     let op = their_op(stoa, "waits out another channel's answer", 0);
-    decide_elsewhere(
-        peer.processor(Arc::clone(&channels)),
-        arriving(identity.channel_id(), op.to_bytes().unwrap(), 1),
-    );
-    std::thread::sleep(Duration::from_millis(100));
-    drop(channels.opening(&other)); // another open settles and wakes every waiter
-    std::thread::sleep(Duration::from_millis(200));
+    let processor = peer.processor(Arc::clone(&channels));
+    let message = arriving(identity.channel_id(), op.to_bytes().unwrap(), 1);
+
+    let entered = std::sync::atomic::AtomicBool::new(false);
+    let answered = std::sync::atomic::AtomicBool::new(false);
+    let stop = std::sync::atomic::AtomicBool::new(false);
+    let answered_when_decided = std::thread::scope(|scope| {
+        let (entered, answered, stop, channels, other) =
+            (&entered, &answered, &stop, &channels, &other);
+        scope.spawn(move || {
+            let until = Instant::now() + Duration::from_secs(12);
+            while !stop.load(std::sync::atomic::Ordering::SeqCst) && Instant::now() < until {
+                drop(channels.opening(other)); // settles, and wakes every waiter
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        });
+        scope.spawn(move || {
+            while !entered.load(std::sync::atomic::Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            std::thread::sleep(Duration::from_millis(200));
+            answered.store(true, std::sync::atomic::Ordering::SeqCst);
+            opening.held();
+            drop(opening);
+        });
+        entered.store(true, std::sync::atomic::Ordering::SeqCst);
+        processor.decide(&message);
+        let seen = answered.load(std::sync::atomic::Ordering::SeqCst);
+        stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        seen
+    });
+
     assert!(
-        peer.journal.lines().is_empty(),
+        answered_when_decided,
         "judged before its own open settled: {:?}",
         peer.journal.lines()
     );
-
-    opening.held();
-    drop(opening);
-    eventually("the op to be stored once its open is answered", || {
-        stored(&peer, &op.op.id()).is_some()
-    });
+    assert!(
+        stored(&peer, &op.op.id()).is_some(),
+        "{:?}",
+        peer.journal.lines()
+    );
 }
 
 #[test]
@@ -1774,6 +1975,53 @@ fn a_message_waiting_on_an_open_delivery_never_answers_is_judged_after_a_bounded
     assert_eq!(peer.journal.with("refused (unknown-channel)").len(), 1);
     assert!(stored(&peer, &waiting.op.id()).is_none());
     drop(unanswered); // still unanswered until here
+}
+
+#[test]
+fn opens_settling_for_other_channels_do_not_extend_the_bounded_wait() {
+    // `op-transport`: the wait is "no later than a fixed time after this peer
+    // began waiting on it". Every settle wakes every waiter, so a wait whose
+    // clock restarted on each wake-up could be postponed for ever by unrelated
+    // opens — one per second would do it — and the limit would bound nothing under
+    // the conditions it exists for. Here an open for another channel settles every
+    // millisecond for as long as the test lets it, and the message waiting on an
+    // open that is never answered must still be refused, an unknown channel, at
+    // its own limit.
+    //
+    // The storm runs until the refusal is seen (or 12 s pass), so the assertion
+    // does not depend on when the processor began waiting: a wait restarted by
+    // wake-ups never ends while the storm lasts, however slow the machine.
+    let peer = Peer::new("recv-wait-not-extended");
+    let never = ChannelIdentity::of(&genesis("Lyceum").address().unwrap());
+    let other = ChannelIdentity::of(&genesis("Athenaeum").address().unwrap());
+    let channels = Arc::new(Channels::default());
+    let _unanswered = channels.opening(&never);
+    let mut processor = peer.processor(Arc::clone(&channels));
+    processor.settle_limit = Duration::from_millis(300);
+    let queue = Arc::clone(&processor.queue);
+    queue.offer(arriving(
+        never.channel_id(),
+        b"waits for an open".to_vec(),
+        1,
+    ));
+    queue.close();
+    std::thread::spawn(move || processor.run());
+
+    let stop = std::sync::atomic::AtomicBool::new(false);
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            let until = Instant::now() + Duration::from_secs(12);
+            while !stop.load(std::sync::atomic::Ordering::SeqCst) && Instant::now() < until {
+                drop(channels.opening(&other)); // settles, and wakes every waiter
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        });
+        eventually(
+            "the message to be refused while opens keep settling",
+            || !peer.journal.with("refused (unknown-channel)").is_empty(),
+        );
+        stop.store(true, std::sync::atomic::Ordering::SeqCst);
+    });
 }
 
 #[test]
@@ -1992,45 +2240,95 @@ fn taking_a_message_from_delivery_does_not_wait_on_the_boundary() {
 
 #[test]
 fn every_refusal_is_logged_under_its_own_name_and_none_carries_what_the_sender_chose() {
-    // One case per refusal the boundary makes, through the processor. A table
-    // rather than a test each: the requirement is one sentence over all of them.
-    // The names are design.md's, hardcoded; `distinct` is the property that
+    // One case per refusal the boundary makes, through the processor — the
+    // seven `refusal_kind` names, `storage` (a log that will not open) included. A
+    // table rather than a test each: the requirement is one sentence over all of
+    // them. The names are design.md's, hardcoded; `distinct` is the property that
     // matters beyond the spelling — no two refusals share a name.
+    //
+    // **Every input the sender chose carries the marker `zzyzx`** — the channel
+    // id, the sender identifier, and the payload (as bytes inside it, or as the
+    // body of a signed op) — so a line that echoed any of them is found by one
+    // search, in the three spellings a careless `format!` would give a byte
+    // string. A payload of single distinctive bytes could not tell an echo from a
+    // coincidence, and the guard below fails the test if a payload does not
+    // actually carry the marker.
+    const MARKER: &[u8] = b"zzyzx";
     let stoa = genesis("Agora").address().unwrap();
     let other = genesis("Lyceum").address().unwrap();
     let identity = ChannelIdentity::of(&stoa);
     let open = identity.channel_id();
     let window = crate::arrival::RECEIVE_WINDOW_MS;
-    let mut forged = their_op(stoa, "a forgery", 0);
+    let mut forged = their_op(stoa, "zzyzx a forgery", 0);
     forged.op.author = key(9).public_key();
-    let cases: [(&str, &str, Vec<u8>); 6] = [
-        ("unknown-channel", "/elsewhere/zzyzx", vec![1, 2, 3]),
+    let oversized: Vec<u8> = MARKER
+        .iter()
+        .cycle()
+        .take(crate::transport::MAX_MESSAGE_BYTES + 1)
+        .copied()
+        .collect();
+    // (name, channel the message arrives on, its payload, whether the op log is
+    // made unopenable first)
+    let cases: [(&str, &str, Vec<u8>, bool); 7] = [
         (
-            "too-long",
-            open,
-            vec![0; crate::transport::MAX_MESSAGE_BYTES + 1],
+            "unknown-channel",
+            "/elsewhere/zzyzx",
+            b"zzyzx payload".to_vec(),
+            false,
         ),
-        ("undecodable", open, b"not an op".to_vec()),
-        ("fails-verification", open, forged.to_bytes().unwrap()),
+        ("too-long", open, oversized, false),
+        ("undecodable", open, b"zzyzx not an op".to_vec(), false),
+        (
+            "fails-verification",
+            open,
+            forged.to_bytes().unwrap(),
+            false,
+        ),
         (
             "stoa-mismatch",
             open,
-            their_op(other, "copied onto another channel", 0)
+            their_op(other, "zzyzx copied onto another channel", 0)
                 .to_bytes()
                 .unwrap(),
+            false,
         ),
         (
             "ahead-of-time",
             open,
-            their_op(stoa, "from the future", window + 60_000)
+            their_op(stoa, "zzyzx from the future", window + 60_000)
                 .to_bytes()
                 .unwrap(),
+            false,
         ),
+        (
+            "storage",
+            open,
+            their_op(stoa, "zzyzx nowhere to put it", 0)
+                .to_bytes()
+                .unwrap(),
+            true,
+        ),
+    ];
+    // What a line echoing the payload would contain, however it spelled the bytes.
+    let echoes = [
+        "zzyzx".to_string(),
+        hex::encode(MARKER),
+        format!("{:?}", MARKER.to_vec())
+            .trim_matches(['[', ']'])
+            .to_string(),
     ];
 
     let mut names = Vec::new();
-    for (kind, channel, payload) in cases {
+    for (kind, channel, payload, break_log) in cases {
+        assert!(
+            payload.windows(MARKER.len()).any(|w| w == MARKER),
+            "{kind}: the payload does not carry the marker, so this case proves nothing"
+        );
         let peer = Peer::new(&format!("recv-refusal-{kind}"));
+        if break_log {
+            peer.dir
+                .break_file(&crate::log::op_log_path_in(&peer.dir.0));
+        }
         peer.processor(open_for(&stoa)).decide(&Arriving {
             channel_id: channel.to_string(),
             sender_id: "zzyzx-sender".to_string(),
@@ -2039,12 +2337,17 @@ fn every_refusal_is_logged_under_its_own_name_and_none_carries_what_the_sender_c
         });
         let lines = peer.journal.lines();
         assert_eq!(
-            peer.journal.with(&format!("refused ({kind})")).len(),
+            peer.journal.with(&format!("refused ({kind}")).len(),
             1,
             "{kind}: {lines:?}"
         );
         for line in &lines {
-            assert!(!line.contains("zzyzx"), "{kind}: {line}");
+            for echo in &echoes {
+                // The line's head only: one that echoed the 150 KiB payload
+                // would otherwise print all of it.
+                let head: String = line.chars().take(200).collect();
+                assert!(!line.contains(echo.as_str()), "{kind}: {head}");
+            }
         }
         names.push(kind);
     }
@@ -2098,6 +2401,61 @@ fn the_waiting_messages_never_exceed_the_bound() {
         assert!(queue.len() <= INBOUND_BOUND);
     }
     assert_eq!(queue.len(), INBOUND_BOUND);
+}
+
+#[test]
+fn the_queue_the_running_wiring_builds_is_bounded_at_the_pinned_count() {
+    // `op-transport`, "Inbound payloads waiting for the boundary are bounded": "by
+    // a fixed count". The tests above build their own `InboundQueue`, so none of
+    // them sees the queue `Delivering::start` builds — `with_bound(usize::MAX)`
+    // there removed the bound with every one of them green. This floods that one,
+    // through `start`, `listen` and `hand_over`.
+    //
+    // The boundary is held up on a message whose channel is still opening, then
+    // more junk than the bound arrives on an open channel. At most
+    // `INBOUND_BOUND` wait in the queue and one is held by the processor, so at
+    // least `total - INBOUND_BOUND - 1` are discarded; how many exactly depends on
+    // whether the processor had taken the first message when the flood began, so
+    // the assertion is the bound's arithmetic and not a count read back from the
+    // implementation. The bound itself is read off the log line, against the
+    // hardcoded 256 that `the_inbound_bound_is_pinned` also pins.
+    let mut peer = Peer::new("bound-running-wiring");
+    let (events, asked) = peer.start_counted(vec![]);
+    let (open, gate) = hold_the_boundary_up(&mut peer, &events);
+    let channel = ChannelIdentity::of(&open);
+
+    let junk = INBOUND_BOUND + 5;
+    for n in 0..junk {
+        events
+            .send(Some(arriving(channel.channel_id(), vec![n as u8], 1)))
+            .unwrap();
+    }
+    let sent = junk + 1; // and the message that holds the boundary up
+    handed_over(&asked, sent);
+
+    let discards = peer.journal.with("discarded unread");
+    assert!(
+        discards.len() >= junk - INBOUND_BOUND,
+        "{} of {sent} discarded, with at most {INBOUND_BOUND} waiting and one held: {:?}",
+        discards.len(),
+        peer.journal.lines()
+    );
+    for line in &discards {
+        assert!(line.contains("queue full at 256;"), "{line}");
+    }
+    let last = discards.last().unwrap();
+    assert!(
+        last.contains(&format!("{} discarded since", discards.len())),
+        "{last}"
+    );
+
+    // Nothing was lost but the discards: once the boundary is released, every
+    // message that waited is decided — the junk as undecodable.
+    gate.release();
+    let waited = junk - discards.len();
+    eventually("every waiting message to be decided", || {
+        peer.journal.with("refused (undecodable)").len() == waited
+    });
 }
 
 #[test]
@@ -2184,6 +2542,62 @@ fn traffic_on_a_channel_this_peer_is_not_opening_takes_no_place_in_the_queue() {
         "{:?}",
         peer.journal.with("discarded")
     );
+}
+
+#[test]
+fn a_refusal_made_on_hand_over_is_logged_by_kind_without_text_the_sender_chose() {
+    // `op-transport`, "Each refusal MUST be recorded in the module's log naming
+    // which refusal it was. The log MUST NOT carry the payload, the sender
+    // identifier, or a channel identifier this peer has no channel open under."
+    // The two refusals the listener makes before a message may wait — an unknown
+    // channel and an oversized payload — are logged by `hand_over`, not by the
+    // processor, so the tests that read the processor's lines
+    // (`a_refusal_is_logged_by_kind_…`, the refusal table) do not see them. A
+    // hand-over line that echoed the channel, the sender or the payload passed
+    // every one of them.
+    let stoa = genesis("Agora").address().unwrap();
+    let open = ChannelIdentity::of(&stoa);
+    let journal = Recorder::default();
+    let queue = InboundQueue::with_bound(INBOUND_BOUND);
+    let oversized: Vec<u8> = b"zzyzx"
+        .iter()
+        .cycle()
+        .take(crate::transport::MAX_MESSAGE_BYTES + 1)
+        .copied()
+        .collect();
+    let message = |channel: &str, payload: Vec<u8>| Arriving {
+        channel_id: channel.to_string(),
+        sender_id: "zzyzx-sender".to_string(),
+        payload,
+        timestamp: 1,
+    };
+    listen(
+        [
+            Some(message(
+                "/elsewhere/zzyzx-channel",
+                b"zzyzx payload".to_vec(),
+            )),
+            Some(message(open.channel_id(), oversized)),
+        ]
+        .into_iter(),
+        &open_for(&stoa),
+        &queue,
+        &journal,
+    );
+
+    assert_eq!(journal.with("refused (unknown-channel)").len(), 1);
+    assert_eq!(journal.with("refused (too-long)").len(), 1);
+    assert_eq!(
+        queue.len(),
+        0,
+        "a refused message took a place in the queue"
+    );
+    for line in journal.lines() {
+        let head: String = line.chars().take(200).collect();
+        for echo in ["zzyzx", &hex::encode(b"zzyzx"), "122, 122, 121, 122, 120"] {
+            assert!(!line.contains(echo), "{head}");
+        }
+    }
 }
 
 /// A peer with one Stoa's channel open and the boundary held up: a message on a
@@ -2439,37 +2853,71 @@ fn a_restarted_peer_keeps_what_delivery_hands_over_before_startup_asks_for_its_c
     // subscription exists — while node creation is still unanswered and the
     // channel's open waits behind it. Red while startup marked its opens only as
     // the worker reached them: the message was refused as an unknown channel.
-    let mut peer = Peer::new("handover-restart");
-    let g = genesis("Agora");
-    let stoa = g.address().unwrap();
-    peer.join(&g); // before startup: the membership a restart finds
-    let node = Gate::closed();
-    let _ = peer.fake.script(|s| {
-        s.node_gate = Some(node.clone());
-        s.create_replies.push_back(the_already_exists_answer(&stoa));
-    });
-    let op = their_op(stoa, "handed over before the channel was asked for", 0);
-    let (_events, asked) = peer.start_counted(vec![arriving(
-        ChannelIdentity::of(&stoa).channel_id(),
-        op.to_bytes().unwrap(),
-        1,
-    )]);
-    handed_over(&asked, 1);
-    assert!(
-        peer.fake.creates().is_empty(),
-        "the channel was asked of delivery before the message was handed over"
-    );
+    //
+    // **This is a guard on an ORDER inside `start`** — marks, then subscription —
+    // and the order is not observable from outside except through a race: with
+    // the marks moved after the subscription the listener thread and `start`
+    // itself run at once, and the listener wins only if it hands the message over
+    // before `start` has marked. Left at one round over one membership, the
+    // listener won on a run of the mutation and not on others, so the test was
+    // "likely caught" and not certain. Two things make it decisive: the peer is in
+    // many Stoas, so the marking is a read of a record several pages long, which
+    // the listener — a thread reading one message from a channel — outpaces by a
+    // wide margin; and the whole scenario runs for several fresh peers, so the
+    // mutation must win the race every time to escape. Neither makes it
+    // deterministic; the rounds are margin. Measured: with `startup_opens` moved
+    // to after the subscription, it was red in round 0 on four of four runs.
+    for round in 0..ROUNDS {
+        let mut peer = Peer::new(&format!("handover-restart-{round}"));
+        let g = genesis("Agora");
+        let stoa = g.address().unwrap();
+        peer.join(&g); // before startup: the membership a restart finds
+        let mut every_channel = vec![stoa];
+        for n in 0..FILLER_STOAS {
+            let filler = genesis(&format!("Filler {n}"));
+            peer.join(&filler);
+            every_channel.push(filler.address().unwrap());
+        }
+        let node = Gate::closed();
+        let _ = peer.fake.script(|s| {
+            s.node_gate = Some(node.clone());
+            // Delivery kept every channel from the module's last run.
+            for held in &every_channel {
+                s.declined_channels.insert(
+                    ChannelIdentity::of(held).channel_id().to_string(),
+                    the_already_exists_answer(held),
+                );
+            }
+        });
+        let op = their_op(stoa, "handed over before the channel was asked for", 0);
+        let (_events, asked) = peer.start_counted(vec![arriving(
+            ChannelIdentity::of(&stoa).channel_id(),
+            op.to_bytes().unwrap(),
+            1,
+        )]);
+        handed_over(&asked, 1);
+        assert!(
+            peer.fake.creates().is_empty(),
+            "the channel was asked of delivery before the message was handed over"
+        );
 
-    node.release(); // node creation answered; the channel "already exists"
-    eventually("the op to be stored once its open settles", || {
-        stored(&peer, &op.op.id()).is_some()
-    });
-    assert!(
-        peer.journal.with("unknown-channel").is_empty(),
-        "{:?}",
-        peer.journal.lines()
-    );
+        node.release(); // node creation answered; every channel "already exists"
+        eventually("the op to be decided once its open settles", || {
+            stored(&peer, &op.op.id()).is_some() || !peer.journal.with("unknown-channel").is_empty()
+        });
+        assert!(
+            peer.journal.with("unknown-channel").is_empty(),
+            "round {round}: {:?}",
+            peer.journal.with("refused")
+        );
+        assert!(stored(&peer, &op.op.id()).is_some(), "round {round}");
+    }
 }
+
+/// How many fresh peers the restart scenario runs for, and how many other Stoas
+/// each is in. See `a_restarted_peer_keeps_what_delivery_hands_over_…`.
+const ROUNDS: usize = 4;
+const FILLER_STOAS: usize = 60;
 
 #[test]
 fn every_discard_is_counted_and_logged_apart_from_refusals() {
@@ -2477,8 +2925,19 @@ fn every_discard_is_counted_and_logged_apart_from_refusals() {
     let queue = InboundQueue::with_bound(1);
     let stoa = genesis("Agora").address().unwrap();
     let channel = ChannelIdentity::of(&stoa);
+    // `op-transport`: a discard's record "MUST NOT carry the payload or the sender
+    // identifier". Both are made distinctive, and every discarded message is
+    // checked for both, in the spellings a careless `format!` would give bytes.
+    let sender = "zzyzx-the-sender-identifier";
     listen(
-        (0..4).map(|n| Some(arriving(channel.channel_id(), vec![n], 0))),
+        (0..4u8).map(|n| {
+            Some(Arriving {
+                channel_id: channel.channel_id().to_string(),
+                sender_id: sender.to_string(),
+                payload: format!("zzyzx-payload-{n}").into_bytes(),
+                timestamp: 0,
+            })
+        }),
         &open_for(&stoa),
         &queue,
         &journal,
@@ -2488,8 +2947,16 @@ fn every_discard_is_counted_and_logged_apart_from_refusals() {
     assert_eq!(discards.len(), 3, "{:?}", journal.lines());
     assert!(discards[2].contains("3 discarded since"), "{}", discards[2]);
     assert!(discards[2].contains("full at 1;"), "{}", discards[2]);
+    let echoes = [
+        "zzyzx".to_string(),
+        hex::encode(b"zzyzx"),
+        "122, 122, 121, 122, 120".to_string(),
+    ];
     for line in &discards {
         assert!(!line.contains("refused"), "{line}");
+        for echo in &echoes {
+            assert!(!line.contains(echo.as_str()), "{line}");
+        }
     }
     // And a refusal's line is not a discard's.
     let refusal = Note::Refused("unknown-channel", None).to_string();
@@ -2512,6 +2979,11 @@ fn a_panicking_delivery_call_is_contained_and_the_next_action_runs() {
 
 #[test]
 fn a_panic_reading_one_event_does_not_end_reception() {
+    // `op-transport`, scenario "A panic reading one message does not end
+    // reception": reading one delivered message's fields panics, and a valid op
+    // then arrives on an open channel; the module's log records the failure, and
+    // the op is stored.
+    //
     // Security review: the listener ran its whole loop under one `catch_unwind`,
     // so one panic while reading an event — the generated decoder runs inside
     // the iterator's `next()` — ended reception for the rest of the process.
@@ -2641,6 +3113,114 @@ fn declined_reads_delivery_s_three_shapes_of_no() {
         declined(&Ok(json!({ "success": true, "value": "r-1" }))),
         None
     );
+}
+
+/// The three shapes of "no" the spec names for node creation, channel creation
+/// and sends ("declines, fails, or does not answer"), each with the words its log
+/// line must carry: delivery's reason where it gave one, and the fact that it gave
+/// none where it did not.
+fn the_ways_delivery_says_no() -> [(&'static str, Result<Value, String>, &'static str); 3] {
+    [
+        (
+            "a transport failure",
+            Err("zzyzx-transport-reason".to_string()),
+            "zzyzx-transport-reason",
+        ),
+        (
+            "an error envelope, as delivery was measured answering",
+            the_observed_decline("zzyzx-envelope-reason"),
+            "zzyzx-envelope-reason",
+        ),
+        (
+            "a failure with no reason",
+            Ok(json!({ "success": false })),
+            "gave no reason",
+        ),
+    ]
+}
+
+#[test]
+fn a_declined_node_creation_is_read_in_every_shape_delivery_says_no() {
+    // `declined_reads_delivery_s_three_shapes_of_no` covers the helper, not that
+    // node creation reads its answer through it. A call site that treated only
+    // `Err` as a failure would request start after delivery's error object.
+    for (shape, reply, words) in the_ways_delivery_says_no() {
+        let mut peer = Peer::new("node-no-shapes");
+        let _ = peer.fake.script(|s| s.create_node = reply.clone());
+        peer.join(&genesis("Agora"));
+        peer.start();
+        peer.delivering.settle();
+
+        assert_eq!(
+            peer.fake.count(&Call::StartNode),
+            0,
+            "{shape}: start was requested"
+        );
+        let logged = peer.journal.with("declined node creation");
+        assert_eq!(logged.len(), 1, "{shape}: {:?}", peer.journal.lines());
+        assert!(logged[0].contains(words), "{shape}: {}", logged[0]);
+        // And channels are still requested: another module's node serves them.
+        assert_eq!(peer.fake.creates().len(), 1, "{shape}");
+    }
+}
+
+#[test]
+fn a_declined_channel_creation_is_read_in_every_shape_delivery_says_no() {
+    // The channel is not open afterwards, whichever way delivery said no, and the
+    // log names the Stoa and delivery's reason. A call site that read only the
+    // envelope, or only `Err`, would leave a refused channel open.
+    let stoa = genesis("Agora").address().unwrap();
+    let channel_id = ChannelIdentity::of(&stoa).channel_id().to_string();
+    for (shape, reply, words) in the_ways_delivery_says_no() {
+        let peer = Peer::new("channel-no-shapes");
+        let _ = peer
+            .fake
+            .script(|s| s.create_replies.push_back(reply.clone()));
+        let worker = peer.worker();
+        worker.open_now(&stoa);
+
+        assert_eq!(peer.fake.creates().len(), 1, "{shape}");
+        assert!(
+            !lock(&worker.channels.book).open.is_open(&channel_id),
+            "{shape}: the channel is open"
+        );
+        let logged = peer.journal.with("channel NOT open");
+        assert_eq!(logged.len(), 1, "{shape}: {:?}", peer.journal.lines());
+        assert!(logged[0].contains(words), "{shape}: {}", logged[0]);
+        assert!(logged[0].contains(&stoa.to_hex()), "{shape}: {}", logged[0]);
+    }
+}
+
+#[test]
+fn a_declined_send_is_read_in_every_shape_delivery_says_no() {
+    // `a_send_delivery_declines_leaves_the_op_published` uses the transport
+    // failure alone, which is not the shape delivery was measured giving. A send
+    // that treated only `Err` as a failure would log the op as handed to the
+    // channel when delivery answered with its error object.
+    let stoa = genesis("Agora").address().unwrap();
+    for (shape, reply, words) in the_ways_delivery_says_no() {
+        let peer = Peer::new("send-no-shapes");
+        let worker = peer.worker();
+        worker.open_now(&stoa); // the channel is open: the send is asked for
+        let _ = peer.fake.script(|s| s.send = Some(reply.clone()));
+        let id = peer.post(&stoa, "delivery will say no");
+        worker.perform(Action::Send(id));
+
+        assert_eq!(
+            peer.fake.sends().len(),
+            1,
+            "{shape}: the send was not asked for"
+        );
+        let logged = peer.journal.with("delivery did not take op");
+        assert_eq!(logged.len(), 1, "{shape}: {:?}", peer.journal.lines());
+        assert!(logged[0].contains(words), "{shape}: {}", logged[0]);
+        assert!(logged[0].contains(&id.to_hex()), "{shape}: {}", logged[0]);
+        assert!(
+            peer.journal.with("handed to the channel").is_empty(),
+            "{shape}: {:?}",
+            peer.journal.lines()
+        );
+    }
 }
 
 #[test]

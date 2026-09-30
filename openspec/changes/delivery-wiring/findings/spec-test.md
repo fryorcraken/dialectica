@@ -22,7 +22,7 @@ passed (1256 + 30 + 3, 0 failed).
 
 ## Findings
 
-- [ ] **`tester`** — the adapter's three sinks are unpinned: a publish sink that
+- [x] **`tester`** — the adapter's three sinks are unpinned: a publish sink that
       does nothing leaves every gate cargo runs green, and that is exactly the
       defect #176 was filed for ("No op ever leaves the authoring peer").
       **Where:** `delivery/tests.rs` tests every handoff by passing
@@ -41,8 +41,27 @@ passed (1256 + 30 + 3, 0 failed).
       requirement about the adapter, which only `nix build ./dialectica#lgx` or a
       source-reading test can see; say which in the test's comment.
       **Severity:** high — the central requirement, not a corner.
+      **Outcome (`tester`): fixed, at the text layer, as the fix shape said.**
+      `delivery::tests::the_adapter_hands_delivery_every_recorded_membership_and_every_published_op`
+      reads `lib.rs` (comments stripped, whitespace removed) and asserts, with
+      hardcoded counts: `&mut|id|delivery.published(id)` once; the three publish
+      handlers each once as `self.publishing(&request,core::publish_post|reply|vote)`;
+      `&mut|stoa|self.delivery.joined(stoa)` twice; `self.delivery.start(` once; and
+      no closure that ignores its argument (`|_id|`, `|_stoa|`, `|_|`, `|_op|`,
+      `|_op_id|`). Its comment says why it is a text pin (`cfg(logos_scaffold)`,
+      which `cargo test` does not compile). Mutations, each predicted red and
+      observed red, and each the only test to move: the finding's own mutation
+      (`&mut |id| delivery.published(id)` replaced by `&mut |_id| {}`, "should
+      contain `&mut|id|delivery.published(id)` exactly 1 time(s)", got 0), and the
+      join handler's sink replaced by `|_stoa| {}` ("… exactly 2 time(s)", got 1).
+      The create handler's sink is the same text as the join handler's and is
+      counted with it, so dropping either is the same failure; not run separately.
+      A change that swapped the sink for a differently named ignoring closure
+      (`|ignored| {}`) would not be caught, nor would a sink that calls something
+      other than `published` on the right object; both need the adapter compiled
+      and run, which is task 7.3's manual two-peer check. Restored each time.
 
-- [ ] **`tester`** — the inbound bound is pinned on the queue and not on the
+- [x] **`tester`** — the inbound bound is pinned on the queue and not on the
       queue `start` builds. **Where:** `the_waiting_messages_never_exceed_the_bound`,
       `a_full_queue_keeps…`, `every_discard_is_counted…` and
       `the_inbound_bound_is_pinned` all construct `InboundQueue::with_bound(...)`
@@ -57,8 +76,16 @@ passed (1256 + 30 + 3, 0 failed).
       messages, and assert the journal carries a discard line. Every ingredient
       already exists in `taking_a_message_from_delivery_does_not_wait_on_the_boundary`.
       **Severity:** medium.
+      **Outcome (`tester`): fixed**, with the fix shape's ingredients:
+      `the_queue_the_running_wiring_builds_is_bounded_at_the_pinned_count` (see the
+      matching `correctness.md` box). Predicted red under `with_bound(usize::MAX)`,
+      observed red ("0 of 262 discarded"), the only test to move. It uses
+      `hold_the_boundary_up` (an unanswered open on a second Stoa) rather than a
+      gate on the first message, and asserts the arithmetic bound
+      (`>= junk - INBOUND_BOUND` discards) because whether the processor has taken
+      the first message when the flood starts is not fixed.
 
-- [ ] **`tester`** — the discard's log record is not checked for the two things the
+- [x] **`tester`** — the discard's log record is not checked for the two things the
       requirement forbids in it. **Where:** `delivery/tests.rs`
       `every_discard_is_counted_and_logged_apart_from_refusals` asserts the
       discard lines lack the word `refused`; the spec says "MUST NOT carry the
@@ -75,8 +102,30 @@ passed (1256 + 30 + 3, 0 failed).
       table a distinctive payload per case and assert it absent, as the
       unknown-channel test does.
       **Severity:** medium (security property, "no text the sender chose").
+      **Outcome (`tester`): fixed, for the discard, for every refusal the
+      processor logs, and for the two the listener logs.**
+      (1) `every_discard_is_counted_and_logged_apart_from_refusals` now feeds
+      messages with the sender `zzyzx-the-sender-identifier` and payloads
+      `zzyzx-payload-N`, and asserts every discard line lacks `zzyzx`, its hex and
+      its decimal byte list. Mutation: the discard line with the sender appended
+      (`format!("{} {who}", Note::Discarded{..})`, kept in one line so it still
+      counts as a discard). Predicted red, observed red
+      ("… 1 discarded since the module started zzyzx-the-sender-identifier"); a first
+      attempt that appended a second line went red on the count instead, which is
+      not the property, and was replaced. The pre-change test passes that mutation.
+      (2) `every_refusal_is_logged_under_its_own_name_and_none_carries_what_the_sender_chose`:
+      distinctive payload per row, guarded so a row whose payload does not carry the
+      marker fails; see the `readability.md` box for the mutation.
+      (3) New `a_refusal_made_on_hand_over_is_logged_by_kind_without_text_the_sender_chose`:
+      the unknown-channel and too-long refusals are logged by `hand_over`, a
+      different code path from the processor's, and no test read those lines for
+      an echo. Mutation: `hand_over`'s refusal line with the channel id appended
+      (prefix kept, so the name-matching tests stay green). Predicted red, observed
+      red, and the only test to move; the same mutation written as
+      `(kind: <sender>)` also turned three dev tests red, by breaking the
+      `refused (unknown-channel)` text they search for, not by the property.
 
-- [ ] **`tester`** — "found the op already held" reaches the sink through no test.
+- [x] **`tester`** — "found the op already held" reaches the sink through no test.
       **Where:** `op-transport`, "Every publish that succeeds … one that stored
       the op, and one that found the op already held", scenario "Re-publishing an
       op already held sends it again". `an_op_the_peer_already_holds_published_again_is_sent_again`
@@ -94,8 +143,19 @@ passed (1256 + 30 + 3, 0 failed).
       called once and the reply says `wasNew:false`. Not reachable by publishing
       the same body twice through a real log, since the counter differs.
       **Severity:** medium.
+      **Outcome (`tester`): fixed, as the fix shape said.**
+      `wire::tests::a_publish_that_finds_the_op_already_held_is_still_handed_to_delivery_on_all_three_handlers`
+      wraps a `MemoryOpLog` in `AlwaysAlreadyHeld` (stores, then answers
+      `Appended::AlreadyPresent`) and, for post, reply and vote, asserts the reply
+      is `wasNew:false` and the recording sink got exactly `[id]` of the id the
+      reply names. Mutation: `delivered_and_published` calling the sink only when
+      `published.was_new()`. Predicted red, observed red ("for post: an op found
+      already held must still be handed to delivery, once, left: []"), the only
+      failure among the 304 `wire::` tests. The three handlers share
+      `delivered_and_published`, so one mutation stands for all three; a
+      per-handler bypass was not tried.
 
-- [ ] **`tester`** — delivery's "no" is tried in one shape per call. The spec says
+- [x] **`tester`** — delivery's "no" is tried in one shape per call. The spec says
       "declines, fails, or does not answer" for node creation, channel creation and
       sends. Node creation and channel creation are tested only with the observed
       `Ok({error, success:false, value:null})` shape
@@ -110,14 +170,42 @@ passed (1256 + 30 + 3, 0 failed).
       one channel-creation case with `Err(..)` (including that start is still not
       requested after an `Err` creation).
       **Severity:** low-medium.
+      **Outcome (`tester`): fixed, wider than asked.** A table,
+      `the_ways_delivery_says_no` (transport failure; the observed error envelope;
+      a failure with no reason), run at every call site by
+      `a_declined_node_creation_is_read_in_every_shape_delivery_says_no` (start is
+      never requested, the log names the reason, channels are still requested),
+      `a_declined_channel_creation_is_read_in_every_shape_delivery_says_no` (the
+      channel is not open, the log names the Stoa and the reason) and
+      `a_declined_send_is_read_in_every_shape_delivery_says_no` (the log says
+      delivery did not take the op, and never that it was handed to the channel).
+      Mutations, each predicted red and observed red: `Worker::send` reading only
+      `Err` — red on the envelope row, and only that test; `channel_answer` reading
+      only `Err` — red on the envelope row, and the dev's
+      `a_declined_repeat_open_leaves_the_channel_open_for_the_next_message` also
+      went red; node creation reading only the error envelope (the reverse shape,
+      `Err` ignored) — red on the transport-failure row, and the only test to move,
+      so the dev's node test did not see that one. Node creation reading only `Err`
+      also turned the dev's `a_declined_node_creation_does_not_stop_the_module`
+      red, so that direction was already covered. "Does not answer" reaches the
+      code as the `Err` the seam's timeout gives; nothing here can tell it from a
+      transport failure, so it is the first row. Restored each time.
 
-- [ ] **`tester`** — "could not subscribe" is asserted; what the spec requires the
+- [x] **`tester`** — "could not subscribe" is asserted; what the spec requires the
       log to say is not. **Where:** `a_failed_subscription_leaves_sending_wired`
       matches the substring `could not subscribe`. The requirement is that the log
       record that "this peer will not receive ops from other peers". A line that
       said only the first would pass. Assert on the consequence's wording as the
       other log assertions do for theirs.
       **Severity:** low.
+      **Outcome (`tester`): fixed.** `a_failed_subscription_leaves_sending_wired`
+      now finds the line by the consequence's words (`will not receive ops from
+      other peers`, case-insensitively), checks it carries delivery's reason, and
+      also asserts node creation was requested (the spec's "node creation, channel
+      creation and sends MUST still be requested"; the test had checked the other
+      two). Mutation: the message reduced to `could not subscribe to
+      channelMessageReceived (<why>)`. Predicted red, observed red, the only test to
+      move. Restored.
 
 - [x] **`spec-writer`** — a requirement clause with no scenario and no test: "given
       up as unanswered". **Where:** `op-transport`, "Every payload the reliable
@@ -144,6 +232,23 @@ passed (1256 + 30 + 3, 0 failed).
       as an unknown channel while delivery still has not answered, and a valid op
       after it on an open channel is then stored. As you say, the `tester` will
       want the limit injectable to run it without a 40 s wait.
+      **Follow-up (`tester`):** the scenario's test is
+      `a_message_waiting_on_an_open_delivery_never_answers_is_judged_after_a_bounded_wait`
+      (limit injected, 200 ms). It had never been seen red; it is now. Two
+      mutations, each predicted red and observed red as "timed out waiting: the op
+      behind the unanswered open to be stored": the injected limit ignored
+      (`Processor::decide` passing `SETTLE_LIMIT` to the wait), and the wait
+      unbounded (`Condvar::wait` for a settle, no limit). A third mutation — a wait
+      whose clock restarts on every wake-up (`wait_timeout(book, limit)` in a loop,
+      giving up only when one call times out) — **survived that test and every dev
+      test**, and is what the spec's "no later than a fixed time after this peer
+      began waiting" forbids, since one unrelated open settling per interval
+      postpones the judgement for ever. New
+      `opens_settling_for_other_channels_do_not_extend_the_bounded_wait` keeps
+      another channel's open settling every millisecond until the waiting message
+      is refused (or 12 s pass), and is red under that mutation ("timed out
+      waiting: the message to be refused while opens keep settling"), green on the
+      shipped loop, and independent of when the processor began waiting.
 
 - [x] **`spec-writer`** — the scenario "The sender identifier is not the author's key"
       can never fail. **Where:** `op-transport`, last requirement. The value is
@@ -173,6 +278,29 @@ passed (1256 + 30 + 3, 0 failed).
       `the_identifier_is_not_a_key_in_any_encoding` and `delivery/tests.rs`
       `the_sender_identifier_is_not_the_authors_key` now map to no scenario; the
       `tester` should retarget or drop them.
+      **Follow-up (`tester`):** both dropped as tests of the scenario.
+      `delivery::tests::the_sender_identifier_is_not_the_authors_key` is deleted (a
+      note in its place says where the property is checked): no key reaches the code,
+      so it could not fail. `sender::tests::the_identifier_is_not_a_key_in_any_encoding`
+      is split: its format half survives as
+      `a_sender_identifier_is_its_head_and_thirty_two_bytes_in_lowercase_hex`, now
+      against hardcoded literals (it asserted against `SENDER_PREFIX` and
+      `SENDER_BYTES`, so it agreed with any value they were changed to), labelled as
+      a `design.md` pin and not a spec scenario; its key half is replaced by
+      `nothing_a_sender_identifier_is_made_from_is_a_key`, which does what the spec
+      now says the scenario is — reads the code that makes the identifier. It pins the
+      minting function's signature (a Stoa address and nothing else), that the bytes
+      come from `getrandom::fill` once, that the one thing imported from `identity`
+      is `Address`, and that no key, keystore or signature word appears in the
+      non-test source. Mutation: the random fill followed by the bytes being
+      overwritten from a public key. Predicted red, observed red on the import and
+      word checks; the dev's "two installations differ" and "two Stoas differ" tests
+      went red too, because that mutation is also deterministic. What this cannot see
+      is a key laundered through the Stoa address, which the spec's "checked by
+      reading" cannot either. `two_installations_holding_one_identity_supply_different_sender_identifiers`
+      never puts one identity in both installations: no identity reaches the code,
+      so doing so would change nothing it can see; its comment now says what can
+      fail it (a derivation from what the two share) instead of claiming the case.
 
 ## Areas that were clean
 

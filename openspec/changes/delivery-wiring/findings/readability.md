@@ -47,7 +47,7 @@ reader is told; none changes behaviour except entry 4's log wording.
       in a doc this piece did not write and counts the spec's list, not the enum;
       left alone.
 
-- [ ] **`tester`** — `delivery/tests.rs:1681` — "One case per refusal the boundary makes"
+- [x] **`tester`** — `delivery/tests.rs:1681` — "One case per refusal the boundary makes"
       is six cases of seven.
       **Scenario:** `cases` is `[(..); 6]`; `Storage` is the seventh refusal and is
       covered by `an_op_log_that_will_not_open_is_a_storage_refusal` (`:541`), not
@@ -57,6 +57,23 @@ reader is told; none changes behaviour except entry 4's log wording.
       **Fix shape:** say "one case per refusal reachable without breaking a store;
       `Storage` is `an_op_log_that_will_not_open_is_a_storage_refusal`'s". Nit.
       **Severity:** nit.
+      **Outcome (`tester`): fixed, by the other route:** the table now has the
+      seventh case. `every_refusal_is_logged_under_its_own_name_and_none_carries_what_the_sender_chose`
+      takes a fourth column, "break the op log first", and `storage` is a row
+      (matched by the prefix `refused (storage`, since that line carries this
+      peer's own error text). The comment says the table is the seven
+      `refusal_kind` names. What the table still cannot do is notice an eighth
+      `InboundRefusal` variant: `refusal_kind` is exhaustive without a wildcard,
+      so a new variant forces a name there and not a row here. Also strengthened in
+      passing: every row's payload, channel and sender now carry the marker
+      `zzyzx`, and the test asserts each payload really contains it, then that no
+      line contains it as text, as hex or as a decimal byte list. Mutation: the
+      processor's fallthrough refusal arm logging the payload
+      (`Some(&String::from_utf8_lossy(..))`) for every kind except
+      `unknown-channel`. Predicted red at the first row that echoes, observed red
+      at `too-long`. (The older `a_refusal_is_logged_by_kind_…` tests one kind,
+      `unknown-channel`, which the mutation leaves alone, so it cannot see it — by
+      construction, not run; that is the gap the table closes.)
 
 - [x] **`dev-writer`** — `delivery.rs:866` — the log says "stored inbound op" for an op
       the log already held, and the test named for the opposite pins it.

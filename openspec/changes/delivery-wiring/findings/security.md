@@ -199,3 +199,11 @@ integration tests fail in mutants' copied tree because they read outside
 `Display` replaced by an empty string survives. That only blanks the reason in
 the "no sender identifier could be retained" log line; it is not a security
 property, so it is left to the tester's lane rather than boxed here.
+
+**Follow-up (`tester`), the missed `SenderError` `Display` mutant:** closed.
+`sender::tests::every_error_says_what_went_wrong_in_its_own_words` renders each
+variant against a hardcoded fragment and requires the five to differ, and
+`a_sender_identifier_that_cannot_be_retained_opens_no_channel` now asserts the
+log line carries the store's own words. Mutation: `fmt` returning `Ok(())` at once.
+Predicted red, observed red in both ("no sender identifier could be retained ()"
+in the second). Restored.
