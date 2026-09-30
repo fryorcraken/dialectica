@@ -784,3 +784,51 @@ exact end instant is not generated and is not a security property.
 Outside this lane, for whoever holds readability or design: design.md's new
 "What breaks" line (`design.md:538`) says the guard's test "allows 0.5"; the test
 asserts `judged_after < limit * 3 / 4`, and its comment says why it is 0.75.
+
+## Re-review round 6 `1d5e2e37..3d34f15e`
+
+- [x] **re-review round 6 `1d5e2e37..3d34f15e`: no findings** — read the
+      `op-transport` delta's new requirement "Nothing of a message's wait on an
+      open is kept once it is judged" with its three scenarios, the ask clause
+      and the widened "Not every message racing a creation is covered" list, the
+      proposal and design.md diffs, and the `delivery.rs` and `delivery/tests.rs`
+      diffs, at `63989d66` (the range's code is `3d34f15e`'s); clean
+
+Dimension: **security** only.
+
+**No code changed but comments.** The `delivery.rs` diff is one doc comment on
+`Pending::asked`; `delivery/tests.rs` gains scenario citations only. So round 5's
+measurements stand on identical code: `end_wait` → `()` caught by `cargo mutants`,
+and the `extend_from` guard's deletion turning
+`an_ask_after_a_messages_wait_has_ended_does_not_make_it_wait_again` red. A
+re-measurement by hand mutation was attempted this round and refused by the
+harness's permission classifier; it was not pursued. The four tests the new
+scenarios cite pass at `63989d66` (4 passed, 0 failed).
+
+**The new requirement is what the code enforces, and it closes round 4's
+`end_wait` box at the spec level.** `await_settled` reaches `end_wait` on every
+exit — the loop has no `return` and nothing in it can panic — and `end_wait`
+removes the message's `Wait` by its own `WaitId`, which is a counter this peer
+issues, so a settle-and-re-request between wake-ups cannot leave it behind under
+a new `Pending` entry. When the entry itself goes, its waits go with it. The
+three exits the requirement names (settled, time ended while waiting, judged at
+once) are the three the tests cover. The requirement's consequence, "at most one
+message's wait at any time", holds as built: `await_settled` has one caller,
+`Processor::decide`, and `start` spawns one processor and runs once
+(`Wiring::NotStarted` guard). No sender action adds a `Pending` entry — only this
+peer's requests do — and `next_wait` wraps rather than grows. Round 4's
+sender-growable state is therefore now both measured and contracted.
+
+**No promise in the new text is one an adversary can make false.** The ask
+clause's "whose end has not yet passed" is `asked >= self.ends` in
+`Wait::extend_from`, with `asked` taken by `Channels::asked` under the book lock
+and reached only from the worker. The widened loss list ("whether or not it had
+been judged by the time of the ask") now names round 4's race honestly rather
+than promising coverage the code does not give; it narrows no guarantee a
+sender could exploit. No log note records a wait, so "hold no record" cannot be
+read against the module's log as built.
+
+Taste, not a box: "record" elsewhere in this spec means a log record, and the new
+requirement uses it for in-memory state. A reader could take "MUST hold no record
+of that message's wait" as a log rule. Harmless as built, since nothing logs a
+wait; the spec-writer may prefer "hold nothing of".
