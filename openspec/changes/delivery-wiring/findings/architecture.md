@@ -438,3 +438,49 @@ wait and the decline's prompt refusal with no new production shape. The adapter,
 - [x] **re-review round 3 `2cb71aaf..7462ded8`: no findings** — read the range's
       `delivery.rs` and `tests.rs` diffs and `wait_ends`/`is_opening`/`await_settled`
       at HEAD; clean
+
+## Re-review round 4 `7462ded8..58460b02`
+
+Read: the range's `delivery.rs` and `delivery/tests.rs` diffs in full, `Channels`,
+`ChannelBook`, `Pending`, `OpenTime`, `Wait`, `Opening`, `await_settled`,
+`Processor::{new, decide}` and `Delivering::start` at HEAD, the lib.rs text pins the
+new tests extend, and the design.md pointers the new doc comments make. Confirmed by
+running, not reading: `a6fa2dde` checked out on its own and `cargo test -p
+dialectica-core --lib delivery` is green (106 tests), and the whole `dialectica-core`
+lib suite is green at the tip (1305). The refactor commit `a6fa2dde` is what it says:
+it adds `Processor::new` setting `settle_limit: SETTLE_LIMIT`, and swaps the one
+struct literal in `start` and the two in the test fixtures for calls to it; no
+behaviour moves. The earlier round-2 taste note (`wait_ends` naming both a field and
+two mutating methods) is undone for the better: the mutator is now `begin_wait`
+and `ChannelBook::wait_ends` is a read; and the per-message end removes the
+"`limit` passed every call, used on the first" note. Nothing this range adds undoes
+an earlier box.
+
+Judged and left without a box (taste).
+
+- **`waits: HashMap<WaitId, Wait>` plus `next_wait` models many concurrent waiters,
+  and production has one.** `Delivering::start` spawns exactly one inbound processor
+  and `decide` runs one message at a time, so at most one wait exists in the whole
+  book outside the tests. The map, the id counter, `end_wait` and the "a wait gone
+  from the book ends the wait" branch are the cost of being right under a second
+  processor, which nothing plans. The alternative is a read-shaped one: `Pending`
+  keeps only the last ask (`Option<Instant>` and a count), and the waiter keeps its
+  own end and a "seen this ask" flag, so the ask needs no registry to reach a blocked
+  reader and there is no entry lifetime to reason about. Neither is wrong: the map
+  is correct by construction for any number of processors, and the doc says why the
+  ask must reach a message already waiting. Not raised because the current shape has
+  no reachable defect and the cost is a few lines.
+- **The processor's limit is pinned by reading `delivery.rs` as text** (two-way: a
+  second constructor, a struct update or an assignment fails the counts). It is the
+  same class of pin the adapter already has, and the stated reason (a thread that
+  owns its processor for the life of the module cannot be read by a test) holds. A
+  seam that let `start` take its processor's limit from a parameter would make the
+  pin a real test; a follow-up, not this piece. `without_comments` strips whole
+  comment lines only, so a trailing comment containing `settle_limit:` fails the
+  count loudly rather than passing quietly.
+- Two test comments still say "deadline" where the code now says a message's end
+  (`delivery/tests.rs:2377`, `:2617`, `:2631`); harmless.
+
+- [x] **re-review round 4 `7462ded8..58460b02`: no findings** — read the range's
+      `delivery.rs` and `tests.rs` diffs, the new wait state at HEAD and the refactor
+      commit `a6fa2dde` on its own (green); clean
