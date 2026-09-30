@@ -220,7 +220,10 @@ pub const RECEIVE_WINDOW_MS: u64 = 60 * 60 * 1000;
 ///
 /// # Called from the receive boundary and from nowhere else
 ///
-/// [`crate::transport::receive`] is its one caller. Rebuilding a store,
+/// Its one caller is `transport::judge`, which is private and reached only
+/// through [`crate::transport::receive_via`] — the receive boundary, which
+/// [`crate::transport::receive`] and the delivery wiring's processor both go
+/// through. Rebuilding a store,
 /// replaying ops and restoring a snapshot all go through
 /// [`crate::log::OpLog::append`], which takes no time — so a path that holds no
 /// `now_ms` cannot reach this without someone widening the log's API to carry

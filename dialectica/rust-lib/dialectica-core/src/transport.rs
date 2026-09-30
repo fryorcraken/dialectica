@@ -485,9 +485,10 @@ pub struct Admitted {
 /// [`InboundMessage`] so that the struct mirroring the event does not hold two
 /// times side by side, one to be read and one never to be.
 ///
-/// **This is the only function that takes a time and appends.** The log's
-/// `append` takes none, which is what keeps the window off every rebuild,
-/// replay and restore path. See [`crate::arrival::exceeds_receive_window`].
+/// **This and [`receive_via`], which it calls, are the only functions that take
+/// a time and reach an append.** The log's `append` takes none, which is what
+/// keeps the window off every rebuild, replay and restore path. See
+/// [`crate::arrival::exceeds_receive_window`].
 ///
 /// # No panic is reachable from any input
 ///
@@ -504,18 +505,87 @@ pub fn receive<L: OpLog>(
     log: &mut L,
     now_ms: u64,
 ) -> Result<Admitted, InboundRefusal> {
-    let channel_stoa = *channels
-        .stoa_of(message.channel_id)
-        .ok_or(InboundRefusal::UnknownChannel)?;
+    receive_via(
+        message,
+        |channel_id| channels.stoa_of(channel_id).copied(),
+        now_ms,
+        |judged| admit(judged, log),
+    )
+}
 
-    // BEFORE the decode. The spec requires it, and the reason is that this is the
-    // one bound whose input size an attacker chooses freely.
-    if message.payload.len() > MAX_MESSAGE_BYTES {
+/// [`receive`], with the channel lookup and the write supplied by the caller: the
+/// one place the boundary's order is written down.
+///
+/// # Why the lookup and the write are parameters
+///
+/// The delivery wiring cannot hand over an `&OpenChannels` or an open log. Its
+/// set of open channels sits behind a lock that must not be held while a
+/// signature is verified or a row appended, and it opens the op log only for an
+/// op that passed, so a payload refused on its channel or its bytes costs no
+/// database open. So it supplies `stoa_of`, which copies the Stoa out and
+/// releases the lock, and `write`, which opens the log and calls [`admit`].
+///
+/// **The order stays here, whoever calls.** [`receive`] and the delivery wiring
+/// both come through this function, so a step added between the lookup and the
+/// judgement reaches the running module and the boundary's tests together.
+///
+/// **The lookup is keyed by the message's own channel identifier**, inside this
+/// function. A caller cannot pair one channel's message with another channel's
+/// Stoa, which is what lets [`Judged`] certify the channel check as well as the
+/// checks on the bytes.
+pub fn receive_via(
+    message: InboundMessage<'_>,
+    stoa_of: impl FnOnce(&str) -> Option<Address>,
+    now_ms: u64,
+    write: impl FnOnce(Judged) -> Result<Admitted, InboundRefusal>,
+) -> Result<Admitted, InboundRefusal> {
+    let channel_stoa = stoa_of(message.channel_id).ok_or(InboundRefusal::UnknownChannel)?;
+    write(judge(message, channel_stoa, now_ms)?)
+}
+
+/// An op that passed every check [`receive`] makes before it writes, the channel
+/// check included.
+///
+/// Its field is private and `judge` is the only constructor, and only
+/// [`receive_via`] calls `judge`, with the Stoa it looked up under the message's
+/// own channel identifier. So [`admit`] cannot be handed an op that skipped a
+/// check, or one judged against another channel's Stoa: "every check runs before
+/// anything is written" holds by the type.
+#[derive(Debug)]
+pub struct Judged(SignedOp);
+
+/// The message limit, as the one predicate every caller asks: a payload longer
+/// than [`MAX_MESSAGE_BYTES`] is refused as [`InboundRefusal::TooLong`], and one
+/// of exactly the limit is not.
+///
+/// One function so that the boundary's own size check (`judge`, inside
+/// [`receive_via`]) and anything refusing earlier — the delivery
+/// wiring, before a payload may wait for the boundary — cannot disagree about
+/// where the limit falls.
+pub fn refuse_oversized(payload: &[u8]) -> Result<(), InboundRefusal> {
+    if payload.len() > MAX_MESSAGE_BYTES {
         return Err(InboundRefusal::TooLong {
-            bytes: message.payload.len(),
+            bytes: payload.len(),
             limit: MAX_MESSAGE_BYTES,
         });
     }
+    Ok(())
+}
+
+/// Checks 2–6 of [`receive`], for a message on the channel of `channel_stoa`.
+///
+/// Private, and called only by [`receive_via`], which looked `channel_stoa` up
+/// under `message.channel_id`: nothing here relates the two, so a caller that
+/// could pass them separately could judge one channel's message against
+/// another's Stoa.
+fn judge(
+    message: InboundMessage<'_>,
+    channel_stoa: Address,
+    now_ms: u64,
+) -> Result<Judged, InboundRefusal> {
+    // BEFORE the decode. The spec requires it, and the reason is that this is the
+    // one bound whose input size an attacker chooses freely.
+    refuse_oversized(message.payload)?;
 
     // The WHOLE payload, so no prefix is decoded in isolation. `Op::decode`'s
     // trailing-bytes check is what makes that true of a valid op followed by junk.
@@ -543,12 +613,19 @@ pub fn receive<L: OpLog>(
             return Err(InboundRefusal::AheadOfTime { counter, now_ms });
         }
     }
+    Ok(Judged(signed))
+}
 
+/// Append an op the boundary passed: the one write [`receive_via`] reaches, and
+/// its last statement.
+pub fn admit<L: OpLog>(judged: Judged, log: &mut L) -> Result<Admitted, InboundRefusal> {
+    let Judged(signed) = judged;
     let id = signed.op.id();
     // `Arrival::unordered()` and not `from_parts(None, None)`: the named
     // constructor is a statement that the transport supplied nothing, and
-    // grepping for it finds every place that gap is absorbed. `message.timestamp`
-    // and `message.sender_id` reach nothing here, by design.
+    // grepping for it finds every place that gap is absorbed. `Judged` carries
+    // only the op, so neither the event's timestamp nor its sender identifier can
+    // reach the append, by design.
     let appended = log
         .append(signed, Arrival::unordered())
         .map_err(InboundRefusal::Storage)?;
@@ -698,11 +775,41 @@ pub fn publish<L: OpLog>(
 
     // The channel is looked up AFTER the append, so that a Stoa with no channel
     // still stores the op. Checking first and returning early would lose it.
+    addressed(id, stoa, payload, channels)
+}
+
+/// Say what to send, and where, for an op this peer **already holds**.
+///
+/// # The half of [`publish`] that does not append
+///
+/// The module's publish handlers append through `authoring`, which stamps the
+/// op's clock and so is the only code that can make the op; the adapter then
+/// hands the op off after the reply. So the append and the handoff happen at two
+/// moments, and this is the second one on its own. Both go through
+/// [`addressed`], so "is a channel open for this Stoa, and which one" has one
+/// answer whichever way the op arrived here.
+///
+/// The payload is the stored op's wire form — `op-transport`'s "the payload
+/// handed to the transport is the op's wire form as stored" — and nothing is
+/// written: there is no `&mut` log here to write to.
+pub fn handoff(stored: &SignedOp, channels: &OpenChannels) -> Result<Publishable, PublishError> {
+    let payload = stored.to_bytes().map_err(PublishError::Unencodable)?;
+    addressed(stored.op.id(), stored.op.stoa, payload, channels)
+}
+
+/// The channel an op goes on, or [`PublishError::NoChannel`] when none is open.
+///
+/// Never opens one: `channels` is borrowed shared, so opening is unreachable.
+fn addressed(
+    id: OpId,
+    stoa: Address,
+    payload: Vec<u8>,
+    channels: &OpenChannels,
+) -> Result<Publishable, PublishError> {
     let identity = ChannelIdentity::of(&stoa);
     if !channels.is_open(identity.channel_id()) {
         return Err(PublishError::NoChannel { stoa, id });
     }
-
     Ok(Publishable {
         id,
         channel_id: identity.channel_id,
@@ -2105,6 +2212,44 @@ mod tests {
     }
 
     #[test]
+    fn the_boundary_looks_a_channel_up_under_the_messages_own_identifier() {
+        // Architecture review: `judge` once took the channel's Stoa from its
+        // caller as a bare address, so `Judged` certified the checks on the bytes
+        // but not that the Stoa was the one the message arrived under. The lookup
+        // is now `receive_via`'s own, keyed by the message's channel identifier.
+        // Two channels are open here, and the op names the one it did NOT arrive
+        // on: judged against the channel it arrived on it is a Stoa mismatch, and
+        // nothing is appended.
+        let arrived_on = a_stoa("Agora");
+        let named = a_stoa("Lyceum");
+        let (mut channels, mut log, identity) = peer_in(arrived_on);
+        channels.open(&ChannelIdentity::of(&named));
+        let payload = signed_post_in(named, "copied across").to_bytes().unwrap();
+
+        let mut asked = Vec::new();
+        let refusal = receive_via(
+            inbound(identity.channel_id(), &payload),
+            |channel_id| {
+                asked.push(channel_id.to_string());
+                channels.stoa_of(channel_id).copied()
+            },
+            NOW_MS,
+            |judged| admit(judged, &mut log),
+        )
+        .unwrap_err();
+
+        assert_eq!(asked, vec![identity.channel_id().to_string()]);
+        assert_eq!(
+            refusal,
+            InboundRefusal::StoaMismatch {
+                named,
+                channel_is_for: arrived_on
+            }
+        );
+        assert_eq!(log.len().unwrap(), 0);
+    }
+
+    #[test]
     fn a_payload_at_the_limit_is_not_refused_for_its_size() {
         // The boundary is inclusive. Without this, a fencepost error in either
         // direction is invisible — both still "refuse something large" and every
@@ -3371,5 +3516,41 @@ mod tests {
         assert_eq!(in_one.channel_id, ChannelIdentity::of(&one).channel_id());
         assert_eq!(in_two.channel_id, ChannelIdentity::of(&two).channel_id());
         assert_ne!(in_one.channel_id, in_two.channel_id);
+    }
+
+    // ─── Handing off an op already held ───────────────────────────────────
+
+    #[test]
+    fn a_handoff_carries_the_stored_wire_form_on_the_ops_own_channel() {
+        let one = a_stoa("Agora");
+        let two = a_stoa("Lyceum");
+        let mut channels = OpenChannels::new();
+        channels.open(&ChannelIdentity::of(&one));
+        channels.open(&ChannelIdentity::of(&two));
+        let op = signed_post_in(two, "held");
+
+        let handed = handoff(&op, &channels).unwrap();
+
+        assert_eq!(handed.id, op.op.id());
+        assert_eq!(handed.channel_id, ChannelIdentity::of(&two).channel_id());
+        assert_eq!(handed.payload, op.to_bytes().unwrap());
+    }
+
+    #[test]
+    fn a_handoff_with_no_open_channel_names_the_op_and_its_stoa() {
+        let stoa = a_stoa("Agora");
+        let op = signed_post_in(stoa, "held");
+        // Another Stoa's channel open, so "some channel is open" is not enough.
+        let mut channels = OpenChannels::new();
+        channels.open(&ChannelIdentity::of(&a_stoa("Lyceum")));
+
+        assert_eq!(
+            handoff(&op, &channels),
+            Err(PublishError::NoChannel {
+                stoa,
+                id: op.op.id()
+            })
+        );
+        assert_eq!(channels.len(), 1, "a handoff opened a channel");
     }
 }
