@@ -2380,7 +2380,12 @@ fn an_opens_time_is_the_same_for_every_message_that_waits_on_it_until_a_request_
     let _first_request = channels.opening(&channel);
     let limit = Duration::from_secs(40);
     let pause = Duration::from_millis(20);
-    let ends_at = || lock(&channels.book).wait_ends(channel.channel_id(), limit);
+    // Each reading is a message beginning to wait, and the end it is given.
+    let ends_at = || {
+        let mut book = lock(&channels.book);
+        let wait = book.begin_wait(channel.channel_id(), limit)?;
+        book.wait_ends(channel.channel_id(), wait)
+    };
 
     let first_message = ends_at().expect("a pending open has a time");
     std::thread::sleep(pause);
@@ -2523,10 +2528,11 @@ fn a_new_request_for_a_channel_whose_wait_has_expired_lets_a_message_wait_again(
 // cannot extend it — and only messages taken after the request wait on it.
 #[test]
 fn a_request_made_while_a_message_waits_does_not_extend_that_messages_wait() {
-    // A storm of requests for the same channel, none reported created, runs for
-    // as long as the message waits: were the message's deadline re-read from
-    // the book, each request would restart it and the wait would last as long as
-    // the storm. The storm stops only once the refusal is seen, so the assertion
+    // A storm of requests for the same channel, none reported created and none
+    // asked of delivery, runs for as long as the message waits: were a request to
+    // move the waiting message's end — the open's time read on each wake-up in
+    // place of the message's own — each request would restart it and the wait
+    // would last as long as the storm. The storm stops only once the refusal is seen, so the assertion
     // does not depend on when the wait began.
     //
     // The refusal is also required to come no sooner than the limit: a message
@@ -2573,6 +2579,287 @@ fn a_request_made_while_a_message_waits_does_not_extend_that_messages_wait() {
     );
     // The first open is still unanswered when the message is refused.
     assert!(channels.is_known(never.channel_id()));
+}
+
+/// Whether a message is waiting on `channel`'s open now, asked of the book, so a
+/// test knows a wait has begun without guessing at a pause.
+fn a_message_waits_on(channels: &Channels, channel: &ChannelIdentity) -> bool {
+    lock(&channels.book)
+        .pending
+        .get(channel.channel_id())
+        .is_some_and(|pending| !pending.waits.is_empty())
+}
+
+#[test]
+fn a_message_waiting_when_delivery_is_asked_is_judged_after_delivery_answers() {
+    // `op-transport`, scenario "A message waiting when this peer asks delivery for
+    // its channel is judged after delivery answers", and the paragraph "Asking
+    // delivery to create a channel starts the open's time again": the ask gives a
+    // message already waiting a new end, the fixed time after the ask, in place of
+    // the one it began with.
+    //
+    // The message begins waiting, the ask comes 0.6 of a limit later, and delivery
+    // answers 0.6 of a limit after the ask. So the answer comes at least 1.2 limits
+    // after the message began waiting, past the end it began with, on any machine;
+    // and 0.6 of a limit after the ask, inside the end the ask gave it, unless this
+    // thread stalls for 0.4 of one. Both are asserted as the scenario's WHEN, so a
+    // stall shows as that and not as a wrong answer. Without the extension the
+    // message is refused at its first end, before the answer.
+    let peer = Peer::new("recv-extended-by-the-ask");
+    let stoa = genesis("Agora").address().unwrap();
+    let identity = ChannelIdentity::of(&stoa);
+    let channels = Arc::new(Channels::default());
+    let limit = Duration::from_millis(1000);
+    let mut processor = peer.processor(Arc::clone(&channels));
+    processor.settle_limit = limit;
+    let op = their_op(stoa, "waiting when delivery is asked", 0);
+    let message = arriving(identity.channel_id(), op.to_bytes().unwrap(), 1);
+    let mut opening = channels.opening(&identity);
+
+    let deciding = std::thread::spawn(move || processor.decide(&message));
+    eventually("the message to begin waiting", || {
+        a_message_waits_on(&channels, &identity)
+    });
+    let waiting_since = Instant::now(); // no earlier than it began waiting
+    std::thread::sleep(limit * 6 / 10);
+    let asked = Instant::now();
+    opening.asked();
+    std::thread::sleep(limit * 6 / 10);
+    assert!(
+        waiting_since.elapsed() > limit,
+        "the case needs the first end passed"
+    );
+    assert!(
+        asked.elapsed() < limit,
+        "this thread stalled past the end the ask gives"
+    );
+    opening.held();
+    drop(opening);
+    eventually("the message to be decided", || deciding.is_finished());
+
+    assert!(
+        stored(&peer, &op.op.id()).is_some(),
+        "{:?}",
+        peer.journal.lines()
+    );
+    assert!(peer.journal.with("(unknown-channel)").is_empty());
+}
+
+#[test]
+fn an_earlier_message_on_a_queued_open_does_not_cost_an_op_that_arrives_while_delivery_is_asked() {
+    // `op-transport`, scenario "An earlier message on a queued open does not cost
+    // an op that arrives while delivery is asked" — the security re-review's
+    // round-3 probe, with the opposite expectation. A junk payload begins waiting
+    // on an open still queued behind other requests, starting the open's time;
+    // this peer then asks delivery; an honest op is handed over while delivery is
+    // being asked; and delivery answers after the fixed time has passed since the
+    // junk began waiting, but inside it since the ask. Before the ask restarted
+    // the open's time, both were refused as an unknown channel and the op lost.
+    //
+    // Timed as `a_message_waiting_when_delivery_is_asked_is_judged_after_delivery_answers`
+    // is: the scenario's two conditions on the answer are asserted, not assumed.
+    let peer = Peer::new("recv-junk-then-op-while-asked");
+    let stoa = genesis("Agora").address().unwrap();
+    let identity = ChannelIdentity::of(&stoa);
+    let channels = Arc::new(Channels::default());
+    let limit = Duration::from_millis(1000);
+    let mut processor = peer.processor(Arc::clone(&channels));
+    processor.settle_limit = limit;
+    let queue = Arc::clone(&processor.queue);
+    let mut opening = channels.opening(&identity);
+    let op = their_op(stoa, "handed over while delivery is asked", 0);
+
+    queue.offer(arriving(
+        identity.channel_id(),
+        b"junk that starts the open's time".to_vec(),
+        1,
+    ));
+    std::thread::spawn(move || processor.run());
+    eventually("the junk to begin waiting", || {
+        a_message_waits_on(&channels, &identity)
+    });
+    let waiting_since = Instant::now();
+    std::thread::sleep(limit * 6 / 10);
+    let asked = Instant::now();
+    opening.asked();
+    queue.offer(arriving(identity.channel_id(), op.to_bytes().unwrap(), 2));
+    std::thread::sleep(limit / 2);
+    assert!(
+        waiting_since.elapsed() > limit,
+        "the case needs the first end passed"
+    );
+    assert!(
+        asked.elapsed() < limit,
+        "this thread stalled past the end the ask gives"
+    );
+    opening.held();
+    drop(opening);
+    queue.close();
+    eventually("both messages to be decided", || {
+        stored(&peer, &op.op.id()).is_some() || peer.journal.with("refused (").len() >= 2
+    });
+
+    assert!(
+        stored(&peer, &op.op.id()).is_some(),
+        "{:?}",
+        peer.journal.lines()
+    );
+}
+
+#[test]
+fn asking_delivery_for_a_channel_whose_wait_has_expired_lets_a_message_wait_again() {
+    // `op-transport`, scenario "Asking delivery for a channel whose wait has
+    // expired lets a message wait again". The open is asked for once and never
+    // asked again; a message waits it out before delivery is asked. This peer then
+    // asks delivery, a message arrives, and delivery answers: the message waited
+    // for that answer and is stored. Without the ask starting the open's time
+    // again, the time has ended and the message is judged at once and refused.
+    //
+    // "Waited for the answer" is read off a flag raised immediately before the
+    // answer, as in `a_new_request_for_a_channel_whose_wait_has_expired_lets_a_message_wait_again`.
+    let peer = Peer::new("recv-expired-then-asked");
+    let stoa = genesis("Agora").address().unwrap();
+    let identity = ChannelIdentity::of(&stoa);
+    let channels = Arc::new(Channels::default());
+    let mut opening = channels.opening(&identity);
+    wait_the_open_out(&peer, &channels, &identity);
+
+    let mut processor = peer.processor(Arc::clone(&channels));
+    processor.settle_limit = Duration::from_secs(10);
+    let op = their_op(stoa, "waits on the ask", 0);
+    let answered = std::sync::atomic::AtomicBool::new(false);
+    opening.asked();
+    let answered_when_decided = std::thread::scope(|scope| {
+        let answered = &answered;
+        scope.spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            answered.store(true, std::sync::atomic::Ordering::SeqCst);
+            opening.held();
+            drop(opening);
+        });
+        processor.decide(&arriving(identity.channel_id(), op.to_bytes().unwrap(), 2));
+        answered.load(std::sync::atomic::Ordering::SeqCst)
+    });
+
+    assert!(
+        answered_when_decided,
+        "judged without waiting on the ask: {:?}",
+        peer.journal.lines()
+    );
+    assert!(
+        stored(&peer, &op.op.id()).is_some(),
+        "{:?}",
+        peer.journal.lines()
+    );
+    assert_eq!(peer.journal.with("unknown-channel").len(), 1);
+}
+
+#[test]
+fn a_second_ask_while_a_message_waits_does_not_extend_its_wait_again() {
+    // `op-transport`, scenario "A second ask while a message waits does not extend
+    // its wait again": refused no later than the fixed time after the FIRST ask.
+    // Without the cap, every ask would move the message's end, and asks chained
+    // against a hung delivery would postpone it for as long as they came.
+    //
+    // The first ask comes 0.4 of a limit after the message began waiting, the
+    // second 0.7 after the first. Right: refused a limit after the first ask.
+    // Uncapped: 1.7 limits after it, which the upper bound of 1.4 fails. The
+    // message must still be waiting at the second ask, or the scenario's WHEN does
+    // not hold — and that is also where a first ask that extended nothing fails,
+    // since its message ended no later than 0.6 of a limit after that ask.
+    let peer = Peer::new("recv-second-ask-no-extension");
+    let stoa = genesis("Agora").address().unwrap();
+    let identity = ChannelIdentity::of(&stoa);
+    let channels = Arc::new(Channels::default());
+    let limit = Duration::from_millis(1000);
+    let mut processor = peer.processor(Arc::clone(&channels));
+    processor.settle_limit = limit;
+    let message = arriving(identity.channel_id(), b"waits through two asks".to_vec(), 1);
+    let opening = channels.opening(&identity);
+
+    let deciding = std::thread::spawn(move || processor.decide(&message));
+    eventually("the message to begin waiting", || {
+        a_message_waits_on(&channels, &identity)
+    });
+    std::thread::sleep(limit * 4 / 10);
+    let first_ask = Instant::now();
+    opening.asked();
+    std::thread::sleep(limit * 7 / 10);
+    assert!(
+        !deciding.is_finished(),
+        "the message was not waiting at the second ask: the first ask did not extend it \
+         ({:?})",
+        peer.journal.lines()
+    );
+    opening.asked();
+    eventually("the message to be refused", || deciding.is_finished());
+    let refused_after = first_ask.elapsed();
+
+    assert!(
+        refused_after < limit * 14 / 10,
+        "refused {refused_after:?} after the first ask: the second ask extended the wait again"
+    );
+    assert_eq!(
+        peer.journal.with("refused (unknown-channel)").len(),
+        1,
+        "{:?}",
+        peer.journal.lines()
+    );
+    drop(opening); // unanswered until here
+}
+
+#[test]
+fn the_worker_marks_its_ask_of_delivery_in_the_channel_book() {
+    // `op-transport`: "When this peer asks delivery to create a channel that is
+    // being opened, the open's time MUST start again at that ask". The tests above
+    // make the ask by hand; this one has the worker make it, by calling delivery.
+    // A message begins waiting on the open, the worker reaches the open half a
+    // limit later and asks delivery, which holds the call. At 1.2 limits after the
+    // message began waiting it is still waiting — the ask moved its end — and it
+    // is stored once delivery answers. A worker that asked without marking it
+    // leaves the message its first end, refused while the call is still held.
+    let peer = Peer::new("worker-marks-the-ask");
+    let gate = Gate::closed();
+    let _ = peer.fake.script(|s| s.create_gate = Some(gate.clone()));
+    let stoa = genesis("Agora").address().unwrap();
+    let identity = ChannelIdentity::of(&stoa);
+    let channels = Arc::new(Channels::default());
+    let limit = Duration::from_millis(1000);
+    let mut processor = peer.processor(Arc::clone(&channels));
+    processor.settle_limit = limit;
+    let op = their_op(stoa, "waiting while the worker asks", 0);
+    let message = arriving(identity.channel_id(), op.to_bytes().unwrap(), 1);
+    let opening = channels.opening(&identity);
+    let worker = Worker {
+        channels: Arc::clone(&channels),
+        ..peer.worker()
+    };
+
+    let deciding = std::thread::spawn(move || processor.decide(&message));
+    eventually("the message to begin waiting", || {
+        a_message_waits_on(&channels, &identity)
+    });
+    let waiting_since = Instant::now();
+    std::thread::sleep(limit / 2);
+    let opening_thread = std::thread::spawn(move || worker.open(opening));
+    eventually("the worker to ask delivery", || {
+        !peer.fake.creates().is_empty()
+    });
+    std::thread::sleep((limit * 12 / 10).saturating_sub(waiting_since.elapsed()));
+    assert!(
+        !deciding.is_finished(),
+        "the message was judged at its first end while delivery was being asked: {:?}",
+        peer.journal.lines()
+    );
+    gate.release();
+    opening_thread.join().unwrap();
+    eventually("the message to be decided", || deciding.is_finished());
+
+    assert!(
+        stored(&peer, &op.op.id()).is_some(),
+        "{:?}",
+        peer.journal.lines()
+    );
 }
 
 #[test]

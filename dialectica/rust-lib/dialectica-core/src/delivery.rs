@@ -499,15 +499,20 @@ const MEMBERSHIP_PAGE: usize = 100;
 /// and `a_restarted_peer_keeps_what_delivery_hands_over_before_startup_asks_for_its_channel`
 /// are red while the worker made the guard as it called delivery.
 ///
-/// # The wait is bounded per open
+/// # The wait is bounded per open, and restarted by this peer's ask
 ///
-/// Each pending open carries its own time ([`Pending::wait_ends`]): one fixed
-/// time, started by the first message to wait on it, after which that channel's
-/// messages are judged without waiting until the channel is asked for again.
+/// Each pending open carries its own time ([`OpenTime`]): one fixed time, started
+/// by the first message to wait on it after a request, and started again when
+/// the worker asks delivery to create the channel ([`Channels::asked`]). Once it
+/// has ended, that channel's messages are judged without waiting until a request
+/// or an ask starts it again. Each waiting message holds its own end ([`Wait`]),
+/// which an ask moves once.
 #[derive(Default)]
 struct ChannelBook {
     open: OpenChannels,
     pending: HashMap<String, Pending>,
+    /// The next [`WaitId`] to hand out.
+    next_wait: u64,
 }
 
 /// A channel being opened: what the book holds for it until every request for it
@@ -517,34 +522,106 @@ struct Pending {
     /// a flag, because a repeated join can put a second open in the queue before
     /// the first is answered.
     requests: usize,
-    /// When messages on this channel stop waiting for the open: `None` until a
-    /// message first waits on it after the latest request. See [`Pending::wait_ends`].
-    wait_ends: Option<Instant>,
+    /// The open's time: what a message beginning to wait on it waits until.
+    time: OpenTime,
+    /// The messages waiting on this open now, each with its own end.
+    waits: HashMap<WaitId, Wait>,
+}
+
+/// Where an open's time stands.
+///
+/// # The time is the open's, not the message's
+///
+/// `op-transport` bounds the wait "for each open, not for each message". With a
+/// clock per message, each message on a channel whose open is stuck waited the
+/// whole [`SETTLE_LIMIT`] again, and the one processor held every other Stoa up
+/// for all of them in a row: a sender putting n messages on that channel chose an
+/// n-fold stall (the security re-review measured ten messages holding a valid op
+/// back for ten limits). Kept here, the time passes once for each time it is
+/// started, however many messages arrive on its channel.
+/// `many_messages_on_one_unanswered_open_hold_other_channels_up_for_one_wait_not_one_each`
+/// is red with the clock per message.
+///
+/// # Three states, because the two things that start it know different things
+///
+/// A message beginning to wait knows the limit it waits by, and fixes the end.
+/// The worker's ask of delivery knows only the moment it asks: the end is fixed,
+/// from that moment, by the next message to wait. Once fixed it is kept as an
+/// end, so a time that has ended stays ended for every later message, whatever
+/// limit that message waits by.
+///
+/// **An end already past is the spec's expired wait**, and needs no state of its
+/// own: every later message on the channel is given that same instant and is
+/// judged at once. Nothing else about the open changes — it stays pending, so its
+/// messages are still handed over and delivery's answer still settles it — until
+/// a request ([`Channels::opening`]) or an ask ([`Channels::asked`]) starts the
+/// time again.
+#[derive(Clone, Copy)]
+enum OpenTime {
+    /// No message has waited since the latest request, and there has been no ask
+    /// since it.
+    NotStarted,
+    /// This peer asked delivery to create the channel at this instant, and no
+    /// message has begun waiting since.
+    StartedAt(Instant),
+    /// The time ends at this instant.
+    Ends(Instant),
+}
+
+impl OpenTime {
+    /// When the open's time ends, fixing it — `limit` after it started, or from
+    /// now if nothing has started it.
+    fn end(&mut self, limit: Duration) -> Instant {
+        let ends = match *self {
+            OpenTime::NotStarted => Instant::now() + limit,
+            OpenTime::StartedAt(asked) => asked + limit,
+            OpenTime::Ends(ends) => ends,
+        };
+        *self = OpenTime::Ends(ends);
+        ends
+    }
+}
+
+/// Names one message's wait in the book, so the ask can reach it and the waiter
+/// can read it back.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct WaitId(u64);
+
+/// One message's wait on an open.
+struct Wait {
+    /// When the message stops waiting if the open has not settled.
+    ends: Instant,
+    /// The extension an ask may still give it: the limit it waits by, until the
+    /// first ask made while it waits uses it up.
+    extension: Option<Duration>,
+}
+
+impl Wait {
+    /// This peer asked delivery for the channel at `asked`: the message now ends
+    /// its wait `limit` after the ask, in place of the end it began with —
+    /// **once**. `op-transport`: a later ask "MUST NOT move that message's end
+    /// again". Without the cap, asks chained against a hung delivery (a repeated
+    /// join, each ask answered by `CALL_TIMEOUT`) would postpone one message for as
+    /// long as they came, and "Requests made while a message waits do not lengthen
+    /// its wait" would be false. `Option::take` is the cap: a second ask finds
+    /// nothing to take. `a_second_ask_while_a_message_waits_does_not_extend_its_wait_again`
+    /// is red without it.
+    fn extend_from(&mut self, asked: Instant) {
+        if let Some(limit) = self.extension.take() {
+            self.ends = asked + limit;
+        }
+    }
 }
 
 impl Pending {
-    /// When a message on this channel must stop waiting — starting the open's
-    /// time, `limit` from now, if no message has waited since the latest request.
-    ///
-    /// # The time is the open's, not the message's
-    ///
-    /// `op-transport` bounds the wait "for each open, not for each message". With
-    /// a clock per message, each message on a channel whose open is stuck waited
-    /// the whole [`SETTLE_LIMIT`] again, and the one processor held every other
-    /// Stoa up for all of them in a row: a sender putting n messages on that
-    /// channel chose an n-fold stall (the security re-review measured ten messages
-    /// holding a valid op back for ten limits). Kept here, the time passes once per
-    /// open, however many messages arrive on its channel.
-    /// `many_messages_on_one_unanswered_open_hold_other_channels_up_for_one_wait_not_one_each`
-    /// is red with the clock per message.
-    ///
-    /// **A time already past is the spec's expired wait**, and needs no state of
-    /// its own: every later message on the channel gets that same instant back
-    /// and is judged at once. Nothing else about the open changes — it stays
-    /// pending, so its messages are still handed over and delivery's answer still
-    /// settles it — until a new request clears the time ([`Channels::opening`]).
-    fn wait_ends(&mut self, limit: Duration) -> Instant {
-        *self.wait_ends.get_or_insert_with(|| Instant::now() + limit)
+    /// This peer asked delivery to create the channel at `asked`: the open's
+    /// time starts again, whether or not it had ended, and every message waiting
+    /// now is extended from the ask, if no earlier ask has extended it.
+    fn asked(&mut self, asked: Instant) {
+        self.time = OpenTime::StartedAt(asked);
+        for wait in self.waits.values_mut() {
+            wait.extend_from(asked);
+        }
     }
 }
 
@@ -555,21 +632,42 @@ impl ChannelBook {
         !self.open.is_open(channel_id) && self.pending.contains_key(channel_id)
     }
 
-    /// When a message on this channel must stop waiting for its open — or
-    /// `None` when it does not wait at all: the channel is open, or no open for
-    /// it is pending.
+    /// Begin a message's wait on its channel's open, ending when the open's time
+    /// ends — or `None` when it does not wait at all: the channel is open, or no
+    /// open for it is pending.
     ///
     /// Guarded by [`ChannelBook::is_opening`], the question
     /// [`Channels::await_settled`] asks again on each wake-up, so "does this
     /// message wait" and "does it keep waiting" are one predicate and cannot
     /// drift apart.
-    fn wait_ends(&mut self, channel_id: &str, limit: Duration) -> Option<Instant> {
+    fn begin_wait(&mut self, channel_id: &str, limit: Duration) -> Option<WaitId> {
         if !self.is_opening(channel_id) {
             return None;
         }
-        self.pending
-            .get_mut(channel_id)
-            .map(|pending| pending.wait_ends(limit))
+        let id = WaitId(self.next_wait);
+        self.next_wait = self.next_wait.wrapping_add(1);
+        let pending = self.pending.get_mut(channel_id)?;
+        let ends = pending.time.end(limit);
+        pending.waits.insert(
+            id,
+            Wait {
+                ends,
+                extension: Some(limit),
+            },
+        );
+        Some(id)
+    }
+
+    /// When a waiting message stops waiting, as its wait stands now — `None` once
+    /// the open it began waiting on is no longer in the book.
+    fn wait_ends(&self, channel_id: &str, wait: WaitId) -> Option<Instant> {
+        Some(self.pending.get(channel_id)?.waits.get(&wait)?.ends)
+    }
+
+    fn end_wait(&mut self, channel_id: &str, wait: WaitId) {
+        if let Some(pending) = self.pending.get_mut(channel_id) {
+            pending.waits.remove(&wait);
+        }
     }
 }
 
@@ -580,29 +678,35 @@ struct Channels {
 }
 
 /// How long messages may wait on one pending open before they are judged anyway,
-/// counted from when the first of them began waiting.
+/// counted from when the open's time started: when the first of them began
+/// waiting after a request, or when this peer last asked delivery for the channel.
 ///
 /// `op-transport` requires the wait be "bounded by a fixed time for each open,
-/// not for each message", and leaves the value to design. See
-/// [`Pending::wait_ends`].
+/// not for each message", and leaves the value to design. See [`OpenTime`].
 ///
 /// **What it bounds is a stall of every Stoa.** There is one processor, so while
 /// it waits, messages on every other channel wait behind it and the queue fills.
-/// Kept per open, that stall is at most this long once for each open that stays
-/// unanswered, whatever a sender puts on its channel — so at most this times the
-/// number of channels being opened at once, which this peer's memberships bound
-/// and no sender chooses, and never past the moment the last of those opens
-/// settles, since each wait ends by its own open's settle.
+/// Each start of an open's time holds every other Stoa up at most this long,
+/// whatever a sender puts on the channel, and only this peer's requests and asks
+/// start one. A message waiting when the worker asks delivery for its channel is
+/// extended once ([`Wait::extend_from`]), so it holds them up for less than twice
+/// this: under it before the ask, or its wait would have expired, and at most it
+/// after — in practice only until the call is answered or given up, which
+/// [`CALL_TIMEOUT`] bounds, unless another request for the channel is pending. No
+/// wait outlasts its own open's settle, so several stuck opens never hold every
+/// Stoa past the moment the last of them settles.
 ///
-/// **Past [`CALL_TIMEOUT`], so it outlasts one delivery call**: an open that is
-/// the worker's current call — a join, or a creation racing its own answer, the
-/// ordinary cases — is settled within it. It does **not** outlast an open queued
-/// behind others: an open is pending from when it is asked for, so at startup
-/// against an unresponsive delivery one can wait behind node creation and every
-/// earlier Stoa's creation, each up to [`CALL_TIMEOUT`]. Once this passes, that
-/// channel's messages are judged at once against what is open — refused, and lost
-/// — until delivery answers or the channel is asked for again. design.md Decision
-/// 11 says why a limit long enough for a queue of opens was not chosen.
+/// **Past [`CALL_TIMEOUT`], and started again by the ask, so it outlasts the
+/// call it is waiting on**: a message waiting on an open when the worker asks
+/// delivery for it (the first ask while it waits), or beginning to wait after, is
+/// judged only once that call is answered or given up, however long the open
+/// waited in the queue first. What it does **not** cover is a message whose wait
+/// ended before delivery was asked at all. An open is pending from when it is
+/// requested, so one queued behind node creation and other opens, each up to
+/// [`CALL_TIMEOUT`] against a slow delivery, can see its time run out in the
+/// queue: that message, and the channel's messages after it until the ask, are
+/// judged against what is open then — refused, and lost. design.md Decision 11
+/// says why a limit long enough for a queue of opens was not chosen.
 const SETTLE_LIMIT: Duration = Duration::from_secs(40);
 
 /// delivery v0.2.1's own callback timeout, `CALLBACK_TIMEOUT{30}` in
@@ -627,10 +731,12 @@ impl Channels {
     /// Mark an open as asked for, returning the guard that settles it.
     ///
     /// **A request starts a new wait.** `op-transport`: "Only a later create, join
-    /// or startup asking for that channel lets a message wait on it again". So a
-    /// request clears the channel's [`Pending::wait_ends`], whether or not it had
-    /// passed. Only this peer's own create, join and startup call this; nothing a
-    /// sender does can restart a wait.
+    /// or startup asking for that channel, or this peer asking delivery to create
+    /// it, lets a message wait on it again". So a request puts the open's time
+    /// back to [`OpenTime::NotStarted`], whether or not it had ended, and the next
+    /// message to wait starts it. It moves no waiting message's end: that is each
+    /// [`Wait`]'s own. Only this peer's own create, join and startup call this;
+    /// nothing a sender does can restart a wait.
     /// `a_new_request_for_a_channel_whose_wait_has_expired_lets_a_message_wait_again`
     /// is red without the reset.
     ///
@@ -641,12 +747,13 @@ impl Channels {
         let pending = book
             .pending
             .entry(identity.channel_id().to_string())
-            .or_insert(Pending {
+            .or_insert_with(|| Pending {
                 requests: 0,
-                wait_ends: None,
+                time: OpenTime::NotStarted,
+                waits: HashMap::new(),
             });
         pending.requests += 1;
-        pending.wait_ends = None;
+        pending.time = OpenTime::NotStarted;
         // Released before the guard exists: dropping a guard takes this lock.
         drop(book);
         Opening {
@@ -676,6 +783,29 @@ impl Channels {
         self.settled.notify_all();
     }
 
+    /// This peer is asking delivery to create the channel, now: the open's time
+    /// starts again, and each message waiting on it is extended from now, once.
+    ///
+    /// `op-transport`, "Asking delivery to create a channel starts the open's time
+    /// again". An open is pending from its request, so a message can begin waiting
+    /// on it while it is still queued behind other calls; kept from then, the
+    /// time could run out while delivery was being asked, and a message racing
+    /// delivery's answer — the race this wait exists for — would be refused and
+    /// lost (the security re-review's round-3 probe). Started again here, every
+    /// message waiting at or after the ask is judged only once that call is
+    /// answered or given up, because the fixed time outlasts [`CALL_TIMEOUT`].
+    ///
+    /// Only the worker calls this, as it calls delivery, so no sender can start an
+    /// open's time or extend a wait. What each of the new tests turns red without
+    /// is in design.md Decision 11.
+    fn asked(&self, identity: &ChannelIdentity) {
+        let mut book = lock(&self.book);
+        let now = Instant::now();
+        if let Some(pending) = book.pending.get_mut(identity.channel_id()) {
+            pending.asked(now);
+        }
+    }
+
     /// Whether a channel is open or being opened: what the listener asks before
     /// a message may take a place in the queue.
     fn is_known(&self, channel_id: &str) -> bool {
@@ -683,40 +813,52 @@ impl Channels {
         book.open.is_open(channel_id) || book.pending.contains_key(channel_id)
     }
 
-    /// Wait while a channel is pending and not open, until its open's time runs
-    /// out — `limit` after the first message began waiting on that open, not after
-    /// this one did. Once it has run out the open's wait is expired, and this and
-    /// every later message on the channel returns at once.
+    /// Wait while a channel is pending and not open, until this message's wait
+    /// ends: the end of the open's time as it stood when the message began
+    /// waiting, or the fixed time after the first ask made while it waits. Once
+    /// the open's time has ended, this and every later message on the channel
+    /// returns at once, until a request or an ask starts it again.
     ///
-    /// **The deadline is read once, when this message begins waiting**, and never
-    /// again from the book. A request made meanwhile starts a new wait for the
-    /// messages after this one, and cannot extend this one's.
-    /// `a_request_made_while_a_message_waits_does_not_extend_that_messages_wait` is
-    /// red with the deadline re-read on each wake-up.
+    /// **The end is this message's own**, held in its [`Wait`] and read back on
+    /// each wake-up, and only an ask moves it, once. A request made meanwhile
+    /// starts a new wait for the messages after this one and moves no waiting
+    /// message's end. `a_request_made_while_a_message_waits_does_not_extend_that_messages_wait`
+    /// is red with the open's time read on each wake-up in place of the message's
+    /// own end.
+    ///
+    /// **A wait gone from the book ends the wait.** It goes only with the open's
+    /// pending entry, when every request it waited on has settled — which is what
+    /// the message waits for — and a request made since gives a new wait only to
+    /// the messages after it. That is reached only when the open settles and is
+    /// asked for again between two of this loop's wake-ups.
     ///
     /// **Its own loop, not `wait_timeout_while`**, because of a poisoned book:
     /// that function returns `Err` at the first wake-up once the mutex is
     /// poisoned, so the wait would end when *any* open settled and the message
     /// would be refused in exactly the gap this wait exists to close. Here the
     /// guard is taken back from a poisoned wake-up as [`lock`] takes it back, and
-    /// only this channel's condition or the deadline ends the wait.
+    /// only this channel's condition or the message's end ends the wait.
     /// `a_poisoned_channel_book_still_waits_for_this_channels_open` is red
     /// without it.
     fn await_settled(&self, channel_id: &str, limit: Duration) {
         let mut book = lock(&self.book);
-        let Some(deadline) = book.wait_ends(channel_id, limit) else {
+        let Some(wait) = book.begin_wait(channel_id, limit) else {
             return;
         };
         while book.is_opening(channel_id) {
-            let left = deadline.saturating_duration_since(Instant::now());
+            let Some(ends) = book.wait_ends(channel_id, wait) else {
+                break;
+            };
+            let left = ends.saturating_duration_since(Instant::now());
             if left.is_zero() {
-                return;
+                break;
             }
             book = match self.settled.wait_timeout(book, left) {
                 Ok((guard, _)) => guard,
                 Err(poisoned) => poisoned.into_inner().0,
             };
         }
+        book.end_wait(channel_id, wait);
     }
 
     /// The Stoa a channel is open for now, copied out so the lock is released
@@ -756,6 +898,13 @@ impl Opening {
     /// Delivery reported that it holds the channel: created it, or already had it.
     fn held(&mut self) {
         self.held = true;
+    }
+
+    /// This peer is asking delivery to create the channel, now
+    /// ([`Channels::asked`]). Called by the worker immediately before
+    /// `channelCreate`, and by nothing else outside tests.
+    fn asked(&self) {
+        self.channels.asked(&self.identity);
     }
 }
 
@@ -848,6 +997,11 @@ impl<D: Delivery> Worker<D> {
                 return;
             }
         };
+        // Marked before the call, not after: the call holds this thread until
+        // delivery answers, which is the time a message racing the answer must
+        // be able to wait through. `the_worker_marks_its_ask_of_delivery_in_the_channel_book`
+        // is red without it.
+        opening.asked();
         let reply = self.delivery.channel_create(
             identity.channel_id(),
             identity.content_topic(),
