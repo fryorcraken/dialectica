@@ -496,12 +496,27 @@ const MEMBERSHIP_PAGE: usize = 100;
 /// and `a_restarted_peer_keeps_what_delivery_hands_over_before_startup_asks_for_its_channel`
 /// are red while the worker made the guard as it called delivery.
 ///
-/// A count per channel id rather than a flag, because a repeated join can put a
-/// second open in the queue before the first is answered.
 #[derive(Default)]
 struct ChannelBook {
     open: OpenChannels,
-    pending: HashMap<String, usize>,
+    pending: HashMap<String, Pending>,
+}
+
+/// A channel being opened: what the book holds for it until every request for it
+/// has settled.
+struct Pending {
+    /// How many requests for this channel have not settled. A count rather than
+    /// a flag, because a repeated join can put a second open in the queue before
+    /// the first is answered.
+    requests: usize,
+}
+
+impl ChannelBook {
+    /// Whether a message on this channel waits for its open: pending, and not
+    /// already open.
+    fn is_opening(&self, channel_id: &str) -> bool {
+        !self.open.is_open(channel_id) && self.pending.contains_key(channel_id)
+    }
 }
 
 #[derive(Default)]
@@ -535,10 +550,11 @@ impl Channels {
     /// The guard owns a handle on the book rather than borrowing it, so it can
     /// outlive the call that made it.
     fn opening(self: &Arc<Self>, identity: &ChannelIdentity) -> Opening {
-        *lock(&self.book)
+        lock(&self.book)
             .pending
             .entry(identity.channel_id().to_string())
-            .or_insert(0) += 1;
+            .or_insert(Pending { requests: 0 })
+            .requests += 1;
         Opening {
             channels: Arc::clone(self),
             identity: identity.clone(),
@@ -548,9 +564,9 @@ impl Channels {
 
     fn settle(&self, identity: &ChannelIdentity, held: bool) {
         let mut book = lock(&self.book);
-        if let Some(count) = book.pending.get_mut(identity.channel_id()) {
-            *count = count.saturating_sub(1);
-            if *count == 0 {
+        if let Some(pending) = book.pending.get_mut(identity.channel_id()) {
+            pending.requests = pending.requests.saturating_sub(1);
+            if pending.requests == 0 {
                 book.pending.remove(identity.channel_id());
             }
         }
@@ -586,7 +602,7 @@ impl Channels {
     fn await_settled(&self, channel_id: &str, limit: Duration) {
         let started = std::time::Instant::now();
         let mut book = lock(&self.book);
-        while !book.open.is_open(channel_id) && book.pending.contains_key(channel_id) {
+        while book.is_opening(channel_id) {
             let Some(left) = limit.checked_sub(started.elapsed()) else {
                 return;
             };
