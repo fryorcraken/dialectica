@@ -508,13 +508,16 @@ const SETTLE_LIMIT: Duration = Duration::from_secs(40);
 
 impl Channels {
     /// Mark an open as asked for, returning the guard that settles it.
-    fn opening<'a>(&'a self, identity: &ChannelIdentity) -> Opening<'a> {
+    ///
+    /// The guard owns a handle on the book rather than borrowing it, so it can
+    /// outlive the call that made it.
+    fn opening(self: &Arc<Self>, identity: &ChannelIdentity) -> Opening {
         *lock(&self.book)
             .pending
             .entry(identity.channel_id().to_string())
             .or_insert(0) += 1;
         Opening {
-            channels: self,
+            channels: Arc::clone(self),
             identity: identity.clone(),
             held: false,
         }
@@ -597,20 +600,20 @@ impl Channels {
 /// An open in flight. Dropping it settles the open — as open only if
 /// [`Opening::held`] was called — so no path out of the worker, a panic
 /// included, can leave the channel pending.
-struct Opening<'a> {
-    channels: &'a Channels,
+struct Opening {
+    channels: Arc<Channels>,
     identity: ChannelIdentity,
     held: bool,
 }
 
-impl Opening<'_> {
+impl Opening {
     /// Delivery reported that it holds the channel: created it, or already had it.
     fn held(&mut self) {
         self.held = true;
     }
 }
 
-impl Drop for Opening<'_> {
+impl Drop for Opening {
     fn drop(&mut self) {
         self.channels.settle(&self.identity, self.held);
     }

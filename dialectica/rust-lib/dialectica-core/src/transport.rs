@@ -519,6 +519,23 @@ pub fn receive<L: OpLog>(
 #[derive(Debug)]
 pub struct Judged(SignedOp);
 
+/// The message limit, as the one predicate every caller asks: a payload longer
+/// than [`MAX_MESSAGE_BYTES`] is refused as [`InboundRefusal::TooLong`], and one
+/// of exactly the limit is not.
+///
+/// One function so that [`judge`] and anything refusing earlier — the delivery
+/// wiring, before a payload may wait for the boundary — cannot disagree about
+/// where the limit falls.
+pub fn refuse_oversized(payload: &[u8]) -> Result<(), InboundRefusal> {
+    if payload.len() > MAX_MESSAGE_BYTES {
+        return Err(InboundRefusal::TooLong {
+            bytes: payload.len(),
+            limit: MAX_MESSAGE_BYTES,
+        });
+    }
+    Ok(())
+}
+
 /// Checks 2–6 of [`receive`], for a message on the channel of `channel_stoa`.
 ///
 /// # Why the halves are separate
@@ -535,12 +552,7 @@ pub fn judge(
 ) -> Result<Judged, InboundRefusal> {
     // BEFORE the decode. The spec requires it, and the reason is that this is the
     // one bound whose input size an attacker chooses freely.
-    if message.payload.len() > MAX_MESSAGE_BYTES {
-        return Err(InboundRefusal::TooLong {
-            bytes: message.payload.len(),
-            limit: MAX_MESSAGE_BYTES,
-        });
-    }
+    refuse_oversized(message.payload)?;
 
     // The WHOLE payload, so no prefix is decoded in isolation. `Op::decode`'s
     // trailing-bytes check is what makes that true of a valid op followed by junk.
