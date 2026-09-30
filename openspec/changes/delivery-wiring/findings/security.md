@@ -614,3 +614,103 @@ as the entry below shows.
 `--re "is_opening|wait_ends|await_settled"`, `dialectica-core` lib tests: 11
 mutants, **8 caught, 3 unviable, 0 missed**. My probe was not in the tree during
 that run.
+
+## Re-review round 4 `7462ded8..58460b02`
+
+Dimension: **security** only. Read at `adba1a22` (the range's code is
+`58460b02`'s): the `delivery.rs` diff in full (`OpenTime`, `Wait`, `WaitId`,
+`Pending::asked`, `ChannelBook::{begin_wait,wait_ends,end_wait}`,
+`Channels::asked`, `Opening::asked`, the rewritten `await_settled`, the worker's
+ask in `Worker::open`, `Processor::new`), the five new tests, design.md Decision
+11, and the `op-transport` delta's wait paragraphs and scenarios. Two probes were
+appended to `delivery/tests.rs` in the reviewer's tree only and are not committed;
+each entry says what its probe did.
+
+**The round-3 outcome holds.** The ask restarts the open's time
+(`Pending::asked` sets `OpenTime::StartedAt`) and extends each registered wait
+from the ask once (`Wait::extend_from`, `Option::take`). The worker marks the ask
+immediately before `channel_create` (`delivery.rs:1004`), after the only early
+return, so no ask is marked without a call. My round-3 scenario — junk waiting
+from 0 on a queued open, ask at 0.6, honest op handed over after it, open settled
+held at 1.1 — is `an_earlier_message_on_a_queued_open_does_not_cost_an_op_that_arrives_while_delivery_is_asked`,
+and it passes: the honest op is stored. **No sender-controlled or unbounded stall
+is reopened, as built.** Only `Worker::open` calls `Opening::asked`; the only
+things that write `OpenTime` are `Channels::opening` (this peer's requests),
+`Pending::asked` (this peer's asks) and `OpenTime::end`, which only fixes an end
+from a start this peer made or from the first waiter after a request, as before.
+The extension is capped at one per message, so repeated asks cannot chain one
+message. A message the ask extends is held under `SETTLE_LIMIT` before it plus at
+most `SETTLE_LIMIT` after, and in practice until the call settles within
+`CALL_TIMEOUT`. Decision 11 now records the startup cost for every K as
+(K+1) × 35 s, and the K = 1 figure of 70 s against 40 s. Both boxes below are
+test gaps: the code is right today, and the suite would let each property
+regress unnoticed.
+
+- [ ] **`tester`** — `delivery.rs:577` (`OpenTime::end`, the `StartedAt` arm) —
+      no test pins that, after an ask, the open's time is counted **from the
+      ask** rather than from the first message to wait after it. That is the
+      spec's "the open's time MUST start again at that ask" and "judged no later
+      than the end of the open's time as it stood when the message began
+      waiting". It is also the property that keeps the post-ask time out of a
+      sender's hands.
+      **Scenario:** a regression that replaces `asked + limit` with
+      `Instant::now() + limit`, which is the pre-round shape
+      `Pending::wait_ends` had. Then after an ask, a sender's message decides
+      when the time ends. It sends its payload just before the call is given up,
+      and while a second request keeps the open pending, the payload holds every
+      Stoa for up to `CALL_TIMEOUT` + `SETTLE_LIMIT` ≈ 75 s past the ask, where
+      the spec bounds it at 40 s.
+      **Measured:** with that mutation hand-applied, all 113 committed lib tests
+      the `delivery` filter selects pass. A probe (limit 1000 ms, an open never answered, `opening.asked()`,
+      sleep 600 ms, then `decide` one junk message on that channel, asserting it
+      was refused under 1.3 limits after the ask) is green unmutated and red
+      under the mutation: **refused 1.60 s after the ask**. `cargo mutants`
+      cannot generate this mutation: it only swaps `+` for `-` or `*`, and
+      those are caught.
+      **Severity:** low. The code is correct; this guards the security bound
+      against a one-token regression. No spec scenario names the case, so the
+      test pins the requirement text quoted above.
+
+- [ ] **`tester`** — `delivery.rs:667` (`ChannelBook::end_wait`) / `:861` — no
+      test pins that a message's `Wait` leaves the book when its wait ends.
+      `begin_wait` registers a `Wait` for **every** message on a channel being
+      opened, including one whose open's time has already ended. `end_wait` is
+      the only thing that removes it before the pending entry goes.
+      **Scenario:** with `end_wait` emptied, a sender who floods the public
+      channel id of a Stoa whose open stays pending grows `Pending::waits` by one
+      entry per message. Each of those messages is judged at once, so the flood
+      is cheap to send. The growth lasts as long as the open is pending, which
+      the unbounded outbound queue against a hung delivery can stretch without
+      limit (design.md Risks). `Pending::asked` also walks that map under the
+      book lock, so each ask costs time linear in the flood.
+      **Measured:** `cargo mutants --file delivery.rs --re "OpenTime|Wait::|Pending::asked|begin_wait|ChannelBook::wait_ends|end_wait|Channels::asked|Opening::asked|await_settled|Processor::new" -- --lib`
+      gave 18 mutants: **11 caught, 6 unviable, 1 missed**. The miss is
+      `replace ChannelBook::end_wait with ()`. A probe (`wait_the_open_out` on a
+      pending open, then 1000 junk messages `decide`d on that channel, asserting
+      `pending.waits.len() == 0`) is green unmutated. With `end_wait` emptied it
+      is red: **1001 waits left in the book**.
+      **Severity:** low. As built, every exit from `await_settled` reaches
+      `end_wait`: the loop has no `return` and no operation in it can panic. So
+      this is regression cover for a sender-driven memory bound, not a live
+      leak.
+
+## Round 4 clean areas
+
+- **Nothing a peer controls reaches the new state.** `WaitId` is this peer's own
+  counter (`wrapping_add` on a `u64`, so it cannot overflow in practice).
+  `HashMap<WaitId, Wait>` is keyed by it and not by anything a sender chose. The
+  channel id stays the only sender-chosen key, as before. At most one `Wait` is
+  registered at a time in the running wiring, because there is one processor.
+- **No panic, and no lock-order hazard.** `asked + limit` and
+  `Instant::now() + limit` are safe at `SETTLE_LIMIT`. `Channels::asked` takes
+  the book lock for map operations only, and the worker holds no other lock
+  when it calls it. `asked` does not notify the condvar and does not need to:
+  the waiter re-reads its own end on its next wake-up, which comes no later
+  than the old end.
+- **"A wait gone from the book ends the wait."** That break is reached only when
+  this peer's own settle and re-request land between two wake-ups. It shortens
+  a wait and never lengthens one, and it costs only the channel whose open
+  failed.
+- **`Processor::new`.** The running wiring's limit is `SETTLE_LIMIT`, set in one
+  place. `settle_limit` is changed only by tests.
+- **What reaches the log, dependencies.** No new `Note`, and no dependency.
