@@ -261,7 +261,7 @@ comments; none changes behaviour.
       also in round 0's code; I did not run it down then and should have.
       **Severity:** low (a comment, but it is a check a reader is told to make).
 
-- [ ] **`dev-writer`** — `design.md:537` — Decision 15 quotes Decision 3 in words
+- [x] **`dev-writer`** — `design.md:537` — Decision 15 quotes Decision 3 in words
       Decision 3 no longer contains.
       **Scenario:** Decision 15 says the old locking behaviour was "contradicting
       Decision 3's 'a mutex held for map lookups'". `git grep -F "map lookups"
@@ -275,8 +275,13 @@ comments; none changes behaviour.
       ("Decision 3's claim that the book is only ever held for map lookups"), or
       cut the clause: Decision 15's next sentence already states the defect.
       **Severity:** low.
+      **Fixed** (`dev-writer`) in the commit `Put the processor through the
+      boundary's one spelling`, the first shape: the quotation is gone, and
+      Decision 15 now says what Decision 3 claims ("that nothing the event loop
+      or the worker needs is held while a payload is decided"), which is what
+      Decision 3 says once its own box below is fixed.
 
-- [ ] **`dev-writer`** — `design.md:84-86` — "share only the channel book's mutex" is
+- [x] **`dev-writer`** — `design.md:84-86` — "share only the channel book's mutex" is
       false as written, and it is the sentence Decision 3's event-loop argument
       stands on.
       **Scenario:** Decision 3 argues the event loop never waits on the worker
@@ -294,8 +299,15 @@ comments; none changes behaviour.
       processor share the channel book's mutex, and the listener and processor the
       queue's; neither is held while a payload is decoded, verified or appended".
       **Severity:** low.
+      **Fixed** (`dev-writer`) in the commit `Put the processor through the
+      boundary's one spelling`: Decision 3 now names all four users of the book
+      (the dispatch thread first, and where it takes the lock), the two users of
+      the queue's mutex, that neither is held across a decision, and that the
+      dispatch thread being a user is why the rule protects replies. The
+      design-review box on the same sentence adds the one wait a reply can meet,
+      and Decision 3 has that too.
 
-- [ ] **`dev-writer`** — `transport.rs:593-594` — a comment in `admit` names two
+- [x] **`dev-writer`** — `transport.rs:593-594` — a comment in `admit` names two
       variables `admit` cannot see.
       **Scenario:** after `receive` was split, `admit(judged: Judged, log)` has no
       `message`. Its comment, carried over unchanged, says "`message.timestamp` and
@@ -308,6 +320,10 @@ comments; none changes behaviour.
       nor its sender identifier can reach the append, by design", or move the
       sentence to `judge`.
       **Severity:** low.
+      **Fixed** (`dev-writer`) in the commit `Put the processor through the
+      boundary's one spelling`, with the first fix shape's words: "`Judged`
+      carries only the op, so neither the event's timestamp nor its sender
+      identifier can reach the append, by design".
 
 - [ ] **`dev-writer`** — `design.md:178,316,320,674` — four pointers to provenance
       that will not resolve once the change is archived.

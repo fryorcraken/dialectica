@@ -27,8 +27,7 @@
 //!   limit, and offers the rest to the bounded [`InboundQueue`] without waiting
 //!   on the boundary.
 //! - **The processor** takes them off in arrival order and puts each through the
-//!   inbound boundary ([`crate::transport::judge`], then
-//!   [`crate::transport::admit`]).
+//!   inbound boundary, [`crate::transport::receive_via`].
 //!
 //! # Nothing here may unwind
 //!
@@ -1052,21 +1051,32 @@ impl Processor {
         }
     }
 
-    /// Put one message through the boundary, and log what it decided.
+    /// Decide one message: wait on its channel's open if it has one, put it
+    /// through the boundary, and record the outcome — each its own call.
+    fn decide(&self, message: &Arriving) {
+        // `op-transport`, "A message arriving on a channel that is not open, but
+        // is being opened, MUST be judged only once that open is settled"
+        // (scenarios "…is stored once delivery reports the channel created" and
+        // "…is refused once delivery declines the open"). See `ChannelBook` for
+        // why, and design Decision 11.
+        self.channels
+            .await_settled(&message.channel_id, self.settle_limit);
+        let decided = self.pass(message);
+        self.record_decision(decided);
+    }
+
+    /// Put one message through the inbound boundary, [`transport::receive_via`].
     ///
     /// **The clock is read here, after any wait, when the message is processed** —
     /// never the event's timestamp, which is delivery's reading at receipt, in
     /// nanoseconds. `op-transport` requires the window be judged against this
     /// peer's own clock at processing time.
-    fn decide(&self, message: &Arriving) {
-        // `op-transport`, "A message arriving on a channel that is not open, but
-        // is being opened, MUST be judged only once that open is settled"
-        // (scenarios "…is stored
-        // once delivery reports the channel created" and "…is refused once
-        // delivery declines the open"). See `ChannelBook` for why, and design
-        // Decision 11.
-        self.channels
-            .await_settled(&message.channel_id, self.settle_limit);
+    ///
+    /// The lookup copies the channel's Stoa out of the book and releases it, and
+    /// the op log is opened only for an op that passed: a payload refused on its
+    /// channel or its bytes costs no database open, and is refused under its own
+    /// name even when the log will not open.
+    fn pass(&self, message: &Arriving) -> Result<transport::Admitted, InboundRefusal> {
         let now_ms = (self.clock)();
         let inbound = InboundMessage {
             channel_id: &message.channel_id,
@@ -1074,22 +1084,22 @@ impl Processor {
             payload: &message.payload,
             timestamp: message.timestamp,
         };
-        // `transport::receive`'s order — channel, then the bytes, then the one
-        // write — with the op log opened only for an op that passed: a payload
-        // refused on its channel or its bytes costs no database open, and is
-        // refused under its own name even when the log will not open.
-        let decided = self
-            .channels
-            .stoa_of(&message.channel_id)
-            .ok_or(InboundRefusal::UnknownChannel)
-            .and_then(|stoa| transport::judge(inbound, stoa, now_ms))
-            .and_then(|judged| {
+        transport::receive_via(
+            inbound,
+            |channel_id| self.channels.stoa_of(channel_id),
+            now_ms,
+            |judged| {
                 // `op-transport`, scenario "A message the op log cannot take is
                 // logged and not retried": an op log that will not open is a
                 // storage failure, and the message is dropped, not held.
                 let mut log = self.stores.op_log().map_err(InboundRefusal::Storage)?;
                 transport::admit(judged, &mut log)
-            });
+            },
+        )
+    }
+
+    /// Log what the boundary decided about one message.
+    fn record_decision(&self, decided: Result<transport::Admitted, InboundRefusal>) {
         match decided {
             Ok(admitted) => match admitted.appended {
                 Appended::Stored => record(&*self.journal, Note::Stored(&admitted.id)),

@@ -225,7 +225,7 @@ disagreement between documents is the first box below.
       and record it, or write in Decision 11 that the value and the relation are not
       pinned; and record what removing the bound (an unbounded wait) does to the
       bounded-wait test, having run it.
-- [ ] **`dev-writer`** (suggestion, a checkable claim that is false, and an
+- [x] **`dev-writer`** (suggestion, a checkable claim that is false, and an
       unrecorded wait) — Decision 3 says "the processor, the listener and the worker
       share only the channel book's mutex". They also share `InboundQueue`'s mutex
       (`offer` on the listener, `take` on the processor, `delivery.rs:875-902`), and
@@ -239,3 +239,14 @@ disagreement between documents is the first box below.
       rather than fail" and not for how long, nor that this is the library default
       rather than a choice. Correct the sentence, and record the figure and that it
       bounds a publish reply during an inbound append.
+      **Fixed** (`dev-writer`) in the commit `Put the processor through the
+      boundary's one spelling`. Decision 3's sentence now lists the dispatch
+      thread, the worker, the listener and the processor as the book's users and
+      the listener and processor as the queue's. A new bullet there records the
+      one wait between threads a reply can meet: a publish's append behind the
+      processor's, bounded by rusqlite's default busy timeout, which nothing here
+      sets. The figure was measured rather than taken from the test comment: a
+      throwaway probe held a write lock on the op log from a second connection
+      and timed an `SqliteOpLog` append, which failed "database is locked" at
+      5.01 s (probe removed). Decision 13 now says "for up to 5 s, rusqlite's
+      default … which nothing here sets" and points at Decision 3.

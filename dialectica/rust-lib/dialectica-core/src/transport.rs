@@ -485,9 +485,10 @@ pub struct Admitted {
 /// [`InboundMessage`] so that the struct mirroring the event does not hold two
 /// times side by side, one to be read and one never to be.
 ///
-/// **This is the only function that takes a time and appends.** The log's
-/// `append` takes none, which is what keeps the window off every rebuild,
-/// replay and restore path. See [`crate::arrival::exceeds_receive_window`].
+/// **This and [`receive_via`], which it calls, are the only functions that take
+/// a time and reach an append.** The log's `append` takes none, which is what
+/// keeps the window off every rebuild, replay and restore path. See
+/// [`crate::arrival::exceeds_receive_window`].
 ///
 /// # No panic is reachable from any input
 ///
@@ -504,18 +505,52 @@ pub fn receive<L: OpLog>(
     log: &mut L,
     now_ms: u64,
 ) -> Result<Admitted, InboundRefusal> {
-    let channel_stoa = *channels
-        .stoa_of(message.channel_id)
-        .ok_or(InboundRefusal::UnknownChannel)?;
-    let judged = judge(message, channel_stoa, now_ms)?;
-    admit(judged, log)
+    receive_via(
+        message,
+        |channel_id| channels.stoa_of(channel_id).copied(),
+        now_ms,
+        |judged| admit(judged, log),
+    )
 }
 
-/// An op that passed every check [`receive`] makes before it writes.
+/// [`receive`], with the channel lookup and the write supplied by the caller: the
+/// one place the boundary's order is written down.
 ///
-/// Its field is private and [`judge`] is the only constructor, so [`admit`]
-/// cannot be handed an op that skipped a check: "every check runs before anything
-/// is written" holds by the type, for a caller that runs the two halves apart.
+/// # Why the lookup and the write are parameters
+///
+/// The delivery wiring cannot hand over an `&OpenChannels` or an open log. Its
+/// set of open channels sits behind a lock that must not be held while a
+/// signature is verified or a row appended, and it opens the op log only for an
+/// op that passed, so a payload refused on its channel or its bytes costs no
+/// database open. So it supplies `stoa_of`, which copies the Stoa out and
+/// releases the lock, and `write`, which opens the log and calls [`admit`].
+///
+/// **The order stays here, whoever calls.** [`receive`] and the delivery wiring
+/// both come through this function, so a step added between the lookup and the
+/// judgement reaches the running module and the boundary's tests together.
+///
+/// **The lookup is keyed by the message's own channel identifier**, inside this
+/// function. A caller cannot pair one channel's message with another channel's
+/// Stoa, which is what lets [`Judged`] certify the channel check as well as the
+/// checks on the bytes.
+pub fn receive_via(
+    message: InboundMessage<'_>,
+    stoa_of: impl FnOnce(&str) -> Option<Address>,
+    now_ms: u64,
+    write: impl FnOnce(Judged) -> Result<Admitted, InboundRefusal>,
+) -> Result<Admitted, InboundRefusal> {
+    let channel_stoa = stoa_of(message.channel_id).ok_or(InboundRefusal::UnknownChannel)?;
+    write(judge(message, channel_stoa, now_ms)?)
+}
+
+/// An op that passed every check [`receive`] makes before it writes, the channel
+/// check included.
+///
+/// Its field is private and `judge` is the only constructor, and only
+/// [`receive_via`] calls `judge`, with the Stoa it looked up under the message's
+/// own channel identifier. So [`admit`] cannot be handed an op that skipped a
+/// check, or one judged against another channel's Stoa: "every check runs before
+/// anything is written" holds by the type.
 #[derive(Debug)]
 pub struct Judged(SignedOp);
 
@@ -523,7 +558,8 @@ pub struct Judged(SignedOp);
 /// than [`MAX_MESSAGE_BYTES`] is refused as [`InboundRefusal::TooLong`], and one
 /// of exactly the limit is not.
 ///
-/// One function so that [`judge`] and anything refusing earlier — the delivery
+/// One function so that the boundary's own size check (`judge`, inside
+/// [`receive_via`]) and anything refusing earlier — the delivery
 /// wiring, before a payload may wait for the boundary — cannot disagree about
 /// where the limit falls.
 pub fn refuse_oversized(payload: &[u8]) -> Result<(), InboundRefusal> {
@@ -538,14 +574,11 @@ pub fn refuse_oversized(payload: &[u8]) -> Result<(), InboundRefusal> {
 
 /// Checks 2–6 of [`receive`], for a message on the channel of `channel_stoa`.
 ///
-/// # Why the halves are separate
-///
-/// The delivery wiring looks the channel up, judges, and only then opens the op
-/// log to [`admit`]: a payload refused on its bytes costs no database open, and
-/// the lock guarding the set of open channels is not held while a signature is
-/// verified or a row appended. [`receive`] is the two halves in the spec's order,
-/// and is what every other caller uses.
-pub fn judge(
+/// Private, and called only by [`receive_via`], which looked `channel_stoa` up
+/// under `message.channel_id`: nothing here relates the two, so a caller that
+/// could pass them separately could judge one channel's message against
+/// another's Stoa.
+fn judge(
     message: InboundMessage<'_>,
     channel_stoa: Address,
     now_ms: u64,
@@ -583,15 +616,16 @@ pub fn judge(
     Ok(Judged(signed))
 }
 
-/// Append an op [`judge`] passed: the one write [`receive`] makes, and its last
-/// statement.
+/// Append an op the boundary passed: the one write [`receive_via`] reaches, and
+/// its last statement.
 pub fn admit<L: OpLog>(judged: Judged, log: &mut L) -> Result<Admitted, InboundRefusal> {
     let Judged(signed) = judged;
     let id = signed.op.id();
     // `Arrival::unordered()` and not `from_parts(None, None)`: the named
     // constructor is a statement that the transport supplied nothing, and
-    // grepping for it finds every place that gap is absorbed. `message.timestamp`
-    // and `message.sender_id` reach nothing here, by design.
+    // grepping for it finds every place that gap is absorbed. `Judged` carries
+    // only the op, so neither the event's timestamp nor its sender identifier can
+    // reach the append, by design.
     let appended = log
         .append(signed, Arrival::unordered())
         .map_err(InboundRefusal::Storage)?;
@@ -2175,6 +2209,44 @@ mod tests {
             matches!(refusal, InboundRefusal::TooLong { .. }),
             "the decode ran before the size check: got {refusal:?}"
         );
+    }
+
+    #[test]
+    fn the_boundary_looks_a_channel_up_under_the_messages_own_identifier() {
+        // Architecture review: `judge` once took the channel's Stoa from its
+        // caller as a bare address, so `Judged` certified the checks on the bytes
+        // but not that the Stoa was the one the message arrived under. The lookup
+        // is now `receive_via`'s own, keyed by the message's channel identifier.
+        // Two channels are open here, and the op names the one it did NOT arrive
+        // on: judged against the channel it arrived on it is a Stoa mismatch, and
+        // nothing is appended.
+        let arrived_on = a_stoa("Agora");
+        let named = a_stoa("Lyceum");
+        let (mut channels, mut log, identity) = peer_in(arrived_on);
+        channels.open(&ChannelIdentity::of(&named));
+        let payload = signed_post_in(named, "copied across").to_bytes().unwrap();
+
+        let mut asked = Vec::new();
+        let refusal = receive_via(
+            inbound(identity.channel_id(), &payload),
+            |channel_id| {
+                asked.push(channel_id.to_string());
+                channels.stoa_of(channel_id).copied()
+            },
+            NOW_MS,
+            |judged| admit(judged, &mut log),
+        )
+        .unwrap_err();
+
+        assert_eq!(asked, vec![identity.channel_id().to_string()]);
+        assert_eq!(
+            refusal,
+            InboundRefusal::StoaMismatch {
+                named,
+                channel_is_for: arrived_on
+            }
+        );
+        assert_eq!(log.len().unwrap(), 0);
     }
 
     #[test]

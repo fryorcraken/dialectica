@@ -192,7 +192,7 @@ copies the Stoa out, so no lock spans a verify or an append; `Wiring` replaces t
 flag and the option, and a refused worker has its own arm; the outbound-argument
 text pin exists and pins the order.
 
-- [ ] **`dev-writer`** — `transport.rs:507-512`, `delivery.rs:1077-1092` —
+- [x] **`dev-writer`** — `transport.rs:507-512`, `delivery.rs:1077-1092` —
       `Processor::decide` spells the boundary's pipeline a second time, and
       `transport::receive`, the spelling the ~55 boundary tests drive, has no
       production caller.
@@ -218,8 +218,19 @@ text pin exists and pins the order.
       decided"): the extraction separates the boundary from the logging.
       **Severity:** low. A shape and drift-risk finding, not a live defect; the two
       spellings agree today.
+      **Fixed** (`dev-writer`) in the commit `Put the processor through the
+      boundary's one spelling`, no behaviour change: the first of the two shapes
+      offered. `transport::receive_via(message, stoa_of, now_ms, write)` is the
+      one place the order (lookup, `judge`, write) is written; `receive` is
+      `receive_via` with `OpenChannels::stoa_of` and `admit` into the log it was
+      handed, and `Processor::pass` is `receive_via` with the book's copying
+      lookup and a write that opens the op log and calls `admit`. So a step added
+      between the lookup and `judge` goes in `receive_via` and reaches the
+      running module and the ~55 boundary tests together. `decide` is now three
+      calls (`await_settled`, `pass`, `record_decision`), which separates the
+      boundary from the logging. Whole suite green before and after.
 
-- [ ] **`dev-writer`** — `transport.rs:548-552` — `judge` takes the channel's Stoa
+- [x] **`dev-writer`** — `transport.rs:548-552` — `judge` takes the channel's Stoa
       as a bare `Address` and never reads `message.channel_id`, so `Judged` no
       longer certifies the channel check its doc says it certifies.
       **Scenario:** `judge(message_on_channel_a, stoa_b, now)` accepts an op whose
@@ -238,8 +249,18 @@ text pin exists and pins the order.
       `judge` takes in place of an `Address`; or narrow the `Judged` and `judge`
       docs to what they certify.
       **Severity:** low. Public-surface shape; no reachable wrong result today.
+      **Fixed** (`dev-writer`) in the commit `Put the processor through the
+      boundary's one spelling`, by construction rather than by a check: `judge`
+      is now private, and its one caller is `receive_via`, which looks the Stoa
+      up itself under `message.channel_id`. No caller can pass a message and a
+      Stoa separately any more, so `Judged` certifies the channel check too, and
+      its doc now says so. `transport::tests::the_boundary_looks_a_channel_up_under_the_messages_own_identifier`
+      pins the key: two channels open, an op naming the one it did not arrive
+      on, the lookup asked exactly the arrival channel's id, and the refusal a
+      Stoa mismatch against it. Red with the lookup keyed by `message.sender_id`
+      instead (the lookup was asked `a-participant`); restored.
 
-- [ ] **`dev-writer`** — `arrival.rs:221-223` — the doc on
+- [x] **`dev-writer`** — `arrival.rs:221-223` — the doc on
       `exceeds_receive_window` says "`crate::transport::receive` is its one
       caller"; after `cd5d7c82` the caller is `judge`.
       **Scenario:** `git grep -n -F "exceeds_receive_window" -- '*.rs'` outside
@@ -248,6 +269,10 @@ text pin exists and pins the order.
       boundary and from nowhere else"), so a reader checking it against the code
       lands in `judge`, not `receive`. **Severity:** low, a doc made false by this
       round's split.
+      **Fixed** (`dev-writer`) in the commit `Put the processor through the
+      boundary's one spelling`: the doc now names `transport::judge` as the one
+      caller, says it is private and reached only through `receive_via`, and
+      that `receive` and the delivery processor both go through that.
 
 - [ ] **`tester`** — `delivery/tests.rs:765` — the negative half of
       `the_adapter_hands_delivery_every_recorded_membership_and_every_published_op`

@@ -81,9 +81,23 @@ delivery call synchronously.
 - **Why a worker may call.** `logos_protocol.h`: a client is owned by one thread,
   and "calls from other threads marshal onto it and block until it answers". The
   owner is the event loop, so the event loop must never wait on the worker — and
-  nothing does: the handlers' `mpsc` send never blocks, and the processor, the
-  listener and the worker share only the channel book's mutex, which is never
-  held while a payload is decoded, verified or appended (Decision 15).
+  nothing does: the handlers' `mpsc` send never blocks. The event loop (the
+  dispatch thread, marking an open in `Delivering::joined` and at startup), the
+  worker, the listener and the processor share the channel book's mutex, and the
+  listener and the processor share the inbound queue's; neither is ever held while
+  a payload is decoded, verified or appended (Decision 15), so none of them waits
+  on another's decision. That the dispatch thread is among the book's users is
+  why that rule protects replies and not only the worker's opens.
+- **The one wait a reply can meet, and its length.** A publish appends to
+  `ops.sqlite` on the dispatch thread, and the processor appends inbound ops to the
+  same file (Decision 13). SQLite takes one writer at a time, so a publish reply
+  can wait behind an inbound append — for at most the connection's busy timeout,
+  after which the append fails as "database is locked" and the publish is
+  refused. That timeout is rusqlite's own default, **not a value this change
+  sets**: 5 s, measured here by holding a write lock on the op log from a second
+  connection and timing an append (it failed "database is locked" at 5.01 s).
+  An inbound append is one row, so the wait is ordinarily far shorter; 5 s is what
+  bounds it.
 
 **Rejected: the generated `*_async` twins**, chained by their callbacks. The
 callbacks run on the event loop after the method returns, so the reply would not
@@ -469,8 +483,11 @@ dispatch thread. Three things follow:
   the version under the write lock. `two_connections_opening_a_fresh_store_at_once_both_open_it`
   failed in round 0 before the fix.
 - **Concurrent appends wait rather than fail**, because rusqlite's connections wait
-  on a busy database. `two_connections_appending_at_once_both_store_everything`
-  pins it; setting the busy timeout to zero turns both tests red with "database is
+  on a busy database — for up to 5 s, rusqlite's default busy timeout, which
+  nothing here sets or changes (Decision 3 has the measurement, and what it
+  bounds: a publish reply waiting behind an inbound append).
+  `two_connections_appending_at_once_both_store_everything` pins the waiting;
+  setting the busy timeout to zero turns both tests red with "database is
   locked".
 
 `stoas.sqlite` and `senders.sqlite` are each opened by one thread only (dispatch,
@@ -525,21 +542,36 @@ the `AlreadyHeld` arm. A delivery pin bump should re-read `channel_lifecycle.nim
 
 ### 15. The processor judges before it opens the op log, and holds no lock while it does
 
-`transport::receive` is its three steps in the spec's order — look the channel up,
-`judge`, `admit` — and the processor runs them apart: it copies the channel's
-Stoa out of the book under the lock, releases it, judges the bytes, and opens the
-op log only for an op that passed. `Judged` has a private field and only `judge`
-makes one, so `admit` cannot be handed an op that skipped a check: "every check
-runs before anything is written" holds by the type, not by the caller's order.
+The boundary's order — look the channel up, `judge`, then the one write — is
+written once, in `transport::receive_via`, which takes the lookup and the write
+as parameters. `transport::receive` is `receive_via` over an `OpenChannels` and a
+log it is handed; the processor's `pass` is `receive_via` with a lookup that
+copies the channel's Stoa out of the book and releases the lock, and a write that
+opens the op log only for an op that passed. `judge` is private and only
+`receive_via` calls it, with the Stoa it looked up under the message's own
+channel identifier; `Judged` has a private field and only `judge` makes one. So
+`admit` cannot be handed an op that skipped a check, or one judged against
+another channel's Stoa: "every check runs before anything is written" holds by
+the type, not by the caller's order.
 
-Two findings forced it. The book's mutex was held across verification and the
-SQLite append, so an append waiting on a busy database held up the worker's opens
-and sends, contradicting Decision 3's "a mutex held for map lookups". And the log
-was opened before the channel was looked up, so the cheapest refusal paid a
-database open (measured by the security review at ≈ 400× the refusal alone), and
-with the log unopenable a message on a channel nobody opened was logged as a
-storage failure. What breaks without it: `the_channel_book_is_not_held_while_an_op_is_appended`
+Two findings forced the lock and the late open. The book's mutex was held across
+verification and the SQLite append, so an append waiting on a busy database held
+up the worker's opens and sends, against Decision 3's claim that nothing the
+event loop or the worker needs is held while a payload is decided. And the log was
+opened before the channel was looked up, so the cheapest refusal paid a database
+open (measured by the security review at ≈ 400× the refusal alone), and with the
+log unopenable a message on a channel nobody opened was logged as a storage
+failure. What breaks without it: `the_channel_book_is_not_held_while_an_op_is_appended`
 and `an_unknown_channel_is_refused_as_one_before_the_op_log_is_opened` go red.
+
+**Rejected: the processor composing the three steps itself**, as it first did
+after the split. It worked, but it was a second spelling of the boundary's
+order that none of the boundary's ~55 tests ran: a step added to `receive` would
+have been covered by every one of them and absent from the running module. And
+`judge` took the channel's Stoa as a bare address beside the message, so the tie
+between the two was the caller's convention. The architecture re-review found
+both. `transport::tests::the_boundary_looks_a_channel_up_under_the_messages_own_identifier`
+pins that the lookup is keyed by the message's own channel identifier.
 
 **Rejected: a snapshot of the open set per message.** It releases the lock too,
 but copies a map per message on the path whose rate a sender chooses.
