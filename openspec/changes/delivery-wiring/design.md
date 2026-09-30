@@ -544,9 +544,18 @@ What breaks without each part:
 `an_earlier_message_on_a_queued_open_does_not_cost_an_op_that_arrives_while_delivery_is_asked`
 is red only with both halves gone (as it was, against a no-op ask, before this was
 built): the extension alone keeps the junk waiting until the open settles, and the
-restart alone gives the op a wait of its own. The five tests named in this
-paragraph and the list above — the four new scenarios' and the worker's — were
-each red against a no-op ask before the change.
+restart alone gives the op a wait of its own. Five of the tests named in this
+paragraph and the list above were each red against a no-op ask before the change:
+the four new scenarios' —
+`a_message_waiting_when_delivery_is_asked_is_judged_after_delivery_answers`,
+`an_earlier_message_on_a_queued_open_does_not_cost_an_op_that_arrives_while_delivery_is_asked`,
+`asking_delivery_for_a_channel_whose_wait_has_expired_lets_a_message_wait_again`
+and `a_second_ask_while_a_message_waits_does_not_extend_its_wait_again` — and the
+worker's, `the_worker_marks_its_ask_of_delivery_in_the_channel_book`. The sixth,
+`an_ask_after_a_messages_wait_has_ended_does_not_make_it_wait_again`, is not one of
+them: it came after the ask was built, and holds the guard in `Wait::extend_from`,
+whose removal is what turns it red (its bullet above). A no-op ask extends nothing,
+so it is not the mutation that test answers.
 
 *Why the book holds each waiting message's end, and not the waiter.* The
 extension is from the **first** ask after a message began waiting, and two asks
@@ -575,6 +584,57 @@ entry, when every request it waited on has settled, which is what the message
 waits for; a request made since gives a new wait only to the messages after it.
 The waiter's loop is reached this way only when the open settles and is asked for
 again between two of its wake-ups, which no test here stages.
+
+*Why each wait leaves the book when its message is judged.* `op-transport`,
+"Nothing of a message's wait on an open is kept once it is judged". The
+correctness and security re-reviews (round 4) found `end_wait` pinned by no test;
+the tests that answered them pinned a property no requirement stated, and the
+spec-writer made it one after the spec-test re-review (round 5). Each waiting
+message is a `Wait` in its open's pending entry, keyed by the `WaitId` that
+`ChannelBook::begin_wait` hands the waiter from a counter on the book.
+`ChannelBook::end_wait` removes it by that id as `Channels::await_settled`
+returns, after the loop, whichever way the loop ended: the open settled, the
+message's end passed while it waited, or the end had already passed when it
+began, so it never slept. Because the ids come from one counter, `end_wait` on a
+pending entry a later request made again removes nothing of another message's.
+
+The constraint is that nothing else removes a `Wait` soon enough.
+`Channels::settle` removes the pending entry, and every `Wait` in it, only when
+the open's last request settles, and a stuck open is pending for a long time —
+up to (K+1) × `CALL_TIMEOUT` at startup, and for many `CALL_TIMEOUT`s for a join
+queued behind a backlog in the unbounded outbound queue (Risks). Kept until then,
+each message a sender put on that channel would add an entry — cheapest after the
+time has ended, when each is judged at once — so the sender would choose how far
+the book grew, and every later ask would walk all of those entries under the
+book's lock (`Pending::asked`). Removed as each wait ends, with the one processor judging one
+message at a time, the book holds at most one message's wait: the spec's stated
+consequence.
+
+*Rejected: no record per message* — the ask extending a count of waiters, or one
+`ends` shared by every message waiting on the open. There would be nothing to
+remove, but it cannot hold the once-only cap, because which messages an ask has
+already extended is a fact about each message ("Why the book holds each waiting
+message's end, and not the waiter", above).
+
+The cost is a map insert and remove per waiting message, each under the book
+lock the waiter already holds at that moment, and a structural obligation:
+`end_wait` runs once after the loop, so every exit from the loop must fall
+through to it. As `await_settled` is written, every exit is a `break` or the
+loop's condition failing, and its one early `return` is before `begin_wait` has
+made a `Wait`; a `return` added inside the loop would leak one entry per message
+that took it.
+
+What breaks without it: `end_wait` doing nothing — a mutant every `delivery::`
+test survived when the correctness re-review ran `cargo mutants` in round 4 —
+turns red, one test per way the wait ends,
+`a_message_that_waited_its_opens_time_out_leaves_no_wait_in_the_book`,
+`messages_judged_at_once_after_an_opens_time_has_ended_leave_no_wait_in_the_book`
+and
+`a_message_whose_open_settles_held_leaves_no_wait_while_another_request_is_pending`
+(measured by the tester when it wrote them, and again by the correctness
+re-review in round 5). Each reads the open's waits through a test helper that
+answers only while the open is still pending, so the pending entry going away
+cannot pass as "no wait left".
 
 **Why per open: the security re-review measured the per-message shape.** The
 first version started the clock afresh for every message (`started` was local to

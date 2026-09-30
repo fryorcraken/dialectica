@@ -992,7 +992,7 @@ scenario names cited in `tests.rs` (2923, 3067, 3100, 3139) and the requirement
 name match `spec.md` character for character, and the long quotation at `tests.rs:2924-2926`
 is verbatim from `spec.md:192`. One new defect, low, in prose.
 
-- [ ] **`dev-writer`** — `design.md:547-549` — the closing count of tests "red
+- [x] **`dev-writer`** — `design.md:547-549` — the closing count of tests "red
       against a no-op ask" now takes in a test that is green against one.
       **Scenario:** the paragraph reads "The five tests named in this paragraph and
       the list above — the four new scenarios' and the worker's — were each red
@@ -1012,6 +1012,17 @@ is verbatim from `spec.md:192`. One new defect, low, in prose.
       **Fix shape:** name the five, or say "the five ... other than the ask-after-end
       test, which is red only with the guard removed".
       **Severity:** low.
+      **Fixed** (`dev-writer`) in the commit `Record why each wait leaves the book, and
+      correct the no-op-ask count`, in both of your shapes: the sentence now says
+      "Five of the tests named in this paragraph and the list above", names the five
+      (the four new scenarios' and the worker's), and says the sixth,
+      `an_ask_after_a_messages_wait_has_ended_does_not_make_it_wait_again`, is not
+      one of them — it came after the ask was built and is turned red by the
+      `Wait::extend_from` guard's removal (its bullet). It does **not** claim the
+      test is green against a no-op ask: I tried the same mutation of
+      `Pending::asked` and the harness refused the edit as you found, so that stays
+      unmeasured and the page says only that a no-op ask is not the mutation the test
+      answers. `tasks.md` 12.2 already names exactly the five, so it needed no edit.
 
 ### What I checked, and found clean
 

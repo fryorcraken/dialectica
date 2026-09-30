@@ -414,7 +414,7 @@ the PR body still says "whose wait has not yet ended". `Closes #176` is the only
 closing keyword, `NO SPEC:` is None, and questions 5, 6 and 7 stay open. The code
 contradicts no recorded decision. One gap.
 
-- [ ] **`dev-writer`** (gap, a decision not recorded, with its mutation evidence only
+- [x] **`dev-writer`** (gap, a decision not recorded, with its mutation evidence only
       in a findings file) — the round added the requirement "Nothing of a message's wait
       on an open is kept once it is judged" (spec delta, `proposal.md:168`), and
       `design.md` has no entry for it. `git grep -n -i -E "end_wait|no record|leaves_no_wait"`
@@ -435,3 +435,25 @@ contradicts no recorded decision. One gap.
       tests red); a findings file is not kept after archive, and this is the guard
       whose purpose is least visible to the next reader. Move it into Decision 11 beside
       the other "What breaks without each part" lines. **Verified:** read at `3d34f15e`.
+      **Fixed** (`dev-writer`) in the commit `Record why each wait leaves the book, and
+      correct the no-op-ask count`: Decision 11 gains "Why each wait leaves the book
+      when its message is judged", after "A wait gone from the book ends the wait".
+      It records the choice (a `WaitId`-keyed `Wait` per waiting message, from a
+      counter on the book, removed by `ChannelBook::end_wait` after
+      `await_settled`'s loop on each of the three exits), the constraint (`settle`
+      removes the pending entry only at the last request's settle, so waits kept
+      until then grew with a sender's messages and were walked by every ask under
+      the lock), the rejected alternative (no record per message, which cannot hold
+      the once-only cap; it points at "Why the book holds each waiting message's end,
+      and not the waiter"), the cost (an insert and remove under a lock already held,
+      and the obligation that every loop exit fall through to `end_wait`), and what
+      breaks without it: `end_wait` doing nothing turns
+      `a_message_that_waited_its_opens_time_out_leaves_no_wait_in_the_book`,
+      `messages_judged_at_once_after_an_opens_time_has_ended_leave_no_wait_in_the_book`
+      and
+      `a_message_whose_open_settles_held_leaves_no_wait_while_another_request_is_pending`
+      red, with the provenance of that measurement. Its "What breaks without it" sits
+      in the new paragraph rather than as a bullet in the list you name: that list
+      follows the ask's paragraphs and each of its bullets is a part of the ask, and
+      the closing no-op-ask sentence counts from it. Prose only; no measurement was
+      re-run.
