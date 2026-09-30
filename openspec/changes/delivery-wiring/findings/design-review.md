@@ -331,3 +331,27 @@ sender identifier held at the length that arrives). In `proposal.md`, 6 and 7 do
       change as a constant and its pin, without a spec change." Checked against
       `node_config` in `delivery.rs` (`"preset": "logos.test"`, `"mode": "Edge"`).
       The question stays open for the owner.
+
+## Re-review round 3 `2cb71aaf..7462ded8`
+
+Read: the round's diff of `design.md` (Decisions 4, 6, 10, 11, Risks), `proposal.md`,
+`tasks.md` (11.1, 11.2) and the `op-transport` delta, the round's `delivery.rs`
+diff (`wait_ends` now asks `is_opening`; `CALL_TIMEOUT`, `SETTLE_LIMIT` and assert
+comments), the new `the_call_timeout_outlasts_deliverys_own_and_the_settle_limit_outlasts_the_call`
+test, issue #176 (body and comment, fresh) and `gh pr view 190`. I did not re-run
+the mutations.
+
+Round 2's box is answered as its outcome says: `proposal.md` Open Question 5 states
+that the code uses `logos.test` and `Edge`. Decision 11's re-argument checks by hand:
+40m = (m+1) x 35 at m = 7 (both 280 s); 20 x 36 = 720 against 21 x 35 = 735. The two
+withdrawn premises are recorded, the alternatives and what 40 s costs are stated, and
+the value is called a judgement, not a measurement. The code matches the decisions: the
+constants and asserts are unchanged, and `wait_ends` using `is_opening` is the
+behaviour-free predicate merge 11.1 says. The test writes the 30 s as a literal, as
+Decision 4 says. Proposal, design, spec delta and the PR body agree; the body's
+`NO SPEC:` section says None, and `Closes #176` is its only keyword beside an issue
+number. Nothing contradicts #176. Taste, not a box: `design.md:375` now reads "the
+four tests named below" with no names at the sentence, so the reader must find the
+four bullets at `design.md:435-447`.
+
+- [x] **re-review round 3 `2cb71aaf..7462ded8`: no findings** — read the round's design.md, proposal.md, spec delta, tasks.md, delivery.rs diff, the new order test, issue #176 and PR #190's body; clean
