@@ -123,16 +123,22 @@ pub fn node_config() -> String {
 /// live as `{"error":"Context not initialized","success":false,"value":null}`:
 ///
 /// - a transport failure (`Err`): timeout, provider unavailable;
-/// - an object whose `error` is a string;
+/// - an object whose `error` is a non-empty string;
 /// - an object whose `success` is `false`, with or without a reason.
 ///
 /// Anything else is delivery reporting it did the thing.
+///
+/// **An empty `error` is no reason.** `StdLogosResult.error` is a `std::string`
+/// defaulting to `""`, and logos-cpp-sdk's `lpPushExpr` serialises it verbatim,
+/// so a success can arrive as `{"success":true,"value":…,"error":""}`. Counted as
+/// a reason, every channel would be declined and every send reported failed.
+/// `an_empty_error_string_is_not_a_reason_to_decline` is red without the filter.
 pub fn declined(reply: &Result<serde_json::Value, String>) -> Option<String> {
     let value = match reply {
         Err(reason) => return Some(reason.clone()),
         Ok(v) => v,
     };
-    if let Some(reason) = crate::wire::callee_error(value) {
+    if let Some(reason) = crate::wire::callee_error(value).filter(|r| !r.is_empty()) {
         return Some(reason.to_string());
     }
     let failed = value

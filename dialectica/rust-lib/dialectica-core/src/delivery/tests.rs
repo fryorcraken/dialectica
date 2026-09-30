@@ -2076,6 +2076,22 @@ fn declined_reads_delivery_s_three_shapes_of_no() {
 }
 
 #[test]
+fn an_empty_error_string_is_not_a_reason_to_decline() {
+    // Correctness review: `StdLogosResult.error` defaults to `""`, and
+    // logos-cpp-sdk's `lpPushExpr` serialises it verbatim, so a success can
+    // arrive as `{"success":true,"value":…,"error":""}`. Read as a decline, no
+    // channel would ever open and no op would ever be sent, with every gate
+    // green. Red while any string in `error` counted as a reason.
+    assert_eq!(
+        declined(&Ok(json!({ "success": true, "value": "r-1", "error": "" }))),
+        None
+    );
+    // An empty reason beside an explicit failure is still a failure, with no
+    // reason given.
+    assert!(declined(&Ok(json!({ "success": false, "value": null, "error": "" }))).is_some());
+}
+
+#[test]
 fn an_appended_twice_arrival_is_reported_already_present() {
     // The boundary's own idempotence, through the processor: the same op on the
     // channel twice is one op, and the second is not a refusal.
