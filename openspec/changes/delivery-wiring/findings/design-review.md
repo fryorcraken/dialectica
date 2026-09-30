@@ -279,3 +279,50 @@ disagreement between documents is the first box below.
       and timed an `SqliteOpLog` append, which failed "database is locked" at
       5.01 s (probe removed). Decision 13 now says "for up to 5 s, rusqlite's
       default … which nothing here sets" and points at Decision 3.
+
+## Re-review round 2 `369561d1..2cb71aaf`
+
+Read: `design.md` in full at `0a8f8639` (Decisions 3, 4, 6, 10, 11, 14, 15, 16, the
+trap table, Risks, Open Questions), `proposal.md` in full, `tasks.md`, the round's
+diff of both spec deltas, `delivery.rs` (`Pending`, `ChannelBook`, `SETTLE_LIMIT`
+and its two compile-time asserts, `Channels::opening` / `settle` / `await_settled`,
+`listen`, `hand_over`, `refused_on_hand_over`, `Processor::decide` / `pass`, the
+order in `Delivering::start`), `transport.rs` (`receive_via`, `judge` now private,
+`refuse_oversized`), issue #176 (body and comment, fresh) and `gh pr view 190`. I
+checked that all 33 test names `design.md` cites in its "turns red" lines exist
+(`git grep`); I did not re-run the mutations.
+
+**Round 1's boxes.** The seventh open question is now in `proposal.md` (with the
+code's behaviour and three options), the per-open bound is recorded with its
+multiplied figure and alternatives, the `SETTLE_LIMIT` relation is pinned at compile
+time and recorded, and Decision 3's sentence about shared mutexes is corrected with
+the measured 5 s. All confirmed in the text and in the code. The closer's box from
+round 0 (`closed #30`) is fixed in the body: `Closes #176` is the only
+keyword-plus-number in it.
+
+**The code takes the decisions.** The wait is per open (`Pending::wait_ends`
+read once per message in `await_settled`, cleared in `opening`, kept across expiry
+because `settle` alone removes the entry); the hand-over check asks the channel
+before the size; startup marks its opens before `subscribe()`; the boundary's
+order is in `receive_via` only and `judge` is private; the listener contains a
+panic per event. No code contradicts a recorded decision, and I found no choice
+in the round's code that a reader would make differently and that Decisions leaves
+unexplained. Nothing in `design.md` contradicts #176: its live-verification
+departure is argued and put to the owner, and `handoff` in place of
+`transport::publish`'s bytes is covered by Decision 8.
+
+**The owner's three questions.** Each is open in `design.md` and in the PR body,
+with what the code does (`logos.test` and `Edge`; one shared 256-deep queue; the
+sender identifier held at the length that arrives). In `proposal.md`, 6 and 7 do;
+5 does not, which is the one box.
+
+- [ ] **`spec-writer`** (gap, documents disagree) — `proposal.md:209-211`, open
+      question 5, says "`#30` used `Edge` on `logos.test`" and never says what this
+      change's code does. The reader of the proposal, who is the owner deciding the
+      question, has to go to `design.md` Decision 5 or the PR body to learn that the
+      code uses `logos.test` and `Edge` (`node_config`, pinned by
+      `the_node_preset_and_mode_are_pinned`). Questions 6 and 7 in the same list say
+      what the code does ("the spec as written", "The code holds it as it arrives").
+      Add one sentence to question 5: this change's code uses `logos.test` and
+      `Edge`, the same as #30, and either can change as a constant and its pin
+      without a spec change.
