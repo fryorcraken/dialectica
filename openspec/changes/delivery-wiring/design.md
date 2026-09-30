@@ -439,8 +439,9 @@ again, for a fresh `SETTLE_LIMIT`. What breaks without each part:
   message begins waiting, turns
   `a_request_made_while_a_message_waits_does_not_extend_that_messages_wait` red:
   a stream of requests would postpone the waiting message for as long as it
-  lasted. What a request made *during* a wait does to that wait is not in the
-  spec; that test carries a `NO SPEC` marker for it.
+  lasted. What a request made *during* a wait does to that wait is in the spec
+  as the `op-transport` scenario "Requests made while a message waits do not
+  lengthen its wait", which that test cites.
 
 **Why per open: the security re-review measured the per-message shape.** The
 first version started the clock afresh for every message (`started` was local to
