@@ -131,7 +131,7 @@ set back to 20 s fails the build (Decision 11). They cannot hold delivery's real
 30 s, since `DELIVERY_CALLBACK_TIMEOUT` lowered with it still compiles;
 `the_call_timeout_outlasts_deliverys_own_and_the_settle_limit_outlasts_the_call`
 writes the 30 s as a literal and is red with `DELIVERY_CALLBACK_TIMEOUT` at
-10 s and `CALL_TIMEOUT` at 20 s, which compiles (re-run on the final tree).
+10 s and `CALL_TIMEOUT` at 20 s, which compiles.
 
 Delivery's own 30 s is not the end of a creation, though: its runtime completes
 the channel after the callback has given up, and says so only when asked again
@@ -359,7 +359,8 @@ created it and before the `channelCreate` answer reaches this peer. Judged in th
 gap, it is refused as an unknown channel and lost (Decision 10). So the channel
 book carries **pending** opens beside open ones, and the processor, meeting a
 message on a channel that is pending and not open, waits for the open to settle,
-for at most `SETTLE_LIMIT` (40 s) **per open** — below.
+for at most `SETTLE_LIMIT` (40 s) **from each start of the open's time**, which
+the first waiting message and this peer's ask of delivery each start — below.
 
 `op-transport` states the behaviour: a message on a channel that "is not open, but
 is being opened, MUST be judged only once that open is settled", and one on any
@@ -369,12 +370,21 @@ condition is exactly pending *and* not open, so a message on an open channel
 whose open is being repeated, or on an unrelated channel, is judged at once.
 Removing the wait turns
 `a_message_arriving_while_its_channel_opens_is_judged_after_the_answer` red. The
-limit is a field of `Processor`, `SETTLE_LIMIT` in the running wiring, so the
-bounded cases run with a short one. Removing the bound altogether — no deadline,
-the wait ending only on a settle — turns red, each timing out in `eventually`,
-the four tests named below,
-`a_message_waiting_on_an_open_delivery_never_answers_is_judged_after_a_bounded_wait`
-and `opens_settling_for_other_channels_do_not_extend_the_bounded_wait`.
+limit is a field of `Processor`, set to `SETTLE_LIMIT` by `Processor::new`, the
+one place a processor is built — `Delivering::start` and the tests' fixtures
+alike, so a test reading the limit reads the running module's (spec-test
+re-review round 3). The bounded cases shorten it on what `new` returns. Removing
+the bound altogether — no deadline, the wait ending only on a settle — turns
+red, each timing out in `eventually`:
+`a_message_waiting_on_an_open_delivery_never_answers_is_judged_after_a_bounded_wait`,
+`opens_settling_for_other_channels_do_not_extend_the_bounded_wait`,
+`many_messages_on_one_unanswered_open_hold_other_channels_up_for_one_wait_not_one_each`,
+`each_unanswered_opens_wait_is_its_own_and_not_one_shared_across_opens`,
+`an_open_whose_wait_has_expired_still_opens_its_channel_when_delivery_answers`,
+`a_new_request_for_a_channel_whose_wait_has_expired_lets_a_message_wait_again`,
+`a_request_made_while_a_message_waits_does_not_extend_that_messages_wait`,
+`asking_delivery_for_a_channel_whose_wait_has_expired_lets_a_message_wait_again`
+and `a_second_ask_while_a_message_waits_does_not_extend_its_wait_again`.
 
 **An open is pending from the request, not from the call.** `op-transport` says a
 channel "is being opened from the moment a create, a join or the module's startup
@@ -422,33 +432,129 @@ test here makes `thread::Builder::spawn` fail — and rely on `start` returning
 with them in scope.
 
 **The time is kept per open, not per message.** Each pending open in the book
-carries `wait_ends`: empty until a message first waits on the open, then that
-instant plus `SETTLE_LIMIT`. Every message on the channel waits until that same
-instant, so once it has passed they are judged at once, against what is open
-then — refused while the open is still unanswered. That is the spec's expired
-wait, and it needs no state of its own: a time in the past is it. Nothing else
-about the open changes: it stays pending, so hand-over still admits its messages
-to the queue, and delivery's answer, when it comes, settles and opens it. A new
-create, join or startup request clears `wait_ends`, so the next message waits
-again, for a fresh `SETTLE_LIMIT`. What breaks without each part:
+carries its time, an `OpenTime`, and each message waiting on it a `Wait` holding
+its own end. The first message to wait after a request fixes the time's end, that
+instant plus the limit, and every later message is given that same end, so once it
+has passed they are judged at once, against what is open then — refused while the
+open is still unanswered. That is the spec's expired wait, and it needs no state
+of its own: an end in the past is it. Nothing else about the open changes: it
+stays pending, so hand-over still admits its messages to the queue, and delivery's
+answer, when it comes, settles and opens it. A new create, join or startup request
+puts the time back to not started, so the next message waits again, for a fresh
+`SETTLE_LIMIT`; it moves no waiting message's end. What breaks without each part:
 
-- keeping the time per message (`wait_ends` recomputed for each message) turns
+- keeping the time per message (`OpenTime::end` giving every message now plus the
+  limit) turns
   `many_messages_on_one_unanswered_open_hold_other_channels_up_for_one_wait_not_one_each`
-  red — four messages on a stuck open held the valid op behind them for 1.61 s at
-  a 400 ms limit, where the test allows under two limits;
+  red (the op behind four stuck messages waited 4.02 s at a 1 s limit, where the
+  test allows under two) and
+  `an_opens_time_is_the_same_for_every_message_that_waits_on_it_until_a_request_clears_it`;
+  when the per-open shape was first built, four messages held the op 1.61 s at a
+  400 ms limit;
 - giving the open up when its time passes (removing it from the book) turns
   `an_open_whose_wait_has_expired_still_opens_its_channel_when_delivery_answers`
-  red — the next message is refused on hand-over;
-- a request not clearing the time turns
+  red — the next message is refused on hand-over — and with it
+  `a_request_made_while_a_message_waits_does_not_extend_that_messages_wait` and
+  `asking_delivery_for_a_channel_whose_wait_has_expired_lets_a_message_wait_again`;
+- a request not putting the time back turns
   `a_new_request_for_a_channel_whose_wait_has_expired_lets_a_message_wait_again`
-  red — the message is judged at once and refused;
-- reading the deadline from the book on each wake-up, rather than once when the
-  message begins waiting, turns
-  `a_request_made_while_a_message_waits_does_not_extend_that_messages_wait` red:
-  a stream of requests would postpone the waiting message for as long as it
-  lasted. What a request made *during* a wait does to that wait is in the spec
-  as the `op-transport` scenario "Requests made while a message waits do not
-  lengthen its wait", which that test cites.
+  red — the message is judged at once and refused — and
+  `an_opens_time_is_the_same_for_every_message_that_waits_on_it_until_a_request_clears_it`;
+- the waiter reading the open's time on each wake-up in place of its own end
+  turns `a_request_made_while_a_message_waits_does_not_extend_that_messages_wait`
+  red — a stream of requests postpones the waiting message for as long as it
+  lasts — and `a_second_ask_while_a_message_waits_does_not_extend_its_wait_again`.
+  What a request made *during* a wait does to that wait is the `op-transport`
+  scenario "Requests made while a message waits do not lengthen its wait", which
+  that test cites.
+
+**This peer's ask of delivery starts the open's time again, and extends a waiting
+message once.** `op-transport`, "Asking delivery to create a channel starts the
+open's time again", from the spec-writer's `d240ebdc`. The worker marks the ask
+in the book (`Opening::asked`) immediately before `channelCreate`, and it does two
+things there: the open's time becomes *started at the ask*, whether or not it had
+ended, so the next message to wait ends the fixed time after the ask; and every
+message waiting at that moment gets a new end, the fixed time after the ask, in
+place of the one it began with — unless an earlier ask already gave it one.
+
+*Why the ask, the finding it answers.* An open is pending from its request, so its
+time can start while the open is still queued behind other calls. When the worker
+then reaches it, the time left is `SETTLE_LIMIT` less the time spent queued, which
+can be shorter than the call — so the message the wait exists for, one racing
+delivery's answer, could be refused mid-call and lost. The old promise that 40 s
+"covers the ordinary cases (the open being the worker's current call)" broke once
+more than 5 s (40 − 35) of calls sat ahead of the open. The security re-review
+(round 3) measured it scaled down: limit 1000 ms, a junk payload waiting from 0,
+an honest op handed over at 800 ms, the open settled held at 1100 ms (a call begun
+at 600 ms and answered 500 ms later), and the op was **not stored**; both messages
+were refused `unknown-channel`. `an_earlier_message_on_a_queued_open_does_not_cost_an_op_that_arrives_while_delivery_is_asked`
+is that probe with an ask at 600 ms and the opposite expectation. Restarted at the
+ask, every message waiting at the (first) ask or beginning after it is judged only
+once the call is answered or given up, because `SETTLE_LIMIT` outlasts
+`CALL_TIMEOUT`.
+
+*Why once per message.* Without the cap, repeated joins against a hung delivery
+chain asks every ≤ 35 s, each extending the same waiting message by 40 s, and
+postpone it — and every other Stoa behind it — for as long as the joins last. The
+cap is what keeps "Requests made while a message waits do not lengthen its wait"
+true now that an ask can move an end. It is `Option::take` on the `Wait`'s
+remaining extension: a second ask finds nothing to take.
+
+*What still loses a message.* One whose wait ended before this peer asked delivery
+at all — an open queued behind more than `SETTLE_LIMIT` of other calls — and the
+channel's messages after it until the ask; and a message already extended once,
+when a later ask comes while it still waits. The spec names both.
+
+What breaks without each part:
+
+- the ask not extending waiting messages turns
+  `a_message_waiting_when_delivery_is_asked_is_judged_after_delivery_answers`,
+  `a_second_ask_while_a_message_waits_does_not_extend_its_wait_again` (its message
+  is no longer waiting at the second ask) and
+  `the_worker_marks_its_ask_of_delivery_in_the_channel_book` red;
+- the ask not starting the open's time again turns
+  `asking_delivery_for_a_channel_whose_wait_has_expired_lets_a_message_wait_again`
+  red;
+- the extension uncapped (every ask moving the end) turns
+  `a_second_ask_while_a_message_waits_does_not_extend_its_wait_again` red — refused
+  1.71 s after the first ask at a 1 s limit, where the test allows 1.4;
+- the worker not marking its ask turns
+  `the_worker_marks_its_ask_of_delivery_in_the_channel_book` red.
+
+`an_earlier_message_on_a_queued_open_does_not_cost_an_op_that_arrives_while_delivery_is_asked`
+is red only with both halves gone (as it was, against a no-op ask, before this was
+built): the extension alone keeps the junk waiting until the open settles, and the
+restart alone gives the op a wait of its own. The five tests named in this
+paragraph and the list above — the four new scenarios' and the worker's — were
+each red against a no-op ask before the change.
+
+*Why the book holds each waiting message's end, and not the waiter.* The
+extension is from the **first** ask after a message began waiting, and two asks
+can land between two of the waiter's wake-ups (an ask, a call declined at once,
+the next queued open for the same channel asked). A waiter that looked at "the
+latest ask" would take the second's time, which is what the cap forbids. Applied
+by the ask itself, under the book's lock, to every `Wait` registered then, "first"
+is exact. *Rejected: a log of asks per open that each waiter indexes from where it
+began* — exact too, but it grows with every ask for as long as the open is
+pending, and an index means nothing once the pending entry is removed and made
+again.
+
+*Why the open's time has three states* (`NotStarted`, `StartedAt(ask)`,
+`Ends(instant)`). The ask knows when it happens, not the limit a message waits by,
+so it cannot fix an end; the next message to wait does, from the ask. Once fixed,
+the end is kept. *Rejected: store only the start and add each reader's limit* —
+an ended time would then be ended or not depending on who read it, and
+`a_new_request_for_a_channel_whose_wait_has_expired_lets_a_message_wait_again`
+(whose expiry runs at 100 ms and whose next reader waits by 10 s) would pass with
+the request's reset removed. *Rejected: move the limit into the book* — it is the
+processor's, set in one place (`Processor::new`), and a second copy in the book
+could disagree with it.
+
+*A wait gone from the book ends the wait.* It goes only with the open's pending
+entry, when every request it waited on has settled, which is what the message
+waits for; a request made since gives a new wait only to the messages after it.
+The waiter's loop is reached this way only when the open settles and is asked for
+again between two of its wake-ups, which no test here stages.
 
 **Why per open: the security re-review measured the per-message shape.** The
 first version started the clock afresh for every message (`started` was local to
@@ -477,10 +583,16 @@ through the shared queue.
 
 **What still bounds the stall, then: two bounds, and the smaller holds.**
 
-- **One `SETTLE_LIMIT` per open.** Each open that stays unanswered while
-  messages arrive on it holds every Stoa up at most once, for at most
-  `SETTLE_LIMIT` — so at most `SETTLE_LIMIT` times the number of channels being
-  opened at once, which this peer's memberships decide and no sender does.
+- **One `SETTLE_LIMIT` per start of an open's time.** Each start holds every Stoa
+  up at most once, for at most `SETTLE_LIMIT`, however many messages arrive on the
+  channel, and only this peer's requests and asks start one, so no sender adds
+  starts. A message the ask extends holds every Stoa up for **less than twice
+  `SETTLE_LIMIT`**: under it before the ask, or its wait would have expired, and at
+  most it after. In practice the part after the ask is shorter: the call is
+  answered or given up within `CALL_TIMEOUT`, settling the open, unless another
+  request for the channel is still pending. So one junk message on a queued open
+  now holds every Stoa for under 80 s, and in practice under 40 + 35 = 75 s, where
+  before the ask it held 40 s.
 - **The last open's settle.** No wait outlasts its own open, and the waits run
   one after another on one wall clock, so each ends by a fixed instant, the
   moment its open settles. The stall therefore never extends past the moment the
@@ -488,30 +600,34 @@ through the shared queue.
   sum of pending times: with opens settling at 70 s, 105 s, … the wait on the
   last ends when it settles, however long the waits before it took.
 
-At startup against a delivery that answers nothing, open m of K settles by
-(m+1) × 35 s, counted from startup (node creation first). A sender putting one
-message on each stuck channel, in the order they settle, holds every Stoa up
-until min(40m, (m+1) × 35) for the m-th. 40m reaches (m+1) × 35 at m = 7, where
-5m = 35 and both are 280 s, and from there each wait runs to its own open's
-settle. So K × 40 s is reachable only while K ≤ 7. For 20 Stoas the stall is
-21 × 35 = 735 s, not 800 s: the per-message shape's figure, unchanged, needing 20
-messages, one per channel, where it took 19 on one channel. The security
-re-review measured it scaled down, with 35 s → 100 ms and `SETTLE_LIMIT` →
+At startup against a delivery that answers nothing, open m of K is asked at
+m × 35 s and settles by (m+1) × 35 s, counted from startup (node creation
+first). A sender putting one message on each stuck channel, in the order they
+settle, has the processor reach the m-th message when open m − 1 settles, which is
+when the worker asks for open m; the ask gives that message an end 40 s later,
+past open m's settle 35 s later, so every wait runs to its own open's settle. The
+stall is therefore (K+1) × 35 s **for every K**: 735 s for 20 Stoas, unchanged,
+and for fewer than 7 Stoas somewhat longer than the min(40m, (m+1) × 35) it was
+before the ask (for K = 1, 70 s where it was 40 s). The security re-review
+measured the ask-less shape scaled down, with 35 s → 100 ms and `SETTLE_LIMIT` →
 114 ms: node creation, then 8 opens settling at 200…900 ms, one message on each in
 settle order, then a valid op on an open channel. The op was stored after 914 ms
 at the per-open limit and 917 ms at a 10 s one. Three opens settling at 200, 400
 and 600 ms under a 10 s limit stored it at 612 ms, where waits summed in turn
-would have predicted 1200 ms.
+would have predicted 1200 ms. Those probes made no ask, so they measured the
+last-settle bound alone, which the ask does not move.
 
-**`SETTLE_LIMIT` is 40 s: past `CALL_TIMEOUT`, so it outlasts one delivery
-call.** An open that is the worker's current call — a join, or a creation racing
-its own answer, the ordinary cases — is settled within it. It does **not** outlast
-an open queued behind others, which can be pending for node creation plus every
-earlier Stoa's creation, each up to 35 s against an unresponsive delivery; that
-channel's messages are then refused and lost until delivery answers or the channel
-is asked for again. The order delivery's own 30 s < `CALL_TIMEOUT` < `SETTLE_LIMIT`,
-on which this and Decision 4 rest, is now `op-transport`'s requirement (the values
-are left to design), and two guards hold it. Two compile-time assertions beside
+**`SETTLE_LIMIT` is 40 s: past `CALL_TIMEOUT`, and started again by the ask, so
+it outlasts the call it waits on.** A message waiting on an open when the worker
+asks delivery for it (its first ask while it waits), or beginning to wait after, is
+judged only once that call is answered or given up, however long the open waited
+in the queue first. It does **not** save a message whose wait ended before the
+ask: an open queued behind node creation and earlier Stoas' creations, each up to
+35 s against an unresponsive delivery, can see its time run out in the queue, and
+that message and the channel's messages after it until the ask are refused and
+lost. The order delivery's own 30 s < `CALL_TIMEOUT` < `SETTLE_LIMIT`, on which
+this and Decision 4 rest, is `op-transport`'s requirement (the values are left to
+design), and two guards hold it. Two compile-time assertions beside
 `SETTLE_LIMIT` hold the constants against each other: setting `SETTLE_LIMIT` to
 10 s, or `CALL_TIMEOUT` back to the IPC default of 20 s, fails the build (both
 tried). Before them, both changes together passed every test, which the
@@ -539,17 +655,19 @@ What the two limits actually differ in:
 
 - **How far one stuck open can hold every Stoa.** A queue-sized limit lets a
   single message on the deepest pending open hold every Stoa for that open's
-  whole pending time. 40 s holds it once, for 40 s. The two agree when a sender
-  puts a message on enough stuck channels, which at startup, where every channel
-  is stuck, means K ≥ 7 of them. They differ where an open's pending time is
-  longer than the number of stuck opens × 40 s: a peer in fewer Stoas at startup,
-  or a join made behind a backlog of sends against a hung delivery. The
-  outbound queue is unbounded (Risks), so that join's open can be pending for
-  many `CALL_TIMEOUT`s, and under a queue-sized limit one message on it holds
-  every Stoa that long.
-- **What 40 s loses.** A message on a channel whose open is still queued after
-  40 s is refused and lost, even when delivery then answers the open held; a
-  queue-sized limit would keep it. That needs delivery to be handing messages
+  whole pending time. 40 s holds it for 40 s if the open is not asked for in that
+  time, and otherwise until its call ends (under 80 s, above). The two agree when
+  a sender puts a message on every stuck channel at startup, for any K now that the
+  ask extends each (above). They differ where a message begins waiting on an open
+  more than 40 s before the worker asks delivery for it: a message on only a deep
+  channel at startup, or on a join made behind a backlog of sends against a hung
+  delivery. The outbound queue is unbounded (Risks), so that join's open can be
+  pending for many `CALL_TIMEOUT`s, and under a queue-sized limit one message on
+  it holds every Stoa that long.
+- **What 40 s loses.** A message that began waiting on an open more than 40 s
+  before the worker asked delivery for it is refused and lost, with the channel's
+  messages after it until the ask, even when delivery then answers the open held;
+  a queue-sized limit would keep them. That needs delivery to be handing messages
   over while its answers to this peer's calls take long enough to queue past
   40 s.
 - **The spec asks for a fixed time.** `op-transport` bounds the wait by "a fixed
@@ -558,19 +676,21 @@ What the two limits actually differ in:
   change.
 
 **So 40 s stays, re-decided on those grounds.** Under a sender who puts a message
-on every stuck channel at startup, every fixed value from 40 s up gives the same
-stall once K ≥ 7, the last open's settle, and a longer one buys no smaller stall.
-A shorter one, down to `CALL_TIMEOUT`, trims little (at 36 s, 20 × 36 = 720 s
-against 735 s for 20 Stoas) and refuses more. The value only chooses, where an
-open's pending time outlasts the stuck opens × the limit, between holding every
-Stoa up longer and refusing more of the stuck channel's messages. 40 s takes the
-short hold. It is `CALL_TIMEOUT` plus a margin for a message that began waiting
-just before the worker reached the call, so it covers the ordinary cases (the
-open being the worker's current call), and it keeps one stuck channel's cost on
-that channel instead of spreading it to every Stoa through the shared queue
-(Decision 10). A longer value would put every Stoa's
+on every stuck channel at startup, every fixed value above `CALL_TIMEOUT` gives
+the same stall, the last open's settle, because the ask carries each waiting
+message past its own call; a longer one buys no smaller stall, and a shorter one
+down to `CALL_TIMEOUT` trims nothing there (the figure of 720 s at a 36 s limit,
+against 735 s, belonged to the shape before the ask). The value only chooses,
+for a message that begins waiting on an open more than the limit before that
+open is asked of delivery, between holding every Stoa up longer and refusing
+more of the stuck channel's messages. 40 s takes the short hold, and keeps one
+stuck channel's cost on that channel instead of spreading it to every Stoa
+through the shared queue (Decision 10). A longer value would put every Stoa's
 arrivals at risk — discarded once 256 are waiting — to save messages on a channel
-whose delivery is already not answering. That is a judgement, not a measurement.
+whose delivery is already not answering. It is `CALL_TIMEOUT` plus a margin of
+5 s: with the ask restarting the time, the margin is what lets a message extended
+at the ask outlast a call that runs to its timeout and is then answered a little
+late by the IPC. That is a judgement, not a measurement.
 
 **The wait is its own loop, not `Condvar::wait_timeout_while`.** Once the book's
 mutex is poisoned — by a contained panic under it — `wait_timeout_while` returns
@@ -581,9 +701,10 @@ limit. What breaks without it: `a_poisoned_channel_book_still_waits_for_this_cha
 goes red.
 
 **What the wait costs.** While the processor waits on one slow open — up to
-`SETTLE_LIMIT` for that open, however many messages arrive on it — messages on
-every *other*, open channel wait behind it, and once 256 are waiting, arrivals
-are discarded for good.
+`SETTLE_LIMIT` for each start of its time, however many messages arrive on it,
+and under twice that for a message the ask extends — messages on every *other*,
+open channel wait behind it, and once 256 are waiting, arrivals are discarded for
+good.
 
 **Alternatives, and why not:**
 
@@ -600,14 +721,24 @@ are discarded for good.
 - **Keep the clock per message** — the first version. Rejected above: a sender
   chose the stall by choosing how many messages to send.
 - **Start an open's time at the request rather than at the first waiting
-  message.** It would bound the K-opens-at-startup total too, but the spec starts
-  it when a message first waits, and an open queued behind others would then
-  often expire before delivery was even asked, refusing messages a delivery that
-  was merely slow would have let through.
+  message.** Still rejected. It would bound the K-opens-at-startup total too, but
+  an open queued behind others would then often expire before delivery was even
+  asked, refusing messages a delivery that was merely slow would have let
+  through. The ask restart takes the part of it that helps — a time that covers
+  the call — from the ask, where what it covers is one call bounded by
+  `CALL_TIMEOUT`, not the queue ahead of it.
+- **Narrow the spec's promise instead of restarting at the ask** (the other
+  direction the security re-review offered, round 3): keep the time from the first
+  message and guarantee only waits that began after the ask. The spec-writer
+  rejected it in `d240ebdc`: it keeps the loss in exactly the race this wait
+  exists for.
+- **Let every ask extend a waiting message.** Rejected by the once-only cap
+  above: asks chained against a hung delivery would postpone one message, and
+  every Stoa behind it, for as long as they came.
 
-The stall is bounded by `SETTLE_LIMIT` per unanswered open and happens only while
-this peer is opening a channel, which it does at start, on create and on join;
-accepted over a second queue.
+The stall is bounded by `SETTLE_LIMIT` per start of an open's time and happens
+only while this peer is opening a channel, which it does at start, on create and
+on join; accepted over a second queue.
 
 A declined *repeat* open leaves an already-open channel open (`Channels::settle`
 opens on success and never closes), which is `stoa-membership`'s "A repeated
@@ -826,19 +957,24 @@ The reasoning that chose each is here; the contract is the requirement cited.
 - [A slow delivery delays later sends by up to 35 s each] → replies are unaffected;
   the outbound queue is unbounded, but each entry is caused by a local call from
   the view, so it grows at the user's rate.
-- [A slow open stalls inbound processing for every Stoa for up to `SETTLE_LIMIT`,
-  once per open however many messages arrive on it; K opens stuck at once can
-  cost up to K × 40 s in turn, never past the last of them settling — at startup
-  against a delivery that answers nothing, (K+1) × 35 s once K ≥ 7, under this
-  limit or any longer one] → a sender cannot lengthen it, and the peer's own memberships
-  bound K. Decision 11 records why a second queue was not worth it, and why 40 s
-  over a limit sized for the queue.
-- [An open queued behind others can stay pending longer than `SETTLE_LIMIT`, so
-  after one wait of 40 s every message on its channel is refused and lost until
-  delivery answers or the channel is asked for again] → needs delivery to hand
-  messages over while not answering calls, at start or on a join made behind a
-  slow open. Decision 11 says why the limit covers one call and not a queue of
-  them, and why the time is per open.
+- [A slow open stalls inbound processing for every Stoa for up to `SETTLE_LIMIT`
+  per start of its time, however many messages arrive on it — under twice that
+  for a message this peer's ask extends, in practice `SETTLE_LIMIT` plus
+  `CALL_TIMEOUT` — and several opens stuck at once never past the last of them
+  settling: at startup against a delivery that answers nothing, (K+1) × 35 s for
+  K Stoas, under this limit or any longer one] → only this peer's requests and
+  asks start an open's time, so a sender cannot lengthen it, and the peer's own
+  memberships bound K. Decision 11 records why a second queue was not worth it,
+  why 40 s over a limit sized for the queue, and why an ask extends a waiting
+  message only once.
+- [An open queued behind others can stay pending longer than `SETTLE_LIMIT`
+  before this peer asks delivery for it, so a message that began waiting on it
+  that long before the ask is refused and lost, with the channel's messages after
+  it until the ask] → needs delivery to hand messages over while not answering
+  calls, at start or on a join made behind a slow open. Every message waiting at
+  the ask or after it is judged only once the call ends (Decision 11). Decision 11
+  says why the limit covers one call and not a queue of them, and why the time is
+  per open and started again by the ask.
 - [256 is a guess at burst depth] → discards are counted and each is logged with
   the running total, so a bound that is too small is visible in the log.
 - [Messages on another application's channels on the shared node are logged as

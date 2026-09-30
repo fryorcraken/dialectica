@@ -678,7 +678,7 @@ changes behaviour.
       or drop the quotation marks.
       **Severity:** nit.
 
-- [ ] **`dev-writer`** — `design.md:134` — "(re-run on the final tree)" is the stale-label
+- [x] **`dev-writer`** — `design.md:134` — "(re-run on the final tree)" is the stale-label
       shape round 2's second entry removed everywhere else.
       **Scenario:** Decision 4's new sentence says
       `the_call_timeout_outlasts_deliverys_own_and_the_settle_limit_outlasts_the_call` "is
@@ -691,6 +691,11 @@ changes behaviour.
       **Fix shape:** drop the parenthesis; the mutation is stated as a command a reader
       can run.
       **Severity:** low.
+      **Fixed** (`dev-writer`) in the commit `Restate Decision 11 for the ask, and
+      drop a stale label`: the parenthesis is gone, as the fix shape says. The claim
+      is unchanged and needs no label. The new mutation claims written in the same
+      commit (Decision 11, the ask) carry none either: each names the change and
+      the tests it turns red.
 
 ### What I checked, and found clean
 
