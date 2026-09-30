@@ -351,3 +351,96 @@ logic (`refused_on_hand_over`, `hand_over`, `is_known`, `await_settled`,
 `channel_answer`, `listen`, `settle`, `Opening`, `opening`), `dialectica-core`
 lib tests: 18 mutants, **14 caught, 4 unviable, 0 missed**. My stall probe was
 in the tree during that run. It adds one test and changes no mutated function.
+
+## Re-review round 2 `369561d1..2cb71aaf`
+
+Dimension: **security** only. Read at `0a8f8639` (the range's code is
+`2cb71aaf`'s): the range's diffs to `delivery.rs`, `transport.rs` and
+`arrival.rs`, the new delivery and transport tests, design.md Decision 11 and the
+Risks, and the `op-transport` / `stoa-membership` spec diffs. Probes were
+appended to `delivery/tests.rs` in the reviewer's tree only and are not
+committed. Each scenario below says what the probe did, so it can be re-run.
+
+**Both round-1 outcomes hold.** The time is kept per open.
+`Pending::wait_ends` is `get_or_insert_with`, so every message on one open gets
+the same instant back. Only `Channels::opening` clears it, and only `joined`
+(create and join replies) and `startup_opens` call that; no inbound path does.
+`await_settled` reads the deadline once, before its loop, so a settle storm and a
+request storm cannot extend a wait. Hand mutation: I made `Pending::wait_ends`
+return `Instant::now() + limit` without storing it, which is the per-message
+clock. Two tests went red:
+`many_messages_on_one_unanswered_open_hold_other_channels_up_for_one_wait_not_one_each`
+(4.02 s against a 1 s limit) and
+`an_opens_time_is_the_same_for_every_message_that_waits_on_it_until_a_request_clears_it`.
+I restored it after. The Decision 11 text no longer says "one call long".
+
+- [ ] **`dev-writer`** — design.md Decision 11, "Rejected: a limit sized for a
+      queue of opens" (`design.md:487-499`), and the Risks entry that leans on it
+      (`design.md:755-758`). The rejection says that under a queue-sized limit
+      "startup's K opens, each held in turn, grow as the square of K where 40 s
+      grows as K". That is false. A wait ends when its open settles, and at
+      startup every open settles by (K+1) × 35 s, counted from startup. The waits
+      run one after another on one processor, but each ends at a fixed wall-clock
+      time. So under a sized limit the stall is at most the pending window,
+      (K+1) × 35 s, which is linear in K.
+      Under 40 s per open it is no smaller once K ≥ 7. A sender puts one message
+      on each stuck channel, in the order the opens settle. Wait m then ends at
+      min(40m, (m+1) × 35), which reaches the window at m = 7, and every later
+      wait runs to its own open's settle. For 20 Stoas the stall is 735 s under
+      either limit. That is the round-1 headline figure, unchanged. It now takes
+      20 messages, one per channel, where it took 19 on one channel.
+      **Scenario:** a peer in 20 Stoas restarts against a delivery that hands
+      messages over but answers no calls (Decision 11's precondition). A sender
+      posts one junk payload on each of those Stoas' public channel ids. Every
+      Stoa's inbound processing stalls about 12 minutes, the queue fills, and
+      later arrivals are discarded for good. A queue-sized limit would stall
+      exactly as long and would refuse none of the stuck channels' messages.
+      So the trade the decision records (lose those messages to get a smaller
+      worst-case stall) buys nothing at K ≥ 7.
+      **Measured:** a probe scaled 35 s → 100 ms (`SETTLE_LIMIT` → 114 ms), with
+      node creation followed by 8 Stoa opens settling at 200…900 ms. It put one
+      message on each open's channel in settle order, then a valid op on an open
+      channel. The op was stored after **914 ms** at the per-open 114 ms limit
+      and **917 ms** at a 10 s limit. A second probe used three opens settling
+      at 200/400/600 ms under a 10 s limit. The "held in turn" reading predicts
+      1200 ms; the op was stored at **612 ms**.
+      **Severity:** low. The bound is documented and is not violated (K × 40 s ≥
+      the window). But the security argument for choosing 40 s over the
+      loss-free alternative is wrong. Correct the rejection and the Risks line,
+      then decide again whether 40 s is still the right value once the argument
+      is true.
+
+## Round 2 clean areas
+
+- **Nothing a peer controls can extend or restart a wait.** A peer's message
+  *does* start an open's time. That is the spec's rule ("started by the first
+  message to wait on it"), and all it lets a sender do is use the one wait
+  early. The loss that follows stays on the stuck channel, as the round-1
+  outcome's "What it trades" records. Once a wait has expired, a message on
+  that channel is refused by `receive_via`'s lookup before any decode. So the
+  queue slots it takes cost a hash lookup each, and the shared bound itself is
+  still owner Open Question 6.
+- **`receive_via`.** `judge` is private. `Judged(` is constructed only inside
+  `judge`, and only `receive_via` calls `judge`, with the Stoa it looked up
+  under the message's own `channel_id`. A caller cannot pair one channel's
+  bytes with another channel's Stoa.
+  `the_boundary_looks_a_channel_up_under_the_messages_own_identifier` pins
+  this. The delivery processor's lookup copies the Stoa and releases the book
+  before anything is decoded or verified.
+- **"Already exists".** This range changes only the spec: `channel_answer` and
+  `ALREADY_EXISTS` are the same as in round 1, and the substring rule matches
+  the new `stoa-membership` wording. The round-1 finding still stands: no peer
+  can put that phrase into delivery's reason.
+- **Panics.** `Instant::now() + limit` would panic only for a limit near
+  `Duration::MAX`. `settle_limit` is `SETTLE_LIMIT` in the running wiring and is
+  set otherwise only in tests. `saturating_duration_since` cannot panic. The
+  compile-time order asserts are `const` and cost nothing at run time.
+- **What reaches the log.** No new `Note` in the range. `record_decision` is
+  the old match, moved.
+- **Dependencies.** None added.
+
+`cargo mutants` on `delivery.rs`, scoped with `--re` to `Pending::`,
+`ChannelBook::`, `Channels::opening`, `Channels::await_settled` and
+`Processor::{decide,pass,record_decision}`, `dialectica-core` lib tests: 16
+mutants, **11 caught, 5 unviable, 0 missed**. My three probes were in the tree
+during that run. They add tests and change no mutated function.
