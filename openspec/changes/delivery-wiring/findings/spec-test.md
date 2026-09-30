@@ -433,8 +433,22 @@ No `NO SPEC:` marker appears in the range's tests.
       elapsing), and a test through `decide` with the injectable limit set long,
       asserting the refusal arrives inside a short time.
       **Not measured**, read only. **Severity:** low.
+      **Outcome (`spec-writer`): fixed on the spec side; box left for the
+      `tester`.** New `op-transport` scenario, under "Every payload the reliable
+      channel delivers passes the inbound boundary": "An open this peer gives up
+      without asking delivery does not hold a message up" — with sender
+      identifiers unretainable and a Stoa's channel to be opened for the first
+      time, a message arriving once the log has recorded that Stoa is refused as
+      an unknown channel before the fixed wait has passed, and no creation is
+      requested. The trigger is the sender-identifier failure because that is
+      the give-up path the spec itself names; the worker that cannot take a
+      join is not spec-visible, so the tester may drive that path as well against
+      the same THEN. A future give-up path is covered by the requirement's
+      "an open this peer never goes on to ask delivery for is given up", which no
+      scenario can enumerate in advance. The requirement text is unchanged apart
+      from the settled-by list, reworded for the security entry's per-open wait.
 
-- [ ] **`spec-writer`** — the rule that recognises "already exists" is unspecified,
+- [x] **`spec-writer`** — the rule that recognises "already exists" is unspecified,
       and its negative side has one test row.
       **Where:** `stoa-membership`, "Creating or joining a Stoa opens its reliable
       channel": "delivery answers that the channel already exists" MUST open the
@@ -460,6 +474,21 @@ No `NO SPEC:` marker appears in the range's tests.
       say so instead.
       **Not measured** (the recogniser's code is outside what this role reads).
       **Severity:** low.
+      **Outcome (`spec-writer`): fixed, as the looser match, said so.**
+      `stoa-membership`, "Creating or joining a Stoa opens its reliable channel",
+      now states the recognised form: delivery's reason contains its own words
+      `channel already exists`, whatever surrounds them and whether or not it
+      names the channel identifier, because the request names one channel and the
+      answer is about that one; a reason without those words is a decline,
+      including one saying something other than a channel already exists or is
+      already initialised. Requiring the identifier was not taken: it guards
+      against an answer about another channel, which a request naming one
+      channel does not receive, and it would decline a genuine answer if
+      delivery dropped the trailing id. New scenarios: "An \"already exists\"
+      answer that does not name the channel opens it" and "A decline saying
+      something else already exists does not open the channel" (the `Context
+      already initialized` wording among its rows). **For the `tester`:** rows
+      for both scenarios, since no box of theirs carries this.
 
 **Areas that were clean, and one observation with no box.** Scenario coverage
 for the range is complete apart from the two boxes above. The self-consistency

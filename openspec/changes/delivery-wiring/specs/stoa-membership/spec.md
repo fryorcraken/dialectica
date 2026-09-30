@@ -10,6 +10,8 @@ The request MUST be made after the membership is recorded. A create or join that
 
 A channel is open only once delivery reports that it holds the channel: either that it created the channel, or that the channel already exists. **An answer reporting that the channel already exists MUST open the channel, exactly as a report that delivery created it does.** Delivery gives that answer when it already holds the channel, and a channel delivery holds is one whose messages it hands over.
 
+**An answer reports that the channel already exists when delivery's reason for it contains delivery's own words for that, `channel already exists`**, whatever else the reason carries around them, and whether or not it names the channel identifier. A reason without those words is a decline for another reason, including one saying that something other than a channel already exists or is already initialised.
+
 If delivery answers the creation with its error shape for any other reason, fails, or does not answer, a channel that was not already open is not open. The module's log MUST record the Stoa and delivery's reason, where delivery gave one. Such a Stoa's channel is requested again at the next module start, or when the Stoa is next created or joined, and that request opens it if delivery then reports that it holds the channel, in either form.
 
 **A repeated request that delivery declines, fails or does not answer MUST leave a channel that is already open open.** Delivery created it once, and nothing this change supplies closes it.
@@ -60,6 +62,17 @@ If delivery answers the creation with its error shape for any other reason, fail
 - **WHEN** a Stoa's channel is not open, its creation is requested, and delivery answers that the channel already exists
 - **THEN** a message carrying a valid op for that Stoa, arriving afterwards on its channel identifier, is stored
 - **AND** a post published into that Stoa afterwards is sent on that channel identifier
+
+#### Scenario: An "already exists" answer that does not name the channel opens it
+
+- **WHEN** a Stoa's channel is not open, its creation is requested, and delivery declines it with a reason that says the channel already exists without naming any channel identifier
+- **THEN** a message carrying a valid op for that Stoa, arriving afterwards on its channel identifier, is stored
+
+#### Scenario: A decline saying something else already exists does not open the channel
+
+- **WHEN** a Stoa's channel is not open, its creation is requested, and delivery declines it with a reason saying that the context is already initialised, or that something other than a channel already exists
+- **THEN** a message arriving afterwards on that Stoa's channel identifier is refused as arriving on an unknown channel
+- **AND** a post published into that Stoa afterwards is not sent
 
 #### Scenario: A creation delivery did not complete in time opens on the next request
 

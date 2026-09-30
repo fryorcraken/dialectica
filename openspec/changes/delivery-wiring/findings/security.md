@@ -224,7 +224,7 @@ dropped before it waits (`delivery.rs:1025-1030`). `INBOUND_BOUND`'s doc now
 states the payload-bytes bound and does not overclaim it. The listener runs each
 `next()` and hand-over under its own `catch_unwind` (`delivery.rs:951-971`).
 
-- [ ] **`spec-writer`** — `op-transport`, "That wait is bounded by a fixed time"
+- [x] **`spec-writer`** — `op-transport`, "That wait is bounded by a fixed time"
       (`specs/op-transport/spec.md:190`), as built at `delivery.rs:587-599` /
       `:1068` — the wait is given up "for that message", so each later message
       on the same still-pending channel waits the full limit again. A sender
@@ -256,6 +256,30 @@ states the payload-bytes bound and does not overclaim it. The listener runs each
       it pending again. This caps the stall at one `SETTLE_LIMIT` per open,
       whatever n is. The spec's "for that message" reads as ruling that out, so
       the spec has to decide it first.
+      **Outcome (`spec-writer`): fixed; the `dev-writer` builds it.** The
+      direction is adopted. `op-transport`, "Every payload the reliable channel
+      delivers passes the inbound boundary": the paragraph is now "That wait is
+      bounded by a fixed time for each open, not for each message" — the time
+      starts when a message first begins waiting on the open; once it has passed
+      unanswered the wait has expired, and the waiting message and every later
+      one on that channel are judged without waiting, so one open holds other
+      channels up for that fixed time however many messages arrive on it. A new
+      paragraph, "An expired wait changes nothing else about the open", keeps the
+      channel being opened (delivery's later answer still settles and opens it,
+      and hand-over does not refuse its messages), and says only a later create,
+      join or startup request lets a message wait on it again. The settled-by
+      list no longer reuses "given up as unanswered" for the expiry; it now reads
+      "given up by this peer after asking delivery and receiving no answer".
+      What it trades: a message on the stuck channel taken after the expiry is
+      judged at once, and refused if the open is still unanswered, where today
+      it would have waited its own 40 s and might have been stored. That loss is
+      confined to the channel whose open is stuck, where the per-message wait
+      spread it to every Stoa through the shared queue. New scenarios: "Many
+      messages on one unanswered open hold other channels up for one wait, not
+      one each" (your probe, asserting under 2 × the limit for ≥ 3 messages), "An
+      open whose wait has expired still opens its channel when delivery
+      answers", and "A new request for a channel whose wait has expired lets a
+      message wait again".
 
 - [ ] **`dev-writer`** — design.md Decision 11 (`design.md:400-406`, `:433`),
       Risks (`design.md:621-625`) and `SETTLE_LIMIT`'s doc (`delivery.rs:520-530`)

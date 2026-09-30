@@ -34,7 +34,10 @@ the design relies on.
   already exists. The second answer is what delivery gives when a creation it
   stopped waiting on completed anyway, and when this module restarts while
   delivery keeps running; read as a decline, it left the channel shut for as
-  long as delivery ran. The create or join reply does not wait for
+  long as delivery ran. It is recognised by delivery's words
+  `channel already exists` in the reason, whether or not the reason names the
+  channel; a reason that says something else already exists is a decline. The
+  create or join reply does not wait for
   the open and does not report on it. A failed open is logged, and is attempted
   again at the next start or the next create or join of that Stoa. A repeated
   open that delivery declines leaves an already-open channel open. A create or
@@ -56,7 +59,11 @@ the design relies on.
   log never carries the payload, the sender identifier, or a channel identifier
   this peer has not opened. A message on a channel whose open is still
   unanswered is judged once the open settles, not refused in the gap, and that
-  wait is bounded by a fixed time even if delivery never answers. A channel
+  wait is bounded by a fixed time even if delivery never answers. The time is
+  kept per open, not per message: once it has passed, later messages on that
+  channel are judged without waiting until the channel is asked for again, so
+  however many messages a sender puts on a channel whose open is stuck, they
+  hold every other Stoa up for one wait, not one each. A channel
   counts as being opened from the moment a create, a join or startup asks for
   it, including while that request waits behind others, not from when delivery
   is asked; and startup counts every Stoa's channel as being opened before it
@@ -179,8 +186,9 @@ requirements use `MUST`.
 The spec takes a position on each of the first four, and the code on this
 branch implements it. Reversing one is still possible, but it is now a spec
 change and a code change together, not an edit to this proposal. The fifth is
-not in the spec. The sixth was raised in review, after the code landed; the
-spec closes part of it and leaves the rest open.
+not in the spec. The sixth and seventh were raised in the security review,
+after the code landed: the spec closes part of the sixth and leaves the rest
+open, and it says nothing about the seventh.
 
 1. **A join or create whose channel fails to open.** The spec has the reply
    succeed unchanged and log the failure. The alternatives are to fail the join,
@@ -218,6 +226,26 @@ spec closes part of it and leaves the rest open.
      is today's rule (the arrival is discarded); it changes which payload is
      discarded only when another channel is the one holding the most, so it
      amends question 3's answer rather than reversing it.
+7. **How long a sender identifier this peer holds may be.** A message waiting
+   for the boundary is held with the sender identifier it arrived with, at
+   whatever length delivery handed over. Its payload is bounded by the 150 KiB
+   message limit, and its channel identifier is one this peer asked for, but
+   nothing bounds the sender identifier short of the largest message the node
+   carries, so the queue's memory is not bounded by this application's own
+   limits alone. The code holds it as it arrives, which is the spec's silence.
+   The options:
+   - **Leave it unbounded** (as built). Nothing to add; the queue's worst case
+     then depends on a node another module may have created.
+   - **Refuse on hand-over a message whose sender identifier is longer than a
+     fixed length**, as an over-long payload is. It needs a length that admits
+     every honest implementation's identifiers (this peer's own are made from 32
+     random bytes),
+     and a refusal kind of its own in the log.
+   - **Do not hold the sender identifier while a message waits.** Nothing the
+     boundary decides depends on it (`op-transport`'s "The transport's sender
+     identifier is never an identity"), but the boundary is required to be
+     handed it, so this amends "Every payload the reliable channel delivers
+     passes the inbound boundary".
 
 ## Impact
 

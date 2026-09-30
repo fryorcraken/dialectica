@@ -185,9 +185,11 @@ A delivered message whose fields cannot be read MUST be discarded and recorded i
 
 **A message the op log cannot take is not decided again.** When the op log cannot be opened, or the append fails, the module's log MUST record it as a storage failure, and the message MUST NOT be held for another attempt: its op is in the log afterwards only if it arrives again.
 
-**A message arriving on a channel that is not open, but is being opened, MUST be judged only once that open is settled** — reported held (created, or already existing, as `stoa-membership`'s requirement "Creating or joining a Stoa opens its reliable channel" says), declined, failed, given up as unanswered, or given up by this peer without delivery being asked — and against the channels open then. Delivery can hand over a message on a channel before its answer to the creation reaches this peer. A message on any other channel identifier, an open one included, MUST be judged without waiting on any open.
+**A message arriving on a channel that is not open, but is being opened, MUST be judged only once that open is settled** — reported held (created, or already existing, as `stoa-membership`'s requirement "Creating or joining a Stoa opens its reliable channel" says), declined, failed, given up by this peer after asking delivery and receiving no answer, or given up by this peer without delivery being asked — and against the channels open then, unless the wait below expires first. Delivery can hand over a message on a channel before its answer to the creation reaches this peer. A message on any other channel identifier, an open one included, MUST be judged without waiting on any open.
 
-**That wait is bounded by a fixed time.** A message waiting on an open MUST be judged no later than a fixed time after this peer began waiting on it, whether or not delivery ever answers the open. When that time passes with the open unanswered, the open is given up as unanswered for that message, and the message is judged against the channels open then.
+**That wait is bounded by a fixed time for each open, not for each message.** The time starts when a message first begins waiting on the open. Every message waiting on that open MUST be judged no later than that fixed time after it started, whether or not delivery ever answers the open. Once that time has passed with the open unanswered, the wait on it has expired: the message that was waiting, and every message on that channel taken after it, MUST be judged without waiting on that open, against the channels open when it is judged. How long one open can hold up the messages on every other channel is therefore that fixed time, however many messages arrive on its channel.
+
+**An expired wait changes nothing else about the open.** The channel is still being opened: delivery's answer, when it comes, settles the open as above, and a message delivery hands over on that channel identifier is not refused on hand-over for being on a channel neither open nor being opened. Only a later create, join or startup asking for that channel lets a message wait on it again, and that wait is bounded in the same way, from when a message first begins waiting on it.
 
 **A channel is being opened from the moment a create, a join or the module's startup asks for it, not from the moment delivery is asked.** An open that waits behind other requests this peer has made of delivery is being opened while it waits. It stays so until delivery's answer settles it, or until this peer gives up asking for it, and an open this peer never goes on to ask delivery for is given up. Delivery can hand over a message on a channel before this peer has asked delivery for that channel at all: a module restarted while delivery kept running is handed messages on its Stoas' channels from the moment it subscribes, while its own requests for those channels still wait behind node creation and behind each other.
 
@@ -252,6 +254,30 @@ A delivered message whose fields cannot be read MUST be discarded and recorded i
 - **WHEN** this peer has requested a Stoa's channel, delivery never answers the creation, and a message carrying a valid op for that Stoa arrives on it
 - **THEN** the message is refused as arriving on an unknown channel while delivery has still not answered
 - **AND** a message carrying a valid op, arriving after it on a channel this peer has open, is then stored
+
+#### Scenario: Many messages on one unanswered open hold other channels up for one wait, not one each
+
+- **WHEN** this peer has requested a Stoa's channel, delivery never answers the creation, at least three messages arrive one after another on that channel identifier, and a message carrying a valid op then arrives on a channel this peer has open
+- **THEN** each message on the unanswered channel is refused as arriving on an unknown channel while delivery has still not answered
+- **AND** the valid op is stored before the fixed time has passed twice over, counted from when the first of those messages began waiting
+
+#### Scenario: An open whose wait has expired still opens its channel when delivery answers
+
+- **WHEN** a message has waited on a Stoa's unanswered channel open until the fixed time passed, a message carrying a valid op for that Stoa is then handed over on its channel identifier while the boundary is held up deciding another payload, and delivery reports the channel created before the boundary is released
+- **THEN** that op is stored
+- **AND** it is not refused as arriving on an unknown channel
+
+#### Scenario: A new request for a channel whose wait has expired lets a message wait again
+
+- **WHEN** a message has waited on a Stoa's unanswered channel open until the fixed time passed, the peer then joins that Stoa again, a message carrying a valid op for that Stoa arrives on its channel identifier, and delivery then reports the channel created
+- **THEN** the op is stored
+- **AND** it is not refused as arriving on an unknown channel
+
+#### Scenario: An open this peer gives up without asking delivery does not hold a message up
+
+- **WHEN** the storage that retains sender identifiers cannot be written, a Stoa's channel is to be opened for the first time, and, once the module's log has recorded that Stoa, a message arrives on that Stoa's channel identifier
+- **THEN** channel creation is not requested for that Stoa
+- **AND** the message is refused as arriving on an unknown channel before the fixed time a message may wait on an open has passed
 
 #### Scenario: A message on a channel not being opened does not wait on another channel's open
 

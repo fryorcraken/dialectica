@@ -172,7 +172,7 @@ Questions and the PR body, and the code does what each says today: `logos.test` 
 (`Arriving.sender_id: String`, no bound anywhere on the inbound path). One
 disagreement between documents is the first box below.
 
-- [ ] **`spec-writer`** (gap, documents disagree) — `proposal.md`'s "Open questions
+- [x] **`spec-writer`** (gap, documents disagree) — `proposal.md`'s "Open questions
       for the owner" lists six, and the sender identifier's length is not among them.
       `design.md` Open Questions and the PR body's "Open for the owner" both carry it
       as an owner question, and no spec text mentions it. The proposal is where the
@@ -180,6 +180,14 @@ disagreement between documents is the first box below.
       were the last. Add it as a seventh (the security review raised it; the spec
       does not bound it; the code holds it at delivery's length), or `design.md` and
       the PR body are listing a question the proposal does not know exists.
+      **Outcome (`spec-writer`): fixed.** `proposal.md` "Open questions for the
+      owner" now has a seventh, "How long a sender identifier this peer holds may
+      be", saying what the code does (holds it as it arrives), that the spec is
+      silent, and three options with what each makes the system do: leave it
+      unbounded, refuse an over-long one on hand-over, or stop holding it while a
+      message waits (which amends the inbound requirement). The list's preamble
+      now says the sixth and seventh came from the security review and that the
+      spec says nothing about the seventh. Not decided; it is the owner's.
 - [ ] **`dev-writer`** (gap, cost recorded but not sized, and a rejected alternative
       whose reasoning applies to the chosen one) — Decision 11 and Risks say the
       wait costs "up to `SETTLE_LIMIT` per message". The aggregate is what an owner
