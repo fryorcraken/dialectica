@@ -187,9 +187,11 @@ A delivered message whose fields cannot be read MUST be discarded and recorded i
 
 **A message arriving on a channel that is not open, but is being opened, MUST be judged only once that open is settled** — reported held (created, or already existing, as `stoa-membership`'s requirement "Creating or joining a Stoa opens its reliable channel" says), declined, failed, given up by this peer after asking delivery and receiving no answer, or given up by this peer without delivery being asked — and against the channels open then, unless the wait below expires first. Delivery can hand over a message on a channel before its answer to the creation reaches this peer. A message on any other channel identifier, an open one included, MUST be judged without waiting on any open.
 
-**That wait is bounded by a fixed time for each open, not for each message.** The time starts when a message first begins waiting on the open after the latest create, join or startup asking for its channel. Every message waiting on that open MUST be judged no later than that fixed time after the time started, whether or not delivery ever answers the open. Once that time has passed with the open unanswered, the wait on it has expired: the message that was waiting, and every message on that channel taken after it until a later request for the channel starts a new wait, MUST be judged without waiting on that open, against the channels open when it is judged. How long one open can hold up the messages on every other channel is therefore that fixed time, however many messages arrive on its channel.
+**That wait is bounded by a fixed time for each open, not for each message.** The time starts when a message first begins waiting on the open after the latest create, join or startup asking for its channel. Every message waiting on that open MUST be judged no later than that fixed time after the time started, whether or not delivery ever answers the open. Once that time has passed with the open unanswered, the wait on it has expired: the message that was waiting, and every message on that channel taken after it until a later request for the channel starts a new wait, MUST be judged without waiting on that open, against the channels open when it is judged. How long one open can hold up the messages on every other channel is therefore at most that fixed time, however many messages arrive on its channel.
 
-Opens left unanswered at the same time hold the messages on every other channel up once each, one after another, so how long they can do so in all is that fixed time for each wait a request starts. Only this peer's own creates, joins and startup start a wait, so that total is set by the requests this peer makes, and no sender can lengthen it by putting more messages on any channel.
+**That fixed time MUST be longer than the longest this peer waits for delivery to answer one channel creation, and that longest MUST be longer than the time delivery allows itself to answer one.** A message waiting on the open whose creation is the one this peer is currently waiting on delivery to answer is then judged only after delivery has answered that creation or this peer has given up waiting for the answer, and this peer does not give up on a creation that delivery would still answer within its own time. The order is contracted here; the values are not. An open still waiting behind other requests this peer has made of delivery is not covered by this order, and a message waiting on one can see its wait expire before delivery is asked.
+
+**The following is a consequence of the requirements above and adds none.** A message waits on an open only while it is the one being judged, and waiting payloads are judged in the order they arrived, so each wait a request starts holds the messages on every other channel up at most once, and the waits of opens left unanswered at the same time run one after another. How long they can do so in all is therefore no more than that fixed time for each wait a request starts, and never extends past the moment the last of those opens settles. Only this peer's own creates, joins and startup start a wait, so that total is set by the requests this peer makes, and no sender can lengthen it by putting more messages on any channel.
 
 **An expired wait changes nothing else about the open.** The channel is still being opened: delivery's answer, when it comes, settles the open as above, and a message delivery hands over on that channel identifier is not refused on hand-over for being on a channel neither open nor being opened. Only a later create, join or startup asking for that channel lets a message wait on it again, and that wait is bounded in the same way, from when a message first begins waiting on it.
 
@@ -264,6 +266,19 @@ Opens left unanswered at the same time hold the messages on every other channel 
 - **WHEN** this peer has requested a Stoa's channel, delivery never answers the creation, at least three messages arrive one after another on that channel identifier, and a message carrying a valid op then arrives on a channel this peer has open
 - **THEN** each message on the unanswered channel is refused as arriving on an unknown channel while delivery has still not answered
 - **AND** the valid op is stored before the fixed time has passed twice over, counted from when the first of those messages began waiting
+
+#### Scenario: Each unanswered open's wait is its own
+
+- **WHEN** this peer has requested two Stoas' channels, delivery answers neither creation, a message arrives on the first Stoa's channel identifier, then one on the second Stoa's, and then a message carrying a valid op on a channel this peer has open
+- **THEN** each message on an unanswered channel is refused as arriving on an unknown channel while delivery has still not answered
+- **AND** the message on the second Stoa's channel is refused no sooner than the fixed time after the message on the first was refused
+- **AND** the valid op is stored before the fixed time has passed three times over, counted from when the first of those messages began waiting
+
+#### Scenario: A message's wait outlasts this peer's wait on a creation, which outlasts delivery's own
+
+- **WHEN** the fixed time a message may wait on an open, the longest this peer waits for delivery to answer one channel creation, and the time delivery allows itself to answer one are compared
+- **THEN** the time delivery allows itself is the shortest of the three
+- **AND** the fixed time a message may wait on an open is the longest
 
 #### Scenario: An open whose wait has expired still opens its channel when delivery answers
 

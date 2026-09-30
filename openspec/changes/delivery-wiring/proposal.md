@@ -66,8 +66,12 @@ the design relies on.
   hold every other Stoa up for one wait, not one each. Asking for the channel
   again starts a new wait for the messages after it, and never lengthens the
   wait of a message already waiting. Several opens stuck at once hold the other
-  Stoas up once each, in turn: a total this peer's own requests set, and no
-  sender can lengthen. A channel
+  Stoas up at most once each, in turn, and never past the moment the last of
+  them settles: a total this peer's own requests set, and no sender can
+  lengthen. The fixed time outlasts the longest this peer waits for delivery to
+  answer a creation, which in turn outlasts delivery's own time for answering,
+  so a message racing the creation this peer is waiting on is never judged
+  before that creation is answered or given up. A channel
   counts as being opened from the moment a create, a join or startup asks for
   it, including while that request waits behind others, not from when delivery
   is asked; and startup counts every Stoa's channel as being opened before it
@@ -209,6 +213,8 @@ open, and it says nothing about the seventh.
 5. **The node's preset (`logos.test` or `logos.dev`) and mode (`Edge` or
    `Core`).** #30 used `Edge` on `logos.test`. This decides which network
    dialectica peers meet on, and whether each peer relays traffic for others.
+   This change's code uses `logos.test` and `Edge`, the same as #30. Either can
+   change as a constant and its pin, without a spec change.
 6. **Whether one Stoa's traffic may crowd out another's in the inbound
    queue.** The queue is one fixed-count bound shared by every channel, and a
    discard is final. The spec now keeps traffic on channels this peer is not

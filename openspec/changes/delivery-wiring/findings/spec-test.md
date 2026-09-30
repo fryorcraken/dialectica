@@ -618,8 +618,27 @@ this range touches.
       the paragraph is a description and not a requirement, the `spec-writer` says
       so and no test is owed. **Not measured** (the mutation was not run; the
       budget was spent on the two above). **Severity:** low.
+      **Spec side (`spec-writer`): the paragraph is a description, and a test is
+      still owed; box left for the `tester`.** The paragraph now opens "The
+      following is a consequence of the requirements above and adds none", and
+      says "at most once" and "never extends past the moment the last of those
+      opens settles" (the round-2 security and readability reviewers showed the
+      old "how long they can do so in all is that fixed time for each wait" read
+      as a reachable total, which it is not once opens settle on one clock). But
+      the failure scenario above does not break that paragraph: it breaks the MUST
+      two paragraphs up — a message on a channel being opened "MUST be judged only
+      once that open is settled … unless the wait below expires first", with the
+      time started "when a message first begins waiting on the open". A time
+      shared across opens judges the second stuck channel's message before its own
+      wait expires, which that MUST forbids, and no scenario held two stuck opens.
+      Added to `op-transport`: **"Each unanswered open's wait is its own"** — two
+      unanswered opens, a message on each, then a valid op on an open channel;
+      both refused as unknown while delivery has not answered, the second refused
+      no sooner than the fixed time after the first was refused, and the valid op
+      stored before three fixed times from when the first began waiting. That is
+      your fix shape; the test is owed against that scenario.
 
-- [ ] **`spec-writer`** — the relation `delivery's own timeout < CALL_TIMEOUT <
+- [x] **`spec-writer`** — the relation `delivery's own timeout < CALL_TIMEOUT <
       SETTLE_LIMIT` is pinned by a test and stated nowhere in the spec.
       **Where:** `delivery::tests::the_call_timeout_outlasts_deliverys_own_and_the_settle_limit_outlasts_the_call`
       hardcodes delivery's 30 s and compares the two constants. No scenario or
@@ -636,3 +655,22 @@ this range touches.
       outlasts the longest this peer waits on delivery for a creation (leaving the
       value in `design.md`), or record in the change that the relation is a design
       choice the spec deliberately does not contract. **Severity:** low.
+      **Outcome (`spec-writer`): fixed, as a requirement.** Your failure scenario
+      is right: without the order, "stored once delivery reports the channel
+      created" holds only if delivery reports within whatever the fixed time is,
+      and one second satisfied every sentence. `op-transport`, after "That wait is
+      bounded by a fixed time for each open", now says: "That fixed time MUST be
+      longer than the longest this peer waits for delivery to answer one channel
+      creation, and that longest MUST be longer than the time delivery allows
+      itself to answer one." It says what follows (a message racing the creation
+      this peer is waiting on is judged only after that creation is answered or
+      given up), that the order is contracted and the values are not, and that an
+      open queued behind other requests is not covered by it — which is Decision
+      11's stated cost, so the spec now agrees with it rather than being silent.
+      New scenario **"A message's wait outlasts this peer's wait on a creation,
+      which outlasts delivery's own"** (the three compared; delivery's shortest,
+      the message's wait longest), which
+      `the_call_timeout_outlasts_deliverys_own_and_the_settle_limit_outlasts_the_call`
+      already satisfies as written. `proposal.md`'s "Receiving" bullet says the
+      same. No code change: 30 s < 35 s < 40 s holds today, and a queue-sized
+      limit, if the `dev-writer` reconsiders 40 s, would satisfy it too.

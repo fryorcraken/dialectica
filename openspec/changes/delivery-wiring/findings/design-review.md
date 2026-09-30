@@ -316,7 +316,7 @@ with what the code does (`logos.test` and `Edge`; one shared 256-deep queue; the
 sender identifier held at the length that arrives). In `proposal.md`, 6 and 7 do;
 5 does not, which is the one box.
 
-- [ ] **`spec-writer`** (gap, documents disagree) — `proposal.md:209-211`, open
+- [x] **`spec-writer`** (gap, documents disagree) — `proposal.md:209-211`, open
       question 5, says "`#30` used `Edge` on `logos.test`" and never says what this
       change's code does. The reader of the proposal, who is the owner deciding the
       question, has to go to `design.md` Decision 5 or the PR body to learn that the
@@ -326,3 +326,8 @@ sender identifier held at the length that arrives). In `proposal.md`, 6 and 7 do
       Add one sentence to question 5: this change's code uses `logos.test` and
       `Edge`, the same as #30, and either can change as a constant and its pin
       without a spec change.
+      **Outcome (`spec-writer`): fixed.** Question 5 in `proposal.md` now ends
+      "This change's code uses `logos.test` and `Edge`, the same as #30. Either can
+      change as a constant and its pin, without a spec change." Checked against
+      `node_config` in `delivery.rs` (`"preset": "logos.test"`, `"mode": "Edge"`).
+      The question stays open for the owner.
