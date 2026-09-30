@@ -207,3 +207,107 @@ variant against a hardcoded fragment and requires the five to differ, and
 log line carries the store's own words. Mutation: `fmt` returning `Ok(())` at once.
 Predicted red, observed red in both ("no sender identifier could be retained ()"
 in the second). Restored.
+
+## Re-review round 1 `7a2a3335..369561d1`
+
+Dimension: **security** only. Read at `f37c6cc4` (the range's code is
+`369561d1`'s): `delivery.rs` in full, the range's diffs to `transport.rs`,
+`wire.rs` and `sender.rs`, design.md Decisions 10, 11 and 14, the Risks and Open
+Questions, and `op-transport`'s wait requirement. I also read the SDK's
+`EventSubscription` (`logos-rust-sdk-src/src/plugin.rs:461-512`) to judge the
+listener's per-event containment.
+
+**The four round-0 outcomes hold.** `Processor::decide` looks the channel up, then
+calls `judge`, then opens the op log for `admit` only (`delivery.rs:1081-1092`).
+`refused_on_hand_over` asks `is_known` before `refuse_oversized`, so a message is
+dropped before it waits (`delivery.rs:1025-1030`). `INBOUND_BOUND`'s doc now
+states the payload-bytes bound and does not overclaim it. The listener runs each
+`next()` and hand-over under its own `catch_unwind` (`delivery.rs:951-971`).
+
+- [ ] **`spec-writer`** — `op-transport`, "That wait is bounded by a fixed time"
+      (`specs/op-transport/spec.md:190`), as built at `delivery.rs:587-599` /
+      `:1068` — the wait is given up "for that message", so each later message
+      on the same still-pending channel waits the full limit again. A sender
+      therefore chooses how long every Stoa's inbound processing stalls, up to
+      the open's whole pending time rather than one `SETTLE_LIMIT`.
+      **Scenario:** since `641cae31`, an open is pending from the request. So a
+      join queued behind k worker actions against an unresponsive delivery is
+      pending for up to (k+1) × 35 s. At startup the last of K Stoas waits behind
+      node creation and K−1 creations, so it is pending for up to K × 35 s + 35 s.
+      Channel ids are public and Stoas are permissionless, so any peer can send
+      on that channel, and the payload need not be an op. With n such messages
+      the one processor waits n × 40 s. For the 20th of 20 Stoas that is up to
+      21 × 35 s = 735 s, and n = ⌈735 / 40⌉ = 19 messages keep every other Stoa's
+      ops unjudged for about 12 minutes. Once 256 messages are waiting, every
+      arrival on an open channel is discarded, and design Decision 10 records
+      that such a discard is final. Honest traffic on a busy Stoa does the same
+      without trying.
+      **Measured:** a probe appended to `delivery/tests.rs` (reviewer's tree
+      only) put 10 messages on a channel whose open is never answered, with
+      `settle_limit` = 200 ms, then a valid op on an open channel. The op was
+      stored after **2.01 s** (10 × 200 ms). The wait did not end at 200 ms.
+      **Severity:** medium-low. It needs a delivery that answers calls slowly
+      while it still hands messages over, which is the state Decision 11 already
+      names. The loss is bounded by that pending window, but inside it a sender
+      holds every Stoa hostage for as long as it keeps sending.
+      **Direction:** let one open's wait end one time: a deadline kept per open
+      (set when the first message begins waiting on it), after which later
+      messages on that open are judged without waiting until a new request marks
+      it pending again. This caps the stall at one `SETTLE_LIMIT` per open,
+      whatever n is. The spec's "for that message" reads as ruling that out, so
+      the spec has to decide it first.
+
+- [ ] **`dev-writer`** — design.md Decision 11 (`design.md:400-406`, `:433`),
+      Risks (`design.md:621-625`) and `SETTLE_LIMIT`'s doc (`delivery.rs:520-530`)
+      — these say the 40 s limit "keeps the stall one call long" and that a
+      message is refused "after holding every Stoa up for 40 s". Under an
+      adversary both are false: the stall is n × 40 s, capped only by the open's
+      pending time (entry above). The stated reason for rejecting a longer limit
+      is also wrong. It says every message on a still-queued channel would hold
+      the processor "one after another". But with a limit that outlasts the
+      pending time, only the **first** message waits: the open has settled by
+      the time the second is taken. So the worst-case stall is the pending time
+      under either limit, and 40 s only shortens the honest few-message case
+      while turning each later message into a refusal and a lost op.
+      **Scenario:** a reader deciding whether the settle wait needs hardening
+      trusts "one call long" and closes the question, and the probe above shows
+      it does not hold. **Severity:** low (documentation of a security bound).
+      Correct the text whichever way the spec entry above is settled.
+
+## Round 1 clean areas
+
+- **Pending opens cannot be created by a sender.** Only `joined` (create and join
+  replies) and `startup_opens` (the membership record) make an `Opening`. An
+  arbitrary channel id is refused on hand-over and never waits.
+- **The listener's per-event containment cannot spin on this SDK.**
+  `EventSubscription::next` is `recv().ok()` over `mpsc::recv_timeout`, which
+  does not panic, so no call to `next()` panics without first consuming an event.
+  Design Decision 16's stated cost does not arise at this pin.
+- **What reaches the log.** New lines (`ChannelAlreadyHeld`, `NoWorker`,
+  `WorkerGone`, the listener's `Panicked`) carry only this peer's own Stoa
+  addresses, op ids, delivery's reasons and panic text. Hand-over refusals log
+  the kind only. One thing to keep an eye on, not a finding: `panic_detail` is
+  untruncated. A panic raised while reading an event with a message that
+  formats event bytes would log them, once per event. I found no reachable panic
+  in the generated decoder (round 0), so this is not live.
+- **"Already exists" by substring.** The reason comes from delivery or the IPC
+  layer. The only identifiers in a `channelCreate` call are this peer's own
+  channel id (`/…/<stoa hex>`), content topic and sender identifier, so no peer
+  can put that phrase into a reason.
+- **Hand-over lookups.** `is_known` hashes the sender-chosen id with SipHash
+  (`HashMap<String, _>`) under a lock that is held only for map operations, and
+  the processor's condvar wait releases it. The listener never waits on the
+  boundary.
+- **`Judged` / `admit`.** `Judged`'s field is private and `judge` is its only
+  constructor, so no caller can append an op that skipped a check.
+- **Drop-guard safety.** `Opening::drop` → `settle` takes the book lock. No path
+  drops an `Opening` while it holds that lock (`opening()` releases the lock
+  before it builds the guard, and unwinding drops inner guards first), and
+  `settle` has no panicking operation, so a drop during unwind cannot abort.
+- **Dependencies.** None added in the range.
+
+`cargo mutants` on `delivery.rs`, scoped with `--re` to the hand-over and wait
+logic (`refused_on_hand_over`, `hand_over`, `is_known`, `await_settled`,
+`channel_answer`, `listen`, `settle`, `Opening`, `opening`), `dialectica-core`
+lib tests: 18 mutants, **14 caught, 4 unviable, 0 missed**. My stall probe was
+in the tree during that run. It adds one test and changes no mutated function.
