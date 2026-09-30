@@ -649,7 +649,7 @@ unchanged by the findings commits after `7462ded8`): the range's diff of `delive
 fixed (see below). Three new defects, all low or nit, all in comments or prose; none
 changes behaviour.
 
-- [ ] **`tester`** — `delivery/tests.rs:2299` — "the work of four small decisions" in
+- [x] **`tester`** — `delivery/tests.rs:2299` — "the work of four small decisions" in
       `each_unanswered_opens_wait_is_its_own_and_not_one_shared_across_opens`: the test
       decides three.
       **Scenario:** the comment justifies the three-limit bound on the valid op ("the
@@ -663,8 +663,12 @@ changes behaviour.
       **Fix shape:** "three small decisions", or drop the count ("plus the work of
       deciding three messages").
       **Severity:** nit.
+      **Outcome (`tester`): fixed.** The comment now reads "plus the work of
+      deciding three messages, leaving a limit of slack", the second of the fix
+      shape's two wordings, so the comment no longer carries a count to drift
+      from the three messages the test offers.
 
-- [ ] **`tester`** — `delivery/tests.rs:2289-2290` — a quotation of the spec that is
+- [x] **`tester`** — `delivery/tests.rs:2289-2290` — a quotation of the spec that is
       not in the spec.
       **Scenario:** the comment quotes `op-transport`'s MUST as "judged only once that
       open is settled … unless that channel's own wait expires first". The delta
@@ -677,6 +681,12 @@ changes behaviour.
       **Fix shape:** quote the spec's words ("unless the wait below expires first"),
       or drop the quotation marks.
       **Severity:** nit.
+      **Outcome (`tester`): fixed.** The comment now quotes two fragments of the
+      requirement and the exception separately, each verbatim from the delta:
+      "judged only once that open is settled" and "unless the wait below expires
+      first", and says the wait in the exception is the second open's own. The
+      invented phrase is gone (`git grep -F "own wait expires first" --
+      dialectica/` finds nothing).
 
 - [x] **`dev-writer`** — `design.md:134` — "(re-run on the final tree)" is the stale-label
       shape round 2's second entry removed everywhere else.

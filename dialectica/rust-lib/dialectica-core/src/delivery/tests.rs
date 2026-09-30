@@ -506,6 +506,59 @@ fn the_call_timeout_outlasts_deliverys_own_and_the_settle_limit_outlasts_the_cal
 }
 
 #[test]
+fn the_processor_the_running_wiring_builds_waits_longer_than_the_call_timeout() {
+    // `op-transport`, "That fixed time MUST be longer than the longest this peer
+    // waits for delivery to answer one channel creation". The test above compares
+    // the two constants, which is not the same thing as the wait the running
+    // processor is given: a `Processor::new` that wrote `Duration::from_secs(20)`
+    // where it writes `SETTLE_LIMIT` left every constant in order and the MUST
+    // broken (spec-test re-review round 3). This reads the limit off a processor
+    // built the one way a processor is built. That `Delivering::start` builds it
+    // that way and does not change the limit afterwards is the next test's.
+    let peer = Peer::new("processor-limit");
+    let limit = peer.processor(Arc::new(Channels::default())).settle_limit;
+    assert!(
+        limit > CALL_TIMEOUT,
+        "the processor waits on an open for {limit:?}, which does not outlast the \
+         {CALL_TIMEOUT:?} this peer waits for delivery to answer a creation"
+    );
+}
+
+#[test]
+fn the_running_wiring_builds_its_processor_with_the_one_constructor_and_never_changes_its_limit() {
+    // The other half of the test above. `Delivering::start` spawns a processor it
+    // builds itself, on a thread that holds it for the life of the module, so no
+    // test can read that one's limit. Read as text instead, comments stripped and
+    // whitespace removed: the limit has exactly two mentions with a colon after
+    // it, the field's declaration and the constructor's `SETTLE_LIMIT`, so no
+    // second struct literal and no struct update can give a processor another;
+    // nothing assigns it after the processor is built; and `start` reaches a
+    // processor through `Processor::new`, once. A `start` that built its own
+    // with 20 s passes every test that builds a processor the test's way, and
+    // `cargo test` has no other way to see it.
+    //
+    // The counts are hardcoded. A change that adds a legitimate second place
+    // that builds a processor is a reason to read what limit it gives, not to
+    // raise a count.
+    let code: String = without_comments(include_str!("../delivery.rs"))
+        .split_whitespace()
+        .collect();
+    for (text, count) in [
+        ("settle_limit:SETTLE_LIMIT,", 1),
+        ("settle_limit:Duration,", 1),
+        ("settle_limit:", 2),
+        ("settle_limit=", 0),
+        ("Processor::new(", 1),
+    ] {
+        assert_eq!(
+            code.matches(text).count(),
+            count,
+            "delivery.rs should contain `{text}` exactly {count} time(s)"
+        );
+    }
+}
+
+#[test]
 fn node_creation_is_requested_once_however_often_startup_runs() {
     let mut peer = Peer::new("start-twice");
     peer.join(&genesis("Agora"));
@@ -815,11 +868,25 @@ fn the_adapter_forwards_each_delivery_argument_in_the_order_the_seam_names_them(
     // send and receive, with every gate green; the inbound mapping has its own
     // pin (`the_adapter_maps_each_event_field_to_the_field_of_the_same_name`), and
     // this is the outbound one. Read as text, whitespace removed.
+    //
+    // **The last argument of each call is `CALL_TIMEOUT`, and it is pinned here
+    // because nothing else can.** The timeout is a `Duration`, so a `from_secs(5)`
+    // in its place compiles, and no test double sees what the adapter passes the
+    // generated client. `op-transport` orders delivery's own 30 s below the wait
+    // this peer gives a creation and that wait below a message's: a creation
+    // given 5 s is recorded as unanswered when delivery would have answered it at
+    // 25 s, and a message waiting on it is then refused. The constant's value is
+    // held against delivery's 30 s by
+    // `the_call_timeout_outlasts_deliverys_own_and_the_settle_limit_outlasts_the_call`;
+    // this holds that the adapter uses it. `channel_create`'s call ends at the
+    // timeout without its closing parenthesis, because rustfmt puts a trailing
+    // comma after an argument list it breaks across lines.
     let code: String = adapter_code().split_whitespace().collect();
     for forwarded in [
-        "create_node_with_timeout(config,",
-        "channel_create_with_timeout(channel_id,content_topic,sender_id,",
-        "channel_send_with_timeout(channel_id,payload,",
+        "create_node_with_timeout(config,core::delivery::CALL_TIMEOUT)",
+        "start_with_timeout(core::delivery::CALL_TIMEOUT)",
+        "channel_create_with_timeout(channel_id,content_topic,sender_id,core::delivery::CALL_TIMEOUT",
+        "channel_send_with_timeout(channel_id,payload,core::delivery::CALL_TIMEOUT)",
     ] {
         assert_eq!(
             code.matches(forwarded).count(),
@@ -827,11 +894,33 @@ fn the_adapter_forwards_each_delivery_argument_in_the_order_the_seam_names_them(
             "the adapter does not forward `{forwarded}`"
         );
     }
+    // The four calls and no fifth use of the constant, and none of the four made
+    // without a timeout, which takes the IPC default of 20 s: `channelSend` for
+    // `channel_send` and so on, with the `_with_timeout` dropped.
+    assert_eq!(
+        code.matches("core::delivery::CALL_TIMEOUT").count(),
+        4,
+        "the adapter should name `CALL_TIMEOUT` once for each call it makes"
+    );
+    for method in methods_called_on(&adapter_code(), "delivery_module") {
+        let is_a_delivery_call = ["create_node", "start", "channel_create", "channel_send"]
+            .iter()
+            .any(|call| method.starts_with(call));
+        assert!(
+            !is_a_delivery_call || method.ends_with("_with_timeout"),
+            "the adapter calls `{method}`, which waits the default 20 s, not `CALL_TIMEOUT`"
+        );
+    }
 }
 
 /// The adapter's source without its comments.
 fn adapter_code() -> String {
-    include_str!("../../../src/lib.rs")
+    without_comments(include_str!("../../../src/lib.rs"))
+}
+
+/// `source` without the lines that are only a comment, doc comments included.
+fn without_comments(source: &str) -> String {
+    source
         .lines()
         .filter(|l| !l.trim_start().starts_with("//"))
         .collect::<Vec<_>>()
@@ -2285,9 +2374,10 @@ fn each_unanswered_opens_wait_is_its_own_and_not_one_shared_across_opens() {
     // What this catches and the tests beside it cannot: the time kept once for the
     // processor, or keyed by the first channel that ever waited, instead of on each
     // `Pending`. The second stuck channel's message is then judged at the first's
-    // deadline, at once, which the MUST in "judged only once that open is settled …
-    // unless that channel's own wait expires first" forbids. Every other test here
-    // has one stuck channel, so it reads one time either way.
+    // deadline, at once, which the MUST in "judged only once that open is settled"
+    // forbids, the exception being "unless the wait below expires first" and that
+    // wait being the second open's own. Every other test here has one stuck channel,
+    // so it reads one time either way.
     //
     // **The second refusal is timed against the first, not against the start.**
     // Polled, so what is measured is the gap between two observations of the journal:
@@ -2295,7 +2385,7 @@ fn each_unanswered_opens_wait_is_its_own_and_not_one_shared_across_opens() {
     // The bound is half a limit, so the right answer fails only if this thread is
     // stalled for half a second between the first refusal and seeing it. The valid
     // op's bound is three limits as the scenario says (the right answer takes two
-    // plus the work of four small decisions, leaving a limit of slack); it is
+    // plus the work of deciding three messages, leaving a limit of slack); it is
     // the scenario's bound, not what catches the shared time.
     let peer = Peer::new("recv-each-open-its-own-wait");
     let open = genesis("Agora").address().unwrap();
@@ -2683,7 +2773,10 @@ fn an_earlier_message_on_a_queued_open_does_not_cost_an_op_that_arrives_while_de
     let asked = Instant::now();
     opening.asked();
     queue.offer(arriving(identity.channel_id(), op.to_bytes().unwrap(), 2));
-    std::thread::sleep(limit / 2);
+    // As long after the ask as the ask came after the first wait began: the answer
+    // is 1.2 limits after the junk began waiting, 0.2 past its first end for the
+    // junk's wake-up, and 0.4 inside the end the ask gave it.
+    std::thread::sleep(limit * 6 / 10);
     assert!(
         waiting_since.elapsed() > limit,
         "the case needs the first end passed"
@@ -2767,6 +2860,14 @@ fn a_second_ask_while_a_message_waits_does_not_extend_its_wait_again() {
     // message must still be waiting at the second ask, or the scenario's WHEN does
     // not hold — and that is also where a first ask that extended nothing fails,
     // since its message ended no later than 0.6 of a limit after that ask.
+    //
+    // **What this thread's own delays cannot be made to look like.** The refusal's
+    // time is read by the deciding thread as it returns, so a stall of this one
+    // after the second ask cannot push it past the bound. A stall before the
+    // second ask can, by passing the end the first ask gave, and is told apart
+    // from a first ask that extended nothing by the time read beside it: a message
+    // judged while this thread says the extended end is still ahead was not
+    // extended, and one judged after it says the end was passed here.
     let peer = Peer::new("recv-second-ask-no-extension");
     let stoa = genesis("Agora").address().unwrap();
     let identity = ChannelIdentity::of(&stoa);
@@ -2777,7 +2878,10 @@ fn a_second_ask_while_a_message_waits_does_not_extend_its_wait_again() {
     let message = arriving(identity.channel_id(), b"waits through two asks".to_vec(), 1);
     let opening = channels.opening(&identity);
 
-    let deciding = std::thread::spawn(move || processor.decide(&message));
+    let deciding = std::thread::spawn(move || {
+        processor.decide(&message);
+        Instant::now()
+    });
     eventually("the message to begin waiting", || {
         a_message_waits_on(&channels, &identity)
     });
@@ -2785,15 +2889,21 @@ fn a_second_ask_while_a_message_waits_does_not_extend_its_wait_again() {
     let first_ask = Instant::now();
     opening.asked();
     std::thread::sleep(limit * 7 / 10);
+    let judged_before_the_second_ask = deciding.is_finished();
+    let since_first_ask = first_ask.elapsed();
     assert!(
-        !deciding.is_finished(),
-        "the message was not waiting at the second ask: the first ask did not extend it \
-         ({:?})",
+        !(judged_before_the_second_ask && since_first_ask >= limit),
+        "this thread stalled {since_first_ask:?} after the first ask, past the end it gave"
+    );
+    assert!(
+        !judged_before_the_second_ask,
+        "the message was not waiting at the second ask, {since_first_ask:?} after the first: \
+         the first ask did not extend it ({:?})",
         peer.journal.lines()
     );
     opening.asked();
     eventually("the message to be refused", || deciding.is_finished());
-    let refused_after = first_ask.elapsed();
+    let refused_after = deciding.join().unwrap().duration_since(first_ask);
 
     assert!(
         refused_after < limit * 14 / 10,
@@ -2841,13 +2951,24 @@ fn the_worker_marks_its_ask_of_delivery_in_the_channel_book() {
     });
     let waiting_since = Instant::now();
     std::thread::sleep(limit / 2);
+    let worker_started = Instant::now(); // no later than the ask
     let opening_thread = std::thread::spawn(move || worker.open(opening));
     eventually("the worker to ask delivery", || {
         !peer.fake.creates().is_empty()
     });
     std::thread::sleep((limit * 12 / 10).saturating_sub(waiting_since.elapsed()));
+    // Read together, so a stall of this thread past the end the ask gave — which
+    // judges the message whatever the worker did — is not reported as a worker that
+    // did not mark its ask.
+    let judged = deciding.is_finished();
+    let since_the_worker_started = worker_started.elapsed();
     assert!(
-        !deciding.is_finished(),
+        !(judged && since_the_worker_started >= limit),
+        "this thread stalled {since_the_worker_started:?} after the worker started, past \
+         the end its ask gives"
+    );
+    assert!(
+        !judged,
         "the message was judged at its first end while delivery was being asked: {:?}",
         peer.journal.lines()
     );

@@ -749,7 +749,7 @@ read from its own output (106 passed, 0 failed, in each run).
    message racing its own join's creation is judged before that creation's wait
    has ended). **Survived.**
 
-- [ ] **`tester`** — the new order scenario is tested on two constants, and
+- [x] **`tester`** — the new order scenario is tested on two constants, and
       neither is shown to be the value the running wiring uses. **Where:**
       `op-transport`, scenario "A message's wait outlasts this peer's wait on a
       creation, which outlasts delivery's own", and the requirement "That fixed
@@ -792,6 +792,42 @@ read from its own output (106 passed, 0 failed, in each run).
       that reads `peer.processor(..).settle_limit` now reads the limit the running
       module waits by, and your mutation 2 would move it. That test, and part
       (b), are still the `tester`'s.
+      **Outcome (`tester`): fixed, both parts, each with a mutation that turns it
+      red** (run with `cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p dialectica-core delivery`,
+      every mutation restored with `git checkout -- <file>`).
+      (a) Two tests. `the_processor_the_running_wiring_builds_waits_longer_than_the_call_timeout`
+      builds a processor with `peer.processor(..)`, which is `Processor::new`, and
+      asserts its `settle_limit > CALL_TIMEOUT`. Mutation: `Processor::new`'s
+      `settle_limit: SETTLE_LIMIT` written `Duration::from_secs(20)` — your
+      mutation 2, at its new line. **Red**, "the processor waits on an open for
+      20s, which does not outlast the 35s this peer waits for delivery to answer a
+      creation"; it and the next test are the only two red, as predicted.
+      `the_running_wiring_builds_its_processor_with_the_one_constructor_and_never_changes_its_limit`
+      reads `delivery.rs` as text (comments stripped, whitespace removed) and
+      holds, by hardcoded count, that `settle_limit:` appears twice (the field and
+      the constructor's `SETTLE_LIMIT`), `settle_limit=` never, and `Processor::new(`
+      once — because `Delivering::start` holds its processor on a thread and no test
+      can read that one's limit. Mutations, each **red** on the assertion it
+      names: `start` built with a struct literal giving `Duration::from_secs(20)`
+      (the original defect's shape; `settle_limit:` found 3 times, not 2), and
+      `start` calling `Processor::new(..)` then assigning `p.settle_limit =
+      Duration::from_secs(20)` (`settle_limit=` found once, not 0; the limit test
+      is green there, as it must be, since it reads the constructor's).
+      (b) `the_adapter_forwards_each_delivery_argument_in_the_order_the_seam_names_them`
+      now pins all four calls through the timeout argument, `start_with_timeout(
+      core::delivery::CALL_TIMEOUT)` and `create_node_with_timeout(config,
+      core::delivery::CALL_TIMEOUT)` included, counts `core::delivery::CALL_TIMEOUT`
+      at four in the adapter, and requires every call on `delivery_module` that is
+      one of the four to be a `_with_timeout` one. `channel_create`'s pin stops
+      before its closing parenthesis, because rustfmt puts a trailing comma after
+      an argument list it breaks across lines. Mutations, each **red**: the create
+      call's argument replaced by `std::time::Duration::from_secs(5)` (your
+      mutation 1; "the adapter does not forward `channel_create_with_timeout(..`"),
+      and, separately, a stray `modules().delivery_module.channel_send(channel_id,
+      payload)` added beside the correct call (the count of four is unchanged, so
+      only the new loop sees it: "the adapter calls `channel_send`, which waits
+      the default 20 s"). The comment on the test says it is a text pin because
+      `cfg(logos_scaffold)` hides the file from `cargo test`.
 
 **Observation, no box.** The scenario "Each unanswered open's wait is its own"
 says the second refusal comes "no sooner than the fixed time after the first";
@@ -806,3 +842,46 @@ it names except as stated above. No `NO SPEC:` marker appears in the range's
 tests. Nothing in the range is out of scope of #176 (reliable channel
 throughout); issue #176 re-read, state OPEN, one comment (the owner's 2026-09-29
 request for a two-peer test after this lands), unchanged since round 1.
+
+### Tester, after round 3: the ask's scenarios (`d240ebdc`), checked
+
+Not a box. Each new scenario and its test, with what turns it red (mutations in
+`delivery.rs`, each restored with `git checkout -- <file>`):
+
+- "A message waiting when this peer asks delivery ... judged after delivery answers":
+  `a_message_waiting_when_delivery_is_asked_is_judged_after_delivery_answers`. Red
+  with `Pending::asked`'s extension loop removed.
+- "An earlier message on a queued open ...": the `an_earlier_message_...` test. **Red
+  only with both halves of the ask removed** (the time restart and the extension):
+  either alone leaves the op stored, because the op is taken behind the junk and
+  the answer arrives before the junk's (extended) end, or before the op's own
+  wait (restarted) — so the scenario's outcome is satisfied by either mechanism
+  and the test is the end-to-end guard for the original defect, while each half
+  has its own test below. This differs from the prediction that it would turn red
+  on each half; the scenario as worded cannot tell the halves apart.
+- "Asking delivery for a channel whose wait has expired lets a message wait again":
+  `asking_delivery_for_a_channel_whose_wait_has_expired_lets_a_message_wait_again`.
+  Red with `self.time = OpenTime::StartedAt(asked)` removed.
+- "A second ask while a message waits does not extend its wait again":
+  `a_second_ask_while_a_message_waits_does_not_extend_its_wait_again`. Red with
+  `extension.take()` made `extension` (refused 1.70 s after the first ask, bound
+  1.4 s), and, through its precondition, with the extension loop removed.
+- The worker's own ask, which the scenarios do not name:
+  `the_worker_marks_its_ask_of_delivery_in_the_channel_book`. Red with
+  `opening.asked()` moved from before `channel_create` to after it.
+- The three scenarios that gained "no ask while waiting" (many messages, each
+  unanswered open, requests made while a message waits): their tests never call
+  `asked()` and do not involve the worker, so the new clause holds by construction;
+  nothing to add.
+
+**Changed for the dev-writer's least-trusted four.** Their slack is unchanged
+(0.4 of a limit on each side), which is the best two timings can do when one must
+sum past 1.0 and each must stay under it. What changed is what a stall is reported
+as: the fourth's refusal time is read by the deciding thread as it returns, so a
+stall of the test thread after the second ask cannot push it past the bound; the
+fourth and the worker test read "was it judged" beside "how long since the ask"
+and report a stall as a stall, not as a missing extension; the second's answer was
+moved from 1.1 to 1.2 limits after the junk began waiting to match the first's
+margin for the junk's wake-up. Two full runs of the suite on the changed tests
+passed (1305 passed each); that is evidence of no flake under the suite's own
+load and not a proof of it.
