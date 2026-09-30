@@ -267,21 +267,41 @@ peer may send on an identifier it picks; queued, that traffic filled the queue a
 made every Stoa's ops the ones discarded, which the security review measured
 (256 foreign messages, then a valid op: `Discarded(1)`). What breaks without it:
 `traffic_on_a_channel_this_peer_is_not_opening_takes_no_place_in_the_queue` goes
-red. "Being opened" starts when the worker asks delivery, not when a join
-enqueues the request; that is not specified, and
-`a_message_on_a_channel_whose_open_is_still_queued_is_refused_on_hand_over`
-carries the `NO SPEC` marker.
+red. "Being opened" starts when a create, a join or startup asks for the channel,
+not when the worker asks delivery (Decision 11).
+
+**A payload over the 150 KiB message limit takes no place either**, on a channel
+open or being opened: it is refused as `too-long` on hand-over, as `op-transport`
+now requires. The queue bounds a count, so while an oversized payload waited for
+the boundary to refuse it, the queue's memory was the bound times the largest
+message the *node* carries — and the node may be one another module created with
+a larger maximum. Refused on hand-over, the payload bytes waiting are at most
+256 × 150 KiB = 38,400 KiB = 37.5 MiB, this application's own figure. The
+predicate is `transport::refuse_oversized`, the one `judge` asks, split out in a
+no-behaviour commit so the two refusals cannot disagree about a payload of
+exactly the limit. The unknown channel is asked first, so a message on a channel
+neither open nor opening is refused as that whatever its size. What breaks
+without each: dropping the size check turns
+`an_oversized_payload_on_an_open_channel_takes_no_place_in_the_queue` red (it was
+red before the check existed); `>=` in `refuse_oversized` turns
+`a_payload_at_the_limit_waits_its_turn` red; asking the size before the channel
+turns `an_oversized_payload_on_an_unknown_channel_is_refused_as_an_unknown_channel`
+red.
+
+**Rejected: a byte bound on the queue** beside the count. It bounds memory whatever
+arrives, but a second bound needs its own discard rule and its own log line, and
+the spec's bound is a count; refusing what the boundary would refuse anyway, one
+step earlier, costs neither.
 
 What remains shared is the bound itself across the Stoas this peer *is* in: a
 flood on one of them can still force discards in the others. That is the owner's
 (`proposal.md` Open Question 6), and this change implements the spec as written.
 
-**The count, 256**, from two bounds. Memory: the queue bounds a count, not bytes —
-a payload waits at whatever size delivery handed over, and the boundary's 150 KiB
-refusal comes after the wait. So the worst case is 256 × delivery's maximum
-message size: ≈ 37.5 MiB on the `logos.test` preset this application asks for
-(#30's 1024 was ≈ 150 MiB), and larger in proportion on a node another module
-created with a larger maximum. Loss: a discard is final for this peer. #30's
+**The count, 256**, from two bounds. Memory: at most 256 × 150 KiB = 37.5 MiB of
+payload waits, since an oversized payload is refused on hand-over (above); #30's
+1024 would be 150 MiB by the same sum. That figure is payload bytes: the sender
+identifier each message carries is held at whatever length arrives (Open
+Questions). Loss: a discard is final for this peer. #30's
 justification ("a dropped op is recoverable through retransmission") does not
 hold — by the time `channelMessageReceived` fires, SDS has treated the message as
 delivered and will not repair it. 256 is meant as a burst deeper than the
@@ -311,22 +331,79 @@ delivery v0.2.1 can emit `channelMessageReceived` for a channel after its runtim
 created it and before the `channelCreate` answer reaches this peer. Judged in that
 gap, it is refused as an unknown channel and lost (Decision 10). So the channel
 book carries **pending** opens beside open ones, and the processor, meeting a
-message on a channel that is pending and not open, waits for the answer, bounded
-by `SETTLE_LIMIT` (40 s, past `CALL_TIMEOUT`). An `Opening` guard settles the open
-on every path out of the worker, a panic included, so nothing waits on an open
-nobody will answer.
+message on a channel that is pending and not open, waits for the open to settle,
+bounded by `SETTLE_LIMIT` (40 s).
 
-`op-transport` states the behaviour: a message on a channel "whose opening this
-peer has requested and delivery has not yet answered, MUST be judged only once
-that open is settled", and one on any other channel identifier, an open one
-included, without waiting; and the wait "is bounded by a fixed time … whether or
-not delivery ever answers the open". The wait's condition is exactly pending
-*and* not open, so a message on an open channel whose open is being repeated, or
-on an unrelated channel, is judged at once. Removing the wait turns
+`op-transport` states the behaviour: a message on a channel that "is not open, but
+is being opened, MUST be judged only once that open is settled", and one on any
+other channel identifier, an open one included, without waiting; and the wait "is
+bounded by a fixed time … whether or not delivery ever answers the open". The
+wait's condition is exactly pending *and* not open, so a message on an open
+channel whose open is being repeated, or on an unrelated channel, is judged at
+once. Removing the wait turns
 `a_message_arriving_while_its_channel_opens_is_judged_after_the_answer` red. The
 limit is a field of `Processor`, `SETTLE_LIMIT` in the running wiring, so
 `a_message_waiting_on_an_open_delivery_never_answers_is_judged_after_a_bounded_wait`
 runs the bounded case with a short one.
+
+**An open is pending from the request, not from the call.** `op-transport` says a
+channel "is being opened from the moment a create, a join or the module's startup
+asks for it, not from the moment delivery is asked", and that startup counts
+every Stoa's channel as being opened "before it checks any message delivery
+hands over". The reason is a restart: a module restarted while delivery kept
+running is handed its Stoas' messages from the moment it subscribes, while its
+own requests for those channels still wait behind node creation and each other.
+**Rejected: pending from the worker's call to delivery.** It needs no guard to
+travel between threads, but every message handed over while its open waits
+behind another request is refused as an unknown channel and lost — at a restart,
+that is every Stoa's traffic until the worker reaches its open.
+
+It is built as a data shape, not a rule each path follows. The `Opening` guard —
+which marks the open pending when made and settles it when dropped — is made
+where the request is made (`Delivering::joined`, and startup's
+`startup_opens`), and travels to the worker **inside** `Action::Open`. So every
+way an open can fail to reach delivery settles it by dropping it: the worker
+finds no sender identifier and returns; the send to the worker is refused and
+hands the action back inside its error; the worker never started, so startup's
+guards drop with its return; a panic unwinds through it. That is the spec's "an
+open this peer never goes on to ask delivery for is given up", held by
+ownership. No open is marked for a request with no worker to take it, because
+`request` only builds the action once it has an outbox. Startup marks its opens
+before it calls `subscribe`.
+
+What breaks without each:
+`a_message_on_a_channel_whose_open_waits_behind_another_is_judged_once_that_open_settles`
+and `a_restarted_peer_keeps_what_delivery_hands_over_before_startup_asks_for_its_channel`
+were red while the worker made the guard as it called delivery (the op never
+stored). Moving startup's marking to after the subscription turned the second
+red too, but only because the listener won a race against the dispatch thread —
+the message is ready the instant the subscription exists — so that reordering is
+*likely* caught, not certainly. Leaking the guard on the no-sender return turns
+`a_sender_identifier_that_cannot_be_retained_opens_no_channel` red: it asserts the
+given-up open is no longer counted as being opened. Forgetting the action a gone
+worker refuses turns `a_join_the_worker_cannot_take_is_given_up_and_not_left_opening`
+red. Startup's guards when the OS refuses the worker thread have no test — no
+test here makes `thread::Builder::spawn` fail — and rely on `start` returning
+with them in scope.
+
+**`SETTLE_LIMIT` bounds a stall of every Stoa, not an open.** There is one
+processor, so while it waits, messages on every other channel wait behind it and
+the queue fills. 40 s is past `CALL_TIMEOUT`, so it outlasts **one** delivery
+call: an open that is the worker's current call — a join, or a creation racing
+its own answer, the ordinary cases — always settles within it. It does **not**
+outlast an open queued behind others, which can now be pending for node creation
+plus every earlier Stoa's creation, each up to 35 s against an unresponsive
+delivery. A message on such a channel is judged when the limit passes — measured,
+as the spec says, from when the processor began waiting on *that message* —
+against what is open then, which is a refusal and a lost op.
+
+**Rejected: a limit sized for a queue of opens** (35 s × the Stoas ahead of it).
+The wait is per message, so every message on a still-queued channel would hold
+every Stoa up for that long, one after another, and 256 of them fill the queue
+into discards on channels that are open. A limit that covers one call keeps the
+stall one call long; what it gives up is messages on channels whose opens are
+queued behind an unresponsive delivery, a state in which delivery is handing
+messages over while not answering calls.
 
 **The wait is its own loop, not `Condvar::wait_timeout_while`.** Once the book's
 mutex is poisoned — by a contained panic under it — `wait_timeout_while` returns
@@ -336,12 +413,9 @@ the guard back from a poisoned wake-up and ends only on its own condition or the
 limit. What breaks without it: `a_poisoned_channel_book_still_waits_for_this_channels_open`
 goes red.
 
-**What the wait costs.** There is one processor, so while it waits on one slow
-`channelCreate` — up to `CALL_TIMEOUT`, in practice delivery's own 30 s — messages
-on every *other*, open channel wait behind it, and once 256 are waiting, arrivals
-are discarded for good. `SETTLE_LIMIT` is reached only if the worker's guarantee
-to settle within `CALL_TIMEOUT` is broken; reaching it judges the message against
-what is open then, which for a still-unanswered open is a refusal and a lost op.
+**What the wait costs.** While the processor waits on one slow open — up to
+`SETTLE_LIMIT` per message — messages on every *other*, open channel wait behind
+it, and once 256 are waiting, arrivals are discarded for good.
 
 **Alternatives, and why not:**
 
@@ -352,13 +426,13 @@ what is open then, which for a still-unanswered open is a refusal and a lost op.
   processor carry on with others. It keeps other Stoas flowing during a slow open,
   but needs a second store of messages with its own bound, its own discard rule
   and its own ordering relative to the main queue — a second copy of Decision
-  10's reasoning, for a stall that lasts at most one call.
+  10's reasoning, for a stall `SETTLE_LIMIT` bounds.
 - **Requeue the message at the back**: breaks "decided in the order they
   arrived", and spins the processor while the open is pending.
 
-The stall is bounded by one call and happens only while this peer is opening a
-channel, which it does at start, on create and on join; accepted over a second
-queue.
+The stall is bounded by `SETTLE_LIMIT` per message and happens only while this
+peer is opening a channel, which it does at start, on create and on join;
+accepted over a second queue.
 
 A declined *repeat* open leaves an already-open channel open (`Channels::settle`
 opens on success and never closes), which is `stoa-membership`'s "A repeated
@@ -517,10 +591,9 @@ The reasoning that chose each is here; the contract is the requirement cited.
   `op-transport`, "A message the op log cannot take is logged and not retried".
   Retrying would mean holding messages the bounded queue has already let go, and
   an op arriving again is admitted as a first arrival would be.
-
-One choice is **not** in the spec and is marked `NO SPEC` in its test: an open
-counts as requested when the worker asks delivery, not when a join enqueues it
-(Decision 10).
+- **An oversized payload is refused on hand-over** — `op-transport`, "Inbound
+  payloads waiting for the boundary are bounded" (Decision 10). Proposed by the
+  security review's deferred finding, put to the spec-writer, and adopted.
 
 ### How each `CLAUDE.md` module-contract trap is handled
 
@@ -542,24 +615,19 @@ counts as requested when the worker asks delivery, not when a join enqueues it
 - [A slow delivery delays later sends by up to 35 s each] → replies are unaffected;
   the outbound queue is unbounded, but each entry is caused by a local call from
   the view, so it grows at the user's rate.
-- [A slow `channelCreate` stalls inbound processing for every Stoa for up to one
-  call] → Decision 11 records why a second queue was not worth it.
+- [A slow open stalls inbound processing for every Stoa for up to `SETTLE_LIMIT`
+  per message waiting on it] → Decision 11 records why a second queue was not
+  worth it.
+- [An open queued behind others can stay pending longer than `SETTLE_LIMIT`, so a
+  message on its channel is refused and lost after holding every Stoa up for
+  40 s] → needs delivery to hand messages over while not answering calls, at
+  start or on a join made behind a slow open. Decision 11 says why the limit
+  covers one call and not a queue of them.
 - [256 is a guess at burst depth] → discards are counted and each is logged with
   the running total, so a bound that is too small is visible in the log.
-- [The queue's memory bound is delivery's maximum message size × 256, not this
-  application's 150 KiB × 256] → a payload over 150 KiB still waits before the
-  boundary refuses it. Refusing it on hand-over, as unknown channels now are, would
-  make the bound this application's own — but the spec says only that unknown
-  channels are refused there, and doing the same for oversized payloads is a
-  behaviour the spec does not state. Put to the spec-writer (Open Questions);
-  not built.
 - [Messages on another application's channels on the shared node are logged as
   `unknown-channel` refusals] → one line each, on hand-over, carrying no channel
   id, and taking no place in the queue (Decision 10).
-- [A channel's open counts from when the worker asks, so messages arriving while
-  its open waits behind other actions are refused] → the restart window, when
-  delivery kept the channels and hands messages over before the worker reaches
-  each open. Marked `NO SPEC` (Decision 10).
 - [The already-exists match depends on delivery's wording] → Decision 14; a pin
   bump should re-read it.
 - [The adapter is compiled only by `nix build ./dialectica#lgx`] → it is four
@@ -598,7 +666,10 @@ schema-race fix changes how a fresh store is created, not what is written.
   part about channels this peer is not opening (Decision 10); a flood on a Stoa
   this peer *is* in still shares the bound with every other Stoa. Not
   pre-empted here.
-- **For the spec-writer: oversized payloads on hand-over.** Whether a payload over
-  `MAX_MESSAGE_BYTES` on an open channel should be refused as `too-long` when
-  delivery hands it over rather than after it has waited. It would make the
-  queue's memory bound this application's own (Risks). Not built.
+- **The sender identifier's length is the owner's.** A message's sender
+  identifier is held while it waits at whatever length delivery handed over,
+  bounded only by the largest message the node carries, so the 37.5 MiB in
+  Decision 10 is payload bytes and not every byte a waiting message holds. The
+  spec does not bound it, and the spec-writer's round that adopted the
+  oversized-payload refusal left it for the owner (`findings/security.md`); not
+  decided here.
