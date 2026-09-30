@@ -457,3 +457,21 @@ contradicts no recorded decision. One gap.
       follows the ask's paragraphs and each of its bullets is a part of the ask, and
       the closing no-op-ask sentence counts from it. Prose only; no measurement was
       re-run.
+
+## Re-review round 7 `3d34f15e..ae44f364`
+
+Round 6's box is answered as its outcome says, and I judge the placement sound: the
+evidence sits inside the new "Why each wait leaves the book when its message is
+judged" paragraph, and the "What breaks without each part" list is a list of parts of
+the ask, so a bullet there would misfile it. The entry matches the code: `begin_wait`
+hands a `WaitId` from `next_wait`, `await_settled` calls `end_wait` once after the
+loop, every loop exit is a `break` or the condition failing, and its one early
+`return` precedes `begin_wait`'s `Wait`; `Pending::asked` walks every wait under the
+book's lock. The corrected no-op-ask count holds: the four scenario tests and the
+worker's test are the five, and `an_ask_after_a_messages_wait_has_ended_does_not_make_it_wait_again`
+is the guard in `Wait::extend_from`. The three spec scenarios now say "that message's
+wait", matching the requirement. `design.md`, `proposal.md`, the spec delta and PR
+#190's body agree; `Closes #176` is the only closing keyword, `NO SPEC:` is None, and
+questions 5, 6 and 7 stay open. Nothing contradicts #176. I did not re-run mutations.
+
+- [x] **re-review round 7 `3d34f15e..ae44f364`: no findings** — read the round's design.md, spec delta, delivery.rs (`begin_wait`, `end_wait`, `await_settled`, `Pending::asked`, `extend_from`), the test helper and test names, the PR #190 body and the round-6 outcome; clean
