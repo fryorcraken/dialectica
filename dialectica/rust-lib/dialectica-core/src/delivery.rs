@@ -467,14 +467,18 @@ impl Channels {
         });
     }
 
-    /// Put one message through the inbound boundary against what is open now.
-    fn receive<L: OpLog>(
-        &self,
-        message: InboundMessage<'_>,
-        log: &mut L,
-        now_ms: u64,
-    ) -> Result<transport::Admitted, InboundRefusal> {
-        transport::receive(message, &lock(&self.book).open, log, now_ms)
+    /// The Stoa a channel is open for now, copied out so the lock is released
+    /// before anything is judged.
+    ///
+    /// **The book is never held across a decision.** Every method here holds the
+    /// guard for map operations only — and, in [`Channels::handoff`], encoding
+    /// one of this peer's own ops — never while a payload is decoded, verified
+    /// or appended. So an append waiting on a busy op log cannot hold up the
+    /// worker's opens and sends, and the listener's hand-over check cannot wait
+    /// on a payload being decided. `the_channel_book_is_not_held_while_an_op_is_appended`
+    /// is red if it is.
+    fn stoa_of(&self, channel_id: &str) -> Option<Address> {
+        lock(&self.book).open.stoa_of(channel_id).copied()
     }
 
     /// What to send for an op already held, and on which channel.
@@ -834,26 +838,28 @@ impl Processor {
         self.channels
             .await_settled(&message.channel_id, SETTLE_LIMIT);
         let now_ms = (self.clock)();
-        let mut log = match self.stores.op_log() {
-            Ok(log) => log,
-            // `op-transport`, scenario "A message the op log cannot take is logged
-            // and not retried": an op log that will not open is logged as a
-            // storage failure and the message is dropped, not held.
-            Err(e) => {
-                let detail = e.to_string();
-                return record(&*self.journal, Note::Refused("storage", Some(&detail)));
-            }
+        let inbound = InboundMessage {
+            channel_id: &message.channel_id,
+            sender_id: &message.sender_id,
+            payload: &message.payload,
+            timestamp: message.timestamp,
         };
-        let decided = self.channels.receive(
-            InboundMessage {
-                channel_id: &message.channel_id,
-                sender_id: &message.sender_id,
-                payload: &message.payload,
-                timestamp: message.timestamp,
-            },
-            &mut log,
-            now_ms,
-        );
+        // `transport::receive`'s order — channel, then the bytes, then the one
+        // write — with the op log opened only for an op that passed: a payload
+        // refused on its channel or its bytes costs no database open, and is
+        // refused under its own name even when the log will not open.
+        let decided = self
+            .channels
+            .stoa_of(&message.channel_id)
+            .ok_or(InboundRefusal::UnknownChannel)
+            .and_then(|stoa| transport::judge(inbound, stoa, now_ms))
+            .and_then(|judged| {
+                // `op-transport`, scenario "A message the op log cannot take is
+                // logged and not retried": an op log that will not open is a
+                // storage failure, and the message is dropped, not held.
+                let mut log = self.stores.op_log().map_err(InboundRefusal::Storage)?;
+                transport::admit(judged, &mut log)
+            });
         match decided {
             Ok(admitted) => record(&*self.journal, Note::Stored(&admitted.id)),
             Err(InboundRefusal::Storage(e)) => {

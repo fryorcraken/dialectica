@@ -1330,6 +1330,62 @@ fn a_refusal_is_logged_by_kind_without_text_the_sender_chose() {
 }
 
 #[test]
+fn an_unknown_channel_is_refused_as_one_before_the_op_log_is_opened() {
+    // Security review, `Processor::decide` opened `ops.sqlite` before the channel
+    // was looked up: the cheapest refusal paid a database open, and with the log
+    // unopenable a message on a channel nobody opened was logged as a storage
+    // failure. Red before the processor judged ahead of opening the log.
+    let peer = Peer::new("recv-unknown-before-log");
+    let stoa = genesis("Agora").address().unwrap();
+    peer.dir
+        .break_file(&crate::log::op_log_path_in(&peer.dir.0));
+    peer.processor(open_for(&stoa))
+        .decide(&arriving("/another-app/channel", vec![1, 2, 3], 1));
+
+    assert_eq!(
+        peer.journal.with("refused (unknown-channel)").len(),
+        1,
+        "{:?}",
+        peer.journal.lines()
+    );
+    assert!(peer.journal.with("storage").is_empty());
+}
+
+#[test]
+fn the_channel_book_is_not_held_while_an_op_is_appended() {
+    // Architecture review: `Channels::receive` held the book's mutex across
+    // verification and the append, so an append waiting on a busy `ops.sqlite`
+    // held up the worker's opens and sends. Here another connection holds the
+    // database's write lock, so the processor's append waits on it (rusqlite's
+    // busy timeout); while it waits, the book must be free. Red before the
+    // processor released the lock ahead of judging.
+    let peer = Peer::new("recv-book-free-during-append");
+    let stoa = genesis("Agora").address().unwrap();
+    let channels = open_for(&stoa);
+    drop(peer.dir.op_log()); // the file and its schema exist
+    let blocker = rusqlite::Connection::open(crate::log::op_log_path_in(&peer.dir.0)).unwrap();
+    blocker.execute_batch("BEGIN IMMEDIATE").unwrap();
+
+    let op = their_op(stoa, "appended while the database is busy", 0);
+    decide_elsewhere(
+        peer.processor(Arc::clone(&channels)),
+        arriving(
+            ChannelIdentity::of(&stoa).channel_id(),
+            op.to_bytes().unwrap(),
+            1,
+        ),
+    );
+    std::thread::sleep(Duration::from_millis(300)); // judged, and waiting to append
+    let free = channels.book.try_lock().is_ok();
+    blocker.execute_batch("ROLLBACK").unwrap();
+
+    assert!(free, "the channel book was held while the op waited to be appended");
+    eventually("the op to be stored once the database is free", || {
+        stored(&peer, &op.op.id()).is_some()
+    });
+}
+
+#[test]
 fn the_peer_keeps_processing_after_an_unreadable_message_and_a_refusal() {
     let peer = Peer::new("recv-keeps-going");
     let stoa = genesis("Agora").address().unwrap();
