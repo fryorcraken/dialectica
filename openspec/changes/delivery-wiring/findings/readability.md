@@ -570,7 +570,7 @@ changes behaviour.
       `CALL_TIMEOUT` at 20 s compiles, and the test goes red ("CALL_TIMEOUT (20s)
       does not outlast delivery's own 30s").
 
-- [ ] **`tester`** — `delivery/tests.rs:2205` — a comment cites a test by a name that is
+- [x] **`tester`** — `delivery/tests.rs:2205` — a comment cites a test by a name that is
       a prefix of the real one.
       **Scenario:** the comment in
       `many_messages_on_one_unanswered_open_hold_other_channels_up_for_one_wait_not_one_each`
@@ -582,6 +582,11 @@ changes behaviour.
       name finds no function.
       **Fix shape:** the full name.
       **Severity:** nit.
+      **Outcome (`tester`): fixed.** The comment now gives the full name,
+      `an_opens_time_is_the_same_for_every_message_that_waits_on_it_until_a_request_clears_it`,
+      on a line of its own (it is too long to share one with the sentence under
+      rustfmt's width). `git grep -F` for the full name finds the citation and the
+      function. A comment, so no mutation applies.
 
 ### What I checked, and found clean
 

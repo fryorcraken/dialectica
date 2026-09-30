@@ -600,7 +600,7 @@ Nothing in the range is out of scope of #176 (reliable channel throughout); I di
 not re-read the issue's comments since round 1, and its state is unchanged in what
 this range touches.
 
-- [ ] **`tester`** — "Opens left unanswered at the same time hold the messages on
+- [x] **`tester`** — "Opens left unanswered at the same time hold the messages on
       every other channel up once each, one after another" has no test, and no
       scenario. **Where:** `op-transport`, the paragraph after "That wait is bounded
       by a fixed time for each open". Every test in the range holds one channel
@@ -637,6 +637,29 @@ this range touches.
       no sooner than the fixed time after the first was refused, and the valid op
       stored before three fixed times from when the first began waiting. That is
       your fix shape; the test is owed against that scenario.
+      **Outcome (`tester`): fixed.**
+      `each_unanswered_opens_wait_is_its_own_and_not_one_shared_across_opens`
+      holds two opens unanswered, offers a message on each and then a valid op on an
+      open channel, with the processor's limit at 1 s. It asserts: both stuck
+      messages refused as unknown channels and neither stored (with both opens
+      still unanswered until the end); the second refused at least half a limit
+      after the first was seen refused (the gap between two observations of the
+      journal, so the right code, which takes a full limit, fails only if the test
+      thread is stalled for half a second between the two, and a shared time, which
+      takes microseconds, cannot pass); and the valid op stored inside three limits,
+      the scenario's own bound, with a limit of slack over the two the right code
+      takes. The "no sooner than the fixed time after the first" sentence is
+      measured as half a limit on purpose, for that slack, and says so in the test.
+      **Mutation, as applied:** the time moved from each `Pending` to one value on
+      the `ChannelBook`, set by the first message that ever waits and cleared by any
+      `Channels::opening` (so that the expiry, new-request and per-message tests
+      still hold, which is the shape the box says nothing else sees). Predicted: only
+      the new test red, at the gap assertion. **Observed: exactly that, one test red
+      of 95, "the second stuck open's message was refused 1.7µs after the first's".**
+      A cruder first mutant (shared value, never cleared by a request) also turned
+      `a_new_request_for_a_channel_whose_wait_has_expired_lets_a_message_wait_again`
+      and `an_opens_time_is_the_same_…_until_a_request_clears_it` red, as expected,
+      and the new test red too. Restored with `git checkout`.
 
 - [x] **`spec-writer`** — the relation `delivery's own timeout < CALL_TIMEOUT <
       SETTLE_LIMIT` is pinned by a test and stated nowhere in the spec.

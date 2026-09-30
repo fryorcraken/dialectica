@@ -384,7 +384,7 @@ Both round-1 outcomes hold, re-measured:
   goes red. `SETTLE_LIMIT` = 10 s alone fails the build at the
   `CALL_TIMEOUT < SETTLE_LIMIT` assert.
 
-- [ ] **`tester`** — `delivery.rs:554` (`ChannelBook::is_opening`, the loop
+- [x] **`tester`** — `delivery.rs:554` (`ChannelBook::is_opening`, the loop
       condition of `Channels::await_settled`). Nothing pins that a message is
       judged promptly once its open is declined. Under the mutation, a declined
       open holds every Stoa up for the whole settle limit.
@@ -413,6 +413,28 @@ Both round-1 outcomes hold, re-measured:
       regression there turns every declined open into a whole-module stall.
       Shape of a fix: in the decline test, set a long limit and require that
       `decide` returns well inside it, or time the refusal against the answer.
+      **Outcome (`tester`): fixed**, by the first fix shape.
+      `a_message_arriving_while_its_open_is_declined_is_refused_after_the_answer`
+      now sets the processor's limit to 120 s and runs `decide` on a thread of its
+      own, and after the open is dropped requires `decide` to have finished inside
+      `eventually`'s ten seconds; the "after the answer, not before it" flag half
+      is kept and is read off the same thread's return value. No stopwatch: the
+      only clock is `eventually`'s ten seconds against a limit twelve times as
+      long, so the right code fails only on a machine that cannot refuse one
+      message in ten seconds. The name is kept because `tasks.md` 5.3 cites its
+      suffix.
+      **Mutation, as applied:** `&&` → `||` in `ChannelBook::is_opening`. Predicted:
+      the decline test red, "timed out waiting: the message to be refused once the
+      open is declined". **Observed: that test red with exactly that message, and
+      also** `a_message_on_an_open_channel_does_not_wait_on_a_repeated_open`
+      (timed out waiting: "the op to be stored without waiting"), the same mutant's
+      other half (open and pending, so "still opening"), which the box says no
+      test holds. **That test is red on this tree, where the box measured all 1330
+      passing**; I could not reproduce that claim with the same mutation, so the
+      box's "second half unpinned" is not borne out, and the decline half was the
+      only one missing. Whole `delivery::tests` wall time under the mutation is
+      10.2 s (the two ten-second timeouts), not the 40 s the old test spent passing.
+      Restored with `git checkout`.
 
 ### Clean in this round
 

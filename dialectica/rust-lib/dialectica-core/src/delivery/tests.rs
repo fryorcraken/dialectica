@@ -477,6 +477,11 @@ fn the_node_preset_and_mode_are_pinned() {
 
 #[test]
 fn the_call_timeout_outlasts_deliverys_own_and_the_settle_limit_outlasts_the_call() {
+    // `op-transport`, scenario "A message's wait outlasts this peer's wait on a
+    // creation, which outlasts delivery's own": delivery's own time is the shortest
+    // of the three and the fixed time a message may wait is the longest, which are
+    // the two assertions below.
+    //
     // The order `CALL_TIMEOUT`'s and `SETTLE_LIMIT`'s docs rest on: delivery's own
     // 30 s < `CALL_TIMEOUT` < `SETTLE_LIMIT`. At 20 s a `channelCreate` delivery
     // completes at 25 s is recorded here as not answered, and the Stoa is shut
@@ -1953,25 +1958,42 @@ fn a_message_arriving_while_its_open_is_declined_is_refused_after_the_answer() {
     let channels = Arc::new(Channels::default());
     let op = their_op(stoa, "raced a decline", 0);
 
-    // "After delivery's answer, not before it" is read off a flag the answering
+    // Two halves, each read off a signal and not off a stopwatch.
+    //
+    // **"After delivery's answer, not before it"** is read off a flag the answering
     // thread sets immediately before it answers, and `decide` is asked whether it
     // had been set when it returned. A refusal made without waiting returns with
     // the flag still down, however the threads happen to be scheduled.
-    let answered = std::sync::atomic::AtomicBool::new(false);
-    let answered_when_decided = std::thread::scope(|scope| {
-        let opening = channels.opening(&identity);
-        scope.spawn(|| {
-            std::thread::sleep(Duration::from_millis(200));
-            answered.store(true, std::sync::atomic::Ordering::SeqCst);
-            drop(opening); // settled, not created
-        });
-        peer.processor(Arc::clone(&channels)).decide(&arriving(
-            identity.channel_id(),
-            op.to_bytes().unwrap(),
-            1,
-        ));
-        answered.load(std::sync::atomic::Ordering::SeqCst)
+    //
+    // **"And then at once, not at the end of the wait"** — `op-transport`'s "judged
+    // once that open is settled", where the fixed time is only an upper bound on the
+    // wait — is read off `decide` having returned inside `eventually`'s ten seconds
+    // against a limit of two minutes. A wait that kept going after the decline (the
+    // loop's condition `!open || pending` instead of `!open && pending`: the open is
+    // gone from `pending` and was never open, so the condition stays true) sits
+    // until the limit and fails here at ten seconds, holding every other Stoa up for
+    // the whole limit in the running wiring. `decide` is on a thread of its own so
+    // that failure is a timeout here and not two minutes of this test.
+    let answered = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let mut processor = peer.processor(Arc::clone(&channels));
+    processor.settle_limit = Duration::from_secs(120);
+    let message = arriving(identity.channel_id(), op.to_bytes().unwrap(), 1);
+    let opening = channels.opening(&identity);
+    let deciding = std::thread::spawn({
+        let answered = Arc::clone(&answered);
+        move || {
+            processor.decide(&message);
+            answered.load(std::sync::atomic::Ordering::SeqCst)
+        }
     });
+    std::thread::sleep(Duration::from_millis(200));
+    answered.store(true, std::sync::atomic::Ordering::SeqCst);
+    drop(opening); // settled, not created
+    eventually(
+        "the message to be refused once the open is declined",
+        || deciding.is_finished(),
+    );
+    let answered_when_decided = deciding.join().unwrap();
 
     assert!(
         answered_when_decided,
@@ -2202,7 +2224,8 @@ fn many_messages_on_one_unanswered_open_hold_other_channels_up_for_one_wait_not_
     // two: the slack is one limit, and a machine slow enough to spend a whole
     // second on that work is the only way to fail on the right code. At 400 ms
     // that slack was 400 ms. The wrong answer takes four (one per stuck message), so
-    // it fails at any limit. `an_opens_time_is_the_same_for_every_message_that_waits_on_it`
+    // it fails at any limit.
+    // `an_opens_time_is_the_same_for_every_message_that_waits_on_it_until_a_request_clears_it`
     // pins the same property with no clock at all.
     let peer = Peer::new("recv-one-wait-per-open");
     let open = genesis("Agora").address().unwrap();
@@ -2249,6 +2272,92 @@ fn many_messages_on_one_unanswered_open_hold_other_channels_up_for_one_wait_not_
     for op in &waiting {
         assert!(stored(&peer, &op.op.id()).is_none());
     }
+    drop(unanswered); // still unanswered until here
+}
+
+#[test]
+fn each_unanswered_opens_wait_is_its_own_and_not_one_shared_across_opens() {
+    // `op-transport`, scenario "Each unanswered open's wait is its own": two
+    // channels whose opens are never answered, a message on each, then a valid op on
+    // a channel that is open. The one processor waits out the first message's open,
+    // then the second's — a full limit each, since the second begins waiting only
+    // when the first is done — and stores the op after both.
+    //
+    // What this catches and the tests beside it cannot: the time kept once for the
+    // processor, or keyed by the first channel that ever waited, instead of on each
+    // `Pending`. The second stuck channel's message is then judged at the first's
+    // deadline, at once, which the MUST in "judged only once that open is settled …
+    // unless that channel's own wait expires first" forbids. Every other test here
+    // has one stuck channel, so it reads one time either way.
+    //
+    // **The second refusal is timed against the first, not against the start.**
+    // Polled, so what is measured is the gap between two observations of the journal:
+    // a full limit when each open has its own wait, near nothing when one is shared.
+    // The bound is half a limit, so the right answer fails only if this thread is
+    // stalled for half a second between the first refusal and seeing it. The valid
+    // op's bound is three limits as the scenario says (the right answer takes two
+    // plus the work of four small decisions, leaving a limit of slack); it is
+    // the scenario's bound, not what catches the shared time.
+    let peer = Peer::new("recv-each-open-its-own-wait");
+    let open = genesis("Agora").address().unwrap();
+    let first_stuck = genesis("Lyceum").address().unwrap();
+    let second_stuck = genesis("Athenaeum").address().unwrap();
+    let channels = open_for(&open);
+    let first = ChannelIdentity::of(&first_stuck);
+    let second = ChannelIdentity::of(&second_stuck);
+    let unanswered = [channels.opening(&first), channels.opening(&second)];
+    let limit = Duration::from_millis(1000);
+    let mut processor = peer.processor(Arc::clone(&channels));
+    processor.settle_limit = limit;
+    let queue = Arc::clone(&processor.queue);
+
+    let on_first = their_op(first_stuck, "on the first stuck open", 0);
+    let on_second = their_op(second_stuck, "on the second stuck open", 0);
+    let after = their_op(open, "behind two stuck opens", 0);
+    queue.offer(arriving(
+        first.channel_id(),
+        on_first.to_bytes().unwrap(),
+        1,
+    ));
+    queue.offer(arriving(
+        second.channel_id(),
+        on_second.to_bytes().unwrap(),
+        2,
+    ));
+    queue.offer(arriving(
+        ChannelIdentity::of(&open).channel_id(),
+        after.to_bytes().unwrap(),
+        3,
+    ));
+    queue.close();
+
+    // Started before the processor, so no later than the first message begins
+    // waiting. The processor is on its own thread, so a wait that never ends fails
+    // `eventually` and does not hang the suite.
+    let started = Instant::now();
+    std::thread::spawn(move || processor.run());
+    let refusals = || peer.journal.with("refused (unknown-channel)").len();
+    eventually("the first stuck message to be refused", || refusals() >= 1);
+    let first_refused = Instant::now();
+    eventually("the second stuck message to be refused", || refusals() >= 2);
+    let between_refusals = first_refused.elapsed();
+    eventually("the op behind both stuck opens to be stored", || {
+        stored(&peer, &after.op.id()).is_some()
+    });
+    let took = started.elapsed();
+
+    assert!(
+        between_refusals >= limit / 2,
+        "the second stuck open's message was refused {between_refusals:?} after the first's: \
+         it was not given a wait of its own of {limit:?}"
+    );
+    assert!(
+        took < 3 * limit,
+        "the op behind two stuck opens waited {took:?}: more than three waits of {limit:?}"
+    );
+    assert_eq!(refusals(), 2, "{:?}", peer.journal.lines());
+    assert!(stored(&peer, &on_first.op.id()).is_none());
+    assert!(stored(&peer, &on_second.op.id()).is_none());
     drop(unanswered); // still unanswered until here
 }
 
