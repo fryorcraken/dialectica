@@ -547,3 +547,124 @@ round's refactor. `&&` to `||` in `ChannelBook::is_opening`:
   wait m ends at min(start_m + 40, (m+1) × 35), so the ends are 40m while 40m <
   (m+1) × 35, equal at m = 7 (both 280 s), and (m+1) × 35 from there. 20 Stoas:
   21 × 35 = 735 s; ⌈735 / 40⌉ = 19.
+
+## Re-review round 4 `7462ded8..58460b02`
+
+Dimension: **correctness only**. Read `git diff 7462ded8 58460b02` for
+`delivery.rs` (`OpenTime`, `WaitId`/`Wait`, `Pending::asked`,
+`ChannelBook::{begin_wait, wait_ends, end_wait}`, `Channels::asked`, the reworked
+`await_settled`, `Opening::asked` and the worker's call before `channel_create`,
+`Processor::new`) and `delivery/tests.rs`, against the `op-transport` delta in
+`d240ebdc`. Reviewed at `adba1a22`. `cargo test … -p dialectica -p dialectica-core`
+green (1305 + 30 + 3).
+
+- [ ] **`dev-writer`** — `delivery.rs:609` `Wait::extend_from` — an ask landing
+      after a message's end has passed, but before the processor has re-taken the
+      book, revives that message's wait for a full limit
+      **What is wrong:** `extend_from` moves `ends` to `asked + limit` whenever the
+      extension is unused, without checking that `ends` is still ahead of `asked`.
+      `await_settled` wakes from `wait_timeout` at its end and must re-take the book
+      before it reads `wait_ends` again; if the worker's `Channels::asked` takes the
+      book first, which is an ordinary interleaving on a loaded machine or behind any
+      other holder of the book (listener's `is_known`, a `settle`, a `handoff`), the
+      message's `Wait` is still in `pending.waits`. It is extended, and the processor
+      goes back to sleep for another limit.
+      **Why it is a defect:** the spec delta says "Once the open's time has ended with
+      the open unanswered, the wait on it has expired: the message waiting then …
+      MUST be judged without waiting on that open". It also derives "A message whose
+      wait an ask extends holds them up for less than twice that fixed time: less than
+      it before the ask, **since its wait would otherwise have expired**". Both
+      assume the ask reaches only a wait that has not ended. Here a wait that has
+      ended is made to wait again. That holds every other Stoa up for up to (end
+      overshoot + one limit), which is past the "less than twice" the spec claims.
+      design.md:589 and :705 and the `SETTLE_LIMIT` doc make the same claim. The
+      fix below makes all of them true, so no prose needs to change.
+      **Scenario (probe, reproducible):** settle limit 300 ms; open requested, not
+      asked; a valid op begins waiting at t0. At t0+150 ms the test thread takes
+      `channels.book` and holds it to t0+450 ms. The message's end at t0+300 ms passes
+      while the processor is blocked re-taking the book. Still holding the book, the
+      test calls `Pending::asked(Instant::now())`, which is the same body
+      `Channels::asked` runs once it holds the lock, then releases. At t0+600 ms the
+      message is **still undecided**. It is then stored when the open is reported
+      held. Per the MUST above it should have been judged, and refused, at once after
+      its end. The probe failed on the tree as it stands ("was still waiting half a
+      limit after it; stored: true").
+      **Measured fix:** a guard `if asked >= self.ends { return; }` at the top of
+      `extend_from` makes the probe pass, and all 103 `delivery::` tests stay green.
+      No test in the suite pins this edge, so the fix needs a regression test that
+      holds the book across the end as the probe does. The fix also leaves the
+      extension unused on that path, which is harmless: the message is judged on
+      that wake-up.
+      **Severity:** low. The window is scheduler-sized unless something else holds the
+      book at the moment of the end, only this peer's ask opens it, and a sender cannot
+      aim at it. It is still a reachable violation of a MUST this range added, and
+      the fix is one line.
+- [ ] **`tester`** — `delivery.rs:667` `ChannelBook::end_wait` — nothing pins
+      that a decided message's `Wait` leaves the book
+      **Measured:** `cargo mutants --file dialectica-core/src/delivery.rs` scoped to
+      this range's functions found 18 mutants: 11 caught, 6 unviable, and **1 missed**.
+      The missed one is `replace ChannelBook::end_wait with ()`, under which every
+      `delivery::` test passes.
+      **Why it matters:** without `end_wait`, every message that waits on an open
+      leaves its `Wait` in `pending.waits` until the whole `Pending` is removed.
+      A `Pending` can live a long time: at startup against a slow delivery, an open
+      queued behind K others stays pending for up to (K+1) × `CALL_TIMEOUT`. For that
+      whole time, each message a sender puts on that channel, each judged at once
+      after the time has ended, adds one entry that is never freed. So a sender
+      chooses how much the book grows, and every later ask walks all of those entries
+      under the book lock. The code is right today. The gap is that a refactor
+      dropping the call would ship green.
+      **Wanted:** a test that decides a message on a pending open, both after it
+      waited its time out and after the open settled held with another request still
+      pending, and then asserts the open's `waits` is empty. `a_message_waits_on`
+      already reads that map.
+
+### Clean in this round
+
+- **Every transition of `OpenTime` matches the delta.** A request (`opening`) sets
+  `NotStarted`. An ask sets `StartedAt(ask)` whatever the state, including after an
+  `Ends` that has passed, which is "whether or not its time had already ended". The
+  first message to begin waiting fixes `Ends`: `now + limit` from `NotStarted`,
+  `ask + limit` from `StartedAt`, the kept instant from `Ends`. So a passed `Ends`
+  judges every later message at once until a request or an ask. Nothing else writes
+  `time`, so "nothing else starts it" holds. `settle` leaves `time` alone while
+  other requests stay pending, which is the "open behind other requests" loss the
+  delta names.
+- **An extension never shortens a wait.** Every begin-wait instant and every ask
+  instant is read under the book lock, so they are ordered, and a wait's first end
+  is at most its start plus one limit. An ask made while the wait is still ahead
+  therefore gives an end no earlier than the one it replaces. That is why
+  `Channels::asked` needs no `notify_all`: a waiter that wakes at its old end
+  re-reads the later one and sleeps again. The once-only cap is `Option::take`, and
+  a message that begins waiting after an ask keeps its extension for the next ask,
+  which is what the delta's "the end the first ask made while it waits moved it to"
+  allows.
+- **The "wait gone from the book" path is right, and reachable only as the doc
+  says.** `wait_ends` returns `None` while `is_opening` holds only if the `Pending`
+  holding this wait was removed, when its last request settled, and a new request
+  re-inserted it with an empty `waits`. A held settle opens the channel and ends the
+  loop on `is_opening` first. So `None` means the open this message waited on has
+  settled, not held, and the message is judged, as "judged only once that open is
+  settled" requires. `end_wait` on the new entry removes nothing, because `WaitId`s
+  are unique.
+- **No `Wait` leaks.** `begin_wait` inserts only on the path that reaches the loop,
+  every exit of the loop falls through to `end_wait`, and nothing between them can
+  panic at the running limit. `Instant + 40 s` does not overflow.
+- **Lock scope.** `Channels::asked` holds the book for a map lookup and a loop over
+  that open's waits. The worker holds no other lock when it calls it, and calls it
+  after the sender lookup and immediately before `channel_create`. That is every
+  `channel_create` call site: `git grep -F channel_create` finds one outside the
+  seam's trait and test doubles.
+- **The rest of the new code is pinned.** The other 11 viable mutants in
+  `OpenTime::end`, `Wait::extend_from`, `Pending::asked`, `begin_wait`,
+  `wait_ends`, `Channels::asked`, `await_settled` and `Opening::asked` are all
+  caught, including `extend_from`/`Pending::asked` → `()` and each `+` → `-`.
+- **`a6fa2dde` changes no behaviour.** `Processor::new` sets the same six fields
+  with `settle_limit: SETTLE_LIMIT`. `Delivering::start` passes the same four
+  handles and `clock`, and both test fixtures did the same, so the tree before
+  and after builds identical processors.
+- **Nothing from earlier rounds is undone.** The per-open time kept on each
+  `Pending` (round 2's shared-deadline test still green), the request not moving a
+  waiting message's end (`a_request_made_while_a_message_waits_…` green), the
+  poisoned-book loop (`into_inner` kept) and the `is_opening` single predicate all
+  survive the rework.
