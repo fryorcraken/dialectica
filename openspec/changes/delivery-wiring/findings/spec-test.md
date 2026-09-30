@@ -885,3 +885,111 @@ moved from 1.1 to 1.2 limits after the junk began waiting to match the first's
 margin for the junk's wake-up. Two full runs of the suite on the changed tests
 passed (1305 passed each); that is evidence of no flake under the suite's own
 load and not a proof of it.
+
+## Re-review round 4 `7462ded8..58460b02`
+
+Reviewed at `adba1a22` (spec and tests as of `58460b02`; later commits add only
+findings). Read: the range's diff of `specs/op-transport/spec.md` and
+`proposal.md`; the range's diff of `delivery/tests.rs`; my round-3 box and its
+outcome. The implementation was read only at `Pending::asked` and the lines
+around it, to mutate them. Baseline and mutation command:
+`cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p dialectica-core delivery`,
+read from its own output. `dialectica/logos-rust-sdk-src` was missing and staged
+with the `nix build --inputs-from` command. The tree is restored and clean
+(`delivery.rs` reverted by hand with `Edit`), no mutation is left behind.
+
+**Round-3 box confirmed answered as its outcome says.** The limit: the
+`Processor` is built in one place, `Processor::new`; the test
+`the_processor_the_running_wiring_builds_waits_longer_than_the_call_timeout` reads
+`settle_limit` off a processor built that way and asserts it exceeds
+`CALL_TIMEOUT`, and `the_running_wiring_builds_its_processor_with_the_one_constructor_and_never_changes_its_limit`
+holds by hardcoded count that `settle_limit:` has two mentions, `settle_limit=`
+none and `Processor::new(` one, so `Delivering::start` cannot build its own with
+another limit or assign one afterwards. The timeout argument:
+`the_adapter_forwards_each_delivery_argument_in_the_order_the_seam_names_them`
+now pins all four calls through `core::delivery::CALL_TIMEOUT`, counts it at four
+and rejects a bare `channel_send`/`channel_create`/`start`/`create_node` on
+`delivery_module`. Its comment says it is a text pin because `cfg(logos_scaffold)`
+hides the file from `cargo test`. Both parts are pinned, and the layer is right
+for each (the adapter half can only be a text pin here).
+
+**Scenario mapping, the four new and the three amended.**
+"A message waiting when this peer asks delivery ..." maps to
+`a_message_waiting_when_delivery_is_asked_is_judged_after_delivery_answers`:
+the answer is timed past the first end and inside the end the ask gives, both
+asserted as the WHEN, and without the extension the message is refused at its
+first end, so it fails for the reason it names. "An earlier message on a queued
+open ..." maps to `an_earlier_message_on_a_queued_open_...`, see the next
+paragraph. "Asking delivery for a channel whose wait has expired ..." maps to
+`asking_delivery_for_a_channel_whose_wait_has_expired_lets_a_message_wait_again`,
+which reads whether the message waited off a flag raised just before the answer
+and so cannot pass on a judge-at-once refusal followed by a late store.
+"A second ask while a message waits ..." maps to
+`a_second_ask_while_a_message_waits_does_not_extend_its_wait_again`; its
+precondition (the message still waiting at the second ask) also fails a first ask
+that extended nothing, and it reports a stalled test thread as a stall. The
+worker's own ask, which no scenario names but the requirement does, is
+`the_worker_marks_its_ask_of_delivery_in_the_channel_book`, which holds the
+create call open with a gate and so fails an `asked()` moved after the call. The
+three amended scenarios (many messages, each open's own wait, requests made while
+a message waits) gained a clause that this peer does not ask delivery while they
+wait; their tests never call `asked()` and do not involve the worker, so the
+clause holds by construction and the clause makes the scenario true rather than
+the test stronger. Nothing untestable as written. No `NO SPEC:` marker in the
+range's tests.
+
+**The tester's "red only with both halves removed" for the queued-open scenario.**
+I read the arithmetic and then measured it. It is a real property of the
+scenario, not a weakness of the test, and on its own it leaves no gap in the
+extension half: `a_message_waiting_when_delivery_is_asked_...` pins the
+extension, `asking_delivery_for_a_channel_whose_wait_has_expired_...` pins the
+restart for the case it is observable in, and the queued-open test is the
+end-to-end guard for the original defect. But the same arithmetic shows the
+restart half has an observable case that no test pins, which is the box below.
+
+**Mutation run (one; restored, `git status --short` empty afterwards).**
+`dialectica/rust-lib/dialectica-core/src/delivery.rs:621`, `Pending::asked`:
+`self.time = OpenTime::StartedAt(asked);` made conditional on
+`self.waits.is_empty()`, so the ask restarts the open's time only when no message
+is waiting. The spec says it MUST start again "whether or not a message is
+waiting". **Survived:** 113 passed, 0 failed, in the delivery filter above.
+
+- [ ] **`tester`** — nothing pins that an ask restarts the open's time while a
+      message is waiting on it. **Where:** `op-transport`, "Asking delivery to
+      create a channel starts the open's time again" ("whether or not a message is
+      waiting on the open and whether or not its time had already ended"), and the
+      sentence in the same paragraph that a later ask made while a message waits
+      "starts the open's time again for the messages taken after it".
+      **Scenario:** a message A waits on an open; this peer asks delivery (ask 1,
+      A is extended to ask 1 + limit); 0.5 limit later it asks again (ask 2, A's
+      end is not moved, per the cap); a message B on the same channel is queued
+      behind A; A is refused at ask 1 + limit; B begins waiting then, and the open's
+      time, restarted at ask 2, ends at ask 2 + limit, 0.5 limit later; delivery
+      answers at ask 1 + 1.25 limit. B is stored. Without the restart while A
+      waits, the open's time still ends at A's original end, B is judged at once
+      and refused as an unknown channel, and B's op is lost.
+      **Measured:** the mutation above, 113 of 113 passed. The two tests that
+      could see it do not: `an_earlier_message_on_a_queued_open_...` is satisfied
+      by the extension alone (tester's own finding, which I reproduced), and
+      `a_second_ask_while_a_message_waits_does_not_extend_its_wait_again` measures
+      only A, never a message taken after it. The restart in the no-message-waiting
+      case is pinned by the expired-wait test, so the `is_empty()` condition passes
+      exactly the cases that are tested.
+      **Fix shape:** a test of the scenario above (two asks, B behind A, answer
+      between A's refusal and ask 2 + limit, B stored), timed as the four ask tests
+      are, asserting its own WHEN. It turns red on the mutation above. Severity:
+      low-medium; it is a stated MUST with a consequence sentence in the spec, and
+      the spec-writer needs to act only if the owner would rather drop that
+      sentence, which I do not recommend.
+
+**Observation, no box.** `a_second_ask_while_a_message_waits_does_not_extend_its_wait_again`
+asserts refusal within 1.4 limits of the first ask where the scenario says no
+later than 1.0. The realistic defect (every ask moves the end, 1.7 limits) is
+caught with margin; an extension of 1.3 limits would pass. The slack is the
+stated allowance for a stalled test thread, same trade as round 3's "no sooner
+than the fixed time" observation, so it is recorded and not boxed. The
+scenario-to-test mapping is otherwise complete for the range, the spec text of
+the range reads consistently with itself (the "one extension" carve-out in the
+judged-no-later-than MUST, the ask paragraph, the not-covered list and the
+consequence paragraph agree on which messages are covered), and issue #176 is
+unchanged in scope (reliable channel throughout; state OPEN).
