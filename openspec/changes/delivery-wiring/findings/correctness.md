@@ -364,3 +364,104 @@ earlier outcomes hold. Suites green: `cargo test … -p dialectica -p dialectica
   are expected) and 2 missed (the two above). Several mutants were each hitting
   the timeout, so the run went well past the time the role allows. The 41
   unreached mutants, from `Channels::settle` onwards, are not reported on here.
+
+## Re-review round 2 `369561d1..2cb71aaf`
+
+Dimension: **correctness only**. Read `git diff 369561d1 2cb71aaf` for
+`delivery.rs`, `transport.rs` and `arrival.rs`, each of the two refactor commits
+on its own (`7c9d6cd6`, `ff3eba85`), and the spec deltas for `op-transport` and
+`stoa-membership`. Reviewed at `0a8f8639`, which is `2cb71aaf` plus tracking.
+Suites green: `cargo test … -p dialectica -p dialectica-core` (1297 + 30 + 3),
+and `nix build ./dialectica#lgx`.
+
+Both round-1 outcomes hold, re-measured:
+- `pending.requests += 1` → `*= 1` turns
+  `a_channel_asked_for_twice_is_being_opened_until_both_requests_settle`,
+  `a_message_waits_for_the_last_of_two_requests_for_its_channel` and
+  `a_request_made_while_a_message_waits_does_not_extend_that_messages_wait` red.
+- `DELIVERY_CALLBACK_TIMEOUT` = 10 s with `CALL_TIMEOUT` = 20 s compiles, and
+  only `the_call_timeout_outlasts_deliverys_own_and_the_settle_limit_outlasts_the_call`
+  goes red. `SETTLE_LIMIT` = 10 s alone fails the build at the
+  `CALL_TIMEOUT < SETTLE_LIMIT` assert.
+
+- [ ] **`tester`** — `delivery.rs:554` (`ChannelBook::is_opening`, the loop
+      condition of `Channels::await_settled`). Nothing pins that a message is
+      judged promptly once its open is declined. Under the mutation, a declined
+      open holds every Stoa up for the whole settle limit.
+      **Scenario:** apply `!open.is_open(id) && pending.contains_key(id)` →
+      `!open.is_open(id) || pending.contains_key(id)`. A join's `channelCreate`
+      is declined (for example `"Context not initialized"`, or v0.2.1's "no
+      reliable channel manager"), and a message is waiting on that open. The
+      decline removes the pending entry. The channel is not open, so the
+      condition stays true, and the processor sits until the open's deadline,
+      40 s in the running wiring. Every message on every other channel waits
+      behind it. The `op-transport` requirement is that the message is judged
+      "once that open is settled". The spec gives the fixed time as an upper
+      bound on the wait, not as the time the wait lasts after a decline. The
+      same mutant keeps a message waiting after its channel opens while a
+      second request for it is still pending (open and pending, so still
+      "opening").
+      **Measured:** `cargo mutants` on the round's functions (16 mutants: 10
+      caught, 5 unviable, 1 missed) MISSED this one. Applied by hand, all 1330
+      tests pass. The core suite's wall time goes from 22.2 s to 40.03 s,
+      because `a_message_arriving_while_its_open_is_declined_is_refused_after_the_answer`
+      uses the processor's default `SETTLE_LIMIT`, waits out all 40 s, and
+      still passes. It asserts that the refusal came *after* the answer, not
+      that it came *soon after* it.
+      **Severity:** low. The shipped `&&` is correct. The gap is that the
+      "declined → judged at once" half of the condition is unpinned, and a
+      regression there turns every declined open into a whole-module stall.
+      Shape of a fix: in the decline test, set a long limit and require that
+      `decide` returns well inside it, or time the refusal against the answer.
+
+### Clean in this round
+
+- **The two refactors change no behaviour.** `ff3eba85` swaps the bare count
+  for `Pending { requests }` and moves the loop condition into `is_opening`
+  unchanged. `7c9d6cd6` routes `receive` and the processor through
+  `receive_via` in the same order as before: lookup under the message's own
+  channel id, then `judge`, then the write. The clock is still read after the
+  wait. The op log is still opened only for an op that passed. The outcome
+  logging moved verbatim into `record_decision`. `judge` going private
+  compiles, so nothing else called it.
+- **The deadline's lifecycle.**
+  - It is set once per open, by the first message that finds the channel
+    pending and not open (`get_or_insert_with`). It is read under the same
+    lock as the loop's first check, so a message that starts the time always
+    waits on it.
+  - It is shared: later messages get the same instant back, and a past instant
+    returns at once. The open stays pending, so hand-over still admits the
+    channel and delivery's answer still settles it.
+  - Each request clears it (`Channels::opening`), including one given up at
+    once. The spec allows this: that is still a request.
+  - A waiting message keeps the local deadline it read, so it is never
+    extended.
+  - A decline or a hold that brings the count to 0 removes the whole record,
+    so a later request starts clean.
+
+  Mutations, each restored:
+  - dropping the reset in `opening` turns two tests red;
+  - re-reading the deadline on each wake-up turns one red;
+  - a per-message clock turns two red;
+  - removing the pending entry at expiry turns two red.
+
+  `Instant + limit` cannot overflow at the shipped 40 s, and only tests set
+  another value.
+- **Every path that settles an open** still goes through the `Opening` drop:
+  - the worker's answer (`held` on created or already exists);
+  - a decline;
+  - a panic in `perform`;
+  - no sender identifier;
+  - a refused send to the worker;
+  - a worker that exits;
+  - a failed worker spawn.
+
+  `opening` releases the book lock before the guard exists, so no drop
+  self-deadlocks. `settle` notifies on every call, so a waiter re-checks
+  `is_opening` against the new state.
+- In prose, not a box: `receive_via`'s doc says a caller "cannot pair one
+  channel's message with another channel's Stoa". That holds only for an
+  honest `stoa_of` closure, because one that ignores its argument can return
+  any Stoa. Both callers are honest, and
+  `the_boundary_looks_a_channel_up_under_the_messages_own_identifier` pins
+  the key. This is a doc precision point, not a defect.
