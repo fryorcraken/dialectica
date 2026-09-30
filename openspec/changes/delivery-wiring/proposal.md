@@ -67,8 +67,8 @@ the design relies on.
   startup asking for the channel again starts a new wait for the messages
   after it, and never lengthens the wait of a message already waiting. When
   this peer then asks delivery to create the channel, that ask starts the
-  open's time again, and extends the wait of a message already waiting on it,
-  once for that message; a message so extended holds the other Stoas up for
+  open's time again, and extends the wait of a message already waiting on it
+  whose end has not yet passed, once for that message; a message so extended holds the other Stoas up for
   less than twice the fixed time. Several opens stuck at once hold the other
   Stoas up at most once for each start of an open's time, in turn, and never
   past the moment the last of them settles: a total this peer's own requests
@@ -89,7 +89,10 @@ the design relies on.
   A message whose fields cannot be read, a panic while reading them included,
   is logged and discarded, and reception carries on. A message
   the op log cannot take is logged as a storage failure and not retried. A
-  failed subscription is logged, and opens and sends still happen.
+  failed subscription is logged, and opens and sends still happen. Once a
+  message that waited on an open is judged, nothing of its wait is kept, so
+  what this peer holds for a stuck open does not grow with the messages a
+  sender puts on its channel.
 - **The inbound bound.** Payloads waiting for the boundary are capped at a fixed
   count. When the cap is reached, the arriving payload is discarded and the
   waiting ones are kept. This **reverses #30**, which discarded the oldest.
@@ -162,6 +165,7 @@ Stoa-lifecycle obligation that `op-transport` assigns to `stoa-membership`.
   - ADDED *Every payload the reliable channel delivers passes the inbound
     boundary*.
   - ADDED *Inbound payloads waiting for the boundary are bounded*.
+  - ADDED *Nothing of a message's wait on an open is kept once it is judged*.
   - ADDED *The sender identifier this peer supplies is its own, stable, and says
     nothing about its author*.
 - `stoa-membership`: `op-transport` says which Stoas get a channel, and when, is

@@ -189,9 +189,9 @@ A delivered message whose fields cannot be read MUST be discarded and recorded i
 
 **That wait is bounded by a fixed time for each open, not for each message.** An open being waited on has a time, which ends that fixed time after it starts. The time is started by the first message to begin waiting on the open after the latest create, join or startup asking for its channel, and is started again when this peer asks delivery to create that channel, as "Asking delivery to create a channel starts the open's time again" below says; nothing else starts it. A message MUST be judged no later than the end of the open's time as it stood when the message began waiting, whether or not delivery ever answers the open, save for the one extension that paragraph allows. Once the open's time has ended with the open unanswered, the wait on it has expired: the message waiting then, and every message on that channel taken after it until a request or an ask starts the open's time again, MUST be judged without waiting on that open, against the channels open when it is judged. How long one start of an open's time can hold up the messages on every other channel is therefore at most that fixed time, however many messages arrive on its channel.
 
-**Asking delivery to create a channel starts the open's time again.** When this peer asks delivery to create a channel that is being opened, the open's time MUST start again at that ask, whether or not a message is waiting on the open and whether or not its time had already ended. A message waiting on the open when the ask is made MUST then be judged no later than that fixed time after the ask, in place of the end it began waiting with, and its wait expires then rather than earlier. That extension is made once for a message: a later ask made while the same message still waits starts the open's time again for the messages taken after it, and MUST NOT move that message's end again. Only this peer asks delivery to create a channel, so no sender can start an open's time again or extend a message's wait.
+**Asking delivery to create a channel starts the open's time again.** When this peer asks delivery to create a channel that is being opened, the open's time MUST start again at that ask, whether or not a message is waiting on the open and whether or not its time had already ended. A message waiting on the open when the ask is made, whose end has not yet passed, MUST then be judged no later than that fixed time after the ask, in place of the end it began waiting with, and its wait expires then rather than earlier. **A message whose end has already passed when the ask is made is not extended, even where it has not yet been judged:** its wait has expired, and it MUST be judged without waiting on that open, as the paragraph above says. That extension is made once for a message: a later ask made while the same message still waits starts the open's time again for the messages taken after it, and MUST NOT move that message's end again. Only this peer asks delivery to create a channel, so no sender can start an open's time again or extend a message's wait.
 
-**That fixed time MUST be longer than the longest this peer waits for delivery to answer one channel creation, and that longest MUST be longer than the time delivery allows itself to answer one.** The order is contracted here; the values are not. With it, a message waiting on an open when this peer asks delivery to create its channel, where that is the first ask made while it waits, and a message that begins waiting on the open after that ask, is judged only after delivery has answered that creation or this peer has given up waiting for the answer; and this peer does not give up on a creation that delivery would still answer within its own time. **Not every message racing a creation is covered, and one that is not can be refused, and lost, before delivery answers:** a message whose wait expired before this peer asked delivery for its channel, because its open waited behind other requests this peer had made of delivery for longer than the fixed time, together with every message on that channel taken after that expiry and before the ask; and a message whose wait an earlier ask had already extended, when a later ask for the same channel is made while it still waits.
+**That fixed time MUST be longer than the longest this peer waits for delivery to answer one channel creation, and that longest MUST be longer than the time delivery allows itself to answer one.** The order is contracted here; the values are not. With it, a message waiting on an open when this peer asks delivery to create its channel, where its end has not yet passed and that is the first ask made while it waits, and a message that begins waiting on the open after that ask, is judged only after delivery has answered that creation or this peer has given up waiting for the answer; and this peer does not give up on a creation that delivery would still answer within its own time. **Not every message racing a creation is covered, and one that is not can be refused, and lost, before delivery answers:** a message whose wait expired before this peer asked delivery for its channel, whether or not it had been judged by the time of the ask, because its open waited behind other requests this peer had made of delivery for longer than the fixed time, together with every message on that channel taken after that expiry and before the ask; and a message whose wait an earlier ask had already extended, when a later ask for the same channel is made while it still waits.
 
 **The following is a consequence of the requirements above and adds none.** A message waits on an open only while it is the one being judged, and waiting payloads are judged in the order they arrived, so each start of an open's time holds the messages on every other channel up at most once, for at most that fixed time, and the waits of opens left unanswered at the same time run one after another. A message whose wait an ask extends holds them up for less than twice that fixed time: less than it before the ask, since its wait would otherwise have expired, and no more than it after. No wait extends past the moment its own open settles. How long they can hold the other channels up in all is therefore no more than that fixed time for each start of an open's time, and never extends past the moment the last of those opens settles. Only this peer's own creates, joins, startup and asks of delivery start an open's time, so that total is set by what this peer asks for, and no sender can lengthen it by putting more messages on any channel.
 
@@ -296,7 +296,7 @@ A delivered message whose fields cannot be read MUST be discarded and recorded i
 
 #### Scenario: A message waiting when this peer asks delivery for its channel is judged after delivery answers
 
-- **WHEN** a message carrying a valid op for a Stoa begins waiting on that Stoa's channel open before this peer has asked delivery to create the channel, this peer then asks delivery to create it, and delivery reports the channel created after the fixed time has passed since the message began waiting, but before it has passed since the ask
+- **WHEN** a message carrying a valid op for a Stoa begins waiting on that Stoa's channel open before this peer has asked delivery to create the channel, this peer then asks delivery to create it before the message's end has passed, and delivery reports the channel created after the fixed time has passed since the message began waiting, but before it has passed since the ask
 - **THEN** the op is stored
 - **AND** it is not refused as arriving on an unknown channel
 
@@ -316,6 +316,12 @@ A delivered message whose fields cannot be read MUST be discarded and recorded i
 
 - **WHEN** a message is waiting on a Stoa's unanswered channel open, and this peer asks delivery to create that channel twice while the message waits, with delivery answering neither ask
 - **THEN** the message is refused as arriving on an unknown channel no later than the fixed time after the first of those asks
+
+#### Scenario: An ask made once a message's end has passed does not make it wait again
+
+- **WHEN** a message is waiting on a Stoa's unanswered channel open before this peer has asked delivery to create the channel, its end passes while this peer is held up before judging it, and this peer asks delivery to create that channel after that end and before the message is judged, with delivery answering neither
+- **THEN** the message is refused as arriving on an unknown channel
+- **AND** it is refused before the fixed time has passed since the ask
 
 #### Scenario: Requests made while a message waits do not lengthen its wait
 
@@ -414,6 +420,28 @@ A message refused when delivery hands it over is not among the waiting payloads,
 - **WHEN** the boundary is held up deciding one payload, and a payload of exactly the message limit then arrives on a channel this peer has open
 - **THEN** no refusal is recorded for it before the boundary is released
 - **AND** it is not refused as over-long after the boundary is released
+
+### Requirement: Nothing of a message's wait on an open is kept once it is judged
+
+Once a message that waited on an open, as "Every payload the reliable channel delivers passes the inbound boundary" describes, has been judged, this peer MUST hold no record of that message's wait. This holds whichever way the wait ended — the open settled, the open's time ended while the message waited, or the message was judged at once because that time had already ended — and whether or not the channel is still being opened afterwards.
+
+**The following is a consequence of the requirements above and adds none.** A message waits on an open only while it is the one being judged, so this peer holds a record of at most one message's wait at any time, however many messages a sender puts on a channel being opened and however long that open goes unanswered.
+
+#### Scenario: A message that waited its open's time out leaves no record of its wait
+
+- **WHEN** a message has waited on a Stoa's unanswered channel open until the fixed time passed, and the channel is still being opened
+- **THEN** this peer holds no record of a wait on that open
+
+#### Scenario: Messages judged at once after an open's time has ended leave no record of their waits
+
+- **WHEN** a message has waited on a Stoa's unanswered channel open until the fixed time passed, and three more messages then arrive on that channel identifier and are each refused as arriving on an unknown channel while the channel is still being opened
+- **THEN** this peer holds no more records of waits on that open than it held before those three arrived
+
+#### Scenario: A message whose open settles held leaves no record while another request for the channel is pending
+
+- **WHEN** a Stoa's channel has been requested twice, a message carrying a valid op for that Stoa waits on the open, and delivery reports the first request's channel created while the second request is still pending
+- **THEN** the op is stored
+- **AND** this peer holds no record of a wait on that open while the second request is still pending
 
 ### Requirement: The sender identifier this peer supplies is its own, stable, and says nothing about its author
 

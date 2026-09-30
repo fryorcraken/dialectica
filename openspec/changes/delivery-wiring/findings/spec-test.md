@@ -1083,7 +1083,7 @@ and `a_second_ask_restarts_...` to the last sentence of the ask paragraph, which
 also has no scenario of its own. The three book-hygiene tests map to nothing in
 the spec; see the second box. No `NO SPEC:` marker in the range's tests.
 
-- [ ] **`spec-writer`** — the ask paragraph and the expiry sentence can be read as
+- [x] **`spec-writer`** — the ask paragraph and the expiry sentence can be read as
       contradicting each other for a message whose own end has passed but which the
       waiter has not yet taken out of the book. **Where:** `op-transport`, "That
       wait is bounded by a fixed time for each open" (line 190: once the time has
@@ -1104,7 +1104,32 @@ the spec; see the second box. No `NO SPEC:` marker in the range's tests.
       is not extended, and is judged as line 190 says") and a scenario for it, then
       this test maps to a scenario. Severity: low; the tests and the code agree, the
       spec is silent on which wins.
-- [ ] **`spec-writer`** — three new tests pin a property no requirement states:
+      **Outcome (`spec-writer`): fixed, as the fix shape said, with a scenario.**
+      "Asking delivery to create a channel starts the open's time again" now
+      extends only "a message waiting on the open when the ask is made, whose end
+      has not yet passed", and says outright that a message whose end has passed
+      when the ask is made is not extended even where it has not yet been judged:
+      its wait has expired and it is judged without waiting, as the paragraph
+      before says. The same qualifier is carried into the two places that lean on
+      the ask paragraph: the covered set in "That fixed time MUST be longer..."
+      (the first ask "where its end has not yet passed"), and its not-covered
+      list, whose expired-before-the-ask message now reads "whether or not it had
+      been judged by the time of the ask". Scenario added, **"An ask made once a
+      message's end has passed does not make it wait again"**: the end passes
+      while this peer is held up before judging the message, the ask comes after
+      that end and before the judgement, delivery answers nothing; the message is
+      refused as an unknown channel, before the fixed time has passed since the
+      ask. `an_ask_after_a_messages_wait_has_ended_does_not_make_it_wait_again`
+      maps to it as written (its 0.75-limit bound is inside "before a limit"); it
+      holds the book to make "held up before judging it" happen, which is a
+      device for the setup and not what is asserted. One knock-on edit: scenario
+      "A message waiting when this peer asks delivery for its channel is judged
+      after delivery answers" now says the ask comes "before the message's end has
+      passed", since under the new clause an ask after it would refuse the
+      message. Its test asks 0.6 of a limit into the wait; it does not assert the
+      ask was inside the end, but a late ask would read red (the message refused
+      before the answer), not falsely green. No behaviour change, no test owed.
+- [x] **`spec-writer`** — three new tests pin a property no requirement states:
       that the channel book holds no record of a message once its wait has ended.
       **Where:** `a_message_that_waited_its_opens_time_out_leaves_no_wait_in_the_book`,
       `messages_judged_at_once_after_an_opens_time_has_ended_leave_no_wait_in_the_book`,
@@ -1123,6 +1148,30 @@ the spec; see the second box. No `NO SPEC:` marker in the range's tests.
       in the change that this is an implementation property deliberately kept out
       of the spec. Severity: low; nothing is wrong with the tests, the gap is that
       nobody decided on purpose.
+      **Outcome (`spec-writer`): fixed, as a requirement.** It is a bound on state
+      a sender can grow, which the security round-4 box on `end_wait` measured
+      (1001 waits left with it emptied), and the spec already bounds the other
+      such state, so it belongs beside "Inbound payloads waiting for the boundary
+      are bounded" rather than in design. ADDED to `op-transport`, **"Nothing of a
+      message's wait on an open is kept once it is judged"**: once a message that
+      waited on an open has been judged, this peer MUST hold no record of its
+      wait, whichever way it ended (the open settled, the open's time ended while
+      it waited, or it was judged at once because that time had already ended),
+      and whether or not the channel is still being opened. A consequence
+      paragraph, adding nothing, states the bound it gives: at most one message's
+      wait is held at any time, however many messages a sender puts on the
+      channel and however long the open goes unanswered. Three scenarios, one per
+      test, each phrased as its test asserts: "A message that waited its open's
+      time out leaves no record of its wait", "Messages judged at once after an
+      open's time has ended leave no record of their waits" (no more records than
+      before the three arrived, since that is the difference the test reads; the
+      first scenario supplies the zero), and "A message whose open settles held
+      leaves no record while another request for the channel is pending" (the op
+      stored, and no record held while the second request is pending). The
+      rename fragility you name stays: "holds no record" is observed through the
+      book, the only place it can be, the same way "the number waiting equals the
+      bound" is. Proposal's Capabilities lists the requirement. No behaviour
+      change, no test owed.
 
 **Clean:** the round-4 box; the layer (the book and the processor are in
 `dialectica-core`, which `cargo test` compiles, and no test depends on the
