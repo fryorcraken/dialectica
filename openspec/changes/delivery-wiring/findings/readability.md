@@ -1049,3 +1049,31 @@ is verbatim from `spec.md:192`. One new defect, low, in prose.
   width ("whose end has not yet passed, once for that message; a message so extended
   holds the other Stoas up for"), where the paragraph before is wrapped at about 75.
   Formatting only.
+
+## Re-review round 7 `3d34f15e..ae44f364`
+
+- [x] **re-review round 7 `3d34f15e..ae44f364`: no findings** — read the range's
+      `design.md` (the reworded no-op-ask count; the new "Why each wait leaves the
+      book" section), the three reworded `op-transport` scenarios, and `tasks.md`,
+      against `delivery.rs` (`Wait`, `Pending::asked`, `begin_wait`, `end_wait`,
+      `settle`, `await_settled`) and `delivery/tests.rs`; clean. Round 6's box is
+      answered as its outcome says: the sentence now names five tests red against
+      a no-op ask and says the sixth,
+      `an_ask_after_a_messages_wait_has_ended_does_not_make_it_wait_again`, is held
+      by the `Wait::extend_from` guard; counting the names in the paragraph and the
+      list above gives those six. All nine test names cited in the new prose exist
+      as `fn`s in `tests.rs`; the requirement name quoted in `design.md:589` and
+      `proposal.md:168` matches `spec.md:424`; the prose's `(K+1) × CALL_TIMEOUT`
+      and "(Risks)" resolve (`CALL_TIMEOUT` is 35 s, the Risks bullets name the
+      unbounded outbound queue); `end_wait` after the loop, the one early `return`
+      before any `Wait` exists, the shared id counter and `settle` removing the
+      entry only at the last request all match the code; the test helper
+      `waits_in_the_book` does answer `None` once the entry goes, as the prose says.
+      The scenario rewordings are consistent with the requirement's "that message's
+      wait", and no test comment quotes their THEN lines.
+
+Not boxes (taste): `design.md:609` wraps one line far past its neighbours ("book's
+lock (`Pending::asked`). Removed as each wait ends, with the one processor judging
+one"), an edit residue. The new section names "round 4" and "round 5" re-reviews,
+which read oddly once `findings/` is deleted; Decision 11 already cites "the
+security re-review" the same way, so nothing is lost.
