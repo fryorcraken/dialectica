@@ -5,7 +5,7 @@ Dimension covered: **architecture** only. `cargo test -p dialectica -p dialectic
 passes (1256 core tests, then the integration suites) and `nix build ./dialectica#lgx`
 succeeds, so the `cfg(logos_scaffold)` adapter compiles.
 
-- [ ] **`dev-writer`** — `dialectica-core/src/delivery.rs:330` — a third copy of the
+- [x] **`dev-writer`** — `dialectica-core/src/delivery.rs:330` — a third copy of the
       panic-payload renderer, after this piece extracted the second **to stop
       exactly this**.
       **Scenario:** `git grep -n -F "non-string panic payload"` finds three
@@ -21,8 +21,13 @@ succeeds, so the `cfg(logos_scaffold)` adapter compiles.
       from `delivery.rs`, delete the two others.
       **Severity:** low. A defect against the change's own stated rationale, not a
       taste point. **Measured:** the grep above.
+      **Fixed** in `cd5d7c82`: `wire::panic_detail` is `pub(crate)` and is the
+      only rendering; `guarded`, the two sinks and `delivery.rs` call it, and the
+      grep above now finds one non-test site. A no-behaviour refactor, so no test
+      goes red without it; `wire.rs`'s existing `guarded` panic tests still pin the
+      rendering.
 
-- [ ] **`dev-writer`** — `dialectica-core/src/delivery.rs:485` — `Channels::receive`
+- [x] **`dev-writer`** — `dialectica-core/src/delivery.rs:485` — `Channels::receive`
       holds the channel-book mutex across signature verification **and the SQLite
       append**, and `design.md:80` says the opposite.
       **Scenario:** `transport::receive(message, &lock(&self.book).open, log, now_ms)`
@@ -44,8 +49,16 @@ succeeds, so the `cfg(logos_scaffold)` adapter compiles.
       then holds by construction rather than by a sentence.
       **Severity:** low to medium. Not reproduced with a timing test; it follows
       from the guard's lifetime.
+      **Fixed** in `cd5d7c82` (the room: `transport::receive` split into lookup,
+      `judge` and `admit`, with `Judged` only `judge` can make) and `3b72e546`
+      (the change): `Channels::receive` is gone; `Channels::stoa_of` copies the
+      Stoa out under the lock and the processor judges and appends with it
+      released. The reshape, as suggested, so it holds by construction.
+      `the_channel_book_is_not_held_while_an_op_is_appended` holds `ops.sqlite`'s
+      write lock from a second connection so the append waits, and asserts the
+      book is free meanwhile; it was red before `3b72e546`. design.md Decision 15.
 
-- [ ] **`dev-writer`** — `dialectica-core/src/delivery.rs:883-887` — `Delivering`
+- [x] **`dev-writer`** — `dialectica-core/src/delivery.rs:883-887` — `Delivering`
       encodes three states in two fields (`started: bool`, `outbox: Option<Outbox>`),
       and the fourth combination gets a wrong log line.
       **Scenario:** `start` sets `started = true`, then the worker thread fails to
@@ -61,6 +74,12 @@ succeeds, so the `cfg(logos_scaffold)` adapter compiles.
       **Severity:** low. Shape and one misleading line; the path is reachable
       only when the OS refuses a thread. CLAUDE.md, "Put the complexity in the
       data structure, not the logic".
+      **Fixed** in `89b3b552`: `Wiring { NotStarted, NoWorker, Running(Outbox) }`
+      replaces the flag and the option, and `NoWorker` logs "the delivery worker
+      could not be started". `a_worker_that_could_not_start_is_named_as_such_and_startup_does_not_run_again`
+      pins the line and that the state counts as started; it builds `Wiring`
+      directly, so it was never run against the old shape and has not been seen
+      red.
 
 - [ ] **`tester`** — `dialectica/rust-lib/src/lib.rs:609-625` (`DeliveryModule::channel_create`)
       — the outbound forwarding of three adjacent `&str` arguments is unpinned,

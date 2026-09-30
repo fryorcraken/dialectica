@@ -11,7 +11,7 @@ Measurements are from probe tests appended to `delivery/tests.rs` in the
 reviewer's worktree only (not committed); each scenario below says what the
 probe did so it can be re-run.
 
-- [ ] **`dev-writer`** — `delivery.rs:845` — `Processor::decide` opens `ops.sqlite`
+- [x] **`dev-writer`** — `delivery.rs:845` — `Processor::decide` opens `ops.sqlite`
       **before** the boundary looks up the channel, so the cheapest refusal pays
       the most expensive step.
       **Scenario:** a message on a channel this peer has not opened — another
@@ -34,6 +34,15 @@ probe did so it can be re-run.
       **Severity:** medium — amplifies the DoS in the next entry; not a crash.
       **Direction:** decide channel and size before opening storage (open the
       log lazily, or split `receive` so the pre-storage checks run first).
+      **Fixed** in `cd5d7c82` + `3b72e546`, the split: `decide` looks the channel
+      up, runs every pre-storage check (`transport::judge`: size, decode, verify,
+      Stoa, window), and opens the op log only to `admit` an op that passed. Your
+      probe 1, ported with an assertion as
+      `an_unknown_channel_is_refused_as_one_before_the_op_log_is_opened`, was red
+      first (one `storage` line). And since `686553da` a message on a channel
+      neither open nor opening does not reach the processor at all: it is refused
+      on hand-over (the spec change your next entry led to). design.md Decisions
+      10 and 15.
 
 - [x] **`spec-writer`** — `op-transport` "Inbound payloads waiting for the
       boundary are bounded" / `delivery.rs:729` — every message delivery emits
@@ -75,7 +84,7 @@ probe did so it can be re-run.
       against isolation, and one amends the spec's position on Open Question 3, so it
       is `proposal.md` Open Question 6 for the owner, with the options.
 
-- [ ] **`dev-writer`** — `delivery.rs:670` (doc) / `delivery.rs:729` — the memory
+- [x] **`dev-writer`** — `delivery.rs:670` (doc) / `delivery.rs:729` — the memory
       bound "256 × 150 KiB ≈ 37.5 MiB" is claimed but not enforced by this code.
       **Scenario:** `InboundQueue::offer` checks only the count; the 150 KiB limit
       is applied by `transport::receive` after the message has waited. What
@@ -92,8 +101,18 @@ probe did so it can be re-run.
       `unknown-channel` before `too-long`, so say which it is logged as), or
       restate the doc and design Decision 10 so the bound is visibly delivery's
       rather than this queue's.
+      **Fixed** (the second direction) in `89b3b552` and the docs commit:
+      `INBOUND_BOUND`'s doc and design Decision 10 now say the queue bounds a
+      count, that the worst case is 256 × delivery's maximum message size, and
+      that it is larger on a node another module created; design.md Risks carries
+      it. **Deferred** (the first direction) to the `spec-writer`: refusing an
+      oversized payload on hand-over is behaviour `op-transport` does not state
+      (it names only unknown channels as refused there, and "decided in the order
+      they arrived" would need saying for it), so it is not built. It now lives in
+      design.md's Open Questions ("For the spec-writer: oversized payloads on
+      hand-over") and in this round's hand-back.
 
-- [ ] **`dev-writer`** — `delivery.rs:1030` — the listener runs its **whole loop**
+- [x] **`dev-writer`** — `delivery.rs:1030` — the listener runs its **whole loop**
       under one `catch_unwind`, so a single panic while reading one event ends
       reception for the rest of the process; `tasks.md` 6.2 and design.md's trap
       table both say the listener runs **each item** under `catch_unwind`, which
@@ -110,6 +129,14 @@ probe did so it can be re-run.
       **Severity:** low. **Direction:** catch per `next()` and keep listening, or
       correct the two claims so the listener's all-or-nothing containment is
       recorded as a decision.
+      **Fixed** in `1cb7a857` (the first direction): each `next()` and its
+      hand-over run under their own `catch_unwind`, the panic is logged, and the
+      loop carries on; `tasks.md` 6.2 and the trap table are now true.
+      `a_panic_reading_one_event_does_not_end_reception` feeds the running
+      listener an event whose read panics, then a valid op; red first (the
+      listener ended and the op was never stored). design.md Decision 16 records
+      the cost: an iterator that panicked on every call without consuming an event
+      would spin.
 
 ## Clean areas
 

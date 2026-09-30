@@ -5,7 +5,7 @@ Dimension covered: readability only (code, comments, spec deltas' prose,
 `design.md`, `proposal.md`). Every entry below is a low-severity defect in what a
 reader is told; none changes behaviour except entry 4's log wording.
 
-- [ ] **`dev-writer`** — `delivery.rs:330` — `panic_detail` is a byte-for-byte copy of
+- [x] **`dev-writer`** — `delivery.rs:330` — `panic_detail` is a byte-for-byte copy of
       `wire.rs:2631`, and `wire.rs`'s doc on its copy is now false.
       **Scenario:** `wire.rs:2626-2629` says the function is "Shared by the two sinks
       that contain a panic ... so the two cannot come to render the same payload
@@ -18,16 +18,21 @@ reader is told; none changes behaviour except entry 4's log wording.
       used by all three; then the doc is true. Defect, not taste: the sentence that
       claims the duplication is prevented sits beside the duplication.
       **Severity:** low.
+      **Fixed** in `cd5d7c82`: one `pub(crate)` `wire::panic_detail`, called by
+      `guarded`, both sinks and the delivery threads; its doc now names all of
+      them. No behaviour change, so nothing goes red without it.
 
-- [ ] **`dev-writer`** — `delivery.rs:13` — heading says "Three threads" and lists four.
+- [x] **`dev-writer`** — `delivery.rs:13` — heading says "Three threads" and lists four.
       **Scenario:** the bullets are dispatch, worker, listener, processor. The third
       bullet names two threads (`spawn_listener` and the processor's `spawn` are
       separate `Builder::spawn` calls at `:952` and `:955`), so a reader counting from
       the heading looks for a third thread and finds a fourth.
       **Fix shape:** "Four threads", or split the third bullet.
       **Severity:** low.
+      **Fixed** in `89b3b552`: "Four threads", and the listener and processor are
+      two bullets.
 
-- [ ] **`dev-writer`** — `delivery.rs:315` — "a seventh refusal forces a name here":
+- [x] **`dev-writer`** — `delivery.rs:315` — "a seventh refusal forces a name here":
       there are already seven arms.
       **Scenario:** `refusal_kind` matches `UnknownChannel`, `TooLong`, `Undecodable`,
       `FailsVerification`, `StoaMismatch`, `AheadOfTime` and `Storage` (7), and
@@ -38,6 +43,9 @@ reader is told; none changes behaviour except entry 4's log wording.
       **Fix shape:** "so a new refusal forces a name here". No number, so it cannot go
       stale (CLAUDE.md, "Do not write down anything a command can answer").
       **Severity:** low.
+      **Fixed** in `89b3b552`, as shaped. `transport.rs:316`'s "six refusals" is
+      in a doc this piece did not write and counts the spec's list, not the enum;
+      left alone.
 
 - [ ] **`tester`** — `delivery/tests.rs:1681` — "One case per refusal the boundary makes"
       is six cases of seven.
@@ -50,7 +58,7 @@ reader is told; none changes behaviour except entry 4's log wording.
       `Storage` is `an_op_log_that_will_not_open_is_a_storage_refusal`'s". Nit.
       **Severity:** nit.
 
-- [ ] **`dev-writer`** — `delivery.rs:866` — the log says "stored inbound op" for an op
+- [x] **`dev-writer`** — `delivery.rs:866` — the log says "stored inbound op" for an op
       the log already held, and the test named for the opposite pins it.
       **Scenario:** `transport::Admitted` carries `appended: Appended`, "Whether the log
       already held it" (`transport.rs:426`). `decide` matches `Ok(admitted)` and logs
@@ -67,8 +75,12 @@ reader is told; none changes behaviour except entry 4's log wording.
       the intended wording, rename the test so it does not claim a report that is
       never made.
       **Severity:** low.
+      **Fixed** in `89b3b552`: `Note::AlreadyStored` reads "inbound op <id> already
+      held; nothing new was stored" when `appended` is `AlreadyPresent`. The test
+      keeps its name, which is now true, and asserts one "stored" line and one
+      "already held" line naming the op; red first (two "stored" lines).
 
-- [ ] **`dev-writer`** — `delivery.rs:668`, `design.md:207` — "decides a typical op in
+- [x] **`dev-writer`** — `delivery.rs:668`, `design.md:207` — "decides a typical op in
       about a millisecond" has no source.
       **Scenario:** it is the premise of the 256 bound ("so 256 waiting is a burst
       hundreds of messages deep arriving faster than SQLite appends"). No
@@ -80,8 +92,12 @@ reader is told; none changes behaviour except entry 4's log wording.
       **Fix shape:** measure it (one `Instant` around `decide` in a scratch test), or
       say "not measured" in both places, as Decision 7 does for the SDS reading.
       **Severity:** low.
+      **Fixed** (the second shape) in `89b3b552` and the docs commit: both places
+      now say the processor's speed per op has not been measured, and that 256 is a
+      judgement. The per-message database open you describe is also gone for
+      refused payloads (`3b72e546`).
 
-- [ ] **`dev-writer`** — `delivery.rs:351` — `Stores` says "The three files the delivery
+- [x] **`dev-writer`** — `delivery.rs:351` — `Stores` says "The three files the delivery
       threads open"; one of the three is opened by no delivery thread.
       **Scenario:** `stores.memberships()` is called from `Delivering::start`
       (`:981`), on the dispatch thread from `on_context_ready`. `design.md` Decision
@@ -92,8 +108,10 @@ reader is told; none changes behaviour except entry 4's log wording.
       processor), the sender identifiers (worker), memberships (dispatch, at start
       only)".
       **Severity:** low.
+      **Fixed** in `89b3b552`, as shaped, pointing at Decision 13 for why each is
+      safe.
 
-- [ ] **`dev-writer`** — `delivery.rs:974-978` — `start` returns `true` when the worker
+- [x] **`dev-writer`** — `delivery.rs:974-978` — `start` returns `true` when the worker
       thread could not be spawned, with no comment and no doc for `true`.
       **Scenario:** the doc says only "A second call does nothing and returns
       `false`". On the `spawn` failure path the call has done half its job (listener
@@ -106,8 +124,11 @@ reader is told; none changes behaviour except entry 4's log wording.
       whether or not every step succeeded") and a line at the early return saying
       why it is not `false`.
       **Severity:** low.
+      **Fixed** in `89b3b552`: both sentences, and the state is now
+      `Wiring::NoWorker`, whose requests log "the delivery worker could not be
+      started" (the architecture review's third entry).
 
-- [ ] **`dev-writer`** — `sender.rs:187` — `create_schema` uses a plain `BEGIN` with an
+- [x] **`dev-writer`** — `sender.rs:187` — `create_schema` uses a plain `BEGIN` with an
       unlocked read of `user_version`, the exact shape `log/sqlite.rs` was just fixed
       for, and nothing beside it says why it is left.
       **Scenario:** this piece's own `two_connections_opening_a_fresh_store_at_once_both_open_it`
@@ -120,6 +141,7 @@ reader is told; none changes behaviour except entry 4's log wording.
       opener by design, and the op log's `create_schema` is the model if a second
       thread ever opens it.
       **Severity:** low.
+      **Fixed** in `89b3b552`, on `create_schema`, as shaped.
 
 ## What I checked and found clean
 

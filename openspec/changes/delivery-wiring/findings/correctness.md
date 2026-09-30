@@ -9,7 +9,7 @@ logos-delivery's `createReliableChannel` (`logos_delivery/channels/api/channel_l
 at `4a85db1b`). `cargo mutants` was run on `delivery.rs` (60 mutants: 38 caught,
 14 unviable, 2 timeouts, 6 missed).
 
-- [ ] **`dev-writer`** (and `spec-writer` for the promise in `stoa-membership`) —
+- [x] **`dev-writer`** (and `spec-writer` for the promise in `stoa-membership`) —
       `delivery.rs:601-607` (`Worker::open`) with `declined` at `delivery.rs:129` —
       a channel delivery already holds can never become open again, so the recovery
       the log line and the spec promise cannot happen.
@@ -63,8 +63,22 @@ at `4a85db1b`). `cargo mutants` was run on `delivery.rs` (60 mutants: 38 caught,
       Decision. Confirmed against source: `createReliableChannel` answers
       `err("channel already exists: " & channelId)` exactly when the manager holds
       the id (`logos-delivery` `4a85db1b`, `channel_lifecycle.nim`).
+      **Fixed** (code, `dev-writer`) in `5fb435f9`: `channel_answer` reads a
+      decline whose reason contains `"channel already exists"` as `AlreadyHeld`,
+      and the worker opens the channel on it exactly as on `Created`. Matching the
+      words, not `channelExists`: design.md Decision 14 has why, and what a
+      rewording would cost. The wording is also at `bfdb5afd`, the
+      `logos-delivery` rev delivery v0.2.1's `flake.lock` pins (the rev above is a
+      later checkout). Red before the change: this probe, ported as
+      `a_creation_delivery_did_not_complete_in_time_opens_on_the_next_request`,
+      and the new scenarios' tests
+      `a_channel_delivery_reports_already_existing_is_open` and
+      `a_module_restarted_while_delivery_kept_running_has_its_channels_open`, plus
+      `only_delivery_s_already_exists_answer_opens_a_declined_channel`. The two
+      tests whose scenarios now exclude the answer already declined with "no
+      reliable channel manager", so they needed no change.
 
-- [ ] **`dev-writer`** — `delivery.rs:134` (`declined`, via `wire::callee_error`) —
+- [x] **`dev-writer`** — `delivery.rs:134` (`declined`, via `wire::callee_error`) —
       a success envelope that carries an empty `error` string is read as a decline.
       **Scenario:** `declined(&Ok(json!({"success":true,"value":"r-1","error":""})))`
       returns `Some("")`, so the channel is logged `channel NOT open …: ;` and never
@@ -83,6 +97,14 @@ at `4a85db1b`). `cargo mutants` was run on `delivery.rs` (60 mutants: 38 caught,
       ever opens and no op is ever sent, with every gate green. An explicit
       `success: true` should outrank an empty `error`, or an empty `error` should
       not count as a reason.
+      **Fixed** in `52726819`: an empty `error` counts as no reason (the second
+      option, so it also covers an envelope with no `success` field);
+      `success: false` beside it still declines. The probe, ported as
+      `an_empty_error_string_is_not_a_reason_to_decline`, was red first
+      (`left: Some("")`). design.md Decision 6. `wire::callee_error` itself is
+      unchanged, because `channelExists` (an existing wire method outside this
+      piece) also reads it; that method has the same exposure, reported to the
+      runner rather than changed here.
 
 - [ ] **`tester`** — `delivery.rs:945` (`Delivering::start`) — the running wiring's
       queue bound is unpinned. This is the tester's own limit 2, now measured.
@@ -105,7 +127,7 @@ at `4a85db1b`). `cargo mutants` was run on `delivery.rs` (60 mutants: 38 caught,
       `replace += with -=` at `delivery.rs:388:18`. No test holds more than a few
       memberships (`git grep MEMBERSHIP_PAGE` finds no use in `delivery/tests.rs`).
 
-- [ ] **`dev-writer`** — `delivery.rs:471-476` (`Channels::await_settled`) — once
+- [x] **`dev-writer`** — `delivery.rs:471-476` (`Channels::await_settled`) — once
       the book mutex is poisoned, the wait ends at the first wake-up of any kind
       rather than when this channel settles.
       **Scenario:** a panic raised while `Channels::receive` or `handoff` holds the
@@ -120,6 +142,12 @@ at `4a85db1b`). `cargo mutants` was run on `delivery.rs` (60 mutants: 38 caught,
       **Severity:** low. It needs an earlier contained panic under the lock. The fix
       is to loop on the condition and recover the guard from the `Err`, rather than
       discarding the result.
+      **Fixed** in `88636ff4`, as described: its own loop over `wait_timeout`,
+      taking the guard back from a poisoned wake-up, ending only on this channel's
+      condition or the limit. `a_poisoned_channel_book_still_waits_for_this_channels_open`
+      poisons the book, parks a message on a pending open, settles a different
+      open, and asserts nothing was judged; red first ("judged before its own
+      open settled"). design.md Decision 11.
 
 ## Clean, in prose
 

@@ -143,8 +143,10 @@ requirements use `MUST`.
 - **An automated two-peer end-to-end test**: one peer publishes a post, and the
   other receives it and shows it. The owner asked for this on #176 (comment of
   2026-09-29). It is the first point at which a second peer can prove anything,
-  and it automates #102's items 5–7. This PR is verified by hand with two
-  `lgs basecamp launch` profiles. **Follow-up, for the project manager to file.**
+  and it automates #102's items 5–7. The by-hand check with two
+  `lgs basecamp launch` profiles (`tasks.md` 7.3) has **not yet been run**;
+  `design.md`'s Open Questions puts that departure from #176 to the owner.
+  **Follow-up, for the project manager to file.**
 - **Delivery outcomes.** `op-transport`'s three owed things are the bound, the
   in-flight record, and the never-propagated record. This change does not
   subscribe to `channelMessageSent` or `channelMessageError`. Because nothing
