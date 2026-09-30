@@ -771,3 +771,120 @@ changes behaviour.
   wait's cost, and the rewrite added a section rather than merging.
 - Mutation testing was by hand on the claims above, not `cargo mutants`. No mutation
   is left in the tree: each was reverted with `git checkout -- <file>`.
+
+## Re-review round 4 `7462ded8..58460b02`
+
+Dimension: readability only. Reviewed at `adba1a22` (the range's code and prose are
+unchanged by the findings commits after `58460b02`): the range's diff of `delivery.rs`
+(`OpenTime`, `Wait`, `Pending::asked`, `Channels::asked`, `Opening::asked`,
+`Processor::new`, the reworded `SETTLE_LIMIT` and `await_settled` docs),
+`delivery/tests.rs` (the six new tests and the two reworded comments), `design.md`
+(Decisions 4, 11 and Risks), `proposal.md`, `tasks.md` and the `op-transport` delta.
+Round 3's three entries are all confirmed answered as their outcomes say. Two new
+defects, both low, both stale references in prose; neither changes behaviour.
+
+- [ ] **`dev-writer`** — `design.md:473`, `design.md:733` — two citations of a commit
+      that will not exist on `main`.
+      **Scenario:** Decision 11 says the ask's requirement is "from the spec-writer's
+      `d240ebdc`" and that the narrower promise was "rejected ... in `d240ebdc`".
+      `d240ebdc` is a commit on `piece/176-delivery-wiring`; `main` is squash-merged
+      (`git log origin/main` subjects all end in `(#NNN)`), so after the merge the
+      SHA names nothing, and `design.md` is archived with the change. A reader of the
+      archived design who wants to see what the spec-writer rejected cannot open it.
+      Round 1's fifth entry removed this class (`findings/security.md`, "PR #190's
+      first-pass mutation list"); this is the same shape with a SHA in place of a
+      file. The sentences stand without it: the requirement is named by its heading
+      ("Asking delivery to create a channel starts the open's time again"), and the
+      rejection is stated with its reason in the same sentence.
+      **Fix shape:** drop both SHAs, or say "the spec-writer's callback after
+      round 3". (`tasks.md:95` heads section 12 with the same SHA, as section 11's
+      heading does with `de35f026`; those are a task log, not an argument, and I do
+      not box them.)
+      **Severity:** low.
+
+- [ ] **`dev-writer`** — `tasks.md:92` — task 11.1 describes `ChannelBook::wait_ends`
+      as a function that "asks `is_opening`"; `wait_ends` no longer does.
+      **Scenario:** 11.1 reads "`ChannelBook::wait_ends` asks `is_opening` rather than
+      spelling 'pending and not open' a second time, so whether a message waits and
+      whether it keeps waiting are one predicate". In `a59e9c6d` the function that
+      makes that call became `ChannelBook::begin_wait` (`delivery.rs:643-660`), and
+      `wait_ends` (`:663`) is now `fn wait_ends(&self, channel_id, wait: WaitId)`, a
+      read of one message's end that never calls `is_opening`. A reader following 11.1
+      to `wait_ends` finds a two-line lookup and no predicate; the claim is true of
+      the function under its new name. No other document names the old symbol
+      (`git grep -n wait_ends` outside `delivery.rs`, `tests.rs` and this line finds
+      nothing), so this is the one site a rename sweep missed.
+      **Fix shape:** "`ChannelBook::begin_wait` (then `wait_ends`) asks `is_opening`".
+      **Severity:** low.
+
+### What I checked, and found clean
+
+- **Round 3's three entries are answered as recorded.** `tests.rs` now reads "plus the
+  work of deciding three messages" and quotes the requirement as "judged only once that
+  open is settled" and "unless the wait below expires first" (both verbatim in
+  `spec.md`); Decision 4's "(re-run on the final tree)" is gone, and the new mutation
+  claims in Decision 11 carry no such label.
+- **Arithmetic, by hand.** 40 + 35 = 75 s ("in practice under 40 + 35 = 75 s");
+  2 x 40 = 80 s ("under 80 s"); K = 20: 21 x 35 = 735 s; open m is asked when open
+  m-1 settles, at m x 35 s, and settles at (m+1) x 35 s, so the ask's end (m x 35 + 40)
+  is past the settle by 5 s for every m and the stall is (K+1) x 35 s for every K;
+  K = 1: min(40, 70) = 40 s before the ask and 2 x 35 = 70 s after ("70 s where it was
+  40 s"); min(40m, (m+1) x 35) meets at m = 7 (280 s each), so "fewer than 7 Stoas" is
+  the range where the ask lengthens it. The 5 s margin is `SETTLE_LIMIT` 40 s less
+  `CALL_TIMEOUT` 35 s (`delivery.rs:98,710`).
+- **"Turns red" claims, run** (each restored with `git checkout -- <file>`; 102
+  `delivery::tests::` tests, all green unmutated):
+  - the wait's `left` fixed at an hour: nine red, exactly the nine Decision 11 lists
+    ("removing the bound altogether"), each timing out in `eventually`;
+  - `Option::take` replaced by a copy in `Wait::extend_from` (uncapped): only
+    `a_second_ask_while_a_message_waits_does_not_extend_its_wait_again` red, "refused
+    1.700s after the first ask" against the text's 1.71 s (the same measurement, to
+    timing noise);
+  - `Wait::extend_from` a no-op: three red, the three Decision 11 names
+    (`a_message_waiting_when_delivery_is_asked_is_judged_after_delivery_answers`,
+    `a_second_ask_...`, `the_worker_marks_its_ask_of_delivery_in_the_channel_book`);
+  - `Pending::asked` not setting `OpenTime::StartedAt`: only
+    `asking_delivery_for_a_channel_whose_wait_has_expired_lets_a_message_wait_again`
+    red, as stated;
+  - both of those at once: `an_earlier_message_on_a_queued_open_...` red, and green
+    with either alone (the two earlier runs), which is the "red only with both halves
+    gone" claim exactly;
+  - `opening.asked()` removed from `Worker::open`: only
+    `the_worker_marks_its_ask_of_delivery_in_the_channel_book` red, as the worker's
+    comment and Decision 11 say;
+  - `OpenTime::end` giving a later message `now + limit`: `many_messages_on_one_...`
+    red ("the op behind the stuck open waited 4.017s: more than one wait of 1s", the
+    text's 4.02 s) and `an_opens_time_is_the_same_for_every_message_...` red.
+- **Code prose matches the code.** `OpenTime`'s three-state doc, `Wait::extend_from`'s
+  "once" (`Option::take`), `Pending::asked`, `Channels::asked`, `Opening::asked`'s "called
+  by the worker ... and by nothing else outside tests" (one call site, `delivery.rs:1004`),
+  `await_settled`'s "a wait gone from the book ends the wait", and `SETTLE_LIMIT`'s
+  bounds all say what the code does. The spec's quoted phrases in the comments
+  ("MUST NOT move that message's end again", "Only a later create, join or startup
+  asking for that channel, or this peer asking delivery to create it, lets a message
+  wait on it again") are verbatim.
+- **Spec, proposal and design agree** on "at most once for each start of an open's
+  time", "less than twice the fixed time", and the two losses that remain (a wait that
+  ran out before the ask; a message an earlier ask already extended). The new
+  scenarios' WHEN clauses match the tests' timing comments (0.6 of a limit, answer at
+  1.2). The four scenarios amended with "this peer does not ask ..." match the code's
+  only way to start a time.
+- **Gates.** `openspec validate delivery-wiring --strict` passes; `cargo fmt
+  --manifest-path dialectica/rust-lib/Cargo.toml --check` is clean.
+
+### Not boxes (taste; say so and move on)
+
+- `tests.rs` (`a_request_made_while_a_message_waits_does_not_extend_that_messages_wait`)
+  has one comment line about 100 columns among 80-column neighbours, an edit residue
+  from extending the paragraph in place (round 1 noted the same in `delivery.rs`).
+- `ChannelBook::end_wait` is the one method of the new set with no doc line; its name
+  and its caller say it, so I did not box it.
+- Comments carrying review labels ("spec-test re-review round 3", "the security
+  re-review's round-3 probe") in `delivery.rs` and `tests.rs` will read oddly once
+  `findings/` is deleted; each states its reason beside the label, so nothing is lost
+  (round 1 made the same call).
+- Decision 11 grew again (it now runs from `design.md:357` into the 700s), with the
+  cost figures worked in several places; round 3 said the same of a shorter one. Every
+  figure I checked is accurate.
+- Mutation testing was by hand on the claims above, not `cargo mutants`. No mutation
+  is left in the tree: each was reverted with `git checkout -- <file>`.
