@@ -697,3 +697,102 @@ this range touches.
       already satisfies as written. `proposal.md`'s "Receiving" bullet says the
       same. No code change: 30 s < 35 s < 40 s holds today, and a queue-sized
       limit, if the `dev-writer` reconsiders 40 s, would satisfy it too.
+
+## Re-review round 3 `2cb71aaf..7462ded8`
+
+Reviewed at `ea37a706` (tree at `7462ded8` for spec and tests; `ea37a706` adds only
+findings). Read: the range's diff of `specs/op-transport/spec.md` and
+`proposal.md`; the range's diff of `delivery/tests.rs`; the tests the new
+scenarios name, and `adapter_code()` and the two text pins that read `lib.rs`;
+my round-2 boxes above. The implementation was read only at the lines each
+mutation touched. Baseline: `cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p dialectica -p dialectica-core`
+exited 0 (1298 + 30 + 3 passed, 0 failed) on the restored tree.
+`dialectica/logos-rust-sdk-src` was missing and staged with the
+`nix build --inputs-from` command.
+
+**Round-2 outcomes confirmed.** The "Opens left unanswered at the same time"
+box: `each_unanswered_opens_wait_is_its_own_and_not_one_shared_across_opens`
+exists, holds two unanswered opens with a message on each and a valid op behind
+both, and asserts both refusals, neither stored, the gap between the two
+observed refusals, and the op stored inside three limits, which is the new
+scenario's three THENs. The gap is measured against the first refusal's
+observation, so the right code can only fail it if the test thread stalls; the
+round-2 mutation (one time shared across opens) gave 1.7 microseconds against a
+bound of half a limit, so it is red. The "relation" box: the requirement and the
+scenario exist and `the_call_timeout_outlasts_...` names the scenario and holds
+both of its THENs against a hardcoded 30 s.
+
+**Also confirmed, by reading.** `a_message_arriving_while_its_open_is_declined_is_refused_after_the_answer`
+now pins the "judged at once, not at the end of the wait" half of the
+requirement as well as the "after the answer" half: `decide` on a thread, limit
+120 s, refusal required inside `eventually`'s ten seconds, so a loop that keeps
+waiting after the decline fails at ten seconds instead of passing. `proposal.md`'s
+open question 5 now says the code uses `logos.test` and `Edge`, which
+`the_node_preset_and_mode_are_pinned` holds against literals. The spec rewrite
+("at most that fixed time", "at most once each", "never past the moment the last
+of them settles", and the consequence paragraph marked as adding no
+requirement) reads consistently with the requirements above it; I found no
+contradiction.
+
+**Mutations run (two; both restored, `git status --short` empty afterwards).**
+Command for both: `cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p dialectica -p dialectica-core delivery`,
+read from its own output (106 passed, 0 failed, in each run).
+
+1. `dialectica/rust-lib/src/lib.rs:621`, the adapter's `channel_create_with_timeout`
+   argument `core::delivery::CALL_TIMEOUT` replaced by
+   `std::time::Duration::from_secs(5)`. **Survived.** The line is behind
+   `cfg(logos_scaffold)`, so `cargo test` does not compile it, and no text pin
+   names the timeout argument.
+2. `dialectica/rust-lib/dialectica-core/src/delivery.rs:1354`, the production
+   processor's `settle_limit: SETTLE_LIMIT` replaced by
+   `settle_limit: Duration::from_secs(20)` (under `CALL_TIMEOUT`'s 35 s, so a
+   message racing its own join's creation is judged before that creation's wait
+   has ended). **Survived.**
+
+- [ ] **`tester`** — the new order scenario is tested on two constants, and
+      neither is shown to be the value the running wiring uses. **Where:**
+      `op-transport`, scenario "A message's wait outlasts this peer's wait on a
+      creation, which outlasts delivery's own", and the requirement "That fixed
+      time MUST be longer than the longest this peer waits for delivery to answer
+      one channel creation". `the_call_timeout_outlasts_deliverys_own_and_the_settle_limit_outlasts_the_call`
+      compares `CALL_TIMEOUT` and `SETTLE_LIMIT` as constants, and the compile-time
+      asserts beside them do the same. The requirement is about what the peer does:
+      the timeout the adapter gives `channelCreate`, and the limit the running
+      processor waits by. Nothing ties either constant to its use.
+      **Measured:** mutation 1 above (the create call given 5 s in place of
+      `CALL_TIMEOUT`): 106 of 106 passed. Mutation 2 (the running processor
+      given 20 s, below `CALL_TIMEOUT`): 106 of 106 passed. The second is the
+      requirement's MUST broken outright; the first breaks the middle term of the
+      order and reopens the "recorded as not answered at 25 s" defect the test's
+      own comment describes. Both lines are also the two constants' only uses
+      (mutation 2's is the only place the running wiring reads `SETTLE_LIMIT`;
+      `Peer::processor` and the fixture at `tests.rs:2851` write
+      `settle_limit: SETTLE_LIMIT` themselves, so no test builds the processor
+      the way `Delivering::start` does).
+      **Fix shape:** (a) for the processor, build it in one place, a constructor
+      or function that `Delivering::start` and `Peer::processor` both call, so the
+      tests' processor is the production one and a test that reads its limit holds
+      `limit > CALL_TIMEOUT`; or a text pin that `settle_limit: SETTLE_LIMIT`
+      appears once in `delivery.rs`. (b) for the adapter, extend the text pin
+      `the_adapter_forwards_each_delivery_argument_in_the_order_the_seam_names_them`
+      past `sender_id,` to the timeout argument (it stops before it today), and
+      count `core::delivery::CALL_TIMEOUT` at the four sites (`create_node`,
+      `start`, `channel_create`, `channel_send`), with the comment saying it is a
+      text pin because `cfg(logos_scaffold)` hides the file from `cargo test`.
+      **Severity:** medium for (a), which is the spec's new MUST and a one-token
+      change; low-medium for (b), which the compile-time order does not cover and
+      only `nix build ./dialectica#lgx` compiles.
+
+**Observation, no box.** The scenario "Each unanswered open's wait is its own"
+says the second refusal comes "no sooner than the fixed time after the first";
+the test asserts half a limit, and says why (slack against a stalled test
+thread). A wait of 0.6 of a limit would pass it. The realistic defects (one time
+shared across opens, or kept once for the processor) produce a gap of
+microseconds and are caught, as measured in round 2, and the per-open full limit
+is held by the other single-open tests, so this is a recorded weakening and not
+a gap worth a box. **Scenario coverage for the range is otherwise complete:**
+both new scenarios map to a test, and neither new test can pass on the defect
+it names except as stated above. No `NO SPEC:` marker appears in the range's
+tests. Nothing in the range is out of scope of #176 (reliable channel
+throughout); issue #176 re-read, state OPEN, one comment (the owner's 2026-09-29
+request for a two-peer test after this lands), unchanged since round 1.
