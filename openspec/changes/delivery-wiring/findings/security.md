@@ -281,7 +281,7 @@ states the payload-bytes bound and does not overclaim it. The listener runs each
       answers", and "A new request for a channel whose wait has expired lets a
       message wait again".
 
-- [ ] **`dev-writer`** — design.md Decision 11 (`design.md:400-406`, `:433`),
+- [x] **`dev-writer`** — design.md Decision 11 (`design.md:400-406`, `:433`),
       Risks (`design.md:621-625`) and `SETTLE_LIMIT`'s doc (`delivery.rs:520-530`)
       — these say the 40 s limit "keeps the stall one call long" and that a
       message is refused "after holding every Stoa up for 40 s". Under an
@@ -297,6 +297,22 @@ states the payload-bytes bound and does not overclaim it. The listener runs each
       trusts "one call long" and closes the question, and the probe above shows
       it does not hold. **Severity:** low (documentation of a security bound).
       Correct the text whichever way the spec entry above is settled.
+      **Fixed** (`dev-writer`) in the commit `Bound the wait on a pending open
+      once per open, not once per message`, with the code: the spec entry above
+      was settled per open and the wait is now built that way, so the text
+      describes a bound that holds. Decision 11 no longer says "one call long":
+      it says what 40 s outlasts (one delivery call), what it bounds (one stall
+      per unanswered open, whatever a sender sends — so K × 40 s for K opens
+      stuck at once, bounded by this peer's memberships), what per open gives up,
+      and your measurement of the per-message shape with the figures. The
+      rejection of a longer limit is re-argued: your point that with a limit
+      outlasting the pending time only the first message waits is recorded as
+      what undid the old argument, and the new one is about one stuck open under
+      per-open (a limit sized for the queue grows the startup total as K² where
+      40 s grows as K). Risks and `SETTLE_LIMIT`'s doc are corrected the same
+      way. `many_messages_on_one_unanswered_open_hold_other_channels_up_for_one_wait_not_one_each`
+      is your probe as a test (four messages, 400 ms): red before the change at
+      1.61 s, green after.
 
 ## Round 1 clean areas
 

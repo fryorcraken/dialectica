@@ -188,7 +188,7 @@ disagreement between documents is the first box below.
       message waits (which amends the inbound requirement). The list's preamble
       now says the sixth and seventh came from the security review and that the
       spec says nothing about the seventh. Not decided; it is the owner's.
-- [ ] **`dev-writer`** (gap, cost recorded but not sized, and a rejected alternative
+- [x] **`dev-writer`** (gap, cost recorded but not sized, and a rejected alternative
       whose reasoning applies to the chosen one) — Decision 11 and Risks say the
       wait costs "up to `SETTLE_LIMIT` per message". The aggregate is what an owner
       needs and is not stated. `await_settled` restarts its clock for each message
@@ -209,7 +209,21 @@ disagreement between documents is the first box below.
       one limit per open instead of one per message. Record it as an alternative and
       what ruled it out, or put it to the owner with Question 6, since the attacker
       who can flood a channel this peer is opening is the same one.
-- [ ] **`dev-writer`** (gap, mutation evidence and an unpinned relation) — Decision
+      **Fixed** (`dev-writer`) in the commit `Bound the wait on a pending open
+      once per open, not once per message`, settled in favour of the per-open
+      bound you describe, which the spec now requires (`b6d35fac`). Each pending
+      open carries `wait_ends`, set when a message first waits on it and cleared
+      by a new request; every message on the channel waits to that instant.
+      Decision 11 now states the multiplied figure the per-message shape had
+      (n × 40 s; 256 × 40 s = 10,240 s ≈ 2 h 51 min, and the security probe's
+      2.01 s for ten messages at 200 ms), why it was replaced, what per open gives
+      up (later messages on the stuck channel refused at once), and what still
+      bounds the stall (one limit per unanswered open, so K × 40 s for K opens
+      stuck at startup, bounded by memberships, not by a sender). The rejection of
+      a limit sized for a queue of opens is re-argued under per-open, where the
+      old argument no longer applied, and two alternatives are added: the
+      per-message clock itself, and starting an open's time at the request.
+- [x] **`dev-writer`** (gap, mutation evidence and an unpinned relation) — Decision
       11's "Removing the wait turns … red" lines cover the wait, the poisoned book and
       the guard placement. Nothing says what turns red when the **bound** is removed:
       `tasks.md` 8.6 records that
@@ -225,6 +239,21 @@ disagreement between documents is the first box below.
       and record it, or write in Decision 11 that the value and the relation are not
       pinned; and record what removing the bound (an unbounded wait) does to the
       bounded-wait test, having run it.
+      **Fixed** (`dev-writer`) in the commit `Bound the wait on a pending open
+      once per open, not once per message`. The relation is pinned at compile
+      time beside `SETTLE_LIMIT`: `DELIVERY_CALLBACK_TIMEOUT` (30 s, named for the
+      purpose) `< CALL_TIMEOUT < SETTLE_LIMIT`, two `const _: () = assert!(…)`.
+      Run both ways: `SETTLE_LIMIT` at 10 s fails the build on the second
+      assertion, `CALL_TIMEOUT` at 20 s on the first; restored. Removing the
+      bound — the wait ending only on a settle, the deadline check disabled and
+      the timed wait made an hour — turns six delivery tests red, each timing out
+      in `eventually`, the bounded-wait test among them; with only the timed wait
+      lengthened, the two tests whose settle storms keep waking the loop stayed
+      green, which is why the recorded mutation disables the check as well.
+      Decision 11 and Decision 4 record both; `tasks.md` 10.4 too. This also
+      covers the correctness re-review's `tester` box on the same relation (its
+      "one assertion over the two constants and a hardcoded 30 s"); that box is
+      the tester's to tick.
 - [x] **`dev-writer`** (suggestion, a checkable claim that is false, and an
       unrecorded wait) — Decision 3 says "the processor, the listener and the worker
       share only the channel book's mutex". They also share `InboundQueue`'s mutex

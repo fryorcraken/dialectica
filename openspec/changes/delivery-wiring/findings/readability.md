@@ -241,7 +241,7 @@ and `CLAUDE.md`'s five new trap entries. The nine entries of round 0 are all
 confirmed fixed (see "What I checked"). Five new defects, all low, all in prose or
 comments; none changes behaviour.
 
-- [ ] **`dev-writer`** — `delivery.rs:929-930`, `design.md:603` — "(logos-protocol 0.9)"
+- [x] **`dev-writer`** — `delivery.rs:929-930`, `design.md:603` — "(logos-protocol 0.9)"
       names a version that does not discriminate the thing it is offered as the
       test for.
       **Scenario:** `listen`'s doc says `recv()` fails on a dead provider "on a
@@ -260,6 +260,15 @@ comments; none changes behaviour.
       `lp_client_set_subscription_status_cb`)", in both places. The number was
       also in round 0's code; I did not run it down then and should have.
       **Severity:** low (a comment, but it is a check a reader is told to make).
+      **Fixed** (`dev-writer`) in the commit `Bound the wait on a pending open
+      once per open, not once per message`. Re-read first: `git -C
+      ~/src/logos-co/logos-protocol grep -n SUBSCRIPTION_STATE 4638634 --
+      cpp/logos_protocol.h` finds the guard defined at `:282` and "Absent … on
+      the first cut of 0.9" at `:280`, and `dialectica/flake.lock:9179` pins
+      `463863446894…`. `listen`'s doc and the design.md trap row now name the
+      feature (`LOGOS_PROTOCOL_HAS_CLIENT_SUBSCRIPTION_STATE`, symbol
+      `lp_client_set_subscription_status_cb`) and say why "0.9" does not
+      discriminate.
 
 - [x] **`dev-writer`** — `design.md:537` — Decision 15 quotes Decision 3 in words
       Decision 3 no longer contains.
@@ -325,7 +334,7 @@ comments; none changes behaviour.
       carries only the op, so neither the event's timestamp nor its sender
       identifier can reach the append, by design".
 
-- [ ] **`dev-writer`** — `design.md:178,316,320,674` — four pointers to provenance
+- [x] **`dev-writer`** — `design.md:178,316,320,674` — four pointers to provenance
       that will not resolve once the change is archived.
       **Scenario:** `tasks.md:16` has the closer delete `findings/` before archive,
       and `design.md` is archived with the change. Line 674 ends "(`findings/security.md`)",
@@ -343,6 +352,17 @@ comments; none changes behaviour.
       rest of the tree already carries such pointers (`membership.rs:1114`,
       `stoa.rs:1079`), so this is a defect of degree, not a new one.
       **Severity:** low.
+      **Fixed** (`dev-writer`) in the commit `Bound the wait on a pending open
+      once per open, not once per message`, by re-running rather than
+      re-labelling. Each of the three mutations now stands in `design.md` as the
+      one-line change and what it turned red on this round: `declined` ignoring
+      `error` turns twelve delivery tests red (Decision 6; the first pass's
+      "three" had gone stale as tests were added), `>=` → `>` in
+      `InboundQueue::offer` four (Decision 10), and `now_ms` read from
+      `message.timestamp` in `Processor::pass` 27 (Decision 10; "seven" before).
+      Each is marked as a count that grows with the suite. `findings/security.md`
+      is gone from Open Questions, which now points at `proposal.md`'s seventh
+      question, and `tasks.md` 7.2 points at the decisions instead of the PR body.
 
 ### What I checked, and found clean
 
