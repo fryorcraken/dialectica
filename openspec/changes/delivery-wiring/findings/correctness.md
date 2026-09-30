@@ -487,3 +487,63 @@ Both round-1 outcomes hold, re-measured:
   any Stoa. Both callers are honest, and
   `the_boundary_looks_a_channel_up_under_the_messages_own_identifier` pins
   the key. This is a doc precision point, not a defect.
+
+## Re-review round 3 `2cb71aaf..7462ded8`
+
+Dimension: **correctness only**. Read `git diff 2cb71aaf 7462ded8` for
+`delivery.rs` (the `is_opening` refactor `cda4827d`, the doc and assert comments),
+`delivery/tests.rs` (the reworked decline test and the new
+`each_unanswered_opens_wait_is_its_own_and_not_one_shared_across_opens`), the
+`op-transport` spec delta, and the arithmetic in design.md Decision 11. Reviewed at
+`ea37a706`. `cargo test … -p dialectica -p dialectica-core` green (1298 + 30 + 3).
+
+Round-2 box, re-measured. The tester's disagreement is right about the tree it
+names and my round-2 number was right about mine, and the two differ only by this
+round's refactor. `&&` to `||` in `ChannelBook::is_opening`:
+- on the current tree, `a_message_arriving_while_its_open_is_declined_is_refused_after_the_answer`
+  and `a_message_on_an_open_channel_does_not_wait_on_a_repeated_open` are both red
+  (93 of 95 `delivery::` tests pass; the suite takes 10.2 s, the two ten-second
+  timeouts);
+- with `wait_ends`'s guard put back to `self.open.is_open(..)` (the round-2 shape)
+  and the same `||`, only the decline test is red and the repeated-open test passes.
+  So at round 2 that half was genuinely unreachable from the loop condition alone,
+  and the refactor, by making the guard and the loop one predicate, made it
+  reachable. The decline half I asked for is pinned either way.
+
+- [x] **re-review round 3 `2cb71aaf..7462ded8`: no findings** — read the `is_opening` refactor, the reworked decline test, the new per-open-wait test, the `op-transport` delta and Decision 11's arithmetic; clean
+
+### Clean in this round
+
+- **`cda4827d` changes no behaviour.** Old guard: return `None` if open, else
+  `pending.get_mut(..).map(..)`, which is `None` when not pending. New guard: return
+  `None` when `!(!open && pending)`, that is open or not pending, else `get_mut`,
+  which is then always `Some`. Same result for all four (open, pending) states; the
+  `get_mut().map` can no longer produce `None`, and the function keeps its
+  `Option` return for the `None` of the guard. The clock, the lock and the loop are
+  untouched.
+- **The shared-deadline defect is caught.** The new
+  `each_unanswered_opens_wait_is_its_own_…` is red under a mutation that makes
+  `ChannelBook::wait_ends` return the earliest deadline set on any pending open
+  ("refused 1.372µs after the first's: it was not given a wait of its own of 1s"),
+  and it is the only one of 95 `delivery::` tests that moves. A wait of two limits
+  instead of one would also fail its `took < 3 * limit` bound (four limits). Its
+  half-limit lower bound, where the scenario says the full fixed time, is stated in
+  the test's own comment and leaves nothing a correct build could fail on: `eventually`
+  polls every 10 ms.
+- **The reworked decline test** is sound. The open is made before `decide`'s thread
+  starts, so the channel is pending when it reads; the flag is set before the open
+  is dropped, so a refusal made without waiting returns with it down; the limit of
+  120 s against `eventually`'s 10 s makes a wait that outlives the decline a
+  timeout and not a two-minute test.
+- **The spec delta matches the code.** `CALL_TIMEOUT` (35 s) is the timeout
+  `lib.rs` passes to `channel_create_with_timeout`, delivery's own is 30 s and
+  `SETTLE_LIMIT` is 40 s, so the new requirement's order holds and its
+  "open behind other requests" exclusion is what the code does. "At most that
+  fixed time", "no more than that fixed time for each wait a request starts" and
+  "never extends past the moment the last of those opens settles" each follow from
+  `await_settled`: the deadline is per `Pending` and set once, a message past it
+  returns at once, and every wait ends when `is_opening` goes false.
+- **Decision 11's startup arithmetic is right.** Waits run one after another,
+  wait m ends at min(start_m + 40, (m+1) × 35), so the ends are 40m while 40m <
+  (m+1) × 35, equal at m = 7 (both 280 s), and (m+1) × 35 from there. 20 Stoas:
+  21 × 35 = 735 s; ⌈735 / 40⌉ = 19.
