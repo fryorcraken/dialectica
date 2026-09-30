@@ -2192,6 +2192,43 @@ fn a_panicking_delivery_call_is_contained_and_the_next_action_runs() {
 }
 
 #[test]
+fn a_panic_reading_one_event_does_not_end_reception() {
+    // Security review: the listener ran its whole loop under one `catch_unwind`,
+    // so one panic while reading an event — the generated decoder runs inside
+    // the iterator's `next()` — ended reception for the rest of the process.
+    // Here the event stream panics once, then hands over a valid op. Red while
+    // containment was per loop: the op was never stored, and the listener
+    // logged its end.
+    let mut peer = Peer::new("listener-panic");
+    let g = genesis("Agora");
+    let stoa = g.address().unwrap();
+    peer.join(&g);
+    let (events, feed) = mpsc::channel::<Option<Option<Arriving>>>();
+    peer.delivering
+        .start(peer.fake.clone(), peer.dir.stores(), now, move || {
+            Ok(feed
+                .into_iter()
+                .map(|event| event.unwrap_or_else(|| panic!("reading this event panicked"))))
+        });
+    peer.delivering.settle(); // the channel is open
+
+    events.send(None).unwrap();
+    let op = their_op(stoa, "after the panic", 0);
+    events
+        .send(Some(Some(arriving(
+            ChannelIdentity::of(&stoa).channel_id(),
+            op.to_bytes().unwrap(),
+            1,
+        ))))
+        .unwrap();
+    eventually("the op after the panic to be stored", || {
+        stored(&peer, &op.op.id()).is_some()
+    });
+    assert_eq!(peer.journal.with("panicked").len(), 1);
+    assert!(peer.journal.with("listener has ended").is_empty());
+}
+
+#[test]
 fn a_panicking_join_sink_does_not_change_the_reply() {
     let g = genesis("Agora");
     let quiet = crate::wire::join_stoa(

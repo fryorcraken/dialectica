@@ -870,14 +870,43 @@ impl InboundQueue {
 /// 0.9). On an older runtime there is no status and `recv()` parks forever: the
 /// thread is then leaked, but it is this thread alone, holding nothing any other
 /// thread waits on.
-fn listen<I>(events: I, channels: &Channels, queue: &InboundQueue, journal: &dyn Journal)
+///
+/// # A panic is contained per event, not per loop
+///
+/// The iterator's `next()` is where the SDK receives an event and the generated
+/// decoder reads its fields — the one piece of the inbound path that touches
+/// event data before the queue. Containing a panic there around the whole loop
+/// would end reception for the rest of the process, every Stoa at once, over one
+/// event. So each `next()` and its hand-over run under their own `catch_unwind`,
+/// and the loop carries on. `a_panic_reading_one_event_does_not_end_reception` is
+/// red with one `catch_unwind` around the loop.
+///
+/// The cost: an iterator that panicked on *every* call without consuming an
+/// event would spin here, logging. The SDK's does not — the event is received
+/// before it is decoded, so the next call receives the next one.
+fn listen<I>(mut events: I, channels: &Channels, queue: &InboundQueue, journal: &dyn Journal)
 where
     I: Iterator<Item = Option<Arriving>>,
 {
-    for event in events {
-        match event {
-            Some(message) => hand_over(message, channels, queue, journal),
-            None => record(journal, Note::Unreadable),
+    loop {
+        let taken = catch_unwind(AssertUnwindSafe(|| match events.next() {
+            None => false,
+            Some(Some(message)) => {
+                hand_over(message, channels, queue, journal);
+                true
+            }
+            Some(None) => {
+                record(journal, Note::Unreadable);
+                true
+            }
+        }));
+        match taken {
+            Ok(true) => {}
+            Ok(false) => return,
+            Err(payload) => record(
+                journal,
+                Note::Panicked("reading an inbound event", &panic_detail(&*payload)),
+            ),
         }
     }
 }
