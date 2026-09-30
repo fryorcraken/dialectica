@@ -447,3 +447,152 @@ comments; none changes behaviour.
 - Mutation testing was run by hand on the claims above, not with `cargo mutants`;
   this is the readability lane. No mutation is left in the tree: every one was
   reverted with `git checkout -- <file>`, and `git status` shows only this file.
+
+## Re-review round 2 `369561d1..2cb71aaf`
+
+Dimension: readability only. Reviewed at `0a8f8639` (the code is unchanged after
+`2cb71aaf`; later commits are findings): the range's diff of `delivery.rs`,
+`transport.rs`, `arrival.rs`, `delivery/tests.rs`, `design.md`, `proposal.md`,
+`tasks.md` and the two spec deltas. Round 1's five entries are all confirmed
+fixed (see below). Four new defects, all low, all in prose or comments; none
+changes behaviour.
+
+- [ ] **`dev-writer`** — `design.md:493-496` — the argument that rejects "a limit sized
+      for a queue of opens" rests on a growth claim that is false, and the paragraph
+      above it says why.
+      **Scenario:** the text says a queue-sized limit makes one stuck open hold every
+      Stoa up for up to (k+1) x 35 s, "and startup's K opens, each held in turn, grow
+      as the square of K where 40 s grows as K". The waits are not additive, because
+      the opens settle one after another on one wall clock: with an unresponsive
+      delivery open j settles at (j+1) x 35 s, the processor reaches message k when
+      message k-1's wait has ended, and message k then waits only until open k
+      settles. Take K = 20, one message on each channel at t = 0, a limit that never
+      expires: message 1 is decided at 70 s, message 2 at 105 s, ..., message 20 at
+      735 s. The total stall is 21 x 35 = 735 s, linear in K, not a sum of
+      (k+1) x 35 (which is 35 x (2 + ... + 21) = 35 x 230 = 8,050 s). The text's own
+      lines 490-493 say the same thing for the per-message shape ("the worst case
+      was the pending time under either limit"). Conversely, K x 40 s
+      (`:471`, `:757`) is an upper bound the wall clock caps: at K = 20 it is 800 s
+      against 735 s of pending time, so "can be held up K x 40 s in all" is not
+      reachable once K > 7 (K x 40 > (K+1) x 35 when 5K > 35).
+      **Why it matters:** this is the stated reason the alternative was rejected;
+      the decision may still stand (40 s caps what a sender can do to one open, a
+      queue-sized limit caps it at the open's queue position), but not on "square
+      versus linear".
+      **Fix shape:** say what the two limits actually differ in (per-open ceiling of
+      40 s against a ceiling that grows with queue position, with the total for K
+      opens bounded by the last open's pending time either way), or drop the
+      comparison of growth rates.
+      **Severity:** low (a design argument, not behaviour).
+
+- [ ] **`dev-writer`** — `design.md:193`, `design.md:339`, `tasks.md:84` — two mutation
+      counts written as "re-run on this change's last round" are stale at the tip,
+      the failure round 1's fifth entry was about.
+      **Scenario:** `git checkout`-clean `2cb71aaf`, mutation as the text states it.
+      (a) `declined` ignoring the `error` field (`.filter(|r| !r.is_empty())` replaced
+      by `.filter(|_| false)` on the `callee_error` read at `delivery.rs:148`): the
+      text says twelve delivery tests red; **13 fail** (the twelve plus
+      `what_delivery_says_of_a_channel_decides_whether_the_channel_opens_and_a_post_is_sent`).
+      (b) `now_ms` read from `message.timestamp` in `Processor::pass`
+      (`message.timestamp as u64`, the `i64` needing a conversion to compile): the text
+      says 27 red, with no "grows with the suite" hedge; **29 fail**, run twice, the
+      extra two being that same test and
+      `a_message_waits_for_the_last_of_two_requests_for_its_channel`. Both tests were
+      added in `a7d0beaa`, after `c96fecae` wrote the counts and re-ran them.
+      The other two hold: `>=` to `>` in `InboundQueue::offer` is four red, and the
+      bound removed (the wait's `left` fixed at an hour) is six red, the six the text
+      names. CLAUDE.md, "Keeping this file true": a number a command answers goes
+      stale; it already did, within the round that wrote it.
+      **Fix shape:** drop the two numbers (keep "the mutation, and that the named
+      tests go red"), or qualify as "at least"; do not re-run and re-write, since the
+      next test added repeats this.
+      **Severity:** low.
+
+- [ ] **`dev-writer`** — `delivery.rs:606-611`, `design.md:125`, `design.md:483` —
+      "neither value is visible to a test" is false since `a7d0beaa`, and the comment
+      overclaims what the compile-time asserts hold.
+      **Scenario:** `delivery/tests.rs:479`
+      `the_call_timeout_outlasts_deliverys_own_and_the_settle_limit_outlasts_the_call`
+      reads `CALL_TIMEOUT` and `SETTLE_LIMIT` and asserts the order against a literal
+      30 s. It exists because the two `const _` asserts compare the constants with
+      each other and with `DELIVERY_CALLBACK_TIMEOUT`, so lowering
+      `DELIVERY_CALLBACK_TIMEOUT` to 10 s with `CALL_TIMEOUT` at 20 s compiles and only
+      the test goes red (the tester's measurement, `findings/correctness.md`). The
+      comment beside the asserts says "Neither value is visible to a test ... so a
+      build that breaks either relation fails to compile"; the relation the docs rest
+      on is delivery's real 30 s, and a build that edits the named constant breaks it
+      and compiles. `design.md:125` ("No test can see this constant") and `:483`
+      ("No test can see either value") say the same. The test is named nowhere in
+      `delivery.rs`, `design.md` or `tasks.md` (`git grep` finds it only in `tests.rs`
+      and the findings), so the one guard for the literal is undiscoverable from the
+      place a reader is told there is none.
+      **Fix shape:** at `delivery.rs:606-611` say the asserts hold the two constants
+      against each other and the test holds them against delivery's own 30 s, naming
+      it; in `design.md` say "no test waits out either value" rather than "sees", and
+      cite the test in Decision 4 and `tasks.md` 10.4.
+      **Severity:** low.
+
+- [ ] **`tester`** — `delivery/tests.rs:2205` — a comment cites a test by a name that is
+      a prefix of the real one.
+      **Scenario:** the comment in
+      `many_messages_on_one_unanswered_open_hold_other_channels_up_for_one_wait_not_one_each`
+      says "`an_opens_time_is_the_same_for_every_message_that_waits_on_it` pins the
+      same property with no clock at all"; the function is
+      `an_opens_time_is_the_same_for_every_message_that_waits_on_it_until_a_request_clears_it`
+      (`:2256`). `git grep -F` on the cited name finds both the citation and the
+      function, so nobody is lost, but `grep -w` or an IDE lookup of the quoted
+      name finds no function.
+      **Fix shape:** the full name.
+      **Severity:** nit.
+
+### What I checked, and found clean
+
+- **Round 1's five entries are fixed as recorded.** `listen`'s doc and the trap-table
+  row name `LOGOS_PROTOCOL_HAS_CLIENT_SUBSCRIPTION_STATE` and say why "0.9" does not
+  discriminate; Decision 15 no longer quotes Decision 3 and Decision 3 names the
+  four users of the book and the two of the queue; `admit`'s comment reads "`Judged`
+  carries only the op ..."; `design.md` no longer points at `findings/security.md`
+  or the PR body for any mutation (`git grep` for both finds nothing outside
+  `findings/`). Fifth entry's counts: see the second box above, where two of the four
+  re-run counts have already gone stale.
+- **Mutations I ran for the new claims** (each restored with `git checkout -- <file>`;
+  94 `delivery::` tests, all green unmutated): the wait's bound removed, six red
+  as stated (the four named in the list and the two named beside them); `>=` to `>`
+  in `offer`, four red as stated; a guard leaked on the no-sender return in
+  `Worker::open` (`std::mem::forget(opening)`), red in
+  `a_sender_identifier_that_cannot_be_retained_opens_no_channel` and
+  `an_open_this_peer_gives_up_without_asking_delivery_does_not_hold_a_message_up`
+  (timed out waiting for the refusal), as `design.md` says.
+- **The per-open wait's prose matches the code.** `Pending::wait_ends`,
+  `Channels::opening` (a request clears the time), `await_settled` (deadline read once,
+  never re-read), the `ChannelBook` doc, `SETTLE_LIMIT`'s doc, Decision 11, the
+  `op-transport` paragraphs and scenarios, and `proposal.md`'s wording say the same
+  thing and quote the spec's phrases exactly ("for each open, not for each message";
+  "Only a later create, join or startup asking for that channel lets a message wait
+  on it again").
+- **Arithmetic in Decision 11's "Why per open"**: 21 x 35 = 735 s; 735 / 40 = 18.4,
+  ceiling 19; 256 x 40 = 10,240 s = 2 h 50.7 min, "about 2 h 51 min"; the probe's
+  10 x 200 ms = 2.01 s is in `findings/security.md:246-248`. The rusqlite busy timeout
+  claim (5 s, "nothing here sets it") holds: no `busy` call in `dialectica-core/src`.
+- **Every test name cited in `design.md`, `tasks.md` and the new comments exists**
+  (twelve checked with one `git grep -E`), apart from the prefix in the fourth box.
+- **Cross-references to `judge`** after it became private: `arrival.rs:223`,
+  `transport.rs` docs, `design.md` Decision 15 and `tasks.md` 10.1 all say private and
+  called only by `receive_via`; no doc still links to it as public.
+- **`cargo fmt --manifest-path dialectica/rust-lib/Cargo.toml --check`** is clean.
+
+### Not boxes (taste; say so and move on)
+
+- `wait_ends` names three things: a field on `Pending`, a method on `Pending` that
+  starts the time if it is absent (reads like a getter, takes `&mut self`), and a
+  method on `ChannelBook` with a different signature. `start_or_get_deadline` on
+  `Pending` would say what it does; the docs are clear enough that I did not box it.
+- `arrival.rs:223-226` ends a line at "Rebuilding a store," after the rewrite, an edit
+  residue like the ones round 1 noted in `delivery.rs` and `proposal.md`.
+- `design.md:430` pairs a measurement at a 400 ms limit with "where the test allows
+  under two limits", and the test now runs at 1000 ms; the sentence is true of both
+  but a reader reproducing it at the test's limit gets about 4 s, not 1.61 s.
+- Decision 15's "the boundary's ~55 tests" counts `receive(` call sites in
+  `transport.rs` (54), not tests; it is approximate by its own mark.
+- Mutation testing was by hand on the claims above, not `cargo mutants`; no mutation
+  is left in the tree (every one reverted with `git checkout`).
