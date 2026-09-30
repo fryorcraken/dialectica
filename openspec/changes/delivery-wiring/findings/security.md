@@ -492,7 +492,7 @@ Stoa for 40 s rather than for the open's whole pending time. Below 7 stuck opens
 40 s is strictly shorter than a queue-sized limit. The loss half does not hold,
 as the entry below shows.
 
-- [ ] **`spec-writer`** — `specs/op-transport/spec.md:192` (and `proposal.md:72-74`,
+- [x] **`spec-writer`** — `specs/op-transport/spec.md:192` (and `proposal.md:72-74`,
       "never judged before that creation is answered or given up") — the new
       paragraph says the order delivery < `CALL_TIMEOUT` < fixed time means "a
       message waiting on the open whose creation is the one this peer is
@@ -539,6 +539,57 @@ as the entry below shows.
       per call rather than per request, and reopens part of Decision 11's
       "Start an open's time at the request" alternative, so it has to be argued
       against the stall bound.
+      **Outcome (`spec-writer`): the second direction, capped; the `dev-writer`
+      builds it.** Narrowing would have kept the loss in exactly the race this
+      wait exists for, and restarting at the ask closes it without reopening the
+      unbounded stall, because only this peer's asks move the time and a message
+      is extended at most once. `op-transport`, "Every payload the reliable
+      channel delivers passes the inbound boundary": the fixed-time paragraph now
+      says an open's time is started by the first message after a request **and
+      again when this peer asks delivery to create the channel**, and nothing
+      else. A new paragraph, "Asking delivery to create a channel starts the
+      open's time again", says the ask restarts the time whether or not a
+      message waits or the time had ended. A message waiting at the ask is judged
+      no later than the fixed time after the ask, and its wait expires then. That
+      extension is made once per message: a later ask during the same wait
+      restarts the time for the messages after it and does not move that one's
+      end. The timeout-order paragraph keeps its MUST unchanged (fixed time >
+      this peer's creation wait > delivery's own) and now states what follows
+      from it. A message waiting at the first ask during its wait, or beginning
+      after an ask, is judged only after that creation is answered or given up.
+      It then **names the loss** it does not cover: a message whose wait expired
+      before delivery was asked (an open queued behind others for longer than the
+      fixed time), the messages after it until the ask, and a message already
+      extended once when a second ask comes. The consequence paragraph now
+      bounds the stall per start of an open's time, not per request. It says a
+      message extended by an ask holds the other channels up for less than twice
+      the fixed time (under it before the ask, at most it after). It still never
+      runs past the last settle, and only this peer's requests and asks set it.
+      "An expired wait changes nothing else" and "A request … does not lengthen a
+      wait already under way" now name the ask as the other thing that starts a
+      wait and the one thing that moves a waiting message's end.
+      New scenarios: "A message waiting when this peer asks delivery for its
+      channel is judged after delivery answers" (the extension; an honest op as
+      the first waiter), "An earlier message on a queued open does not cost an op
+      that arrives while delivery is asked" (your probe with the opposite
+      expectation), "Asking delivery for a channel whose wait has expired lets a
+      message wait again", and "A second ask while a message waits does not
+      extend its wait again" (the cap). Three existing scenarios gained a WHEN
+      clause ruling asks out while their messages wait, since their timing claims
+      assume none: "Many messages on one unanswered open …", "Each unanswered
+      open's wait is its own" and "Requests made while a message waits do not
+      lengthen its wait". `proposal.md` "Receiving" is rewritten to match.
+      Why the stall bound survives: before the ask a waiting message is under one
+      fixed time, or it would have expired. After the ask it is at most one fixed
+      time, and in practice until this peer gives up the call (`CALL_TIMEOUT` <
+      the fixed time) unless a second request for that channel is pending. So one
+      junk message on a queued open now holds every Stoa for under 80 s where it
+      held 40 s. The startup total at K ≥ 7 (the last open's settle, 735 s for 20
+      Stoas) is unchanged, because no wait outlasts its own open. The cap is what
+      keeps "Requests made while a message waits do not lengthen its wait" true.
+      Without it, repeated joins against a hung delivery chain asks every
+      ≤ 35 s, each extending the same message by 40 s, and postpone it for as
+      long as they last.
 
 ## Round 3 clean areas
 
