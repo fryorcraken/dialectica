@@ -385,6 +385,7 @@ impl Peer {
             stores: self.dir.stores(),
             journal: self.journal.clone(),
             clock: now,
+            settle_limit: SETTLE_LIMIT,
         }
     }
 }
@@ -1665,6 +1666,83 @@ fn a_message_on_a_channel_not_being_opened_does_not_wait_on_another_channels_ope
 }
 
 #[test]
+fn a_poisoned_channel_book_still_waits_for_this_channels_open() {
+    // Correctness review: once the book's mutex was poisoned, `wait_timeout_while`
+    // returned `Err` at its first wake-up and the wait was discarded — so a
+    // message on a channel still opening was judged as soon as ANY open settled,
+    // refused as an unknown channel, and lost. Red before the wait recovered the
+    // guard and looped on its own condition.
+    let peer = Peer::new("recv-poisoned-book");
+    let stoa = genesis("Agora").address().unwrap();
+    let identity = ChannelIdentity::of(&stoa);
+    let other = ChannelIdentity::of(&genesis("Lyceum").address().unwrap());
+    let channels = Arc::new(Channels::default());
+    let poisoner = Arc::clone(&channels);
+    let _ = std::thread::spawn(move || {
+        let _held = poisoner.book.lock();
+        panic!("a contained panic while the book was held");
+    })
+    .join();
+    assert!(channels.book.is_poisoned());
+
+    let mut opening = channels.opening(&identity);
+    let op = their_op(stoa, "waits out another channel's answer", 0);
+    decide_elsewhere(
+        peer.processor(Arc::clone(&channels)),
+        arriving(identity.channel_id(), op.to_bytes().unwrap(), 1),
+    );
+    std::thread::sleep(Duration::from_millis(100));
+    drop(channels.opening(&other)); // another open settles and wakes every waiter
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(
+        peer.journal.lines().is_empty(),
+        "judged before its own open settled: {:?}",
+        peer.journal.lines()
+    );
+
+    opening.held();
+    drop(opening);
+    eventually("the op to be stored once its open is answered", || {
+        stored(&peer, &op.op.id()).is_some()
+    });
+}
+
+#[test]
+fn a_message_waiting_on_an_open_delivery_never_answers_is_judged_after_a_bounded_wait() {
+    // `op-transport`, scenario "A message waiting on an open delivery never
+    // answers is judged after a bounded wait": refused as an unknown channel
+    // while the open is still unanswered, and a valid op after it on an open
+    // channel is then stored. The limit is shortened here; the running wiring's
+    // is `SETTLE_LIMIT`.
+    let peer = Peer::new("recv-bounded-wait");
+    let open = genesis("Agora").address().unwrap();
+    let never = ChannelIdentity::of(&genesis("Lyceum").address().unwrap());
+    let channels = open_for(&open);
+    let unanswered = channels.opening(&never);
+    let mut processor = peer.processor(Arc::clone(&channels));
+    processor.settle_limit = Duration::from_millis(200);
+    let queue = Arc::clone(&processor.queue);
+
+    let waiting = their_op(genesis("Lyceum").address().unwrap(), "never answered", 0);
+    let after = their_op(open, "behind the unanswered open", 0);
+    queue.offer(arriving(never.channel_id(), waiting.to_bytes().unwrap(), 1));
+    queue.offer(arriving(
+        ChannelIdentity::of(&open).channel_id(),
+        after.to_bytes().unwrap(),
+        2,
+    ));
+    queue.close();
+    std::thread::spawn(move || processor.run());
+
+    eventually("the op behind the unanswered open to be stored", || {
+        stored(&peer, &after.op.id()).is_some()
+    });
+    assert_eq!(peer.journal.with("refused (unknown-channel)").len(), 1);
+    assert!(stored(&peer, &waiting.op.id()).is_none());
+    drop(unanswered); // still unanswered until here
+}
+
+#[test]
 fn a_message_on_an_open_channel_does_not_wait_on_a_repeated_open() {
     let peer = Peer::new("recv-repeated-open");
     let stoa = genesis("Agora").address().unwrap();
@@ -1794,6 +1872,7 @@ fn a_message_the_op_log_cannot_take_is_logged_and_not_retried() {
         stores: peer.dir.stores(),
         journal: peer.journal.clone(),
         clock: now,
+        settle_limit: SETTLE_LIMIT,
     };
     let channel = ChannelIdentity::of(&stoa);
     let log_file = crate::log::op_log_path_in(&peer.dir.0);

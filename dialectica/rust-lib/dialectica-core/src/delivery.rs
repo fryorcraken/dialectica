@@ -475,10 +475,14 @@ struct Channels {
     settled: Condvar,
 }
 
-/// How long the processor waits on a pending open before judging anyway: past
-/// [`CALL_TIMEOUT`], so it outlasts the call it is waiting on. The worker always
-/// answers the open — a `Drop` guard settles it even on a panic — so this bound
-/// is reached only if that guarantee is broken.
+/// How long the processor waits on a pending open before judging anyway.
+///
+/// `op-transport` requires the wait be "bounded by a fixed time … whether or not
+/// delivery ever answers the open", and leaves the value to design. Past
+/// [`CALL_TIMEOUT`], so it outlasts the call it is waiting on: the worker always
+/// settles the open within that — a `Drop` guard settles it even on a panic — so
+/// this bound is reached only if that guarantee is broken. What reaching it costs
+/// is in design.md Decision 11.
 const SETTLE_LIMIT: Duration = Duration::from_secs(40);
 
 impl Channels {
@@ -523,11 +527,27 @@ impl Channels {
     }
 
     /// Wait, up to `limit`, while a channel is pending and not open.
+    ///
+    /// **Its own loop, not `wait_timeout_while`**, because of a poisoned book:
+    /// that function returns `Err` at the first wake-up once the mutex is
+    /// poisoned, so the wait would end when *any* open settled and the message
+    /// would be refused in exactly the gap this wait exists to close. Here the
+    /// guard is taken back from a poisoned wake-up as [`lock`] takes it back, and
+    /// only this channel's condition or the limit ends the wait.
+    /// `a_poisoned_channel_book_still_waits_for_this_channels_open` is red
+    /// without it.
     fn await_settled(&self, channel_id: &str, limit: Duration) {
-        let book = lock(&self.book);
-        let _ = self.settled.wait_timeout_while(book, limit, |b| {
-            !b.open.is_open(channel_id) && b.pending.contains_key(channel_id)
-        });
+        let started = std::time::Instant::now();
+        let mut book = lock(&self.book);
+        while !book.open.is_open(channel_id) && book.pending.contains_key(channel_id) {
+            let Some(left) = limit.checked_sub(started.elapsed()) else {
+                return;
+            };
+            book = match self.settled.wait_timeout(book, left) {
+                Ok((guard, _)) => guard,
+                Err(poisoned) => poisoned.into_inner().0,
+            };
+        }
     }
 
     /// The Stoa a channel is open for now, copied out so the lock is released
@@ -901,6 +921,9 @@ struct Processor {
     stores: Stores,
     journal: Arc<dyn Journal>,
     clock: fn() -> u64,
+    /// How long a message waits on its channel's pending open: [`SETTLE_LIMIT`]
+    /// in the running wiring, shorter in a test of what happens when it passes.
+    settle_limit: Duration,
 }
 
 impl Processor {
@@ -929,7 +952,7 @@ impl Processor {
         // delivery declines the open"). See `ChannelBook` for why, and design
         // Decision 11.
         self.channels
-            .await_settled(&message.channel_id, SETTLE_LIMIT);
+            .await_settled(&message.channel_id, self.settle_limit);
         let now_ms = (self.clock)();
         let inbound = InboundMessage {
             channel_id: &message.channel_id,
@@ -1053,6 +1076,7 @@ impl Delivering {
                 stores: stores.clone(),
                 journal: Arc::clone(&self.journal),
                 clock,
+                settle_limit: SETTLE_LIMIT,
             },
             Processor::run,
         );
