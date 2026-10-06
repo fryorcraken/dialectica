@@ -53,9 +53,19 @@ repos/fryorcraken/agent-spec-flow`.
       dispatch commit), and still holds back an unread `dev-writer` push
       without it; 11 feeds rule 1's round. Rule 9 is now classified.
 
-- [ ] **`dev-writer`** — `design.md:286-288` — "The reasons stay only in the overlay, so the two cannot disagree on a reason" is false for one of the six lines
+- [x] **`dev-writer`** — `design.md:286-288` — "The reasons stay only in the overlay, so the two cannot disagree on a reason" is false for one of the six lines
       **Scenario:** `CLAUDE.md:420-421` reads "the repository root has no flake, so `.#lgx` fails there", which is the reason, and the overlay's `## Build` (`PROJECT.md:45-46`) states the same reason. They agree today. design.md's sentence is what tells the next editor they need not check. `findings/architecture.md` box 1's outcome repeats it ("copies no reason"). Separately, `design.md:279` calls one rule "no-`/nix/store`-read", and the PR body says "no `/nix/store` reads". The rule at `CLAUDE.md:416-417` and `PROJECT.md:126-128` forbids only `readlink` or `ls` of a store path to find an artefact. The overlay says reading builder source does mean reading the store.
       **Measured:** `Read CLAUDE.md` 404-421 and `.claude/specflow/PROJECT.md` 45-46, 126-128. Either drop the clause from `CLAUDE.md:421`, or have design.md say which line carries its reason and why. Name the `/nix/store` rule as it is written.
+      **Fixed** in the commit "Give each CLAUDE.md shell rule its reason in
+      the overlay", by the first option: the clause is dropped from the
+      `nix build` line, which now reads "…`./dialectica#lgx`, not `.#lgx`."
+      and leaves the reason to `## Build`. Checking the other five showed the
+      sentence was false in a second way (`findings/rereview-readability.md`
+      box 1): `## Hazards` held no reason for the `yq`/`jq`, `VAR=` and
+      `/nix/store` rules, so those three reasons were added there. design.md
+      now names the rule as written ("no `readlink` or `ls` of a `/nix/store`
+      path") and records both corrections. The PR body's "no `/nix/store`
+      reads" is corrected in the same pass.
 
 - [ ] **`dev-writer`** — `design.md:299-308`, `design.md:323-325` and the Risks entry at `design.md:424-440` — the marketplace decision gives "unpublished" as its forcing constraint, which no longer holds as stated, and records no alternative to a local clone of a moving branch
       **Scenario:** `gh api repos/fryorcraken/agent-spec-flow` reports `"private":false`, created 2026-10-06, and the README itself clones it from `https://github.com/fryorcraken/agent-spec-flow`. So "While the plugin is unpublished its marketplace is a local clone" leaves out the constraint that actually applies. The plugin's `DECISIONS.md` decision 20 (`6023db6`) says: "No release tag, and dialectica stays on its local marketplace, until a full piece has run on the plugin". design.md does not cite it. Two alternatives are now available and neither is recorded with what rules it out. (a) A tracked `github` marketplace source pinned to a commit. This would close the Risks entry's "names `specflow@agent-spec-flow` with no source or revision", and that entry already asks for a pinned commit as the follow-up. (b) A README clone checked out at the reconciled `77fce4d`. Today the README clones the default branch, which is `756e76a` now and could be anything later. A contributor therefore installs a revision design.md's "What runs is an installed copy" never reconciled. The re-check command at `design.md:344-345` is the only guard, and the README does not mention it.

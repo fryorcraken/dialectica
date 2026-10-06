@@ -417,8 +417,8 @@ named; read it there rather than restating it here.
   use the documented paths under `.scaffold/basecamp/`. `## Hazards`.
 - **In a fresh worktree, stage the SDK before `cargo test`**, with the command
   in `README.md`, "Building". `## Test layers`.
-- **Build scaffold-gated code with `nix build ./dialectica#lgx`**; the
-  repository root has no flake, so `.#lgx` fails there. `## Build`.
+- **Build scaffold-gated code with `nix build ./dialectica#lgx`**, not
+  `.#lgx`. `## Build`.
 
 <!-- specflow:begin v0.1.0 -->
 ## specflow

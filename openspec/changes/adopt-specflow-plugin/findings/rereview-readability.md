@@ -5,7 +5,7 @@ Dimension: readability only. Scope: `20643177..HEAD`, excluding `findings/`
 15 files). Every line of that diff was read, plus the whole of the overlay,
 `design.md`, `tasks.md` and README's new section in their current form.
 
-- [ ] **`dev-writer`** — `CLAUDE.md:406-409` — the new section's intro says
+- [x] **`dev-writer`** — `CLAUDE.md:406-409` — the new section's intro says
       *"The reason for each is in the overlay … under the section named; read it
       there rather than restating it here."* That holds for four of the six
       bullets and not the other two. The `yq`/`jq` bullet points at `## Hazards`,
@@ -26,6 +26,23 @@ Dimension: readability only. Scope: `20643177..HEAD`, excluding `findings/`
       **Measured:** `git grep -n -i -e "python" -- .claude/specflow/PROJECT.md`
       matches only line 113, the rule itself. Severity: low, a pointer that
       over-promises.
+      **Fixed** in the commit "Give each CLAUDE.md shell rule its reason in
+      the overlay", by making the intro's promise true rather than weakening
+      it. Checked all six against the section each names. Two had a reason
+      already (`qmltestrunner`'s Qt5 exit, the SDK's manifest failure) and
+      `## Build` holds the `.#lgx` one. Three did not, and the overlay's
+      `## Hazards` gains each: the `python3` click and the `VAR=` click, both
+      restored from the removed `CLAUDE.md` text
+      (`git grep -n -F "never Python" origin/main -- CLAUDE.md`, and the
+      `QT_QPA_PLATFORM` paragraph above `origin/main:CLAUDE.md:225`), and for
+      `/nix/store`, which had none on `main` either, that the store is
+      outside the working directories. The other direction: the `nix build`
+      line no longer restates its reason; it reads "…`./dialectica#lgx`, not
+      `.#lgx`. `## Build`." design.md's "Six shell rules" section now says
+      each line holds the rule and replacement, the section the reason, and
+      records the three reasons put back. The block is untouched:
+      `cmp -i 24899:1796 -n 9490 CLAUDE.md <clone>/skills/sync/SKILL.md`
+      exits 0 with offsets derived after the edit.
 
 - [ ] **`dev-writer`** — `.claude/specflow/PROJECT.md:27-28` — *"Passing it one
       spec file is the supported shape."* was added in this range, lifted from

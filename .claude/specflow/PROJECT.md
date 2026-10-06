@@ -109,9 +109,12 @@ release outputs `basecamp/`, `ui-results/` and `dist/`.
   turns an undefined binding from a warning into a failure.
 - **Never prefix `QT_QPA_PLATFORM=offscreen` or any `VAR=value`**: the wrappers
   are `run-qml-tests.sh` for QML and `nix build ./dialectica#lgx` for
-  scaffold-gated Rust.
-- **Read YAML with `yq` and JSON with `jq`, never Python.** This repo's `yq` is
-  the jq wrapper, so its filters are jq syntax and it ships `tomlq` for TOML.
+  scaffold-gated Rust. The prefix costs the owner an approval click on its own
+  (the block's cost table), and each wrapper already sets what it needs.
+- **Read YAML with `yq` and JSON with `jq`, never Python.** Every `python3`
+  call that parses one costs the owner an approval click where a `yq` or `jq`
+  call would have done. This repo's `yq` is the jq wrapper, so its filters
+  are jq syntax and it ships `tomlq` for TOML.
   The Go `yq` is a different tool. The UI scripts probe the `yq` on `PATH`
   (`dialectica-ui/tests/require-jq-yq.sh`) and refuse any that does not turn
   YAML into JSON.
@@ -124,7 +127,9 @@ release outputs `basecamp/`, `ui-results/` and `dist/`.
   "`[basecamp.env]`", says what each one prevents; `CLAUDE.md`'s "Module
   contract traps" has the `DTheme` collision and the `check_bindings` account.
 - **Never `readlink` or `ls` a `/nix/store` path** to find a build artefact; use
-  the documented paths under `.scaffold/basecamp/`. Reading `logos-module-builder`
+  the documented paths under `.scaffold/basecamp/`. The store is outside the
+  working directories, so each probe costs an approval click for an answer
+  that is already written down. Reading `logos-module-builder`
   or `logos-rust-sdk` source means reading the store, which needs `/add-dir`.
 - **`stoa-genesis` is not a valid archive reference example**: its live spec was
   hand-edited after its delta (`3dddf03`). Derive the delta-to-spec rule from
