@@ -121,15 +121,19 @@ TestCase {
         return null
     }
 
-    // Visibility checked on every ancestor, as `tst_navigation.qml` does: an
-    // element inside a hidden screen must not count as displayed.
-    function visibleNamed(item, name) {
+    // **The one place "displayed" is defined for this file.** Every node under
+    // `item` that `matches(node)` AND whose own `visible` and every ancestor's
+    // are not false, as `tst_navigation.qml` checks it: an element inside a
+    // hidden screen must not count as displayed. The finders below differ only in
+    // the predicate they hand in, so a change to what counts as displayed (a
+    // zero `opacity`, say) is made here and reaches all of them.
+    function visibleNodes(item, matches) {
         var found = []
         function walk(node, ancestorsVisible) {
             if (!node)
                 return
             var here = ancestorsVisible && node.visible !== false
-            if (node.objectName === name && here)
+            if (here && matches(node))
                 found.push(node)
             var kids = node.children
             if (kids !== undefined)
@@ -140,23 +144,27 @@ TestCase {
         return found
     }
 
+    function visibleNamed(item, name) {
+        return spec.visibleNodes(item, function (node) {
+            return node.objectName === name
+        })
+    }
+
     // Every displayed text containing `phrase`, so a message is caught by what
     // it SAYS as well as by which element carries it.
     function visibleTextsContaining(item, phrase) {
-        var found = []
-        function walk(node, ancestorsVisible) {
-            if (!node)
-                return
-            var here = ancestorsVisible && node.visible !== false
-            if (here && typeof node.text === "string" && node.text.indexOf(phrase) >= 0)
-                found.push(node.text)
-            var kids = node.children
-            if (kids !== undefined)
-                for (var i = 0; i < kids.length; i++)
-                    walk(kids[i], here)
-        }
-        walk(item, true)
-        return found
+        return spec.visibleNodes(item, function (node) {
+            return typeof node.text === "string" && node.text.indexOf(phrase) >= 0
+        }).map(function (node) {
+            return node.text
+        })
+    }
+
+    // Whether the message for a newly stored op is on screen, by what it says.
+    // `kind` is "post" or "reply", the word the message uses for what was stored.
+    function storedMessageShown(view, kind) {
+        return spec.visibleTextsContaining(
+            view, "Your " + kind + " was saved on this machine.").length > 0
     }
 
     function outcomesShown(view, kind) {
@@ -185,37 +193,38 @@ TestCase {
         compare(view.chosen.stoa, spec.stoaA, "and it is the same Stoa")
     }
 
-    // The thread link's own target, raised through the feed's `threadOpened`,
-    // as `tst_navigation.qml` does. Its `MouseArea` takes a real click only in
-    // a window (`tst_feed_mouse_clicks.qml`), and which row's thread opens is
-    // the row's judgement either way.
-    function openTheThread(view) {
-        var link = spec.visibleNamed(view, "readThreadLink")
-        verify(link.length > 0, "a row offers its thread")
-        var root = link[link.length - 1].target
-        compare(root, spec.rootOp, "the fixture's root row is the one opened")
+    // Open a thread by raising the feed's `threadOpened`, as `tst_navigation.qml`
+    // does: the thread link's `MouseArea` takes a real click only in a window
+    // (`tst_feed_mouse_clicks.qml`), and which row's thread opens is the row's
+    // judgement either way. **Both ways to name the thread are this one helper.**
+    //
+    //   - Called with no `root`, the target is read off the rendered row's own
+    //     `readThreadLink`, and asserted to be the fixture's `rootOp`: the thread
+    //     opened is the one the row offers.
+    //   - Called with a `root`, that root is opened, which is the only way to
+    //     reach a thread the fixture's one row does not offer.
+    //
+    // Either way it asserts the screen shown is the thread, and that it is the
+    // thread asked for.
+    function openTheThread(view, root) {
+        if (root === undefined) {
+            var link = spec.visibleNamed(view, "readThreadLink")
+            verify(link.length > 0, "a row offers its thread")
+            root = link[link.length - 1].target
+            compare(root, spec.rootOp, "the fixture's root row is the one opened")
+        }
         spec.visibleNamed(view, "feed")[0].threadOpened(root)
         compare(view.screenShown, "thread")
+        compare(view.reading.rootOp, root, "and it is the thread asked for")
     }
 
     // A displayed element whose own `text` is exactly `text`: how a control
     // with no `objectName` ("Next", "Try reading again", "SHOW HIDDEN") is found
     // by what a user reads on it.
     function visibleWithText(item, text) {
-        var found = []
-        function walk(node, ancestorsVisible) {
-            if (!node)
-                return
-            var here = ancestorsVisible && node.visible !== false
-            if (here && node.text === text)
-                found.push(node)
-            var kids = node.children
-            if (kids !== undefined)
-                for (var i = 0; i < kids.length; i++)
-                    walk(kids[i], here)
-        }
-        walk(item, true)
-        return found
+        return spec.visibleNodes(item, function (node) {
+            return node.text === text
+        })
     }
 
     // Press the one displayed button reading `text`. A `FlatButton` and the
@@ -245,17 +254,10 @@ TestCase {
         return n
     }
 
+    // The thread's back button, which begins a new visit to the feed.
     function backToTheFeed(view) {
         spec.visibleNamed(view, "threadBackButton")[0].clicked()
         compare(view.screenShown, "feed")
-    }
-
-    // Open the thread whose root is `root` through the feed's own signal, so a
-    // thread other than the fixture's one row can be reached.
-    function openThreadNamed(view, root) {
-        spec.visibleNamed(view, "feed")[0].threadOpened(root)
-        compare(view.screenShown, "thread")
-        compare(view.reading.rootOp, root, "and it is the thread asked for")
     }
 
     function openedOnStoaA() {
@@ -295,8 +297,7 @@ TestCase {
         compare(spec.outcomesShown(s.view, "post"), 1)
 
         spec.openTheThread(s.view)
-        spec.visibleNamed(s.view, "threadBackButton")[0].clicked()
-        compare(s.view.screenShown, "feed")
+        spec.backToTheFeed(s.view)
 
         compare(spec.outcomesShown(s.view, "post"), 0,
                 "returning from a thread begins a new visit to the feed")
@@ -378,10 +379,8 @@ TestCase {
         compare(spec.outcomesShown(s.view, "reply"), 1,
                 "the reply's outcome is displayed on the visit that produced it")
 
-        spec.visibleNamed(s.view, "threadBackButton")[0].clicked()
-        compare(s.view.screenShown, "feed")
+        spec.backToTheFeed(s.view)
         spec.openTheThread(s.view)
-        compare(s.view.reading.rootOp, spec.rootOp, "the same thread")
 
         compare(spec.outcomesShown(s.view, "reply"), 0,
                 "the thread screen's composer displays no outcome")
@@ -390,26 +389,27 @@ TestCase {
 
     // Scenario: The outcome stays for the rest of the visit that produced it.
     //
-    // The guard against over-clearing: a fix that cleared the outcome on every
-    // read would pass every test above and fail this one, because a newly
-    // stored post is followed by a re-read.
+    // The scenario's own test, and **not the only guard against over-clearing**.
+    // A fix that cleared the outcome on every read (`composer.clearOutcome()`
+    // first in `FeedScreen.reload()`) turns red every feed test in this file
+    // that publishes and then asserts the outcome displayed, this one among
+    // them, because a newly stored post is always followed by a re-read. The
+    // absence tests above go red too, at the presence assertion each makes
+    // before it leaves. Measured by making that edit and running this file; it is
+    // why those presence assertions are not decoration and are not to be dropped.
+    // What this test pins that they do not: that the re-read happened and
+    // returned a row for the post, which is the scenario's own condition.
     function test_the_outcome_stays_across_the_re_read_that_follows_the_publish() {
         var s = spec.openedOnStoaA()
-        var readsBefore = 0
-        for (var i = 0; i < s.bridge.calls.length; i++)
-            if (s.bridge.calls[i].method === "list_threads")
-                readsBefore++
+        var readsBefore = spec.countCalls(s.bridge, "list_threads")
 
         spec.publish(s.view, "post", "first post")
 
-        var readsAfter = 0
-        for (var j = 0; j < s.bridge.calls.length; j++)
-            if (s.bridge.calls[j].method === "list_threads")
-                readsAfter++
-        compare(readsAfter, readsBefore + 1, "the publish was followed by a re-read")
+        compare(spec.countCalls(s.bridge, "list_threads"), readsBefore + 1,
+                "the publish was followed by a re-read")
         compare(s.view.feedRowCount, 2, "and that re-read returned a row for the post")
 
-        verify(spec.visibleTextsContaining(s.view, "Your post was saved on this machine.").length > 0,
+        verify(spec.storedMessageShown(s.view, "post"),
                "the message for a newly stored op is still displayed")
         s.view.destroy()
     }
@@ -509,12 +509,12 @@ TestCase {
     // thread or a different one."
     function test_a_replys_outcome_does_not_follow_the_user_into_another_thread() {
         var s = spec.openedOnStoaA()
-        spec.openThreadNamed(s.view, spec.rootOp)
+        spec.openTheThread(s.view, spec.rootOp)
         spec.publish(s.view, "reply", "a reply")
         compare(spec.outcomesShown(s.view, "reply"), 1)
 
         spec.backToTheFeed(s.view)
-        spec.openThreadNamed(s.view, spec.otherRootOp)
+        spec.openTheThread(s.view, spec.otherRootOp)
 
         compare(spec.visibleNamed(s.view, "replyDraftField").length, 1,
                 "the other thread's reply composer is on screen")
@@ -536,7 +536,7 @@ TestCase {
         spec.backToTheFeed(s.view)
 
         s.bridge.readThreadFail = true
-        spec.openThreadNamed(s.view, spec.rootOp)
+        spec.openTheThread(s.view, spec.rootOp)
         compare(s.view.threadReadState, "failed", "the later visit's read failed")
         compare(spec.outcomesShown(s.view, "reply"), 0)
 
@@ -608,17 +608,24 @@ TestCase {
         spec.publish(s.view, "post", "first post")
         compare(spec.outcomesShown(s.view, "post"), 1)
 
+        verify(spec.storedMessageShown(s.view, "post"),
+               "it is the message for a newly stored op before any paging")
+
         spec.pressButtonReading(s.view, "Next")
         compare(spec.argsOfLast(s.bridge, "list_threads").page, 1,
                 "the feed read the next page")
         compare(spec.outcomesShown(s.view, "post"), 1,
                 "the outcome survives paging forward")
+        verify(spec.storedMessageShown(s.view, "post"),
+               "and it is still the message for a newly stored op, not another")
 
         spec.pressButtonReading(s.view, "Previous")
         compare(spec.argsOfLast(s.bridge, "list_threads").page, 0,
                 "the feed read the first page again")
         compare(spec.outcomesShown(s.view, "post"), 1,
                 "and paging back")
+        verify(spec.storedMessageShown(s.view, "post"),
+               "still the message for a newly stored op after paging back")
         s.view.destroy()
     }
 
@@ -632,6 +639,8 @@ TestCase {
         compare(spec.argsOfLast(s.bridge, "list_threads").includeHidden, true,
                 "the feed re-read asking for hidden posts")
         compare(spec.outcomesShown(s.view, "post"), 1)
+        verify(spec.storedMessageShown(s.view, "post"),
+               "and it is still the message for a newly stored op")
         s.view.destroy()
     }
 
@@ -645,6 +654,8 @@ TestCase {
         compare(spec.argsOfLast(s.bridge, "read_thread").includeHidden, true,
                 "the thread re-read asking for hidden posts")
         compare(spec.outcomesShown(s.view, "reply"), 1)
+        verify(spec.storedMessageShown(s.view, "reply"),
+               "and it is still the message for a newly stored op")
         s.view.destroy()
     }
 
