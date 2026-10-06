@@ -63,16 +63,68 @@ Each alternative tracks a proxy for that event, not the event itself:
   saying so, and it reverses the mount-once design that #152's fix and both
   screens' read triggers are built on.
 
-A transition passes through intermediate values. `openThread` empties `chosen`
-before it sets `reading`, so `screenShown` reads "list" for an instant. That is
-harmless, because beginning a visit only withdraws what the previous visit left.
+**A transition can pass through an intermediate value, and none of them begins
+a visit.** Every transition is `enterOnly`, which writes the four states in
+`stateNames` order (`previewing`, `chosen`, `reading`, `moderating`), and
+`screenShown`'s ternary tests `moderating` and `reading` before `chosen`. So the
+two routes out of the feed and the two routes back differ:
 
-**What breaks without it:** with the hook removed, the six absence tests in
-`tst_publish_outcome_visits.qml` fail on their absence assertions, each after
-its presence assertion has passed. Measured before the fix. Removing only the
-`thread` branch turns exactly
-`test_a_replys_outcome_is_gone_on_the_next_visit_to_the_thread` red (also
-measured).
+| Transition | `screenShown` takes, in order |
+|---|---|
+| list to feed (`open`) | "feed" |
+| feed to thread (`openThread`) | "list", "thread" |
+| thread to feed (`closeThread`) | "feed" |
+| feed to moderation (`moderateIn`) | "list", "moderation" |
+| moderation to feed (`closeModeration`) | "feed" |
+| feed to list (`closeFeed`) | "list" |
+
+On the way out, `chosen` is emptied before the destination is written, so the
+value reads "list" for an instant. On the way back, `chosen` is written while
+`reading` or `moderating` is still set, which leaves the value unchanged, and
+the next write empties the old state and moves it straight to "feed". Each
+return therefore calls `feed.beginVisit()` exactly once. The only intermediate
+is "list", and the hook does nothing for "list", so an intermediate never
+withdraws an outcome. An intermediate that did reach the hook would still be
+harmless unless a transition started and ended on the same screen, and no
+transition does. A transition that re-points a screen without changing
+`screenShown` is a different case, covered under Risks.
+
+The table was measured, not read off the setters: a scratch spec drove each
+transition on `Main.qml` and recorded every `screenShownChanged` value. A
+deliberately wrong expectation ("list", "feed" for `closeThread`) was also run
+and failed, so the comparison is not vacuous. The scratch spec was not
+committed. The tests below see where
+each transition lands, which is what a user can see. They do not see the values
+a transition passes through, so a reordering of `stateNames` that added a "list"
+step to a return would leave them green. By the argument above, it would also
+be harmless.
+
+**What breaks without it.** Measured against `tst_publish_outcome_visits.qml`
+as it stands. Each case makes the edit, runs
+`sh dialectica-ui/tests/run-qml-tests.sh dialectica-ui/tests/tst_publish_outcome_visits.qml`,
+and then reverts:
+
+- Removing the `feed` branch reddens the feed's absence tests. Each fails at its
+  absence assertion, after its presence assertion has passed:
+  `test_a_confirmation_is_gone_after_reopening_the_stoa_from_the_list`,
+  `test_a_confirmation_is_gone_after_returning_from_a_thread`,
+  `test_a_confirmation_is_gone_after_returning_from_moderation`,
+  `test_a_failed_read_on_the_later_visit_carries_no_outcome`,
+  `test_an_already_published_or_refused_outcome_is_gone_on_the_next_visit` and
+  `test_an_outcome_does_not_follow_the_user_into_another_stoa`.
+- Removing the `thread` branch reddens the reply composer's absence tests, in
+  the same way:
+  `test_a_replys_outcome_is_gone_on_the_next_visit_to_the_thread`,
+  `test_a_replys_outcome_does_not_follow_the_user_into_another_thread`,
+  `test_a_failed_read_on_the_later_visit_to_the_thread_carries_no_outcome` and
+  `test_every_kind_of_reply_outcome_is_gone_on_the_next_visit_to_the_thread`.
+  The thread failed-read test fails only after the retry. While the read is
+  failed, the composer is not rendered, so the outcome is absent with or
+  without the hook.
+- Removing the whole hook reddens the union of those two lists and nothing
+  else. `test_a_publish_on_the_later_visit_displays_its_own_outcome` stays green
+  without the hook, because the later publish replaces the outcome either way.
+  That test pins the later outcome. It does not pin the withdrawal.
 
 ### 2. The draft is kept across visits: the smallest change, and marked NO SPEC
 
@@ -85,6 +137,13 @@ pins it under a `NO SPEC:` marker.
 The alternative is to clear the draft in `beginVisit()` as well. That is one
 more line, but it decides a question the spec deliberately leaves open, and it
 throws away text the user typed. Both are choices for the owner to make.
+
+**What breaks without it:** if `clearOutcome()` also empties the draft, exactly
+the two `NO SPEC:` draft tests go red. They are
+`test_an_unsubmitted_draft_is_still_held_when_the_same_stoa_is_reopened` and
+`test_a_draft_typed_in_one_stoa_is_still_held_and_published_in_another`. Every
+outcome test stays green, so nothing else in the suite depends on the draft
+being kept. This was measured by mutating `clearOutcome()` and running the file.
 
 **The cross-Stoa case is real.** The feed's composer is one instance for every
 Stoa and takes its `stoaAddress` from the screen. So a draft typed in Stoa A is
@@ -104,6 +163,21 @@ split across two properties, and `DComposer`'s rule is that every write leaves
 them consistent. Keeping the one reset inside the component means a screen
 cannot clear one and leave the other.
 
+**What breaks without it, measured by mutating `clearOutcome()`:**
+
+- **Clearing only `outcomeDetail` brings the defect back.** It reddens the same
+  absence tests as removing the hook (Decision 1), because `outcome` is what
+  decides whether anything renders.
+- **Clearing only `outcome` leaves the suite green.** That is not a gap the
+  suite can close. Every path that writes `outcome` also writes `outcomeDetail`
+  (`applyReply`'s two success branches and `refuse`), and `DPublishOutcome`
+  renders `detail` only while the outcome is "refused". So a stale detail
+  behind an empty outcome cannot be displayed, and the next outcome overwrites
+  it. Writing both halves keeps the component's invariant, not a behaviour a
+  test can see. The detail would become visible only if a writer set "refused"
+  without setting the detail. That writer would be the defect, and this reset
+  would not stop it.
+
 ### 4. The outcome element is named `<kind>OutcomeMessage`
 
 `DComposer` names its `DPublishOutcome` from `kind`, as it already names the
@@ -117,9 +191,29 @@ the first version of this change.
 ### 5. Within a visit, nothing withdraws the outcome
 
 The re-read that follows a newly stored op does not touch the composer. This is
-the guard against over-correcting: clearing the outcome in `FeedScreen.reload()`
-passes every absence test, and it turns seven tests red, including
-`test_the_outcome_stays_across_the_re_read_that_follows_the_publish` (measured).
+the guard against over-correcting.
+
+**What breaks without it, measured** by making each edit and running the file:
+
+- **`composer.clearOutcome()` as the first line of `FeedScreen.reload()`**
+  turns red every feed test that publishes and then asserts the outcome
+  displayed. In each of them the first publish is newly stored or already
+  published, and that publish is followed by a re-read, so the outcome is gone
+  before the first presence assertion. That set includes
+  `test_the_outcome_stays_across_the_re_read_that_follows_the_publish`,
+  `test_the_outcome_stays_whatever_the_re_read_returns`,
+  `test_paging_the_feed_within_the_visit_keeps_the_outcome` and
+  `test_changing_what_the_feed_lists_within_the_visit_keeps_the_outcome`. It
+  also includes the feed's absence tests and
+  `test_a_publish_on_the_later_visit_displays_its_own_outcome`, each red at the
+  presence assertion it makes before leaving. So over-clearing does not pass
+  the absence tests: they cannot reach the assertion it would satisfy.
+- **`replyComposer.clearOutcome()` as the first line of `DThreadScreen.reload()`**
+  does the same to every reply test that publishes and then asserts the outcome
+  displayed. That set includes
+  `test_a_replys_outcome_stays_across_a_failed_re_read_of_the_thread` and
+  `test_changing_what_the_thread_lists_within_the_visit_keeps_the_outcome`, as
+  well as the reply composer's absence tests at their presence assertions.
 
 ## Risks / Trade-offs
 
