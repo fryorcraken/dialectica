@@ -15,6 +15,9 @@
 // §2.5 says widening the surface is a deliberate act, and a read head is an
 // implementation detail every decoder happens to share.
 mod cursor;
+// Private: the one shedding rule the delivery queue and the parked store share.
+// Neither owns it, so it lives in neither.
+mod shedding;
 
 pub mod arrival;
 pub mod asserted_time;
@@ -30,6 +33,7 @@ pub mod moderation;
 pub mod names;
 pub mod onboarding;
 pub mod op;
+pub mod parked;
 pub mod revision;
 pub mod sanitise;
 pub mod sender;

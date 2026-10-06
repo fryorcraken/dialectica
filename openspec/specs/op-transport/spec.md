@@ -672,278 +672,6 @@ Once the module's startup has wired delivery, when this peer has no channel open
 - **THEN** channel creation is requested before the send
 - **AND** the send is requested on the channel identifier that was created
 
-### Requirement: Every payload the reliable channel delivers passes the inbound boundary
-
-Every message delivery hands over as received on a reliable channel MUST be put through the boundary "Every inbound payload is validated before it reaches storage" contracts, with the channel identifier, sender identifier and payload it arrived with. An op received from the network MUST reach the op log by no other route.
-
-No other delivery event is an arrival. A message delivered outside a reliable channel, and a report on this peer's own send, MUST NOT reach the op log.
-
-**The receive window MUST be judged against this peer's own clock, read when the payload is processed**, and never against the timestamp the delivery event carries.
-
-Each refusal MUST be recorded in the module's log naming which refusal it was. **The log MUST NOT carry the payload, the sender identifier, or a channel identifier this peer has no channel open under**: whoever sent the message chose each of them, and a channel identifier this peer did not open may belong to another application sharing the node.
-
-A delivered message whose fields cannot be read MUST be discarded and recorded in the module's log, however the reading fails, a panic in the code that reads them included. A refusal, a discarded message, or a failure to store MUST NOT stop the peer from processing the messages that follow.
-
-**A message the op log cannot take is not decided again.** When the op log cannot be opened, or the append fails, the module's log MUST record it as a storage failure, and the message MUST NOT be held for another attempt: its op is in the log afterwards only if it arrives again.
-
-**A message arriving on a channel that is not open, but is being opened, MUST be judged only once that open is settled** — reported held (created, or already existing, as `stoa-membership`'s requirement "Creating or joining a Stoa opens its reliable channel" says), declined, failed, given up by this peer after asking delivery and receiving no answer, or given up by this peer without delivery being asked — and against the channels open then, unless the wait below expires first. Delivery can hand over a message on a channel before its answer to the creation reaches this peer. A message on any other channel identifier, an open one included, MUST be judged without waiting on any open.
-
-**That wait is bounded by a fixed time for each open, not for each message.** An open being waited on has a time, which ends that fixed time after it starts. The time is started by the first message to begin waiting on the open after the latest create, join or startup asking for its channel, and is started again when this peer asks delivery to create that channel, as "Asking delivery to create a channel starts the open's time again" below says; nothing else starts it. A message MUST be judged no later than the end of the open's time as it stood when the message began waiting, whether or not delivery ever answers the open, save for the one extension that paragraph allows. Once the open's time has ended with the open unanswered, the wait on it has expired: the message waiting then, and every message on that channel taken after it until a request or an ask starts the open's time again, MUST be judged without waiting on that open, against the channels open when it is judged. How long one start of an open's time can hold up the messages on every other channel is therefore at most that fixed time, however many messages arrive on its channel.
-
-**Asking delivery to create a channel starts the open's time again.** When this peer asks delivery to create a channel that is being opened, the open's time MUST start again at that ask, whether or not a message is waiting on the open and whether or not its time had already ended. A message waiting on the open when the ask is made, whose end has not yet passed, MUST then be judged no later than that fixed time after the ask, in place of the end it began waiting with, and its wait expires then rather than earlier. **A message whose end has already passed when the ask is made is not extended, even where it has not yet been judged:** its wait has expired, and it MUST be judged without waiting on that open, as the paragraph above says. That extension is made once for a message: a later ask made while the same message still waits starts the open's time again for the messages taken after it, and MUST NOT move that message's end again. Only this peer asks delivery to create a channel, so no sender can start an open's time again or extend a message's wait.
-
-**That fixed time MUST be longer than the longest this peer waits for delivery to answer one channel creation, and that longest MUST be longer than the time delivery allows itself to answer one.** The order is contracted here; the values are not. With it, a message waiting on an open when this peer asks delivery to create its channel, where its end has not yet passed and that is the first ask made while it waits, and a message that begins waiting on the open after that ask, is judged only after delivery has answered that creation or this peer has given up waiting for the answer; and this peer does not give up on a creation that delivery would still answer within its own time. **Not every message racing a creation is covered, and one that is not can be refused, and lost, before delivery answers:** a message whose wait expired before this peer asked delivery for its channel, whether or not it had been judged by the time of the ask, because its open waited behind other requests this peer had made of delivery for longer than the fixed time, together with every message on that channel taken after that expiry and before the ask; and a message whose wait an earlier ask had already extended, when a later ask for the same channel is made while it still waits.
-
-**The following is a consequence of the requirements above and adds none.** A message waits on an open only while it is the one being judged, and waiting payloads are judged in the order they arrived, so each start of an open's time holds the messages on every other channel up at most once, for at most that fixed time, and the waits of opens left unanswered at the same time run one after another. A message whose wait an ask extends holds them up for less than twice that fixed time: less than it before the ask, since its wait would otherwise have expired, and no more than it after. No wait extends past the moment its own open settles. How long they can hold the other channels up in all is therefore no more than that fixed time for each start of an open's time, and never extends past the moment the last of those opens settles. Only this peer's own creates, joins, startup and asks of delivery start an open's time, so that total is set by what this peer asks for, and no sender can lengthen it by putting more messages on any channel.
-
-**An expired wait changes nothing else about the open.** The channel is still being opened: delivery's answer, when it comes, settles the open as above, and a message delivery hands over on that channel identifier is not refused on hand-over for being on a channel neither open nor being opened. Only a later create, join or startup asking for that channel, or this peer asking delivery to create it, lets a message wait on it again, and that wait is bounded in the same way.
-
-**A request for a channel starts a new wait for the messages that begin waiting after it, and does not lengthen a wait already under way.** A message already waiting when a create, join or startup asks for its channel again MUST be judged no later than the end it began waiting with, or the end the first ask made while it waits moved it to, however many such requests are made while it waits: a request moves no waiting message's end, and only an ask does, once, as above. The new wait applies only to messages on that channel that begin waiting after the request.
-
-**A channel is being opened from the moment a create, a join or the module's startup asks for it, not from the moment delivery is asked.** An open that waits behind other requests this peer has made of delivery is being opened while it waits. It stays so until delivery's answer settles it, or until this peer gives up asking for it, and an open this peer never goes on to ask delivery for is given up. Delivery can hand over a message on a channel before this peer has asked delivery for that channel at all: a module restarted while delivery kept running is handed messages on its Stoas' channels from the moment it subscribes, while its own requests for those channels still wait behind node creation and behind each other.
-
-**The module's startup MUST count the channel of every Stoa it asks for as being opened before it checks any message delivery hands over**, whether that check is made on hand-over or at the boundary.
-
-**If this peer cannot subscribe to the messages delivery hands over on reliable channels, the module's log MUST record that this peer will not receive ops from other peers**, and node creation, channel creation and sends MUST still be requested as they would have been otherwise.
-
-#### Scenario: An op another peer published is stored
-
-- **WHEN** a message arrives on a channel this peer has open, carrying a valid op that names that channel's Stoa and whose counter is within the receive window of this peer's clock
-- **THEN** the op is in the log
-- **AND** its recorded arrival reports it as not ordered by the transport
-
-#### Scenario: The window is judged by this peer's clock, not the event's timestamp
-
-- **WHEN** a message carries a valid op whose counter is more than one hour ahead of this peer's clock when it is processed, and the event's timestamp is later still
-- **THEN** the op is refused as ahead of this peer's time
-- **AND** it is not stored
-
-#### Scenario: An event timestamp far in the past does not refuse an op within the window
-
-- **WHEN** a message carries a valid op whose counter is within the receive window of this peer's clock when it is processed, and the event's timestamp is decades earlier
-- **THEN** the op is stored
-
-#### Scenario: A refusal is logged by kind, without text the sender chose
-
-- **WHEN** a message arrives on a channel identifier this peer has not opened, carrying a distinctive sender identifier and payload
-- **THEN** the module's log records the refusal as an unknown channel
-- **AND** the log contains neither that channel identifier, nor that sender identifier, nor the payload's bytes
-
-#### Scenario: The peer keeps processing after an unreadable message
-
-- **WHEN** a message whose fields cannot be read is followed by one carrying a valid op on an open channel
-- **THEN** the valid op is stored
-
-#### Scenario: A panic reading one message does not end reception
-
-- **WHEN** reading one delivered message's fields panics, and a message carrying a valid op then arrives on a channel this peer has open
-- **THEN** the module's log records the failure
-- **AND** the valid op is stored
-
-#### Scenario: A message the op log cannot take is logged and not retried
-
-- **WHEN** a message carrying a valid op arrives on an open channel while the op log cannot be opened, and the op log can be opened again afterwards
-- **THEN** the module's log records a storage failure
-- **AND** the op is not in the op log afterwards
-
-#### Scenario: A message arriving while its channel opens is stored once delivery reports the channel created
-
-- **WHEN** this peer has requested a Stoa's channel, a message carrying a valid op for that Stoa arrives on it before delivery has answered, and delivery then reports the channel created
-- **THEN** the op is stored
-- **AND** it is not refused as arriving on an unknown channel
-
-#### Scenario: A message arriving while its channel opens is refused once delivery declines the open
-
-- **WHEN** this peer has requested a Stoa's channel, a message carrying a valid op for that Stoa arrives on it before delivery has answered, and delivery then answers the creation with its error shape, for a reason other than that the channel already exists
-- **THEN** the message is refused as arriving on an unknown channel
-- **AND** the refusal is made after delivery's answer, not before it
-
-#### Scenario: A message waiting on an open delivery never answers is judged after a bounded wait
-
-- **WHEN** this peer has requested a Stoa's channel, delivery never answers the creation, and a message carrying a valid op for that Stoa arrives on it
-- **THEN** the message is refused as arriving on an unknown channel while delivery has still not answered
-- **AND** a message carrying a valid op, arriving after it on a channel this peer has open, is then stored
-
-#### Scenario: Many messages on one unanswered open hold other channels up for one wait, not one each
-
-- **WHEN** this peer has requested a Stoa's channel, delivery never answers the creation, at least three messages arrive one after another on that channel identifier, this peer does not ask delivery to create that channel while any of them waits, and a message carrying a valid op then arrives on a channel this peer has open
-- **THEN** each message on the unanswered channel is refused as arriving on an unknown channel while delivery has still not answered
-- **AND** the valid op is stored before the fixed time has passed twice over, counted from when the first of those messages began waiting
-
-#### Scenario: Each unanswered open's wait is its own
-
-- **WHEN** this peer has requested two Stoas' channels, delivery answers neither creation, a message arrives on the first Stoa's channel identifier, then one on the second Stoa's, and then a message carrying a valid op on a channel this peer has open, and this peer asks delivery to create neither channel while either of those messages waits
-- **THEN** each message on an unanswered channel is refused as arriving on an unknown channel while delivery has still not answered
-- **AND** the message on the second Stoa's channel is refused no sooner than the fixed time after the message on the first was refused
-- **AND** the valid op is stored before the fixed time has passed three times over, counted from when the first of those messages began waiting
-
-#### Scenario: A message's wait outlasts this peer's wait on a creation, which outlasts delivery's own
-
-- **WHEN** the fixed time a message may wait on an open, the longest this peer waits for delivery to answer one channel creation, and the time delivery allows itself to answer one are compared
-- **THEN** the time delivery allows itself is the shortest of the three
-- **AND** the fixed time a message may wait on an open is the longest
-
-#### Scenario: An open whose wait has expired still opens its channel when delivery answers
-
-- **WHEN** a message has waited on a Stoa's unanswered channel open until the fixed time passed, a message carrying a valid op for that Stoa is then handed over on its channel identifier while the boundary is held up deciding another payload, and delivery reports the channel created before the boundary is released
-- **THEN** that op is stored
-- **AND** it is not refused as arriving on an unknown channel
-
-#### Scenario: A new request for a channel whose wait has expired lets a message wait again
-
-- **WHEN** a message has waited on a Stoa's unanswered channel open until the fixed time passed, the peer then joins that Stoa again, a message carrying a valid op for that Stoa arrives on its channel identifier, and delivery then reports the channel created
-- **THEN** the op is stored
-- **AND** it is not refused as arriving on an unknown channel
-
-#### Scenario: A message waiting when this peer asks delivery for its channel is judged after delivery answers
-
-- **WHEN** a message carrying a valid op for a Stoa begins waiting on that Stoa's channel open before this peer has asked delivery to create the channel, this peer then asks delivery to create it before the message's end has passed, and delivery reports the channel created after the fixed time has passed since the message began waiting, but before it has passed since the ask
-- **THEN** the op is stored
-- **AND** it is not refused as arriving on an unknown channel
-
-#### Scenario: An earlier message on a queued open does not cost an op that arrives while delivery is asked
-
-- **WHEN** a message begins waiting on a Stoa's channel open before this peer has asked delivery to create the channel, this peer then asks delivery to create it, a message carrying a valid op for that Stoa is then handed over on its channel identifier, and delivery reports the channel created after the fixed time has passed since the first message began waiting, but before it has passed since the ask
-- **THEN** the op is stored
-- **AND** it is not refused as arriving on an unknown channel
-
-#### Scenario: Asking delivery for a channel whose wait has expired lets a message wait again
-
-- **WHEN** a message has waited on a Stoa's channel open until the fixed time passed, before this peer asked delivery to create the channel, this peer then asks delivery to create it, a message carrying a valid op for that Stoa arrives on its channel identifier, and delivery then reports the channel created
-- **THEN** the op is stored
-- **AND** it is not refused as arriving on an unknown channel
-
-#### Scenario: A second ask while a message waits does not extend its wait again
-
-- **WHEN** a message is waiting on a Stoa's unanswered channel open, and this peer asks delivery to create that channel twice while the message waits, with delivery answering neither ask
-- **THEN** the message is refused as arriving on an unknown channel no later than the fixed time after the first of those asks
-
-#### Scenario: An ask made once a message's end has passed does not make it wait again
-
-- **WHEN** a message is waiting on a Stoa's unanswered channel open before this peer has asked delivery to create the channel, its end passes while this peer is held up before judging it, and this peer asks delivery to create that channel after that end and before the message is judged, with delivery answering neither
-- **THEN** the message is refused as arriving on an unknown channel
-- **AND** it is refused before the fixed time has passed since the ask
-
-#### Scenario: Requests made while a message waits do not lengthen its wait
-
-- **WHEN** a message is waiting on a Stoa's unanswered channel open, and that channel is asked for again and again for as long as the message waits, with none of those requests reported created and none of them yet asked of delivery
-- **THEN** the message is refused as arriving on an unknown channel while those requests are still being made
-- **AND** the first open is still unanswered when it is refused
-
-#### Scenario: An open this peer gives up without asking delivery does not hold a message up
-
-- **WHEN** the storage that retains sender identifiers cannot be written, a Stoa's channel is to be opened for the first time, and, once the module's log has recorded that Stoa, a message arrives on that Stoa's channel identifier
-- **THEN** channel creation is not requested for that Stoa
-- **AND** the message is refused as arriving on an unknown channel before the fixed time a message may wait on an open has passed
-
-#### Scenario: A message on a channel not being opened does not wait on another channel's open
-
-- **WHEN** one Stoa's channel open is requested and unanswered, and a message arrives on a channel identifier this peer has neither open nor being opened
-- **THEN** that message is refused as arriving on an unknown channel before the open is answered
-
-#### Scenario: A message on an open channel does not wait on a repeated open
-
-- **WHEN** a Stoa's channel is open, its opening is requested again and not yet answered, and a message carrying a valid op for that Stoa arrives on it
-- **THEN** the op is stored before the repeated open is answered
-
-#### Scenario: A message on a channel whose open waits behind another is judged once that open settles
-
-- **WHEN** this peer has asked delivery for one Stoa's channel and delivery has not answered, a second Stoa is then joined, a message carrying a valid op for the second Stoa arrives on its channel identifier before delivery has been asked to create that channel, and delivery then reports both channels created
-- **THEN** the op is stored
-- **AND** it is not refused as arriving on an unknown channel
-
-#### Scenario: A restarted peer keeps what delivery hands over before startup asks for its channel
-
-- **WHEN** the module starts while the peer is in a Stoa and delivery has not yet answered node creation, a message carrying a valid op for that Stoa is the first thing delivery hands over after this peer subscribes, and delivery then answers node creation and answers that channel's creation that the channel already exists
-- **THEN** the op is stored
-- **AND** it is not refused as arriving on an unknown channel
-
-#### Scenario: A peer that cannot subscribe still publishes
-
-- **WHEN** subscribing to reliable-channel messages fails at startup, the peer is in a Stoa, and a post is then published into it
-- **THEN** the module's log records that this peer will not receive ops from other peers
-- **AND** channel creation is requested for the Stoa
-- **AND** delivery is asked to send the post
-
-#### Scenario: Only reliable-channel receipts reach the op log
-
-- **WHEN** this application is examined for which delivery events can reach the op log
-- **THEN** the only one is a message received on a reliable channel
-- **AND** a report on this peer's own send is not among them
-
-### Requirement: Inbound payloads waiting for the boundary are bounded
-
-The payloads this peer holds between delivery handing them over and the boundary deciding them MUST be bounded by a fixed count. Taking a message from delivery MUST NOT wait on the boundary deciding any payload, the refusals below included.
-
-Waiting payloads MUST be decided in the order they arrived. When the bound is reached, a payload arriving MUST be discarded, and the payloads already waiting MUST be kept.
-
-A discarded payload is not stored. Every discard MUST be counted from the module's start, and each MUST be recorded in the module's log with the running count. A discard's log record MUST be distinguishable from a refusal's, and MUST NOT carry the payload or the sender identifier.
-
-**A message on a channel identifier this peer has neither open nor being opened MUST NOT take a place among the waiting payloads.** It MUST be refused as arriving on an unknown channel when delivery hands it over, and recorded in the module's log as that refusal is recorded by "Every payload the reliable channel delivers passes the inbound boundary". It MUST NOT count towards the bound and MUST NOT be counted or logged as a discard. Whether a channel is open or being opened — "being opened" as "Every payload the reliable channel delivers passes the inbound boundary" defines it — is judged when delivery hands the message over.
-
-**A payload larger than the message limit MUST NOT take a place among the waiting payloads either**, on a channel that is open or being opened. It MUST be refused as over-long when delivery hands it over, as "An oversized payload is refused, against a limit pinned at 150 KiB" contracts, and recorded in the module's log as that refusal is recorded. It MUST NOT count towards the bound and MUST NOT be counted or logged as a discard. A payload of exactly the limit is not refused for its size. The payload bytes held waiting are therefore bounded by the bound times 150 KiB, whatever the largest message the node carries. A message on a channel identifier neither open nor being opened is refused as arriving on an unknown channel, as above, whatever its size.
-
-A message refused when delivery hands it over is not among the waiting payloads, and "decided in the order they arrived" does not order its refusal against their decisions.
-
-#### Scenario: The waiting payloads never exceed the bound
-
-- **WHEN** more payloads than the bound arrive on a channel this peer has open while none is decided
-- **THEN** the number waiting equals the bound
-
-#### Scenario: A full queue keeps what it holds and discards the arrival
-
-- **WHEN** the bound is reached and one more payload arrives
-- **THEN** the payloads decided next are the ones that were waiting, in the order they arrived
-- **AND** the arriving payload is not stored
-
-#### Scenario: Every discard is counted and logged apart from refusals
-
-- **WHEN** three payloads are discarded
-- **THEN** the running count recorded with the third discard is three
-- **AND** each discard's log record is distinguishable from a refusal's
-
-#### Scenario: Traffic on a channel this peer is not opening takes no place in the queue
-
-- **WHEN** the boundary is held up deciding one payload, more messages than the bound then arrive on a channel identifier this peer has neither open nor being opened, and a message carrying a valid op then arrives on a channel this peer has open
-- **THEN** each of the messages on the channel identifier this peer is not opening is recorded as refused as arriving on an unknown channel, before the boundary is released
-- **AND** no discard is recorded
-- **AND** the valid op is stored once the boundary is released
-
-#### Scenario: An oversized payload on an open channel takes no place in the queue
-
-- **WHEN** the boundary is held up deciding one payload, more payloads than the bound then arrive on a channel this peer has open, each one byte larger than the message limit, and a message carrying a valid op then arrives on that channel
-- **THEN** each oversized payload is recorded as refused as over-long, before the boundary is released
-- **AND** no discard is recorded
-- **AND** the valid op is stored once the boundary is released
-
-#### Scenario: A payload at the limit waits its turn
-
-- **WHEN** the boundary is held up deciding one payload, and a payload of exactly the message limit then arrives on a channel this peer has open
-- **THEN** no refusal is recorded for it before the boundary is released
-- **AND** it is not refused as over-long after the boundary is released
-
-### Requirement: Nothing of a message's wait on an open is kept once it is judged
-
-Once a message that waited on an open, as "Every payload the reliable channel delivers passes the inbound boundary" describes, has been judged, this peer MUST hold no record of that message's wait. This holds whichever way the wait ended — the open settled, the open's time ended while the message waited, or the message was judged at once because that time had already ended — and whether or not the channel is still being opened afterwards.
-
-**The following is a consequence of the requirements above and adds none.** A message waits on an open only while it is the one being judged, so this peer holds a record of at most one message's wait at any time, however many messages a sender puts on a channel being opened and however long that open goes unanswered.
-
-#### Scenario: A message that waited its open's time out leaves no record of its wait
-
-- **WHEN** a message has waited on a Stoa's unanswered channel open until the fixed time passed, and the channel is still being opened
-- **THEN** this peer holds no record of that message's wait on that open
-
-#### Scenario: Messages judged at once after an open's time has ended leave no record of their waits
-
-- **WHEN** a message has waited on a Stoa's unanswered channel open until the fixed time passed, and three more messages then arrive on that channel identifier and are each refused as arriving on an unknown channel while the channel is still being opened
-- **THEN** this peer holds no more records of messages' waits on that open than it held before those three arrived
-
-#### Scenario: A message whose open settles held leaves no record while another request for the channel is pending
-
-- **WHEN** a Stoa's channel has been requested twice, a message carrying a valid op for that Stoa waits on the open, and delivery reports the first request's channel created while the second request is still pending
-- **THEN** the op is stored
-- **AND** this peer holds no record of that message's wait on that open while the second request is still pending
-
 ### Requirement: The sender identifier this peer supplies is its own, stable, and says nothing about its author
 
 When this peer opens a Stoa's channel, the sender identifier it supplies MUST:
@@ -985,3 +713,497 @@ Every participant in a channel sees the sender identifier. What a receiving peer
 - **WHEN** the storage that retains sender identifiers cannot be written, and a Stoa's channel is to be opened for the first time
 - **THEN** channel creation is not requested for that Stoa
 - **AND** the module's log records the Stoa
+
+### Requirement: A message a reliable channel delivers reaches the op log only through the inbound boundary
+
+Every message delivery hands over as received on a reliable channel MUST be put through the boundary "Every inbound payload is validated before it reaches storage" contracts, with the channel identifier and payload it arrived with, and, unless it was parked, with the sender identifier it arrived with. An op received from the network MUST reach the op log by no other route.
+
+A parked message is put through the boundary without a sender identifier, because none is kept for it, as "Parked messages are kept apart from the op log, survive a restart, and keep no sender identifier" requires. The boundary decides nothing from one, as "The transport's sender identifier is never an identity" requires.
+
+No other delivery event is an arrival. A message delivered outside a reliable channel, and a report on this peer's own send, MUST NOT reach the op log.
+
+**The receive window MUST be judged against this peer's own clock, read when the payload is judged** — for a parked message, when its review judges it — and never against the timestamp the delivery event carries.
+
+Each refusal MUST be recorded in the module's log naming which refusal it was. **The log MUST NOT carry the payload, the sender identifier, or a channel identifier this peer has no channel open under**: whoever sent the message chose each of them, and a channel identifier this peer did not open may belong to another application sharing the node.
+
+A delivered message whose fields cannot be read MUST be discarded and recorded in the module's log, however the reading fails, a panic in the code that reads them included. A refusal, a discarded message, or a failure to store MUST NOT stop the peer from processing the messages that follow.
+
+**A message the op log cannot take is not decided again.** When the op log cannot be opened, or the append fails, the module's log MUST record it as a storage failure, and the message MUST NOT be held for another attempt: its op is in the log afterwards only if it arrives again.
+
+**What happens to a message on a channel that is not open but is being opened is "A message on a channel being opened is parked, and nothing waits on an open".** Delivery can hand over a message on a channel before its answer to the creation reaches this peer. Deciding a message MUST NOT wait on any channel's open, whichever channel the message is on.
+
+**A channel is being opened from the moment a create, a join or the module's startup asks for it, not from the moment delivery is asked, and it stays being opened until every such request for it has settled.** A request settles when delivery reports that it holds the channel — created, or already existing, as `stoa-membership`'s requirement "Creating or joining a Stoa opens its reliable channel" says — when delivery declines or fails the creation, when this peer gives up after asking delivery and receiving no answer, or when this peer gives up the request without asking delivery. An open this peer never goes on to ask delivery for is given up. An open that waits behind other requests this peer has made of delivery is being opened while it waits. Delivery can hand over a message on a channel before this peer has asked delivery for that channel at all: a module restarted while delivery kept running is handed messages on its Stoas' channels from the moment it subscribes, while its own requests for those channels still wait behind node creation and behind each other.
+
+**The longest this peer waits for delivery to answer one channel creation MUST be longer than the time delivery allows itself to answer one.** The order is contracted here; the values are not. With it, this peer does not give up on a creation that delivery would still answer within its own time.
+
+**The module's startup MUST count the channel of every Stoa it asks for as being opened before it checks any message delivery hands over**, whether that check is made on hand-over or when the message is taken from the waiting payloads.
+
+**If this peer cannot subscribe to the messages delivery hands over on reliable channels, the module's log MUST record that this peer will not receive ops from other peers**, and node creation, channel creation and sends MUST still be requested as they would have been otherwise.
+
+#### Scenario: An op another peer published is stored
+
+- **WHEN** a message arrives on a channel this peer has open, carrying a valid op that names that channel's Stoa and whose counter is within the receive window of this peer's clock
+- **THEN** the op is in the log
+- **AND** its recorded arrival reports it as not ordered by the transport
+
+#### Scenario: The window is judged by this peer's clock, not the event's timestamp
+
+- **WHEN** a message carries a valid op whose counter is more than one hour ahead of this peer's clock when it is judged, and the event's timestamp is later still
+- **THEN** the op is refused as ahead of this peer's time
+- **AND** it is not stored
+
+#### Scenario: An event timestamp far in the past does not refuse an op within the window
+
+- **WHEN** a message carries a valid op whose counter is within the receive window of this peer's clock when it is judged, and the event's timestamp is decades earlier
+- **THEN** the op is stored
+
+#### Scenario: A refusal is logged by kind, without text the sender chose
+
+- **WHEN** a message arrives on a channel identifier this peer has not opened, carrying a distinctive sender identifier and payload
+- **THEN** the module's log records the refusal as an unknown channel
+- **AND** the log contains neither that channel identifier, nor that sender identifier, nor the payload's bytes
+
+#### Scenario: The peer keeps processing after an unreadable message
+
+- **WHEN** a message whose fields cannot be read is followed by one carrying a valid op on an open channel
+- **THEN** the valid op is stored
+
+#### Scenario: A panic reading one message does not end reception
+
+- **WHEN** reading one delivered message's fields panics, and a message carrying a valid op then arrives on a channel this peer has open
+- **THEN** the module's log records the failure
+- **AND** the valid op is stored
+
+#### Scenario: A message the op log cannot take is logged and not retried
+
+- **WHEN** a message carrying a valid op arrives on an open channel while the op log cannot be opened, and the op log can be opened again afterwards
+- **THEN** the module's log records a storage failure
+- **AND** the op is not in the op log afterwards
+
+#### Scenario: A message arriving while its channel opens is stored once delivery reports the channel created
+
+- **WHEN** this peer has requested a Stoa's channel, a message carrying a valid op for that Stoa arrives on it before delivery has answered, and delivery then reports the channel created
+- **THEN** the op is stored
+- **AND** it is not refused as arriving on an unknown channel
+
+#### Scenario: A message arriving while its channel opens is refused once delivery declines the open
+
+- **WHEN** this peer has requested a Stoa's channel, a message carrying a valid op for that Stoa arrives on it before delivery has answered, and delivery then answers the creation with its error shape, for a reason other than that the channel already exists
+- **THEN** the message is refused as arriving on an unknown channel
+- **AND** the refusal is made after delivery's answer, not before it
+
+#### Scenario: This peer's wait on a creation outlasts delivery's own
+
+- **WHEN** the longest this peer waits for delivery to answer one channel creation is compared with the time delivery allows itself to answer one, written as a literal independently of the implementation
+- **THEN** this peer's wait is the longer
+
+#### Scenario: An open this peer gives up without asking delivery leaves nothing parked
+
+- **WHEN** the storage that retains sender identifiers cannot be written, a Stoa's channel is to be opened for the first time, and, once the module's log has recorded that Stoa, a message arrives on that Stoa's channel identifier
+- **THEN** channel creation is not requested for that Stoa
+- **AND** the message is refused as arriving on an unknown channel
+- **AND** nothing is parked on that channel afterwards
+
+#### Scenario: A message on a channel not being opened does not wait on another channel's open
+
+- **WHEN** one Stoa's channel open is requested and unanswered, and a message arrives on a channel identifier this peer has neither open nor being opened
+- **THEN** that message is refused as arriving on an unknown channel before the open is answered
+
+#### Scenario: A message on an open channel does not wait on a repeated open
+
+- **WHEN** a Stoa's channel is open, its opening is requested again and not yet answered, and a message carrying a valid op for that Stoa arrives on it
+- **THEN** the op is stored before the repeated open is answered
+- **AND** no park is recorded for it
+
+#### Scenario: A message on a channel whose open waits behind another is judged once that open settles
+
+- **WHEN** this peer has asked delivery for one Stoa's channel and delivery has not answered, a second Stoa is then joined, a message carrying a valid op for the second Stoa arrives on its channel identifier before delivery has been asked to create that channel, and delivery then reports both channels created
+- **THEN** the op is stored
+- **AND** it is not refused as arriving on an unknown channel
+
+#### Scenario: A restarted peer keeps what delivery hands over before startup asks for its channel
+
+- **WHEN** the module starts while the peer is in a Stoa and delivery has not yet answered node creation, a message carrying a valid op for that Stoa is the first thing delivery hands over after this peer subscribes, and delivery then answers node creation and answers that channel's creation that the channel already exists
+- **THEN** the op is stored
+- **AND** it is not refused as arriving on an unknown channel
+
+#### Scenario: A peer that cannot subscribe still publishes
+
+- **WHEN** subscribing to reliable-channel messages fails at startup, the peer is in a Stoa, and a post is then published into it
+- **THEN** the module's log records that this peer will not receive ops from other peers
+- **AND** channel creation is requested for the Stoa
+- **AND** delivery is asked to send the post
+
+#### Scenario: Only reliable-channel receipts reach the op log
+
+- **WHEN** this application is examined for which delivery events can reach the op log
+- **THEN** the only one is a message received on a reliable channel
+- **AND** a report on this peer's own send is not among them
+
+### Requirement: Inbound payloads waiting to be taken are bounded
+
+The payloads this peer holds between delivery handing them over and the boundary taking them MUST be bounded by a fixed count. Taking a message from delivery MUST NOT wait on the boundary deciding any payload, the refusals below included, and MUST NOT wait on any channel's open.
+
+Waiting payloads MUST be taken in the order they arrived.
+
+**When the bound is reached, the newest waiting payload of the channel holding the most waiting payloads, counting the arriving payload with its own channel, MUST be discarded**, and every other payload MUST be kept, the arriving one included whenever it is not the one discarded. Newest means arrived latest. When several channels hold the most, the arriving payload's own channel MUST be the one chosen if it is among them; otherwise the one among them whose newest waiting payload arrived latest. So when every waiting payload is on the arriving payload's channel, the arriving payload is the one discarded. This is the rule "Parked messages are bounded per channel and in total" applies to its total bounds.
+
+A discarded payload is not stored. Every discard MUST be counted from the module's start, and each MUST be recorded in the module's log with the running count. A discard's log record MUST be distinguishable from a refusal's and from a park's, and MUST NOT carry the payload or the sender identifier.
+
+**A message on a channel identifier this peer has neither open nor being opened MUST NOT take a place among the waiting payloads.** It MUST be refused as arriving on an unknown channel when delivery hands it over, and recorded in the module's log as that refusal is recorded by "A message a reliable channel delivers reaches the op log only through the inbound boundary". It MUST NOT count towards the bound and MUST NOT be counted or logged as a discard. Whether a channel is open or being opened — "being opened" as "A message a reliable channel delivers reaches the op log only through the inbound boundary" defines it — is judged when delivery hands the message over.
+
+**A payload larger than the message limit MUST NOT take a place among the waiting payloads either**, on a channel that is open or being opened. It MUST be refused as over-long when delivery hands it over, as "An oversized payload is refused, against a limit pinned at 150 KiB" contracts, and recorded in the module's log as that refusal is recorded. It MUST NOT count towards the bound and MUST NOT be counted or logged as a discard. A payload of exactly the limit is not refused for its size. The payload bytes held waiting are therefore bounded by the bound times 150 KiB, whatever the largest message the node carries. A message on a channel identifier neither open nor being opened is refused as arriving on an unknown channel, as above, whatever its size.
+
+A message refused when delivery hands it over is not among the waiting payloads, and "taken in the order they arrived" does not order its refusal against what happens to them.
+
+#### Scenario: The waiting payloads never exceed the bound
+
+- **WHEN** more payloads than the bound arrive on a channel this peer has open while none is taken
+- **THEN** the number waiting equals the bound
+
+#### Scenario: A full queue on one channel keeps what it holds and discards the arrival
+
+- **WHEN** every waiting payload is on one channel, the bound is reached, and one more payload arrives on that channel
+- **THEN** the payloads taken next are the ones that were waiting, in the order they arrived
+- **AND** the arriving payload is not stored
+
+#### Scenario: A full queue discards the newest payload of the channel holding the most
+
+- **WHEN** the boundary is held up deciding one payload, payloads arrive on one open channel until it holds more waiting payloads than any other and the bound is reached, and a message carrying a valid op then arrives on a second open channel holding fewer
+- **THEN** the payload that arrived last on the first channel is recorded as discarded
+- **AND** the valid op is stored once the boundary is released
+
+#### Scenario: The arriving payload's channel loses a tie for the most
+
+- **WHEN** the bound is reached, and a payload arrives on an open channel that, counting the arrival, holds as many waiting payloads as another channel holds, with no channel holding more
+- **THEN** the arriving payload is the one discarded
+- **AND** every payload that was already waiting is kept
+
+#### Scenario: Among other channels tied for the most waiting, the one whose newest arrived latest gives up its newest
+
+- **WHEN** the boundary is held up deciding one payload, messages carrying distinct valid ops arrive on two open channels until the bound is reached with each of the two holding as many waiting payloads as the other, the first and the last of them arriving on the first channel, and a message carrying a valid op then arrives on a third open channel
+- **THEN** the payload that arrived last on the first channel is recorded as discarded
+- **AND** every other of those ops, the third channel's included, is stored once the boundary is released
+
+#### Scenario: Every discard is counted and logged apart from refusals
+
+- **WHEN** three payloads are discarded
+- **THEN** the running count recorded with the third discard is three
+- **AND** each discard's log record is distinguishable from a refusal's
+
+#### Scenario: Traffic on a channel this peer is not opening takes no place in the queue
+
+- **WHEN** the boundary is held up deciding one payload, more messages than the bound then arrive on a channel identifier this peer has neither open nor being opened, and a message carrying a valid op then arrives on a channel this peer has open
+- **THEN** each of the messages on the channel identifier this peer is not opening is recorded as refused as arriving on an unknown channel, before the boundary is released
+- **AND** no discard is recorded
+- **AND** the valid op is stored once the boundary is released
+
+#### Scenario: An oversized payload on an open channel takes no place in the queue
+
+- **WHEN** the boundary is held up deciding one payload, more payloads than the bound then arrive on a channel this peer has open, each one byte larger than the message limit, and a message carrying a valid op then arrives on that channel
+- **THEN** each oversized payload is recorded as refused as over-long, before the boundary is released
+- **AND** no discard is recorded
+- **AND** the valid op is stored once the boundary is released
+
+#### Scenario: A payload at the limit waits its turn
+
+- **WHEN** the boundary is held up deciding one payload, and a payload of exactly the message limit then arrives on a channel this peer has open
+- **THEN** no refusal is recorded for it before the boundary is released
+- **AND** it is not refused as over-long after the boundary is released
+
+### Requirement: A message on a channel being opened is parked, and nothing waits on an open
+
+When the boundary takes a payload from the waiting payloads, its channel's state at that instant MUST decide what happens to it. The state is read once for each payload, and the payload is parked or judged on that one reading:
+
+- **The channel is open**, whether or not a further request for it is also unsettled: the payload MUST be judged at once, as "Every inbound payload is validated before it reaches storage" contracts.
+- **The channel is not open, and is being opened**, as "A message a reliable channel delivers reaches the op log only through the inbound boundary" defines it: the payload MUST be **parked**. It MUST NOT be judged, refused or stored then, and the boundary MUST go on to the next waiting payload without waiting for that open to settle.
+- **The channel is neither open nor being opened**: the payload MUST be judged at once, and the boundary refuses it as arriving on an unknown channel.
+
+Nothing other than the boundary taking a waiting payload parks a message. A message refused when delivery hands it over, as "Inbound payloads waiting to be taken are bounded" contracts, is never parked.
+
+**Parking judges nothing.** A parked message MUST NOT be refused for any reason before it is reviewed, save a discard under "Parked messages are bounded per channel and in total". A payload that does not decode, or that carries an op that does not verify, names another Stoa, or is ahead of this peer's time, is parked like any other, and refused, if it is, by its review.
+
+Each park MUST be recorded in the module's log as a park, distinguishably from a refusal, a discard and a store, and the record MUST NOT carry the payload or the sender identifier. A parked message's channel is not open when the message is taken, so "A message a reliable channel delivers reaches the op log only through the inbound boundary" keeps that channel's identifier out of the record as well.
+
+If the parked messages cannot be written, the payload MUST NOT be parked, the module's log MUST record a storage failure, and the payload MUST NOT be held for another attempt.
+
+#### Scenario: A message on a channel being opened is parked, not judged
+
+- **WHEN** this peer has requested a Stoa's channel and delivery has not answered, and a message carrying a valid op for that Stoa arrives on its channel identifier and is taken
+- **THEN** the module's log records it as parked
+- **AND** the op is not in the op log
+- **AND** no refusal is recorded for it while delivery has still not answered
+
+#### Scenario: A park is logged without text the sender chose
+
+- **WHEN** a message carrying a distinctive sender identifier and payload is taken on a channel being opened
+- **THEN** the module's log records it as parked
+- **AND** the park's record contains neither that channel's identifier, nor that sender identifier, nor the payload's bytes
+
+#### Scenario: An unanswered open holds up no other channel
+
+- **WHEN** this peer has requested one Stoa's channel and delivery never answers, three messages arrive one after another on that channel identifier, and a message carrying a valid op then arrives on a channel this peer has open
+- **THEN** the valid op is stored while delivery has still not answered the first open
+- **AND** each of the three is recorded as parked
+- **AND** none of the three is recorded as refused while delivery has still not answered
+
+#### Scenario: A payload that does not decode is parked, and refused by its review
+
+- **WHEN** a payload the op decoder does not accept arrives on a channel being opened and is taken, and delivery then reports the channel created
+- **THEN** it is recorded as parked, with no refusal recorded for it before delivery's answer
+- **AND** after delivery's answer it is refused as not decoding
+
+#### Scenario: A message taken after its open settled held is judged, not parked
+
+- **WHEN** the boundary is held up deciding one payload, a message carrying a valid op is then handed over on a channel being opened, delivery reports that channel created, and the boundary is then released
+- **THEN** the op is stored
+- **AND** no park is recorded for it
+
+#### Scenario: A message taken after its open was declined is refused, not parked
+
+- **WHEN** the boundary is held up deciding one payload, a message carrying a valid op is then handed over on a channel being opened, delivery answers that channel's creation with its error shape for a reason other than that the channel already exists, and the boundary is then released
+- **THEN** the message is refused as arriving on an unknown channel
+- **AND** no park is recorded for it
+
+#### Scenario: A message that cannot be parked is logged and not retried
+
+- **WHEN** the parked messages cannot be written, a message carrying a valid op is taken on a channel being opened, the parked messages can then be written again, and delivery then reports the channel created
+- **THEN** the module's log records a storage failure
+- **AND** the op is not in the op log afterwards
+- **AND** nothing is parked on that channel afterwards
+
+### Requirement: Parked messages are reviewed on three events and no others
+
+A **review** of a channel decides the messages parked on it. Exactly three events MUST begin one, and nothing else does: not the passing of time, not the arrival or taking of a message, not a create, join or startup request for a channel, not a send, and not closing a channel.
+
+1. **Delivery reports that it holds the channel**, in answer to any request for it: it created the channel, or the channel already exists. Each message parked on that channel MUST then be judged at the boundary as a message taken on an open channel is — against the channels open when it is judged and this peer's clock read then — and stored, refused for whichever reason the boundary gives, or found already held.
+2. **The channel stops being opened without being open**: the last unsettled request for it settles in some way other than delivery reporting that it holds the channel, and the channel is not open. Each message parked on that channel MUST then be refused as arriving on an unknown channel, and recorded in the module's log as that refusal is recorded.
+3. **The module's first startup in a module process**, once it has counted the channel of every Stoa it asks for as being opened. Each parked message whose channel is then neither open nor being opened MUST be refused as arriving on an unknown channel, and recorded as that refusal is recorded. A message parked on a channel startup counts as being opened MUST be left parked, for that channel's next event of the first or second kind. A later startup in the same module process begins no review.
+
+A request that settles while another request for the same channel is still unsettled, in any way other than delivery reporting that it holds the channel, MUST leave that channel's parked messages parked.
+
+**The receive window is judged at review.** A parked op's counter MUST be compared with this peer's clock read when its review judges it, and never with the clock when it arrived or when it was parked.
+
+**Messages on one channel that take a place among the waiting payloads are decided in the order delivery handed them over, whether or not they were parked.** A message refused when delivery hands it over is not among them. A review MUST decide a channel's parked messages in the order they were handed over, and MUST decide all of them before any message on that channel taken after the event that began the review is judged. Deciding a channel's parked messages MUST NOT wait on any other channel's open. No order is promised between messages on different channels.
+
+**If the parked messages cannot be read at a review**, the module's log MUST record a storage failure, and the messages that review could not read MUST stay parked, to be decided by the channel's next review. The order above is not promised between them and the messages on their channel judged in the meantime. A parked message whose op the op log cannot take at its review is a storage failure as "A message a reliable channel delivers reaches the op log only through the inbound boundary" says, and it MUST NOT be parked afterwards.
+
+A module stopping part-way through a review is outside this requirement, which contracts reviews that run to their end.
+
+#### Scenario: Messages parked on an unanswered open are stored once delivery reports the channel created
+
+- **WHEN** three messages carrying distinct valid ops for a Stoa are parked on its channel while its open is unanswered, and delivery then reports the channel created
+- **THEN** all three ops are stored
+- **AND** nothing is parked on that channel afterwards
+
+#### Scenario: A parked message is stored once delivery reports the channel already exists
+
+- **WHEN** a message carrying a valid op for a Stoa is parked on its channel while its open is unanswered, and delivery then answers the creation that the channel already exists
+- **THEN** the op is stored
+
+#### Scenario: Messages parked on an open delivery declines are refused as an unknown channel
+
+- **WHEN** two messages carrying valid ops for a Stoa are parked on its channel while its only request is unanswered, and delivery then answers the creation with its error shape, for a reason other than that the channel already exists
+- **THEN** each is refused as arriving on an unknown channel
+- **AND** neither refusal is recorded before delivery's answer
+- **AND** nothing is parked on that channel afterwards
+
+#### Scenario: Messages parked on an open this peer gives up are refused once it is given up
+
+- **WHEN** a message carrying a valid op for a Stoa is parked on its channel, delivery never answers the creation, and this peer then gives up waiting for the answer
+- **THEN** the message is refused as arriving on an unknown channel
+- **AND** the refusal is recorded after this peer gave up, not before
+- **AND** nothing is parked on that channel afterwards
+
+#### Scenario: A declined request leaves parked messages parked while another request is unsettled
+
+- **WHEN** a Stoa's channel is not open and has been requested twice, a message carrying a valid op for that Stoa is parked on it, delivery answers the first request with its error shape for a reason other than that the channel already exists, and then reports the second request's channel created
+- **THEN** no refusal is recorded for the message after the first answer
+- **AND** the op is stored after the second answer
+
+#### Scenario: Nothing but the three events reviews a parked message
+
+- **WHEN** a message carrying a valid op for a Stoa is parked on its channel while its open is unanswered, and then, with delivery still not answering and before this peer gives up on any request for that channel, further messages arrive on that channel and on a channel this peer has open, the Stoa is joined again, and a post is published into another Stoa
+- **THEN** no store and no refusal is recorded for the parked message
+- **AND** it is still parked
+
+#### Scenario: A parked op is judged against this peer's clock at its review
+
+- **WHEN** a message carrying a valid op whose counter is more than one hour ahead of this peer's clock is parked, this peer's clock then advances until the counter is less than one hour ahead of it, and delivery then reports the channel created
+- **THEN** the op is stored
+
+#### Scenario: A parked op that has come to be ahead of this peer's time is refused at its review
+
+- **WHEN** a message carrying a valid op whose counter is within the receive window of this peer's clock is parked, this peer's clock then moves back so that the counter is more than one hour ahead of it, and delivery then reports the channel created
+- **THEN** the op is refused as ahead of this peer's time
+- **AND** it is not stored
+
+#### Scenario: Parked messages are decided before later messages on their channel, in hand-over order
+
+- **WHEN** messages carrying valid ops A and then B for a Stoa are parked on its channel, delivery then reports the channel created, and a message carrying a valid op C for that Stoa is then taken on the channel
+- **THEN** the module's log records A's store, then B's, then C's, in that order
+
+#### Scenario: Startup refuses a parked message on a channel it does not open
+
+- **WHEN** a message carrying a valid op for a Stoa is parked on its channel, the module stops before that open settles, and the module starts again with the record of the Stoas the peer is in unreadable, so that no channel is requested
+- **THEN** the message is refused as arriving on an unknown channel
+- **AND** nothing is parked afterwards
+
+#### Scenario: Startup leaves a parked message on a channel it opens for that open's answer
+
+- **WHEN** a message carrying a valid op for a Stoa is parked on its channel, the module stops before that open settles, and the module starts again while the peer is in that Stoa, with delivery not yet answering startup's creation of that channel
+- **THEN** no store and no refusal is recorded for the message before delivery answers that creation
+
+#### Scenario: Parked messages a review could not read are decided by the channel's next review
+
+- **WHEN** a message carrying a valid op for a Stoa is parked on its channel, the parked messages cannot be read when delivery reports the channel created, they can be read again afterwards, the Stoa is then joined again, and delivery answers the repeated creation that the channel already exists
+- **THEN** the module's log records a storage failure at the first answer
+- **AND** the op is stored after the second answer
+
+### Requirement: Every message is decided exactly once, however close to a settle it is taken
+
+Each message that takes a place among the waiting payloads MUST be decided exactly once: judged when it is taken; or parked, and then decided by exactly one review; or discarded under a bound, while waiting or while parked; or, when it cannot be parked, recorded as a storage failure as "A message on a channel being opened is parked, and nothing waits on an open" says.
+
+**The taking of a message and an event that begins a review of its channel MUST be ordered, one before the other.** A message taken before that event and parked MUST be decided by the review that event begins, however short the time between its being taken and the event. A message taken after that event MUST be parked, judged or refused by the channel's state after the event, as "A message on a channel being opened is parked, and nothing waits on an open" says.
+
+A message a review has decided MUST NOT be parked afterwards and MUST NOT be decided by a later review. A message discarded from the parked messages MUST NOT be decided by any review.
+
+#### Scenario: Messages taken around a settle are each decided once
+
+- **WHEN** messages carrying distinct valid ops for a Stoa are handed over on its channel one after another, starting while this peer's only request for that channel is unanswered and continuing after delivery reports the channel created
+- **THEN** every one of those ops is stored
+- **AND** the module's log records one store for each, and records none of them as already held
+- **AND** nothing is parked on that channel afterwards
+
+#### Scenario: A message parked just before its open settles is decided by that settle's review
+
+- **WHEN** a message carrying a valid op for a Stoa is taken and parked on its channel, and delivery reports that channel created before any other message is taken
+- **THEN** the op is stored
+- **AND** nothing is parked on that channel afterwards
+
+#### Scenario: A message a review decided is not decided again
+
+- **WHEN** a message carrying a valid op is parked, delivery reports its channel created and the op is stored, the Stoa is then joined again and delivery answers that the channel already exists, and the module is then restarted and delivery answers startup's creation of that channel that it already exists
+- **THEN** the module's log records that op's store once
+- **AND** records no decision for that message after its store
+
+### Requirement: Parked messages are bounded per channel and in total
+
+Four fixed bounds MUST hold over the parked messages at every moment, what survived a restart included:
+
+- the number of messages parked on one channel;
+- the payload bytes parked on one channel;
+- the number of messages parked in all;
+- the payload bytes parked in all.
+
+Each per-channel bound MUST be no greater than the matching total bound. Each byte bound MUST be at least 150 KiB, the message limit "An oversized payload is refused, against a limit pinned at 150 KiB" pins, so that a payload at the limit can be parked on a channel that holds nothing parked. The values are not contracted here.
+
+**When parking a payload would put its own channel over its count bound or its byte bound, that payload MUST be discarded**, and nothing already parked is.
+
+**Otherwise, while parking it would put the parked messages over a total bound, the newest parked message of the channel holding the most of what that bound counts is chosen** — messages for the count bound, payload bytes for the byte bound — counting the payload being parked with its own channel, and leaving out every message already chosen. Messages are chosen for the count bound first, until it would hold, and then for the byte bound, until it would hold. Newest means handed over latest. When several channels hold the most, the payload's own channel MUST be the one chosen if it is among them; otherwise the one among them whose newest parked message was handed over latest.
+
+**If the payload being parked is chosen, for either total bound, that payload MUST be discarded and every message already parked MUST be kept**, a message chosen before it included. Otherwise every message chosen MUST be discarded, and the payload MUST be parked.
+
+A discarded parked message is not stored, and MUST NOT be decided by any review. Every discard from the parked messages MUST be counted from the module's start in the same running count as discards from the waiting payloads, and recorded in the module's log with that count. Its record MUST be distinguishable from a discard from the waiting payloads, from a park and from a refusal, and MUST NOT carry the payload or the sender identifier.
+
+#### Scenario: A channel at its count bound discards the arrival and keeps what it parked
+
+- **WHEN** as many messages carrying valid ops as the per-channel count bound are parked on one channel, one more message carrying a valid op is then taken on it while its open is still unanswered, and delivery then reports the channel created
+- **THEN** that last message is recorded as discarded from the parked messages
+- **AND** every message parked before it is stored
+- **AND** its op is not stored
+
+#### Scenario: A channel at its byte bound discards the arrival
+
+- **WHEN** fewer messages than the per-channel count bound are parked on one channel, one more payload, which on its own fits the per-channel byte bound, would put that channel's parked payload bytes over it, and that payload is then taken on the channel while its open is still unanswered
+- **THEN** that payload is recorded as discarded from the parked messages
+- **AND** every message parked before it is still parked
+
+#### Scenario: Over a total bound, the channel holding the most gives up its newest
+
+- **WHEN** the parked messages reach the total count bound with one channel holding more parked messages than any other, and a message is then taken on a different channel being opened, which, counting that message, holds fewer
+- **THEN** the message handed over last of those parked on the channel holding the most is recorded as discarded from the parked messages
+- **AND** the message taken is recorded as parked
+
+#### Scenario: The arriving payload's channel loses a tie for the most parked
+
+- **WHEN** the parked messages reach the total count bound, and a message is then taken on a channel being opened that, counting that message, holds as many parked messages as another channel holds, with no channel holding more, and is within its own channel's bounds
+- **THEN** the message taken is recorded as discarded from the parked messages
+- **AND** every message that was parked before it is still parked
+
+#### Scenario: Among other channels tied for the most parked, the one whose newest was handed over latest gives up its newest
+
+- **WHEN** the parked messages reach the total count bound with two channels holding as many parked messages as each other and more than any other, the first and the last of those two channels' messages to be handed over being on the first channel, and a message is then taken on a third channel being opened, which, counting that message, holds fewer, is within its own channel's bounds, and keeps the parked payload bytes within their total bound
+- **THEN** the message handed over last of those parked on the first channel is recorded as discarded from the parked messages
+- **AND** every message parked on the second channel is still parked
+- **AND** the message taken is recorded as parked
+
+#### Scenario: Over both total bounds at once, the count bound is restored first
+
+- **WHEN** the parked messages reach the total count bound, with one channel holding more parked messages than any other and a second channel holding more payload bytes than any other, and a message is then taken on a third channel being opened, which is within its own channel's bounds, holds, counting that message, fewer parked messages than the first channel and fewer payload bytes than the second, and whose payload puts the parked payload bytes over their total bound by more than the payload bytes of the first channel's newest parked message and by no more than those of the second channel's newest parked message
+- **THEN** the message handed over last of those parked on the first channel is recorded as discarded from the parked messages
+- **AND** the message handed over last of those parked on the second channel is recorded as discarded from the parked messages
+- **AND** the message taken is recorded as parked
+
+#### Scenario: A payload discarded for the byte total costs no message already parked
+
+- **WHEN** the parked messages reach the total count bound, with one channel holding more parked messages than any other, and a message is then taken on a second channel being opened, which is within its own channel's bounds, holds, counting that message, fewer parked messages than the first channel and more payload bytes than any other channel holds, and whose payload puts the parked payload bytes over their total bound even once the first channel's newest parked message is left out
+- **THEN** the message taken is recorded as discarded from the parked messages
+- **AND** every message that was parked before it is still parked
+- **AND** no other discard is recorded
+
+#### Scenario: Messages that survived a restart count towards the bounds
+
+- **WHEN** as many messages as the per-channel count bound are parked on one Stoa's channel, the module stops before that open settles and starts again while the peer is in that Stoa, and one more message is taken on that channel before startup's open of it settles
+- **THEN** that message is recorded as discarded from the parked messages
+
+#### Scenario: The bounds are ordered as required
+
+- **WHEN** the four bounds are compared with each other and with 150 KiB written independently of them
+- **THEN** each per-channel bound is no greater than the matching total bound
+- **AND** each byte bound is at least 150 KiB
+
+#### Scenario: A discard from the parked messages shares the running count and is logged apart
+
+- **WHEN** one payload is discarded from the waiting payloads, and then one message is discarded from the parked messages
+- **THEN** the running count recorded with the second discard is two
+- **AND** the two discards' records are distinguishable from each other and from a refusal's
+
+### Requirement: Parked messages are kept apart from the op log, survive a restart, and keep no sender identifier
+
+Parked messages MUST be kept in storage that outlives the module process. A message parked when the module stops MUST still be parked when it starts again, until a review decides it or a bound discards it.
+
+For each parked message, this peer MUST keep its payload, the channel identifier it arrived on, and its place in the order delivery handed messages over. It MUST NOT keep the sender identifier or the timestamp the delivery event carried.
+
+**A parked message is not an op this peer holds.** Until a review stores it:
+
+- no read of the op log, and no reply the module gives to any call, MUST carry it or anything decoded from it;
+- it MUST NOT change any Stoa's Lamport clock, which `op-ordering`'s requirement "A peer's Lamport clock is a function of the ops it holds" makes a function of the ops held;
+- a judgement of an arriving message MUST NOT report its op as already held on account of the parked message.
+
+#### Scenario: A parked op is not readable as an op
+
+- **WHEN** a message carrying a valid op for a Stoa is parked on its channel
+- **THEN** no read of the op log returns that op
+- **AND** no read of that Stoa's posts through the module's surface returns it
+
+#### Scenario: A parked op does not move its Stoa's clock
+
+- **WHEN** a message carrying a valid op for a Stoa, whose counter is above every counter this peer holds for that Stoa, is parked on that Stoa's channel, and this peer's Lamport clock for that Stoa is then read while the open is still unanswered
+- **THEN** the clock is the value it had before the message was parked
+
+#### Scenario: A parked op is not counted as held
+
+- **WHEN** a message carrying a valid op for a Stoa is parked on its channel, and delivery then reports the channel created
+- **THEN** the module's log records the op as stored
+- **AND** does not record it as already held
+
+#### Scenario: A message parked before a restart is stored once startup's open is answered
+
+- **WHEN** a message carrying a valid op for a Stoa is parked on its channel, the module stops before that open settles, the module starts again while the peer is in that Stoa, and delivery answers startup's creation of that channel that it already exists
+- **THEN** the op is stored
+
+#### Scenario: Nothing parked carries the sender identifier or the event's timestamp
+
+- **WHEN** a message carrying a distinctive sender identifier and a distinctive timestamp is parked, and what is kept for it is read back from storage
+- **THEN** neither the sender identifier nor the timestamp appears in it
