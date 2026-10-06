@@ -29,9 +29,22 @@ checked; see "First-round claims" below.
       **Scenario:** (a) 3.3 sits unticked as pre-merge implementation work and says to run the install "from the repository root". The root checkout is on `main` at `6a7e02b9` (`git worktree list`), whose `.claude/settings.json` has no `enabledPlugins` (`git show origin/main:.claude/settings.json`). Run before the merge, `--scope project` writes that key into a tracked file on the owner's `main` checkout. README's "`git diff .claude/settings.json` should show nothing" is then false for the one person told to run it, and the dirty file can block the post-merge pull. (b) 3.4 is defined as "after the merge", but the `closer` archives `tasks.md` before merging (stage-block spec: the archive row precedes the merge row). The row is therefore frozen unticked in `archive/` and can never be ticked in a live file. `Closes #195` also closes the issue whose fourth Check it is. Neither `closer` reads `## Implementation`. `openspec archive` warns on incomplete tasks, and the plugin's `flow` skill calls that warning "expected" (`skills/flow/SKILL.md:165-166`). So nothing will notice if the plugin never loads, and that is the one failure 3.4 says only it can show. Severity: low to medium. Make both steps explicitly post-merge, and give them a home that outlives the archive: a follow-up issue, or `Part of #195` with the issue left open for its fourth Check. Otherwise drop the rows and rely on README's closing sentence.
       **Measured:** `git worktree list` shows `/home/fryorcraken/src/rad/dialectica 6a7e02b9 [main]`. `git show origin/main:.claude/settings.json` has only `worktree.baseRef`. `gh pr view 196 --json body` ends `Closes #195`.
 
-- [ ] **`dev-writer`** — `.claude/specflow/PROJECT.md:31-35` (and `design.md`'s "`run-qml-tests.sh` with one spec is the unprompted shape") — a tracked file declares commands free that are free only through the owner's untracked allowlist
+- [x] **`dev-writer`** — `.claude/specflow/PROJECT.md:31-35` (and `design.md`'s "`run-qml-tests.sh` with one spec is the unprompted shape") — a tracked file declares commands free that are free only through the owner's untracked allowlist
       **Scenario:** the block's free row is "an **allow-listed** command — `git …`, `openspec …`, the project's own" (`CLAUDE.md:488`). The overlay names `nix build …`, `lgs …` and `sh dialectica-ui/tests/run-qml-tests.sh <spec>` as that row's commands, and says the script "is the exception here" to the block's `sh <relative-path>` pricing. Whether any of them is allow-listed is decided by `permissions.allow`. This repo deliberately keeps that untracked (`design.md` "`settings.json` carries no allowlist"; `.gitignore:60-61`). The tracked `settings.json` has none, and README's contributor route does not ask for one, although the plugin's own README step 2 does. On any machine but the owner's, every agent that follows the overlay pays a click per QML spec, told the call was free. That is also an overlay line restating the block's pricing for this project, which its own header says it does not do. `design.md` drops "`blockReadsOutsideWorkingDirectories` is on" as "a fact about this machine's settings" in the same change, then keeps this one. Severity: low; it costs clicks, not correctness. Either say in README's "Working with the agent flow" which commands to allow-list, or reword the overlay to name them as the project's own commands that the allowlist should hold, without asserting they are free.
       **Measured:** `.claude/settings.json` holds `worktree` and `enabledPlugins` only. `git grep -n -F "permissions" -- .claude README.md` finds nothing, and the plugin's `README.md:65-66` reads "Add the project's own test, build and lint commands to `permissions.allow`".
+      **Fixed** in the commit "Name the project's own commands without
+      calling them free", by the second option. The overlay's bullet names
+      `nix build …`, `lgs …` and `sh dialectica-ui/tests/run-qml-tests.sh` as
+      what a machine's `permissions.allow` should hold, says whether a call is
+      free is that untracked allowlist's answer and the file does not promise
+      it, and keeps the instruction to run the script even where it prompts.
+      The "exception" to the block's `sh <relative-path>` pricing is gone.
+      design.md's entry is rewritten to say why ("named as the project's own
+      commands, not as free ones"), and "Dropped, deliberately" now drops
+      the old "free" claim with `blockReadsOutsideWorkingDirectories`, as the
+      same kind of machine fact. `git grep -n -i -F "free" -- .claude/specflow/PROJECT.md`
+      prints one line, 34, which says that whether a call is free is the
+      allowlist's answer.
 
 ## First-round claims, checked
 

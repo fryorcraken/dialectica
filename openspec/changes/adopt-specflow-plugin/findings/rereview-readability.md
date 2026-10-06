@@ -44,7 +44,7 @@ Dimension: readability only. Scope: `20643177..HEAD`, excluding `findings/`
       `cmp -i 24899:1796 -n 9490 CLAUDE.md <clone>/skills/sync/SKILL.md`
       exits 0 with offsets derived after the edit.
 
-- [ ] **`dev-writer`** — `.claude/specflow/PROJECT.md:27-28` — *"Passing it one
+- [x] **`dev-writer`** — `.claude/specflow/PROJECT.md:27-28` — *"Passing it one
       spec file is the supported shape."* was added in this range, lifted from
       `origin/main:CLAUDE.md:218-219`. There it went on *"…and needs no approval
       click"*, so "supported" meant supported by the permission checker. Without
@@ -57,6 +57,14 @@ Dimension: readability only. Scope: `20643177..HEAD`, excluding `findings/`
       **Scenario:** an agent wanting the whole suite reads line 28, takes the
       no-argument run to be unsupported, and loops over specs one at a time.
       Severity: low.
+      **Fixed** in the commit "Name the project's own commands without
+      calling them free". The sentence is dropped; the bullet now reads "Run
+      the QML suite through the script, never through `qmltestrunner`
+      directly (see Hazards), either whole or with one spec file", matching
+      the QML row and `CLAUDE.md`'s `run-qml-tests.sh [<spec>]`. The "no
+      approval click" meaning is not restored either:
+      `findings/rereview-architecture.md` box 5 is that it depends on an
+      untracked allowlist, and the bullet below now says so.
 
 - [x] **`dev-writer`** — `openspec/changes/adopt-specflow-plugin/design.md:187-191`
       — "What was considered instead" opens with *"Write them into the overlay

@@ -87,10 +87,15 @@ Corrections to the draft, each checked against the file named:
   `scaffold.toml`, so the hazard says to check they survived an `lgs` verb
   rather than to set them, and points at `docs/SCAFFOLD.md` for what each
   prevents. `CLAUDE.md` names neither switch.
-- **`run-qml-tests.sh` with one spec is the unprompted shape.** The removed
-  `CLAUDE.md` text said so, and the block's table prices `sh <relative-path>`
-  as a click in general, so the overlay names the script, `nix build …` and
-  `lgs …` as the "project's own" commands the block's free row refers to.
+- **`run-qml-tests.sh`, `nix build …` and `lgs …` are named as the
+  project's own commands, not as free ones.** The removed `CLAUDE.md` text
+  said one spec "needs no approval click", and the block's free row lists
+  "an allow-listed command — … the project's own". Both are true only where
+  `permissions.allow` holds the command, and this repository keeps the
+  allowlist untracked ("`settings.json` carries no allowlist" below), so on
+  any other machine the claim would be false and an agent would pay a click
+  it was told was free. The overlay names them as what the allowlist should
+  hold, and tells an agent to use the script even where it prompts.
 - **The `yq` guard probes, it does not match a name**:
   `require-jq-yq.sh` feeds the `yq` on `PATH` a YAML document and refuses one
   that does not return JSON.
@@ -421,9 +426,9 @@ Dialectica-specific sentences in deleted text with no home in the overlay:
   the rule.
 - **`blockReadsOutsideWorkingDirectories` is on.** A fact about this machine's
   settings, which `settings.local.json` answers. The old cost table's naming
-  of `nix build …` and `lgs …` as free is not dropped with it: the overlay's
-  `## Test layers` names them, with `run-qml-tests.sh`, as the project's own
-  commands the block's free row means.
+  of `nix build …` and `lgs …` as free is the same kind of fact and goes with
+  it; the overlay's `## Test layers` keeps the commands themselves, with
+  `run-qml-tests.sh`, as the project's own.
 - **"Address this repo's agents unqualified."** Inverted by the plugin, whose
   agents are addressed `specflow:<role>`.
 - **`keystore` and `posting-capability`'s AEAD contradiction**, the

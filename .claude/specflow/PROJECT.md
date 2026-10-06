@@ -25,14 +25,16 @@ this project's facts; it does not change specflow's rules.
 - **Counting tests:** `grep -c "function test_" <file>` for QML test
   functions, `grep -c "#\[test\]" <file>` for Rust ones.
 - Run the QML suite through the script, never through `qmltestrunner`
-  directly (see Hazards). Passing it one spec file is the supported shape. A
-  change touching no QML can break no QML test, so a green component suite
-  proves nothing about it.
-- **This project's own commands**, the block's "the project's own" row:
-  `nix build …`, `lgs …`, and `sh dialectica-ui/tests/run-qml-tests.sh` with
-  one spec file. The block prices `sh <relative-path>` as a click in general;
-  this script is the exception here, so do not route around it to a bare
-  `qmltestrunner`.
+  directly (see Hazards), either whole or with one spec file. A change
+  touching no QML can break no QML test, so a green component suite proves
+  nothing about it.
+- **This project's own commands**, the ones the block's "the project's own"
+  row means: `nix build …`, `lgs …` and
+  `sh dialectica-ui/tests/run-qml-tests.sh`. They are what a machine's
+  `permissions.allow` should hold. Whether a call is free there is that
+  machine's allowlist's answer, which this repository keeps untracked, so
+  this file does not promise it. Where the script prompts, still run it; do
+  not route around it to a bare `qmltestrunner`.
 
 ## Build
 
