@@ -431,12 +431,17 @@ TestCase {
         s.view.destroy()
     }
 
-    // ---- what the scenarios above leave open ------------------------------
+    // ---- the rest of the requirement ---------------------------------------
     //
-    // The requirement is wider than its eight scenarios: it names "whatever
-    // that re-read returns", "a failed read included", every composer the view
-    // mounts, a different thread, and the rule that re-reading, paging and
-    // changing what a screen lists do not begin a visit. Each is a test here.
+    // What follows pins the requirement's later scenarios and the clauses of its
+    // prose that no scenario states. A test pinning a scenario carries a
+    // `// Scenario:` line naming it; one carrying a `// Requirement:` line pins a
+    // quoted clause of the prose instead. Neither kind is an extra beyond the
+    // spec, so do not trim one as redundant. The prose names "whatever that
+    // re-read returns", "a failed read included", every composer the view
+    // mounts, a different thread, a later publish replacing an outcome, and the
+    // rule that re-reading, retrying, paging and changing what a screen lists
+    // (hidden content included or excluded) do not begin a visit.
 
     // Requirement: "its outcome MUST remain displayed across the re-read that
     // follows a successful publish, whatever that re-read returns". The
@@ -481,6 +486,9 @@ TestCase {
         }
     }
 
+    // Scenario: A reply's outcome is displayed again when a failed re-read
+    // recovers.
+    //
     // The same, for the reply composer, where a re-read that fails also removes
     // the composer from the screen (it is shown only on a successful read). So
     // the outcome cannot be seen during the failure: it must be there again
@@ -505,6 +513,7 @@ TestCase {
         s.view.destroy()
     }
 
+    // Scenario: A reply's outcome does not follow the user into another thread.
     // Requirement: "This holds whether the later visit is for the same Stoa or
     // thread or a different one."
     function test_a_replys_outcome_does_not_follow_the_user_into_another_thread() {
@@ -523,6 +532,8 @@ TestCase {
         s.view.destroy()
     }
 
+    // Scenario: A failed read on the later visit to the thread carries no
+    // outcome once it recovers.
     // Requirement: "This holds ... whatever state that visit's read reaches, a
     // failed read included", and it applies to the reply composer too. On the
     // thread screen a failed read hides the composer, so absence DURING the
@@ -551,9 +562,10 @@ TestCase {
         s.view.destroy()
     }
 
-    // Scenario "Every kind of outcome is gone on the next visit", for the other
-    // composer. The requirement applies to every composer the view mounts, and
-    // the scenario's own text names only the feed.
+    // Scenario: Every kind of reply outcome is gone on the next visit to the
+    // thread. The feed's counterpart is "Every kind of outcome is gone on the
+    // next visit", and the requirement applies to every composer the view
+    // mounts.
     function test_every_kind_of_reply_outcome_is_gone_on_the_next_visit_to_the_thread() {
         var cases = [
             { label: "already published", reply: '{"opId":"newreply","wasNew":false}',
@@ -582,6 +594,8 @@ TestCase {
         }
     }
 
+    // Scenario: A confirmation is gone after returning from the moderation
+    // screen.
     // Requirement: a visit's definition names every main-area screen, so the
     // moderation screen ends a visit to the feed and returning from it begins
     // one, exactly as returning from a thread does.
@@ -600,6 +614,7 @@ TestCase {
         s.view.destroy()
     }
 
+    // Scenario: Paging the feed does not withdraw the outcome.
     // Requirement: "Re-reading, paging or changing what a screen lists while it
     // stays rendered does not begin a new visit." Paging.
     function test_paging_the_feed_within_the_visit_keeps_the_outcome() {
@@ -629,6 +644,7 @@ TestCase {
         s.view.destroy()
     }
 
+    // Scenario: Changing what the feed lists does not withdraw the outcome.
     // The same rule, for changing what the screen lists.
     function test_changing_what_the_feed_lists_within_the_visit_keeps_the_outcome() {
         var s = spec.openedOnStoaA()
@@ -644,6 +660,7 @@ TestCase {
         s.view.destroy()
     }
 
+    // Scenario: Changing what the thread lists does not withdraw the outcome.
     function test_changing_what_the_thread_lists_within_the_visit_keeps_the_outcome() {
         var s = spec.openedOnStoaA()
         spec.openTheThread(s.view)
@@ -656,6 +673,117 @@ TestCase {
         compare(spec.outcomesShown(s.view, "reply"), 1)
         verify(spec.storedMessageShown(s.view, "reply"),
                "and it is still the message for a newly stored op")
+        s.view.destroy()
+    }
+
+    // Requirement: the outcome is displayed "until the visit ends or a later
+    // publish from that composer reports its own outcome". Two publishes on ONE
+    // visit, in each order, for each composer: the later outcome replaces the
+    // earlier, so a stale confirmation does not stay over a refusal and a stale
+    // refusal does not stay over a confirmation. (The scenario "A publish on the
+    // later visit displays its own outcome" is a different clause: its second
+    // publish is on a later visit.)
+    function test_a_later_publish_on_the_same_visit_replaces_the_earlier_outcome() {
+        var stored = { post: '{"opId":"newpost","wasNew":true}',
+                       reply: '{"opId":"newreply","wasNew":true}' }
+        var refused = '{"error":"the keystore is readable by others"}'
+        var cases = [
+            { kind: "post", first: stored.post, second: refused,
+              firstSays: "Your post was saved on this machine.",
+              secondSays: "Your post was not published." },
+            { kind: "post", first: refused, second: stored.post,
+              firstSays: "Your post was not published.",
+              secondSays: "Your post was saved on this machine." },
+            { kind: "reply", first: stored.reply, second: refused,
+              firstSays: "Your reply was saved on this machine.",
+              secondSays: "Your reply was not published." },
+            { kind: "reply", first: refused, second: stored.reply,
+              firstSays: "Your reply was not published.",
+              secondSays: "Your reply was saved on this machine." }
+        ]
+        for (var i = 0; i < cases.length; i++) {
+            var c = cases[i]
+            var label = c.kind + " " + (i % 2 === 0 ? "stored then refused"
+                                                    : "refused then stored")
+            var s = spec.openedOnStoaA()
+            if (c.kind === "reply")
+                spec.openTheThread(s.view)
+            s.bridge[c.kind + "Reply"] = c.first
+            spec.publish(s.view, c.kind, "the first " + c.kind)
+            verify(spec.visibleTextsContaining(s.view, c.firstSays).length > 0,
+                   label + ": the first publish's outcome is displayed")
+
+            s.bridge[c.kind + "Reply"] = c.second
+            spec.publish(s.view, c.kind, "the second " + c.kind)
+
+            verify(spec.visibleTextsContaining(s.view, c.secondSays).length > 0,
+                   label + ": the later publish's outcome is displayed")
+            compare(spec.visibleTextsContaining(s.view, c.firstSays), [],
+                    label + ": and the earlier one is not")
+            compare(spec.outcomesShown(s.view, c.kind), 1,
+                    label + ": one outcome, not two")
+            s.view.destroy()
+        }
+    }
+
+    // Requirement: asking for hidden content "to be included or excluded"
+    // changes what a screen lists, which does not begin a visit. The two
+    // scenarios above press the toggle once, which only ever includes; this
+    // presses it back, so excluding is observed too, on both composers.
+    function test_asking_for_hidden_content_to_be_excluded_again_keeps_the_outcome() {
+        var cases = [
+            { kind: "post", method: "list_threads" },
+            { kind: "reply", method: "read_thread" }
+        ]
+        for (var i = 0; i < cases.length; i++) {
+            var c = cases[i]
+            var s = spec.openedOnStoaA()
+            if (c.kind === "reply")
+                spec.openTheThread(s.view)
+            spec.publish(s.view, c.kind, "a " + c.kind)
+            verify(spec.storedMessageShown(s.view, c.kind),
+                   c.kind + ": the message for a newly stored op is displayed")
+
+            spec.toggleShowHidden(s.view)
+            compare(spec.argsOfLast(s.bridge, c.method).includeHidden, true,
+                    c.kind + ": hidden content was asked for")
+            spec.toggleShowHidden(s.view)
+            compare(spec.argsOfLast(s.bridge, c.method).includeHidden, false,
+                    c.kind + ": and then asked to be excluded again")
+
+            compare(spec.outcomesShown(s.view, c.kind), 1,
+                    c.kind + ": the outcome survives the exclusion")
+            verify(spec.storedMessageShown(s.view, c.kind),
+                   c.kind + ": and it is still the message for a newly stored op")
+            s.view.destroy()
+        }
+    }
+
+    // Requirement: a composer on a later visit displays no outcome "after a
+    // failed read is retried and succeeds on that visit". The thread's half is
+    // `test_a_failed_read_on_the_later_visit_to_the_thread_carries_no_outcome`;
+    // this is the feed's. Absence while the read is failed is not the case
+    // under test (the composer is on screen then too, and the scenario above
+    // pins it); absence once the retry succeeds is, because a screen that
+    // merely hid an outcome while the read failed would show it again here.
+    function test_a_retried_feed_read_on_the_later_visit_carries_no_outcome() {
+        var s = spec.openedOnStoaA()
+        spec.publish(s.view, "post", "first post")
+        compare(spec.outcomesShown(s.view, "post"), 1)
+
+        s.bridge.threadsFail = true
+        spec.reopenFromTheList(s.view)
+        compare(s.view.feedReadState, "failed", "the later visit's read failed")
+
+        s.bridge.threadsFail = false
+        spec.pressButtonReading(s.view, "Try reading again")
+        compare(s.view.feedReadState, "ok", "the retry succeeded, on the same visit")
+
+        compare(spec.visibleNamed(s.view, "postDraftField").length, 1,
+                "the composer is on screen, so an outcome could be shown")
+        compare(spec.outcomesShown(s.view, "post"), 0,
+                "and it shows none: nothing was published on this visit")
+        compare(spec.visibleTextsContaining(s.view, "saved on this machine"), [])
         s.view.destroy()
     }
 

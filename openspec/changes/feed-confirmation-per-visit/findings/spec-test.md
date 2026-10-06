@@ -193,7 +193,7 @@ implementation edit contrived enough that reading is the better judge, and the
 text is pinned by hardcoded copy, not by anything the test asked the
 implementation for.
 
-- [ ] **`tester`** — three clauses of the rewritten requirement have no test
+- [x] **`tester`** — three clauses of the rewritten requirement have no test
       and no scenario. (a) "until the visit ends **or a later publish from that
       composer reports its own outcome**": nothing publishes twice on one visit
       (`test_a_publish_on_the_later_visit_displays_its_own_outcome` publishes on
@@ -209,8 +209,46 @@ implementation for.
       passes all 21 tests. **Not measured**, found by reading. **Severity:** low;
       each is one short test, or, if the owner considers one not worth pinning,
       the `spec-writer` drops the clause.
+      **Outcome (`tester`): fixed.** Three tests added to
+      `dialectica-ui/tests/tst_publish_outcome_visits.qml`, each carrying a
+      `// Requirement:` line quoting its clause. None is a `// Scenario:` test,
+      because the spec states none of the three as a scenario; the
+      `spec-writer` may add one per clause, and the tests then take a
+      `// Scenario:` line. Each was proved by a mutation that no other test
+      in the file detects.
+      (a) `test_a_later_publish_on_the_same_visit_replaces_the_earlier_outcome`
+      (table: post and reply, stored then refused and refused then stored).
+      Mutation: `DComposer.refuse()` assigns only when `outcome === ""`.
+      Predicted: the stale confirmation survives a refusal. Observed: that test
+      alone red, at "post stored then refused: the later publish's outcome is
+      displayed". The reverse direction, `applyReply`'s stored branch guarded the
+      same way: that test alone red, at "post refused then stored". Both as
+      predicted. The reply rows run the same `DComposer` code and are not
+      reached by either mutation, which stops at the first failing case.
+      (b) `test_asking_for_hidden_content_to_be_excluded_again_keeps_the_outcome`
+      (table: feed and thread; toggles on, asserts `includeHidden` true, toggles
+      off, asserts `includeHidden` false, then the outcome). Mutation: the feed's
+      toggle calls `composer.clearOutcome()` when it turns hidden content off.
+      Predicted: only the toggle-off test goes red, since the existing
+      toggle tests only turn it on. Observed: that test alone red, at "post: the
+      outcome survives the exclusion" (0 for 1). The same edit on the thread
+      screen's toggle and `replyComposer`: that test alone red, at "reply: the
+      outcome survives the exclusion". Both as predicted.
+      (c) `test_a_retried_feed_read_on_the_later_visit_carries_no_outcome`
+      (publishes, reopens with the read failing, retries it successfully, asserts
+      the composer is on screen and shows nothing). Mutation, contrived to be
+      the one shape the existing tests miss: `clearOutcome()` only veils the
+      outcome (a `veiled` flag the composer's `DPublishOutcome` reads), a publish
+      lifts the veil, and the feed's "Try reading again" lifts it too, so the
+      outcome is hidden while the read fails and returns on the retry. Predicted:
+      `test_a_failed_read_on_the_later_visit_carries_no_outcome` passes, since it
+      never retries, and only the new test is red. Observed: exactly that, 23
+      pass and the new test red at "and it shows none" (1 for 0). It is the
+      feed's half of the thread's `..._to_the_thread_carries_no_outcome`.
+      Mutated files restored with `git checkout --`; `git status --short` showed
+      only the test file.
 
-- [ ] **`tester`** — `tst_publish_outcome_visits.qml` lines 436-439 are stale
+- [x] **`tester`** — `tst_publish_outcome_visits.qml` lines 436-439 are stale
       against the spec this round changed: "The requirement is wider than its
       eight scenarios ... Each is a test here" and the section title "what the
       scenarios above leave open". The spec now carries 16 scenarios (counted:
@@ -220,3 +258,16 @@ implementation for.
       comment, treats those tests as extras beyond the spec, and trims them as
       redundant, or cannot tell which scenario a test pins. **Severity:** low,
       a comment defect.
+      **Outcome (`tester`): fixed.** The section heading is now "the rest of the
+      requirement" and its comment names what the section holds instead of
+      counting: tests pinning the requirement's later scenarios, and tests
+      pinning quoted clauses of its prose that no scenario states. It says
+      that a test carries a `// Scenario:` line when it pins a scenario and a
+      `// Requirement:` line when it pins a clause of the prose, and that
+      neither is an extra to trim. The eight tests for the later scenarios
+      each now carry a `// Scenario:` line naming it (failed re-read recovers,
+      another thread, later failed thread read, every kind of reply outcome,
+      moderation return, paging, feed lists, thread lists). The comment above
+      the reply-outcome test, which said the scenario's text names only the
+      feed, was stale for the same reason and is corrected. No number appears in
+      any of it.
