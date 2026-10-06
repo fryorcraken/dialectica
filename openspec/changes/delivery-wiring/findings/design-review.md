@@ -475,3 +475,25 @@ wait", matching the requirement. `design.md`, `proposal.md`, the spec delta and 
 questions 5, 6 and 7 stay open. Nothing contradicts #176. I did not re-run mutations.
 
 - [x] **re-review round 7 `3d34f15e..ae44f364`: no findings** — read the round's design.md, spec delta, delivery.rs (`begin_wait`, `end_wait`, `await_settled`, `Pending::asked`, `extend_from`), the test helper and test names, the PR #190 body and the round-6 outcome; clean
+
+## Re-review round 8 `ae44f364..43844f2b`
+
+Decision 17 is in good shape and the code takes it: `TOPIC_PREFIX` is `/dialectica/1/s-`, the
+channel and sender ids are unchanged, the fake's `channel_create` consults
+`delivery_topic_rule::parse` ahead of any scripted reply, and the entry records the rule
+with its source (`content_topic.nim:60-123`, `channel_lifecycle.nim:46-48`, LIP-23), three
+rejected alternatives with reasons, the no-migration cost, the mutation evidence and the
+pin-bump limit. The new `CLAUDE.md` entry records a reason, not a count or a version, and
+carries a self-invalidating pin-bump instruction. `design.md` (Risks, Open Questions),
+`tasks.md` 7.3 and PR #190's body all say the first live run failed and why. `Closes #176`
+is the only closing keyword. One place still says the run has not happened.
+
+- [ ] **`dev-writer`** — `proposal.md:185-187` still says the live check "has **not yet been
+      run**", where `design.md`, `tasks.md` 7.3 and the PR body now say the owner's first run
+      happened, created the node, and had every channel declined for its content topic
+      (Decision 17). The round's brief required the first-run failure and its cause to be
+      stated in `proposal.md` too, and the change's own proposal is the document that
+      reads as the plan: a reader of it alone is told nothing was tried. Reword to say the
+      first run failed on the content topic and the rerun is the owner's. **Verified:**
+      `git grep -n -i -E "live|7\.3" -- openspec/changes/delivery-wiring/proposal.md`
+      finds no mention of the failed run, and the range's diff does not touch the file.
