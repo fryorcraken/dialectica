@@ -150,7 +150,7 @@ names, the removed section titles, and quoted `CLAUDE.md` sentences).
       which `cargo test` does not compile; `nix build ./dialectica#lgx` was
       not run for a `///` edit.
 
-- [ ] **`dev-writer`** — `openspec/changes/adopt-specflow-plugin/design.md:46` —
+- [x] **`dev-writer`** — `openspec/changes/adopt-specflow-plugin/design.md:46` —
       *"`gh api …/branches/main/protection` lists four required contexts"* is a
       present-state count a command answers, two lines before the sentence
       explaining that the overlay names the command, not the list, *"because the
@@ -159,8 +159,13 @@ names, the removed section titles, and quoted `CLAUDE.md` sentences).
       was read at.
       **Severity:** low; breaks the block's "Keeping documents true" rule in the
       paragraph that applies it.
+      **Fixed** in the commit "Record the plugin's install, revision and trust
+      model, and pin the checks": "four" is gone; the sentence says the
+      command lists the required contexts and the UI jobs are not among them.
+      Re-read with `gh api repos/fryorcraken/dialectica/branches/main/protection`:
+      no `ui-specs` or `ui-tests.yml` job is a required context.
 
-- [ ] **`dev-writer`** — `openspec/changes/adopt-specflow-plugin/design.md:172-177`
+- [x] **`dev-writer`** — `openspec/changes/adopt-specflow-plugin/design.md:172-177`
       — the "Stories behind kept rules" bullet lists dropped items by shorthand
       only (*"six findings recovered from a reflog after a branch rename; the
       "wrong for two years" comment"*), with no source file. The section exists
@@ -171,6 +176,15 @@ names, the removed section titles, and quoted `CLAUDE.md` sentences).
       list is inconsistent. Give each item its deleted file. Line 175 also runs
       past the file's wrap width.
       **Severity:** low.
+      **Fixed** in the commit "Record the plugin's install, revision and trust
+      model, and pin the checks", together with `findings/design-review.md`'s
+      box asking for the same list as a category. The entry is now "every
+      incident narrative behind a kept rule", with examples grouped under the
+      deleted file each came from at `origin/main`, every line within the
+      wrap width. Each was located with `git grep … origin/main --
+      CLAUDE.md .claude/agents docs/…`, which also corrected one item: the
+      rewrite behind "`.claude/` is the owner's" touched seven role files and
+      a CI gate (`origin/main:CLAUDE.md:55`), not nine files.
 
 Clean, in prose:
 

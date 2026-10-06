@@ -28,9 +28,9 @@ request for exactly the `.claude/` changes below.
   `specflow@agent-spec-flow`. `worktree.baseRef: "head"` stays.
 - **`.gitignore`**: re-admit `.claude/specflow/`.
 - The marketplace entry is machine-local while the plugin is unpublished, so
-  it is not in this change: `README.md` documents the two steps each
-  contributor runs once, cloning `agent-spec-flow` and running `claude plugin
-  marketplace add` on the clone.
+  it is not in this change: `README.md` documents the three steps each
+  contributor runs once, cloning `agent-spec-flow`, running `claude plugin
+  marketplace add` on the clone, and installing the plugin for the project.
 
 **Not a no-op for the flow.** The issue says the change is behaviour-neutral
 for the flow. That held at `6a7e02b9`; since then `5ec12953` (#174) changed
@@ -58,5 +58,5 @@ not the system. `.openspec.yaml` declares `skip_specs: true`.
 - Agent and session instructions only. No code, test, workflow or spec file
   changes behaviour.
 - After merge, the next piece starts with `/specflow:run <issue#>`, and needs
-  the plugin cloned and its marketplace added on the clone, as `README.md`
-  says.
+  the plugin cloned, its marketplace added on the clone and the plugin
+  installed, as `README.md` says.

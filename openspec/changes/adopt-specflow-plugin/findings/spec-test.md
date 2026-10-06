@@ -34,21 +34,58 @@ HEAD `be56964`; `skills/sync/SKILL.md` unchanged since the v0.1.0 commit
       each now quotes the block's current wording. See that file's box for the
       test run.
 
-- [ ] **`dev-writer`** — `tasks.md` (no row) and the issue's second Check — "`openspec/changes/ui-remaining-screens/tasks.md` still has its `## Stages` block" names a path that no longer exists, and `tasks.md` drops the check without saying so
+- [x] **`dev-writer`** — `tasks.md` (no row) and the issue's second Check — "`openspec/changes/ui-remaining-screens/tasks.md` still has its `## Stages` block" names a path that no longer exists, and `tasks.md` drops the check without saying so
       **Scenario:** run literally, the check fails on a missing file whatever this change does. Read leniently, it passes vacuously. Either way it measures nothing about "any other change in flight keeps working".
       **Measured:** `git ls-files openspec/changes` shows the change archived as `openspec/changes/archive/2026-09-28-ui-remaining-screens/` (#189, `645b4e73`). The only other non-archived change is `relevance-votes`, and `git grep -n -E "^## Stages" -- openspec/changes` finds no stage block in it. That predates this piece and is not caused by it, but it means there is currently no in-flight stage block for the claim to be about. A correct check has two parts. (a) This piece touches no other change: `git diff --stat origin/main...HEAD` lists only `openspec/changes/adopt-specflow-plugin/` under `openspec/`, which I measured. (b) The plugin's own detection, `grep -c "^## Stages" openspec/changes/<name>/tasks.md` (`skills/run/SKILL.md:103`), runs on each non-archived change. Record the corrected check and its result in `tasks.md`, and note in the PR that the issue's check was stale. Severity: low.
+      **Fixed** in the commit "Record the plugin's install, revision and trust
+      model, and pin the checks": `tasks.md` 4.3 records the stale path, the
+      corrected two-part check and its results, and the PR body notes it.
+      Re-run on this branch: (a) `git diff --stat origin/main...HEAD --
+      openspec` lists this change's folder and
+      `openspec/changes/relevance-votes/tasks.md`, whose 2-line edit is the
+      citation repoint from your first box; it touches no stage-block line.
+      (b) `openspec list` shows `adopt-specflow-plugin` and
+      `relevance-votes`; `grep -c "^## Stages"` on their `tasks.md` prints
+      `1` and `0`.
 
-- [ ] **`dev-writer`** — `tasks.md:35-36` (1.1 Verify) — the heading half has no command, and neither half can see a required heading whose section is empty
+- [x] **`dev-writer`** — `tasks.md:35-36` (1.1 Verify) — the heading half has no command, and neither half can see a required heading whose section is empty
       **Scenario:** a required section loses its whole body, which is what a lost dialectica rule looks like. The overlay still has eight headings and no `TODO` line, so the Verify passes. `/specflow:run` passes too, because it refuses only on a line reading exactly `TODO` (`openspec/specs/project-overlay/spec.md:34` in the plugin).
       **Measured (mutation, restored with `git restore`):** I deleted lines 55-60 of `.claude/specflow/PROJECT.md`, the whole body of `## Mutation tool`. `grep -c -x "TODO" .claude/specflow/PROJECT.md` printed `0`, and `grep -c -E "^## (Test layers|Build|Mutation tool|CI gates|Never commit|Hazards|Extra stages|Lessons)$" .claude/specflow/PROJECT.md` printed `8`. Both survived. Write the heading command into the Verify (the one above works; on the unmutated tree it prints `8`), and add a check that each required heading has a non-blank line before the next `## `. Severity: low. The issue's check mirrors the plugin's contract exactly, but the issue's requirement ("holds every dialectica-specific rule") is about content, and nothing measures content.
+      **Fixed** in the commit "Record the plugin's install, revision and trust
+      model, and pin the checks": 1.1's Verify now gives three commands, your
+      heading count, the `TODO` count, and `grep -n -A2` over the eight
+      headings, read for each heading's third line being text. Watched
+      failing: with `## Mutation tool`'s body deleted by `Edit` and restored
+      the same way, the first two printed `8` and `0` and the third printed
+      `58:## Mutation tool`, `59-`, `60:## CI gates`. On the restored tree
+      they print `8`, `0`, and eight groups each ending in a `<n>-` text line.
+      The Verify says plainly that none of the three judges content; that
+      stays 1.2's reading.
 
-- [ ] **`dev-writer`** — `tasks.md:47-49` (2.3 Verify) — the `cmp` check gives no command, no offsets and no reference revision, so a re-reviewer or the `closer` cannot reproduce it
+- [x] **`dev-writer`** — `tasks.md:47-49` (2.3 Verify) — the `cmp` check gives no command, no offsets and no reference revision, so a re-reviewer or the `closer` cannot reproduce it
       **Scenario:** offsets read with `grep -b -o` are match offsets, not line starts. My first attempt used 23658/1801, which is 5 bytes into each begin line, and `cmp` then reported "EOF on CLAUDE.md". That reads as a mismatch, but it came from the span, not the content. The reference is also a live directory marketplace with no version pin. The plugin checkout has no `v0.1.0` tag (`git -C … tag` prints nothing), so the same command run after the plugin moves compares against a different block while the stamp still reads `v0.1.0`. On "both files edited alike": the plugin file is outside this repo, its checkout is clean, and `skills/sync/SKILL.md` is unchanged between `77fce4d` and `be56964`. So that risk is ruled out today, but only by these extra measurements, which the Verify does not name.
       **Measured:** `cmp -i 23653:1796 -n 9490 CLAUDE.md /home/fryorcraken/src/fryorcraken/agent-spec-flow/skills/sync/SKILL.md` exits 0 with no output. The span is begin-line start to EOF: 33143 − 23653 = 9490 bytes, which is also 11269 + 16 + 1 − 1796 = 9490 for the plugin's end-marker line. The blocks are identical. Write that command, or an equivalent, into the Verify, and name `77fce4d` as the reference. Severity: low.
+      **Fixed** in the commit "Record the plugin's install, revision and trust
+      model, and pin the checks": 2.3's Verify names `77fce4d`, checks the
+      clone's file against it with `git -C <clone> diff --exit-code 77fce4d
+      -- skills/sync/SKILL.md` (prints nothing), and gives the derivation
+      rather than fixed numbers, because this pass's `CLAUDE.md` edits moved
+      the begin offset from 23653 to 23900. The cause of the 5-byte trap is
+      recorded: this machine's `grep -b` prints the match offset even without
+      `-o`, so the pattern must start at `<!--`. With
+      `grep -b -n -F "<!-- specflow:"`: `CLAUDE.md` 23900 and 33368,
+      `wc -c` 33390; `SKILL.md` 1796 and 11264. Span 9490 both sides;
+      `cmp -i 23900:1796 -n 9490 CLAUDE.md <clone>/skills/sync/SKILL.md`
+      exits 0, and `cmp -i 23900:1801 …` reports "differ: byte 1", so the
+      check can fail.
 
-- [ ] **`dev-writer`** — `tasks.md:56-58` (3.3) and the issue's fourth Check — "a session started after the merge lists the `specflow:*` agents and skills" has no row and no owner, and it is the only check that can show `enabledPlugins` works
+- [x] **`dev-writer`** — `tasks.md:56-58` (3.3) and the issue's fourth Check — "a session started after the merge lists the `specflow:*` agents and skills" has no row and no owner, and it is the only check that can show `enabledPlugins` works
       **Scenario:** the marketplace entry is missing or misnamed in `settings.local.json`. Nothing fails until the next piece's `/specflow:run`, by which time the in-repo agents are gone. Every other check passes on a tree where the plugin never loads.
       **Measured:** this check cannot run before the merge. This agent's session was dispatched from the piece, and it lists no `specflow:*` skill or agent type, which is expected before 3.3. What can be checked today holds. `jq . .claude/settings.json` shows `enabledPlugins` containing `specflow@agent-spec-flow: true` beside `worktree.baseRef: "head"`. The key matches the plugin's manifests: marketplace `name` is `agent-spec-flow`, plugin `name` is `specflow`, version `0.1.0`. Add the post-merge session check as an owner row beside 3.3, so it is ticked by someone rather than assumed. Severity: medium, because it is the only end-to-end check and it currently belongs to nobody.
+      **Fixed** in the commit "Record the plugin's install, revision and trust
+      model, and pin the checks": `tasks.md` 3.4 is that owner row, unticked,
+      saying why it is the only end-to-end check. 3.3 now also carries the
+      plugin install step that `findings/architecture.md` found missing.
 
 ## Clean, and what the change decided that the issue did not
 

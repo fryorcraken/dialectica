@@ -90,7 +90,7 @@ reports `ok` having run almost nothing.
 Changes go through a spec-driven agent flow that runs on the **specflow**
 Claude Code plugin, `specflow@agent-spec-flow`, which `.claude/settings.json`
 enables. Until `agent-spec-flow` is published, Claude Code cannot find it on its
-own. Once, before starting a session here:
+own. Once, before starting a session here, three steps:
 
 1. Clone the plugin's repository into a directory of your choice:
 
@@ -104,8 +104,20 @@ own. Once, before starting a session here:
    claude plugin marketplace add ~/src/agent-spec-flow
    ```
 
-`~/src/agent-spec-flow` is only an example; use the same directory in both
-steps.
+3. Install the plugin for this project, from the repository root:
+
+   ```
+   claude plugin install specflow@agent-spec-flow --scope project
+   ```
+
+   Registering the marketplace makes the plugin installable, not installed.
+   `--scope project` records it in `.claude/settings.json`, which already
+   enables it, so `git diff .claude/settings.json` should show nothing
+   afterwards.
+
+`~/src/agent-spec-flow` is only an example; use the same directory in the
+first two steps. A session started afterwards lists the `specflow:*` agents
+and skills.
 
 This step goes away once the plugin is published and its marketplace entry
 moves into `.claude/settings.json` as a pinned `github` source.

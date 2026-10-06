@@ -207,7 +207,9 @@ Nix build for mutation sampling.
 
 - **Across every `0.0.x` milestone, a control with no wired effect, or mock or
   placeholder data, may ship as long as an issue assigned to a milestone
-  finishes it** (owner-confirmed).
+  finishes it** (owner-confirmed). That includes a feature shipping ahead of
+  what consumes it: 0.0.1's vote control publishes real votes that no ranking
+  consumes yet.
 - Each milestone's own description on GitHub states what it contains and
   excludes; read it before scoping.
 - GitHub is the system of record for issues and milestones, CI and releases.

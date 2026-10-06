@@ -52,15 +52,41 @@ archived (`2026-09-28`); the #174 reasoning is archived where `design.md` says.
       - 12: deleting `findings/` at the start of Step 3.
       A paragraph covers the detail that items 1–4 compress. The "why not the overlay" question has its own paragraph: items 6–10 and 12 could live there, and the owner chose upstream. Each item was checked against the plugin text at `756e76a` (its agents and skills are unchanged since `be56964`), not taken from this box. All are now tracked in https://github.com/fryorcraken/agent-spec-flow/issues/1#issuecomment-6010040773. The count is corrected in the PR body ("Five are the headline rules … Seven more … `design.md` lists all twelve") and in design.md's Risks. `proposal.md` stated no number, but its enumeration read as complete, so it now says "Among its rules are" and records the acceptance.
 
-- [ ] **`dev-writer`** — `design.md:168-187` — "Dropped, deliberately" misses dialectica-specific text that is now silently gone. None of it needs restoring, but each needs a line saying it was dropped and why, or the next reader cannot tell a decision from a loss:
+- [x] **`dev-writer`** — `design.md:168-187` — "Dropped, deliberately" misses dialectica-specific text that is now silently gone. None of it needs restoring, but each needs a line saying it was dropped and why, or the next reader cannot tell a decision from a loss:
       (1) the live instance of the issue-number-citation rule, `moderation-resolution`'s "The deciding moderation is named" (`.claude/agents/README.md:43-45` at `origin/main`). It no longer exists — `openspec/specs/moderation-resolution/spec.md:242-246` cites no issue — so it is resolved history, the same reason the `keystore`/`posting-capability` entry gives;
       (2) the owner-confirmed scope of the `0.0.x` policy, "a feature may ship ahead of what consumes it", and its example: 0.0.1's vote control publishes real votes that no ranking consumes yet (`docs/PROJECT-MANAGEMENT.md`, "Standing policy"). `PROJECT.md:196-198` keeps the dead-button half and drops this half;
       (3) the old costs table's naming of `nix build …` and `lgs …` as free. The block's row now says "the project's own" (`CLAUDE.md:465`), and neither the overlay nor anything else names which commands those are. The reason in the `blockReadsOutsideWorkingDirectories` entry applies, but the entry has to say so;
       (4) the stories list at `design.md:172-177` reads as an enumeration but leaves out others that went: the ~690–705-deletion stale PRs and the 6,871-deletion false alarm (`closer.md`), the shepherd that watched a cancelled Build LGX run, "forty findings" read as done, "openspec is not installed" reaching five agents, and two pieces merging unreviewed code in one day (`RUNNER.md:557-560`). Make it a category ("every incident narrative, for example …") rather than a list.
       **Scenario:** a later reader looking for the vote-control precedent, or for which local commands cost no click, finds nothing in the overlay and no "Dropped" line, so cannot tell whether the drop was deliberate.
+      **Fixed** in the commit "Record the plugin's install, revision and trust
+      model, and pin the checks", except (3), which the previous commit
+      carried. Each item checked at `origin/main` first.
+      (1) A "Dropped" line: the requirement in
+      `openspec/specs/moderation-resolution/spec.md` cites no issue, so it is
+      resolved history; the plugin's `flow` skill keeps the rule
+      ("A spec never cites a GitHub issue number…").
+      (2) Carried rather than dropped, because it is owner-confirmed policy:
+      the overlay's `## pm` now adds that a feature may ship ahead of what
+      consumes it, with the 0.0.1 vote-control example, and `design.md`'s
+      `PROJECT-MANAGEMENT.md` decision lists it.
+      (3) Carried, in "Correct the overlay and CLAUDE.md where review found
+      them wrong": `## Test layers` names `nix build …`, `lgs …` and
+      `run-qml-tests.sh` with one spec as the project's own commands, and the
+      `blockReadsOutsideWorkingDirectories` entry now says so.
+      (4) A category with grouped examples, each under its deleted file; see
+      `findings/readability.md`'s box on the same lines.
 
-- [ ] **`dev-writer`** — `design.md:160-166` — unrecorded: `.claude/settings.json` departs from what `/specflow:init` writes. Init merges a `permissions.allow` block (`git`, `gh pr/run/issue/api`, `gh repo view`, `openspec`, `grep`, `pwd`) into the **tracked** `settings.json` (`init/SKILL.md:35-64`, plugin `DECISIONS.md` #15). This repo keeps its allowlist in the untracked `settings.local.json` (`.gitignore:60-63`), and this change follows the repo, not the plugin. That is a reasonable choice, but nothing records it.
+- [x] **`dev-writer`** — `design.md:160-166` — unrecorded: `.claude/settings.json` departs from what `/specflow:init` writes. Init merges a `permissions.allow` block (`git`, `gh pr/run/issue/api`, `gh repo view`, `openspec`, `grep`, `pwd`) into the **tracked** `settings.json` (`init/SKILL.md:35-64`, plugin `DECISIONS.md` #15). This repo keeps its allowlist in the untracked `settings.local.json` (`.gitignore:60-63`), and this change follows the repo, not the plugin. That is a reasonable choice, but nothing records it.
       **Scenario:** the owner later runs `/specflow:init`, for example to re-check headings or `gh auth`. It merges an allowlist into the tracked `settings.json`, so every clone gets it, against `.gitignore`'s stated rule, and nothing fails. Record that the allowlist stays machine-local here, and whether `/specflow:init` may ever run in this repo or only `/specflow:sync`.
+      **Fixed** in the commit "Record the plugin's install, revision and trust
+      model, and pin the checks": a new decision, "`settings.json` carries no
+      allowlist, unlike what `/specflow:init` writes". It records that this
+      change follows the repo's rule (`.gitignore`'s comment above
+      `.claude/*`), that `/specflow:sync` is the route for refreshing the
+      block, and that if `init` is ever run here its § 1 write to
+      `settings.json` is the one to refuse at the prompt, which the skill
+      handles (`init/SKILL.md:16-18`). Read at plugin `756e76a`, whose
+      `init/SKILL.md` § 1 still writes the allowlist.
 
 - [x] **`dev-writer`** — `design.md:28-69` — "Corrections to the draft" leaves out two overlay lines that differ from the issue's draft. (1) `PROJECT.md:50` gives `lgs basecamp launch <profile>`, where the draft has no argument. The correction is right (`README.md:60` runs `lgs basecamp launch alice`) but is not listed. (2) `PROJECT.md:24-25`, "The `-p` flags are load-bearing", is not in the draft or in any deleted file. It restates `README.md:84-86`, which makes a second copy of README text. `design.md:62-64` keeps the SDK-staging command in `README.md` only, so the two choices need reconciling or the duplicate needs a reason.
       **Scenario:** the section reads as the complete set of departures ("Corrections to the draft, each checked against the file named"), so a reviewer comparing the overlay with the draft finds two changes nobody accounts for.
