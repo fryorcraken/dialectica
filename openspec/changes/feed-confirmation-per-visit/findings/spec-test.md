@@ -135,3 +135,88 @@ asserts `feedReadState` as a precondition for its fourth case (an answer with no
 `items` is `failed`), which depends on how the feed classifies a malformed
 answer rather than on this requirement, but it is a precondition check and
 fails for a reason that names itself, so no box is opened.
+
+## Re-review
+
+Scope: `git diff c933da11...HEAD` over `specs/` and `dialectica-ui/tests`. Only
+the spec delta and `tst_publish_outcome_visits.qml` were read; the
+implementation only at the lines mutated. The draft-ownership entries above are
+untouched.
+
+**The rewritten sentences hold and can be tested.** "A composer the screen is
+not rendering displays nothing" plus "the obligations apply whenever the
+composer is rendered" resolves the vacuity the first review raised; the
+recovery obligation ("displayed again once a read on the same visit succeeds")
+is observable and `test_a_replys_outcome_stays_across_a_failed_re_read_of_the_thread`
+observes it by text and by count. The widened visit definition (moderation
+return, retried read is a re-read, hidden-content toggle is a change of
+listing) gives each of the eight new scenarios a sentence to rest on. All
+eight have a test at the only layer that can see them (the QML suite driving
+`Main.qml`), matching name for name: moderation return, every kind of reply
+outcome, another thread, later failed thread read, failed re-read recovers,
+paging, feed lists, thread lists. The suite is 21 tests, 21 pass on the
+unmutated tree (`sh dialectica-ui/tests/run-qml-tests.sh
+dialectica-ui/tests/tst_publish_outcome_visits.qml`).
+
+**The helper merge hid nothing.** `visibleNodes` reproduces the three walkers'
+predicate exactly (`here && matches(node)`, `here` being own and every
+ancestor's `visible`). `openTheThread(view, root)` keeps the link-target
+assertion on the no-`root` path and keeps the old `openThreadNamed`'s
+`reading.rootOp` assertion on both paths, which also subsumes the explicit
+"the same thread" compare removed from
+`test_a_replys_outcome_is_gone_on_the_next_visit_to_the_thread`. The new
+`storedMessageShown` checks are not derived from the implementation: the copy
+is pinned by an existing requirement ("the message displayed states the content
+was saved on this machine").
+
+**Mutations run** (output read from the suite command above). Both reverted
+with `git checkout --`; `git status --short` is empty.
+
+1. `FeedScreen.reload()` clears the post composer's outcome (first line). 11 of
+   21 failed, including `test_the_outcome_stays_across_the_re_read_that_follows_the_publish`
+   at its text check (line 412), `test_paging_the_feed_...`,
+   `test_changing_what_the_feed_lists_...` and the absence tests, each at the
+   presence assertion before it leaves. That confirms the new test comment's
+   measured claim ("turns red every feed test in this file that publishes and
+   then asserts the outcome displayed ... the absence tests go red too"). Killed.
+2. `DThreadScreen.beginVisit()` emptied (under-clearing on the thread). 4 of 21
+   failed: `test_a_replys_outcome_is_gone_on_the_next_visit_to_the_thread`,
+   `test_a_replys_outcome_does_not_follow_the_user_into_another_thread`,
+   `test_a_failed_read_on_the_later_visit_to_the_thread_carries_no_outcome`
+   (at line 548, after the retry, which is the case the new scenario adds) and
+   `test_every_kind_of_reply_outcome_is_gone_on_the_next_visit_to_the_thread`
+   (at the first "already published" case). Killed.
+
+I did not mutate for the new `storedMessageShown` assertions in the paging and
+hidden-toggle tests: a mutation that swaps which message survives needs an
+implementation edit contrived enough that reading is the better judge, and the
+text is pinned by hardcoded copy, not by anything the test asked the
+implementation for.
+
+- [ ] **`tester`** — three clauses of the rewritten requirement have no test
+      and no scenario. (a) "until the visit ends **or a later publish from that
+      composer reports its own outcome**": nothing publishes twice on one visit
+      (`test_a_publish_on_the_later_visit_displays_its_own_outcome` publishes on
+      a later visit, a different obligation). (b) The visit definition says
+      asking for hidden content "to be included **or excluded**" changes what a
+      screen lists, but both toggle tests press "SHOW HIDDEN" once and never
+      toggle back. (c) "and after a failed read is retried and succeeds on that
+      visit" is pinned for the thread composer only; the feed's
+      `test_a_failed_read_on_the_later_visit_carries_no_outcome` never retries.
+      **Scenario:** a change that stops a second publish on the same visit from
+      replacing the first outcome (the stale confirmation stays over a refusal),
+      or that clears or resurrects the outcome on toggle-off or on a feed retry,
+      passes all 21 tests. **Not measured**, found by reading. **Severity:** low;
+      each is one short test, or, if the owner considers one not worth pinning,
+      the `spec-writer` drops the clause.
+
+- [ ] **`tester`** — `tst_publish_outcome_visits.qml` lines 436-439 are stale
+      against the spec this round changed: "The requirement is wider than its
+      eight scenarios ... Each is a test here" and the section title "what the
+      scenarios above leave open". The spec now carries 16 scenarios (counted:
+      `git grep -c "^#### Scenario"`), eight of them pinned by tests under that
+      heading, and those tests carry no `// Scenario:` line naming the scenario
+      they pin, unlike the first eight scenarios' tests. **Scenario:** the next editor trusts the
+      comment, treats those tests as extras beyond the spec, and trims them as
+      redundant, or cannot tell which scenario a test pins. **Severity:** low,
+      a comment defect.
