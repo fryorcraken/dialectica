@@ -22,8 +22,8 @@
       round 8 `ae44f364..43844f2b` fix for the owner's failed two-peer check (dev-writer): content topic given four parts so delivery's parser accepts it, a test-only transcription of that parser, the fake delivery refusing what delivery refuses, Decision 17, a CLAUDE.md trap — all six lanes; security and correctness on the strongest model (opus), readability, architecture, spec-test and design on role defaults: a code change on the channel identity both peers must agree on, found only by the live check
       round 9 `43844f2b..87596ac4` round 8 findings passes (spec-writer, dev-writer): op-transport requirement that the content topic is one the network's rule accepts, test-only getShard step and delivery-pin test in transport.rs, live-check result recorded (7.3), QML and CLAUDE.md comment corrections — correctness, spec-test, design, readability and architecture; correctness on the strongest model (opus), the other four on role defaults: each confirms its round-8 answers; security skipped — no production code changed (the topic is unchanged, the new code is cfg(test), delivery.rs gained a doc comment only)
       round 10 `87596ac4..c0190bda` round 9 findings passes (spec-writer, dev-writer): composer-view delta dropping "delivery is not wired at all", op-transport sentence reworded, test-only lock_nodes_of refactor, scaffold.toml-to-lock pin test, design.md and docs/SCAFFOLD.md prose — correctness, spec-test, design and readability on role defaults, correctness also confirming the refactor commit changes no behaviour: each confirms its round-9 answers; security and architecture skipped — the code is cfg(test) only and the refactor is a helper extraction inside that test module
-- [ ] findings all ticked, `findings/` deleted — `closer`
-- [ ] `openspec validate --strict`, then `archive` — `closer`
+- [x] findings all ticked, `findings/` deleted — `closer`
+- [x] `openspec validate --strict`, then `archive` — `closer`
 - [ ] CI green, title/body checked, PR merged — `closer`
 
 ## 1. Make room (no behaviour change)
