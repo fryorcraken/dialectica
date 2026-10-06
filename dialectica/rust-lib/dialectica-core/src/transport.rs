@@ -94,21 +94,36 @@ use std::collections::HashMap;
 /// not.
 pub const MAX_MESSAGE_BYTES: usize = 150 * 1024;
 
-/// Domain prefix for a content topic. §4.1's format, verbatim.
+/// Head of a content topic: `/<application>/<version>/` and the start of the
+/// `<topic-name>` segment, `s-`.
 ///
-/// The `/dialectica/1/` head is load-bearing and not a naming preference: §4.2
-/// establishes that autosharding hashes only `application` + `version`, so this
-/// prefix is what places every dialectica topic on one shard. A different prefix
-/// would be a routing change disguised as a rename.
-const TOPIC_PREFIX: &str = "/dialectica/1/s/";
-/// Suffix of a content topic, completing §4.1's `/dialectica/1/s/<hex>/proto`.
+/// **A content topic has exactly four `/`-separated parts**,
+/// `/dialectica/1/s-<hex>/proto`. Delivery reads a five-part topic as
+/// `/<generation>/<application>/…` and refuses one whose first part is not a
+/// number, so the earlier `/dialectica/1/s/<hex>/proto` was declined by every
+/// node. The test-only `delivery_topic_rule`, further down this file, cites the
+/// parser. The `s` discriminant is therefore part of the name segment, joined by
+/// `-`, and never a segment of its own.
+///
+/// The `/dialectica/1/` head is load-bearing and not a naming preference:
+/// autosharding hashes only `application` + `version`, so this prefix is what
+/// places every dialectica topic on one shard. A different prefix would be a
+/// routing change disguised as a rename. That holds only because the topic has
+/// four parts; in the five-part form delivery would have read `1` as the
+/// application.
+const TOPIC_PREFIX: &str = "/dialectica/1/s-";
+/// Suffix of a content topic: the `<encoding>` segment.
 const TOPIC_SUFFIX: &str = "/proto";
 /// Domain prefix for a channel id.
 ///
-/// A different discriminant in the same position as the topic's `s`, because the
-/// two are not one namespace: a content topic is disclosed to filtering, storage
-/// and forwarding peers, and a channel id is an application-chosen rendezvous
-/// string. One value for both would make a change to either a change to both.
+/// A different discriminant from the topic's `s`, because the two are not one
+/// namespace: a content topic is disclosed to filtering, storage and forwarding
+/// peers, and a channel id is an application-chosen rendezvous string. One value
+/// for both would make a change to either a change to both.
+///
+/// Delivery does not parse a channel id — it is an opaque `SdsChannelID` from
+/// `logosdelivery_channel_create` to the channel table — so the four-part rule
+/// that binds the topic does not bind this, and it keeps its `/c/` segment.
 ///
 /// Structured rather than the bare hex, so that §4.5's deferred `(stoa, thread)`
 /// split has somewhere to put a thread segment — and so that two applications
@@ -485,9 +500,10 @@ pub struct Admitted {
 /// [`InboundMessage`] so that the struct mirroring the event does not hold two
 /// times side by side, one to be read and one never to be.
 ///
-/// **This is the only function that takes a time and appends.** The log's
-/// `append` takes none, which is what keeps the window off every rebuild,
-/// replay and restore path. See [`crate::arrival::exceeds_receive_window`].
+/// **This and [`receive_via`], which it calls, are the only functions that take
+/// a time and reach an append.** The log's `append` takes none, which is what
+/// keeps the window off every rebuild, replay and restore path. See
+/// [`crate::arrival::exceeds_receive_window`].
 ///
 /// # No panic is reachable from any input
 ///
@@ -504,18 +520,87 @@ pub fn receive<L: OpLog>(
     log: &mut L,
     now_ms: u64,
 ) -> Result<Admitted, InboundRefusal> {
-    let channel_stoa = *channels
-        .stoa_of(message.channel_id)
-        .ok_or(InboundRefusal::UnknownChannel)?;
+    receive_via(
+        message,
+        |channel_id| channels.stoa_of(channel_id).copied(),
+        now_ms,
+        |judged| admit(judged, log),
+    )
+}
 
-    // BEFORE the decode. The spec requires it, and the reason is that this is the
-    // one bound whose input size an attacker chooses freely.
-    if message.payload.len() > MAX_MESSAGE_BYTES {
+/// [`receive`], with the channel lookup and the write supplied by the caller: the
+/// one place the boundary's order is written down.
+///
+/// # Why the lookup and the write are parameters
+///
+/// The delivery wiring cannot hand over an `&OpenChannels` or an open log. Its
+/// set of open channels sits behind a lock that must not be held while a
+/// signature is verified or a row appended, and it opens the op log only for an
+/// op that passed, so a payload refused on its channel or its bytes costs no
+/// database open. So it supplies `stoa_of`, which copies the Stoa out and
+/// releases the lock, and `write`, which opens the log and calls [`admit`].
+///
+/// **The order stays here, whoever calls.** [`receive`] and the delivery wiring
+/// both come through this function, so a step added between the lookup and the
+/// judgement reaches the running module and the boundary's tests together.
+///
+/// **The lookup is keyed by the message's own channel identifier**, inside this
+/// function. A caller cannot pair one channel's message with another channel's
+/// Stoa, which is what lets [`Judged`] certify the channel check as well as the
+/// checks on the bytes.
+pub fn receive_via(
+    message: InboundMessage<'_>,
+    stoa_of: impl FnOnce(&str) -> Option<Address>,
+    now_ms: u64,
+    write: impl FnOnce(Judged) -> Result<Admitted, InboundRefusal>,
+) -> Result<Admitted, InboundRefusal> {
+    let channel_stoa = stoa_of(message.channel_id).ok_or(InboundRefusal::UnknownChannel)?;
+    write(judge(message, channel_stoa, now_ms)?)
+}
+
+/// An op that passed every check [`receive`] makes before it writes, the channel
+/// check included.
+///
+/// Its field is private and `judge` is the only constructor, and only
+/// [`receive_via`] calls `judge`, with the Stoa it looked up under the message's
+/// own channel identifier. So [`admit`] cannot be handed an op that skipped a
+/// check, or one judged against another channel's Stoa: "every check runs before
+/// anything is written" holds by the type.
+#[derive(Debug)]
+pub struct Judged(SignedOp);
+
+/// The message limit, as the one predicate every caller asks: a payload longer
+/// than [`MAX_MESSAGE_BYTES`] is refused as [`InboundRefusal::TooLong`], and one
+/// of exactly the limit is not.
+///
+/// One function so that the boundary's own size check (`judge`, inside
+/// [`receive_via`]) and anything refusing earlier — the delivery
+/// wiring, before a payload may wait for the boundary — cannot disagree about
+/// where the limit falls.
+pub fn refuse_oversized(payload: &[u8]) -> Result<(), InboundRefusal> {
+    if payload.len() > MAX_MESSAGE_BYTES {
         return Err(InboundRefusal::TooLong {
-            bytes: message.payload.len(),
+            bytes: payload.len(),
             limit: MAX_MESSAGE_BYTES,
         });
     }
+    Ok(())
+}
+
+/// Checks 2–6 of [`receive`], for a message on the channel of `channel_stoa`.
+///
+/// Private, and called only by [`receive_via`], which looked `channel_stoa` up
+/// under `message.channel_id`: nothing here relates the two, so a caller that
+/// could pass them separately could judge one channel's message against
+/// another's Stoa.
+fn judge(
+    message: InboundMessage<'_>,
+    channel_stoa: Address,
+    now_ms: u64,
+) -> Result<Judged, InboundRefusal> {
+    // BEFORE the decode. The spec requires it, and the reason is that this is the
+    // one bound whose input size an attacker chooses freely.
+    refuse_oversized(message.payload)?;
 
     // The WHOLE payload, so no prefix is decoded in isolation. `Op::decode`'s
     // trailing-bytes check is what makes that true of a valid op followed by junk.
@@ -543,12 +628,19 @@ pub fn receive<L: OpLog>(
             return Err(InboundRefusal::AheadOfTime { counter, now_ms });
         }
     }
+    Ok(Judged(signed))
+}
 
+/// Append an op the boundary passed: the one write [`receive_via`] reaches, and
+/// its last statement.
+pub fn admit<L: OpLog>(judged: Judged, log: &mut L) -> Result<Admitted, InboundRefusal> {
+    let Judged(signed) = judged;
     let id = signed.op.id();
     // `Arrival::unordered()` and not `from_parts(None, None)`: the named
     // constructor is a statement that the transport supplied nothing, and
-    // grepping for it finds every place that gap is absorbed. `message.timestamp`
-    // and `message.sender_id` reach nothing here, by design.
+    // grepping for it finds every place that gap is absorbed. `Judged` carries
+    // only the op, so neither the event's timestamp nor its sender identifier can
+    // reach the append, by design.
     let appended = log
         .append(signed, Arrival::unordered())
         .map_err(InboundRefusal::Storage)?;
@@ -698,16 +790,375 @@ pub fn publish<L: OpLog>(
 
     // The channel is looked up AFTER the append, so that a Stoa with no channel
     // still stores the op. Checking first and returning early would lose it.
+    addressed(id, stoa, payload, channels)
+}
+
+/// Say what to send, and where, for an op this peer **already holds**.
+///
+/// # The half of [`publish`] that does not append
+///
+/// The module's publish handlers append through `authoring`, which stamps the
+/// op's clock and so is the only code that can make the op; the adapter then
+/// hands the op off after the reply. So the append and the handoff happen at two
+/// moments, and this is the second one on its own. Both go through
+/// [`addressed`], so "is a channel open for this Stoa, and which one" has one
+/// answer whichever way the op arrived here.
+///
+/// The payload is the stored op's wire form — `op-transport`'s "the payload
+/// handed to the transport is the op's wire form as stored" — and nothing is
+/// written: there is no `&mut` log here to write to.
+pub fn handoff(stored: &SignedOp, channels: &OpenChannels) -> Result<Publishable, PublishError> {
+    let payload = stored.to_bytes().map_err(PublishError::Unencodable)?;
+    addressed(stored.op.id(), stored.op.stoa, payload, channels)
+}
+
+/// The channel an op goes on, or [`PublishError::NoChannel`] when none is open.
+///
+/// Never opens one: `channels` is borrowed shared, so opening is unreachable.
+fn addressed(
+    id: OpId,
+    stoa: Address,
+    payload: Vec<u8>,
+    channels: &OpenChannels,
+) -> Result<Publishable, PublishError> {
     let identity = ChannelIdentity::of(&stoa);
     if !channels.is_open(identity.channel_id()) {
         return Err(PublishError::NoChannel { stoa, id });
     }
-
     Ok(Publishable {
         id,
         channel_id: identity.channel_id,
         payload,
     })
+}
+
+/// Delivery's content-topic rule, transcribed so a test can refuse what
+/// delivery refuses. Test support only; nothing in the module calls it.
+///
+/// # Why this exists
+///
+/// The fake delivery in `delivery/tests.rs` accepted any string as a content
+/// topic, and so did every test here. Real delivery does not: `channelCreate`
+/// subscribes to the topic, the subscription resolves the topic's shard by
+/// autosharding, and autosharding parses the topic first. The first live
+/// two-peer run declined every channel with
+/// `ChannelCreate failed: failed to subscribe to content topic: invalid format:
+/// generation should be a numeric value`, while every test in this crate stayed
+/// green. A topic is checked against this rule so that class of defect is red
+/// here rather than discovered by launching two peers.
+///
+/// # Source
+///
+/// `logos-messaging/logos-delivery` at [`delivery_topic_rule::DELIVERY_REV`]
+/// (the revision `logos-delivery-module` at `b8b9ac2f…` locks). Two steps, in
+/// the order `channelCreate` meets them:
+///
+/// [`parse`](delivery_topic_rule::parse) is `NsContentTopic.parse`,
+/// `logos_delivery/waku/waku_core/topics/content_topic.nim:60-123`:
+///
+/// - the topic starts with `/`;
+/// - the rest splits on `/` into exactly **four** non-empty parts,
+///   `/<application>/<version>/<topic-name>/<encoding>`,
+/// - or exactly **five**, `/<generation>/<application>/…`, whose first part
+///   must parse as an integer;
+/// - any other count is refused.
+///
+/// [`subscribable`](delivery_topic_rule::subscribable) is what the subscription
+/// does with it, `getShard(ContentTopic)` in
+/// `logos_delivery/waku/waku_core/topics/sharding.nim:32-51`: the parse, then a
+/// refusal of any generation other than `0` or none. The path is
+/// `channel_lifecycle.nim` → `subscription_manager.nim`
+/// `getShardForContentTopic` → `getShard`. The fake delivery applies this one.
+///
+/// The messages are delivery's own, verbatim, so a test can match a refusal
+/// against the one a live node logged.
+///
+/// # When delivery's pin moves
+///
+/// `the_transcribed_revision_is_the_one_delivery_is_locked_at` fails the moment
+/// `dialectica/flake.lock` locks `logos-delivery` at any other revision, and
+/// `the_scaffold_installs_the_delivery_module_the_lock_holds` the moment
+/// `scaffold.toml` installs a `logos-delivery-module` other than the one that
+/// lock holds — the scaffold's is the delivery a Basecamp runs. A fake that
+/// agrees with an old parser hides a new one's refusal exactly as the
+/// accept-everything fake did, so those tests turn either pin bump into a prompt
+/// to re-read these files rather than relying on whoever bumps it having read
+/// design.md.
+#[cfg(test)]
+pub(crate) mod delivery_topic_rule {
+    /// The `logos-delivery` revision every transcription of delivery's source in
+    /// this crate was read at: this module, and the wording
+    /// [`crate::delivery::ALREADY_EXISTS`] matches.
+    pub(crate) const DELIVERY_REV: &str = "bfdb5afd263c5ff634ef8c59b2fe1ebbbcd0f306";
+
+    /// A topic delivery accepted, split the way delivery splits it.
+    #[derive(Debug, PartialEq, Eq)]
+    pub(crate) struct Parsed<'a> {
+        pub generation: Option<i64>,
+        pub application: &'a str,
+        pub version: &'a str,
+        pub name: &'a str,
+        pub encoding: &'a str,
+    }
+
+    /// What `channelCreate` does to a topic before it builds a channel:
+    /// `sharding.nim`'s `getShard(ContentTopic)`, which parses the topic and then
+    /// resolves its shard. Refuses what either step refuses, with that step's
+    /// message.
+    pub(crate) fn subscribable(topic: &str) -> Result<Parsed<'_>, String> {
+        let parsed = parse(topic)?;
+        match parsed.generation {
+            None | Some(0) => Ok(parsed),
+            Some(_) => Err("Generation > 0 are not supported yet".to_string()),
+        }
+    }
+
+    /// `NsContentTopic.parse`, transcribed. See the module docs for the source.
+    pub(crate) fn parse(topic: &str) -> Result<Parsed<'_>, String> {
+        let Some(rest) = topic.strip_prefix('/') else {
+            return Err(format!(
+                "invalid format: content-topic '{topic}' must start with slash"
+            ));
+        };
+        let parts: Vec<&str> = rest.split('/').collect();
+        let (generation, named) = match parts.len() {
+            4 => (None, &parts[..]),
+            5 => {
+                if parts[0].is_empty() {
+                    return Err("missing part: generation".to_string());
+                }
+                // Nim's `parseInt` takes an optional sign and decimal digits.
+                // Two reviewers recall it also skipping `_` between digits
+                // (`1_0`), which Rust's does not; unverified, and if so this is
+                // the stricter side, on a form no topic built here takes.
+                let generation = parts[0].parse::<i64>().map_err(|_| {
+                    "invalid format: generation should be a numeric value".to_string()
+                })?;
+                (Some(generation), &parts[1..])
+            }
+            _ => {
+                return Err(
+                    "invalid format: Invalid content topic structure. Expected either \
+                     /<application>/<version>/<topic-name>/<encoding> or \
+                     /<gen>/<application>/<version>/<topic-name>/<encoding>"
+                        .to_string(),
+                )
+            }
+        };
+        for (part, what) in named
+            .iter()
+            .zip(["application", "version", "topic-name", "encoding"])
+        {
+            if part.is_empty() {
+                return Err(format!("missing part: {what}"));
+            }
+        }
+        Ok(Parsed {
+            generation,
+            application: named[0],
+            version: named[1],
+            name: named[2],
+            encoding: named[3],
+        })
+    }
+
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn the_topic_a_live_node_refused_is_refused_with_its_message() {
+            // Verbatim from the live two-peer run that found this: the Stoa
+            // `bcacb91b…` and the topic the old derivation built for it. A
+            // transcription that accepted everything — which is what the fake
+            // delivery was — fails here.
+            //
+            // Also the refusal half of `op-transport`'s scenario "The network's
+            // content-topic rule reads the content topic as dialectica version
+            // 1": a name beginning with `/dialectica/1/` with five parts is
+            // refused, by the rule as written rather than by the derivation.
+            let refused = "/dialectica/1/s/bcacb91b8700eec5f9d77d051f1d422779c82cc209bc9ae9c7fd4e65d3e79dda/proto";
+            let live = Err("invalid format: generation should be a numeric value".to_string());
+            assert_eq!(parse(refused), live);
+            assert_eq!(subscribable(refused), live);
+        }
+
+        #[test]
+        fn delivery_s_own_default_topic_is_accepted() {
+            // `DefaultContentTopic` in the same file, line 16, in both forms the
+            // parser documents. A transcription that refused everything fails
+            // here.
+            assert_eq!(
+                parse("/waku/2/default-content/proto"),
+                Ok(Parsed {
+                    generation: None,
+                    application: "waku",
+                    version: "2",
+                    name: "default-content",
+                    encoding: "proto",
+                })
+            );
+            assert_eq!(
+                parse("/0/waku/2/default-content/proto").map(|p| p.generation),
+                Ok(Some(0))
+            );
+        }
+
+        #[test]
+        fn other_part_counts_and_empty_parts_are_refused() {
+            for topic in [
+                "waku/2/default-content/proto",
+                "/waku/2/proto",
+                "/a/b/c/d/e/f",
+                "/waku//default-content/proto",
+                "/waku/2/default-content/",
+                "//waku/2/default-content/proto",
+            ] {
+                assert!(parse(topic).is_err(), "{topic} was accepted");
+            }
+        }
+
+        /// Every node of `dialectica/flake.lock` that locks the GitHub repository
+        /// `repo`, by node name, with the revision it is locked at.
+        ///
+        /// The lock is read as text, the way `delivery/tests.rs` reads the
+        /// adapter's source. Compiled only under `cfg(test)`, so the `lgx` build
+        /// never needs the path; `cargo test` runs from a checkout where it
+        /// resolves, and nix's `src = ./.` holds the lock too. A node is matched
+        /// by what it locks rather than by its input name, which the lock is free
+        /// to suffix (`_2`) and a flake to rename.
+        fn lock_nodes_of(repo: &str) -> Vec<(String, Option<String>)> {
+            let lock: serde_json::Value = serde_json::from_str(include_str!("../../../flake.lock"))
+                .expect("dialectica/flake.lock is JSON");
+            let nodes = lock["nodes"]
+                .as_object()
+                .expect("a flake lock has a `nodes` table");
+            let suffix = format!("/{repo}");
+            nodes
+                .iter()
+                .filter(|(_, node)| {
+                    let at = &node["locked"];
+                    at["repo"] == repo
+                        || at["url"]
+                            .as_str()
+                            .is_some_and(|url| url.trim_end_matches(".git").ends_with(&suffix))
+                })
+                .map(|(name, node)| {
+                    let rev = node["locked"]["rev"].as_str().map(str::to_string);
+                    (name.clone(), rev)
+                })
+                .collect()
+        }
+
+        #[test]
+        fn the_transcribed_revision_is_the_one_delivery_is_locked_at() {
+            let locked = lock_nodes_of("logos-delivery");
+            // Without this, renaming the input would make the loop below check
+            // nothing and pass.
+            assert!(
+                !locked.is_empty(),
+                "no logos-delivery node in dialectica/flake.lock; find where \
+                 delivery is locked now and point this test at it"
+            );
+            for (name, rev) in locked {
+                assert_eq!(
+                    rev.as_deref(),
+                    Some(DELIVERY_REV),
+                    "dialectica/flake.lock node `{name}` locks logos-delivery at \
+                     {rev:?}, not the {DELIVERY_REV} this crate's transcriptions were \
+                     read at. Re-read, at the new rev: \
+                     waku/waku_core/topics/content_topic.nim and sharding.nim against \
+                     `delivery_topic_rule`, and channels/api/channel_lifecycle.nim \
+                     against `delivery::ALREADY_EXISTS`; then update DELIVERY_REV."
+                );
+            }
+        }
+
+        /// The revision the tracked `scaffold.toml` installs
+        /// `logos-delivery-module` at: the commit in `[modules.delivery_module]`'s
+        /// `flake = "github:logos-co/logos-delivery-module/<rev>#lgx"`. `None` when
+        /// that table, its `flake` key or the repository segment is missing.
+        ///
+        /// Read with `include_str!` from the checkout's root: CI tests the
+        /// committed pin, and a local run sees an `lgs basecamp` verb's rewrite
+        /// of the file before it is committed. Text, not a TOML crate, for one
+        /// key in one table. `cfg(test)` only, like [`lock_nodes_of`]: the file is
+        /// outside the `lgx` build's `src = ./.`, and that build compiles no tests
+        /// (it is green with this test in place).
+        fn scaffold_delivery_module_rev() -> Option<&'static str> {
+            let scaffold = include_str!("../../../../scaffold.toml");
+            let table = scaffold
+                .split("\n[")
+                .find(|table| table.starts_with("modules.delivery_module]"))?;
+            let flake = table.lines().find_map(|line| {
+                let (key, value) = line.split_once('=')?;
+                (key.trim() == "flake").then(|| value.trim().trim_matches('"'))
+            })?;
+            let (_, rest) = flake.split_once("/logos-delivery-module/")?;
+            rest.split('#').next()
+        }
+
+        #[test]
+        fn the_scaffold_installs_the_delivery_module_the_lock_holds() {
+            // The delivery a Basecamp loads is the module `scaffold.toml` installs
+            // (`role = "dependency"`), not `dialectica/flake.lock`'s
+            // `delivery_module` input, which the build takes only for the client
+            // generator to read the impl header. The test above ties the lock's
+            // `logos-delivery` to DELIVERY_REV, and that node is the lock's
+            // `delivery_module`'s own input; this ties the installed module to
+            // the lock, so a scaffold pin bump that left the lock behind is a
+            // red test rather than a fake agreeing with a parser nobody runs.
+            let installed = scaffold_delivery_module_rev().expect(
+                "scaffold.toml has no `[modules.delivery_module]` flake ref of the form \
+                 github:logos-co/logos-delivery-module/<rev>#lgx; find where the \
+                 installed delivery module is pinned now and point this test at it",
+            );
+            let locked = lock_nodes_of("logos-delivery-module");
+            // Without this, renaming the input would make the loop below check
+            // nothing and pass.
+            assert!(
+                !locked.is_empty(),
+                "no logos-delivery-module node in dialectica/flake.lock; find where \
+                 the delivery module is locked now and point this test at it"
+            );
+            for (name, rev) in locked {
+                assert_eq!(
+                    rev.as_deref(),
+                    Some(installed),
+                    "scaffold.toml installs logos-delivery-module at {installed}, but \
+                     dialectica/flake.lock node `{name}` locks it at {rev:?}. A Basecamp \
+                     runs the scaffold's; this crate's transcriptions are checked \
+                     against the lock's. Lock dialectica/flake.nix's delivery_module at \
+                     the scaffold's rev, and the logos-delivery test beside this one \
+                     then says what to re-read."
+                );
+            }
+        }
+
+        #[test]
+        fn a_generation_other_than_zero_parses_and_is_then_refused_for_its_shard() {
+            // `getShard(NsContentTopic)` takes generation `0` or none and refuses
+            // every other value, after the parse has accepted it. A rule that
+            // stopped at the parse let `/1/…` through the fake while a live node
+            // declined it.
+            for topic in [
+                "/1/waku/2/default-content/proto",
+                "/-1/waku/2/default-content/proto",
+            ] {
+                assert!(parse(topic).is_ok(), "the parse itself refused {topic}");
+                assert_eq!(
+                    subscribable(topic),
+                    Err("Generation > 0 are not supported yet".to_string()),
+                    "{topic}"
+                );
+            }
+            for topic in [
+                "/0/waku/2/default-content/proto",
+                "/waku/2/default-content/proto",
+            ] {
+                assert!(subscribable(topic).is_ok(), "{topic} was refused");
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1012,7 +1463,7 @@ mod tests {
             );
             assert_eq!(
                 identity.content_topic(),
-                format!("/dialectica/1/s/{hex}/proto"),
+                format!("/dialectica/1/s-{hex}/proto"),
                 "the content topic for {title} is not the address and the affixes alone"
             );
         }
@@ -1068,10 +1519,17 @@ mod tests {
         //
         // That is where the value came from, via `sha256sum` rather than this
         // crate's hasher. The two strings below are that hex interpolated into
-        // §4.1's `/dialectica/1/s/<hex>/proto` and into the channel form.
+        // the topic form `/dialectica/1/s-<hex>/proto` and into the channel form
+        // `/dialectica/1/c/<hex>`.
         //
         // If this fails, do NOT update the expected values to match. Work out
         // what changed and whether the network can survive it.
+        //
+        // The topic expectation was changed once, from
+        // `/dialectica/1/s/<hex>/proto`: delivery cannot parse a five-part topic
+        // whose first part is not a number, so no peer ever opened a channel on
+        // the old value and there was no network to migrate. The design's
+        // "The content topic has four parts" records it.
         let stoa = crate::identity::stoa_address(b"a genesis record");
         assert_eq!(
             stoa.to_hex(),
@@ -1081,7 +1539,7 @@ mod tests {
         let identity = ChannelIdentity::of(&stoa);
         assert_eq!(
             identity.content_topic(),
-            "/dialectica/1/s/6b1f1c28061e99c72e3340fb4fd07e8192b394e1327012e140f240a990d89cd8/proto",
+            "/dialectica/1/s-6b1f1c28061e99c72e3340fb4fd07e8192b394e1327012e140f240a990d89cd8/proto",
             "the content topic derivation changed"
         );
         assert_eq!(
@@ -1108,6 +1566,41 @@ mod tests {
             "got {}",
             identity.channel_id()
         );
+    }
+
+    #[test]
+    fn the_content_topic_is_one_delivery_parses_with_dialectica_as_application() {
+        // The regression test for the first live two-peer run, where delivery
+        // declined every channel: `invalid format: generation should be a
+        // numeric value`. The old topic `/dialectica/1/s/<hex>/proto` has FIVE
+        // parts, and delivery reads a five-part topic as `/<generation>/…`, so
+        // `dialectica` was taken for a generation number.
+        //
+        // Two things are checked, against delivery's rule rather than against
+        // what the derivation produced:
+        //
+        // This is `op-transport`'s scenario "The network's content-topic rule
+        // reads the content topic as dialectica version 1"; its refusal half is
+        // `delivery_topic_rule`'s
+        // `the_topic_a_live_node_refused_is_refused_with_its_message`.
+        //
+        // - delivery accepts it at all (`delivery_topic_rule` cites the parser
+        //   and the shard step after it);
+        // - it parses with `dialectica` as the APPLICATION and `1` as the
+        //   VERSION, and no generation. Autosharding hashes exactly those two
+        //   fields (`sharding.nim:20-30` at the same revision), so this is what
+        //   makes the spec's "`/dialectica/1/` is what puts every Stoa on one
+        //   shard" true. Had the five-part form parsed, it would have read
+        //   `1` as the application and `s` as the version.
+        for title in ["Agora", "Lyceum", "Academy", "The Zzyzx Assembly"] {
+            let identity = ChannelIdentity::of(&a_stoa(title));
+            let topic = identity.content_topic();
+            let parsed = delivery_topic_rule::subscribable(topic)
+                .unwrap_or_else(|why| panic!("delivery refuses {topic}: {why}"));
+            assert_eq!(parsed.generation, None, "{topic}");
+            assert_eq!(parsed.application, "dialectica", "{topic}");
+            assert_eq!(parsed.version, "1", "{topic}");
+        }
     }
 
     #[test]
@@ -2102,6 +2595,44 @@ mod tests {
             matches!(refusal, InboundRefusal::TooLong { .. }),
             "the decode ran before the size check: got {refusal:?}"
         );
+    }
+
+    #[test]
+    fn the_boundary_looks_a_channel_up_under_the_messages_own_identifier() {
+        // Architecture review: `judge` once took the channel's Stoa from its
+        // caller as a bare address, so `Judged` certified the checks on the bytes
+        // but not that the Stoa was the one the message arrived under. The lookup
+        // is now `receive_via`'s own, keyed by the message's channel identifier.
+        // Two channels are open here, and the op names the one it did NOT arrive
+        // on: judged against the channel it arrived on it is a Stoa mismatch, and
+        // nothing is appended.
+        let arrived_on = a_stoa("Agora");
+        let named = a_stoa("Lyceum");
+        let (mut channels, mut log, identity) = peer_in(arrived_on);
+        channels.open(&ChannelIdentity::of(&named));
+        let payload = signed_post_in(named, "copied across").to_bytes().unwrap();
+
+        let mut asked = Vec::new();
+        let refusal = receive_via(
+            inbound(identity.channel_id(), &payload),
+            |channel_id| {
+                asked.push(channel_id.to_string());
+                channels.stoa_of(channel_id).copied()
+            },
+            NOW_MS,
+            |judged| admit(judged, &mut log),
+        )
+        .unwrap_err();
+
+        assert_eq!(asked, vec![identity.channel_id().to_string()]);
+        assert_eq!(
+            refusal,
+            InboundRefusal::StoaMismatch {
+                named,
+                channel_is_for: arrived_on
+            }
+        );
+        assert_eq!(log.len().unwrap(), 0);
     }
 
     #[test]
@@ -3371,5 +3902,41 @@ mod tests {
         assert_eq!(in_one.channel_id, ChannelIdentity::of(&one).channel_id());
         assert_eq!(in_two.channel_id, ChannelIdentity::of(&two).channel_id());
         assert_ne!(in_one.channel_id, in_two.channel_id);
+    }
+
+    // ─── Handing off an op already held ───────────────────────────────────
+
+    #[test]
+    fn a_handoff_carries_the_stored_wire_form_on_the_ops_own_channel() {
+        let one = a_stoa("Agora");
+        let two = a_stoa("Lyceum");
+        let mut channels = OpenChannels::new();
+        channels.open(&ChannelIdentity::of(&one));
+        channels.open(&ChannelIdentity::of(&two));
+        let op = signed_post_in(two, "held");
+
+        let handed = handoff(&op, &channels).unwrap();
+
+        assert_eq!(handed.id, op.op.id());
+        assert_eq!(handed.channel_id, ChannelIdentity::of(&two).channel_id());
+        assert_eq!(handed.payload, op.to_bytes().unwrap());
+    }
+
+    #[test]
+    fn a_handoff_with_no_open_channel_names_the_op_and_its_stoa() {
+        let stoa = a_stoa("Agora");
+        let op = signed_post_in(stoa, "held");
+        // Another Stoa's channel open, so "some channel is open" is not enough.
+        let mut channels = OpenChannels::new();
+        channels.open(&ChannelIdentity::of(&a_stoa("Lyceum")));
+
+        assert_eq!(
+            handoff(&op, &channels),
+            Err(PublishError::NoChannel {
+                stoa,
+                id: op.op.id()
+            })
+        );
+        assert_eq!(channels.len(), 1, "a handoff opened a channel");
     }
 }

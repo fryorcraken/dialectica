@@ -319,8 +319,9 @@ somewhere — so an interface that merely declines to mention delivery lets that
 assumption stand unchallenged while being fully compliant.
 
 **The stakes are specific to this system rather than general good manners.** A
-publish reply carries no delivery outcome by design; delivery is not wired at
-all; and a post whose body is legal but near the cap encodes to more than the
+publish reply carries no delivery outcome by design; where core hands the op to
+the network, it learns nothing of whether any peer received
+it; and a post whose body is legal but near the cap encodes to more than the
 transport will carry, so it is accepted locally and silently refused by every
 receiving peer. An author therefore cannot distinguish a post nobody has received
 from one everybody has, and the interface is the only place that fact can be

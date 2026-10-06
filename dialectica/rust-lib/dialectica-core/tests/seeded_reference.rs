@@ -235,7 +235,11 @@ fn the_core_joins_the_committed_reference_as_a_new_membership() {
         "the store starts empty: {before}"
     );
 
-    let joined = reply(&dialectica_core::join_stoa(&reference, &mut store));
+    let joined = reply(&dialectica_core::join_stoa(
+        &reference,
+        &mut store,
+        &mut |_| {},
+    ));
     assert_eq!(joined.get("error"), None, "joinStoa refused it: {joined}");
     assert_eq!(joined["stoa"], stoa.as_str(), "{joined}");
     assert_eq!(joined["foundingTitle"], TITLE, "{joined}");

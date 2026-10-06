@@ -194,13 +194,52 @@ These are structural and bite at build time, not review time.
   timeout.
 - **Handle `RET_STALE_WARN` (3)** from the delivery C ABI: a non-terminal
   "still running" tick every ~5s, always followed by a terminal OK/ERR.
-  Ignoring it double-counts completions.
+  Ignoring it double-counts completions. It reaches whatever counts delivery
+  *outcome events*; the module's own calls never see it — at v0.2.1
+  `api_call_handler.h` and the start/stop callbacks return early on it, so each
+  `channelCreate`/`channelSend` answers once. Re-check when the pin moves.
+- **Delivery declines with `Ok`, not `Err`.** At v0.2.1 a refused call answers
+  successfully at the IPC level with an envelope in the body —
+  `{"error":"Context not initialized","success":false,"value":null}` — and a
+  success may carry `"error":""`. Read the envelope before the value, and do
+  not count an empty `error` as a reason (`core::delivery::declined`). A second
+  `createNode` in one context is declined with "Context already initialized",
+  which usually means another module owns the node.
+- **Delivery's own 30 s callback timeout outlasts the IPC default of 20 s**, so
+  every delivery call here passes a longer timeout (`CALL_TIMEOUT`). And the
+  30 s is not the end of a creation: delivery answers
+  `"channel_create callback timeout"` while its runtime finishes creating the
+  channel, and a later `channelCreate` answers `"channel already exists"`. The
+  same answer greets every channel after a module restart under a running
+  delivery. That answer means delivery **holds** the channel; read as a decline,
+  the Stoa goes deaf until delivery restarts.
+- **`channelMessageReceived` can arrive before the `channelCreate` answer** for
+  the same channel (v0.2.1 emits from its runtime's callback thread). A message
+  judged in that gap is refused as an unknown channel and lost, because SDS has
+  already counted it delivered — so an open that is asked for and unanswered is
+  its own state, not "closed".
+- **`cargo test` does not compile the adapter** (`dialectica/rust-lib/src/lib.rs`,
+  behind `cfg(logos_scaffold)`); `nix build ./dialectica#lgx` is the only local
+  gate that does. Keep decisions out of that file and in `dialectica-core`,
+  behind a seam a test can drive.
 - **`createNode` exactly once per context.** The delivery node is a singleton
   per Logos Core instance; `stop()` kills traffic for every module using it.
   Contracted in the `op-transport` spec; kept here because it presents as a
   runtime failure in someone else's module.
 - **`messageReceived`'s timestamp is nanoseconds**; every other delivery event
   is ISO-8601 (delivery bug #26).
+- **Delivery parses a content topic; it treats a channel id and a sender id as
+  opaque.** A topic must be `/<app>/<version>/<name>/<encoding>` — exactly four
+  non-empty parts — or five with generation `0` first. Anything else and
+  `channelCreate` is declined: a non-numeric generation by the parse
+  (`invalid format: generation should be a numeric value`), any other number by
+  the shard lookup after it (`Generation > 0 are not supported yet`). Our
+  first topic had five parts and every channel was refused live while every
+  test passed, because the fake took any string. The fake now declines what
+  `transport::delivery_topic_rule` (delivery's parse and shard step,
+  transcribed) refuses, and a test there fails when `dialectica/flake.lock`
+  moves delivery off the rev it was transcribed at. `delivery-wiring`'s design,
+  Decision 17.
 - **`messageReceived` fires for your own messages; `channelMessageReceived`
   does not** — own sends come back as `channelMessageSent`. The consequence is
   contracted in the `op-transport` spec ("A peer's own published op is not

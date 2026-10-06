@@ -80,7 +80,7 @@
 
 pub mod sqlite;
 
-pub use sqlite::SqliteOpLog;
+pub use sqlite::{op_log_path_in, SqliteOpLog};
 
 use crate::arrival::{clock_from_counters, cmp_ops, Arrival, OpEntry};
 use crate::identity::Address;
