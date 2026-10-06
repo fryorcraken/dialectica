@@ -385,11 +385,18 @@ TestCase {
     // strings rendered around the marker and the affordance, so such an
     // addition is caught rather than silently passing the existing boolean-
     // only assertions.
-    function collectTexts(item, out) {
+    //
+    // The one walk in this file: every `text` an item and its descendants carry.
+    // What it reaches and what it ignores is written where it is used for the
+    // no-claim tests, below. `renderedOnly` skips an item that is not visible
+    // and everything under it.
+    function collectTexts(item, out, renderedOnly) {
+        if (renderedOnly === true && !item.visible)
+            return
         if (typeof item.text === "string")
             out.push(item.text)
         for (var i = 0; i < item.children.length; i++)
-            collectTexts(item.children[i], out)
+            collectTexts(item.children[i], out, renderedOnly)
     }
 
     function test_the_marker_and_the_inert_row_state_nothing_about_earlier_content() {
@@ -427,57 +434,68 @@ TestCase {
 
     // ---- no edit or version claim beside the reply composer ---------------
     //
-    // `thread-view`'s "The text around the reply composer does not promise that
-    // a reply can be edited, or that its earlier versions can be read". The
-    // screen offers no way to edit a reply, no method on the module surface
-    // publishes a revision, and none reads a prior version. So any text
-    // promising one of those is false.
+    // `thread-view`'s "The text around the reply composer says nothing about
+    // editing a reply or reading its earlier versions". The screen offers no
+    // way to edit a reply, no method on the module surface publishes a
+    // revision, and none reads a prior version. So text promising one of those
+    // is false, and text denying one goes false the day it is built, so the
+    // requirement forbids both.
     //
-    // The spec forbids a CLAIM, not one sentence. These tests therefore match
-    // a pattern rather than looking for the removed string, so a reworded
-    // promise ("Replies may be revised") fails as well. They walk only the
-    // composer's group and the shut gate: the fixture's root is revised, so
-    // the thread's rows render `edited` and "read the earlier versions". Both
-    // are reports of what an author did, or an inert affordance on a post,
-    // which the requirement says it does not bear on, and a whole-screen walk
-    // would fail on them. `test_the_walk_does_not_reach_the_thread_rows_...`
-    // pins that scope.
+    // The spec forbids a STATEMENT, not one sentence. These tests therefore
+    // match a pattern rather than looking for the removed string, so a reworded
+    // promise ("Replies may be revised") or a denial ("A reply cannot be
+    // edited") fails as well. The matcher flags a word, which is what fits a
+    // requirement that forbids the topic in both directions: it needs no
+    // denial-aware exemption, and a wrong exemption would pass the sentence it
+    // was written to catch.
     //
-    // **The matcher is stricter than the spec on purpose.** It flags a word,
-    // so it also flags a sentence that DENIES the claim ("A reply cannot be
-    // edited"), which the spec permits. Honest copy of that kind is a
-    // legitimate future edit, and when it comes the answer is to read the
-    // requirement and narrow this pattern deliberately, not to reword the
-    // sentence around it. The word list is hand-maintained: a paraphrase
-    // outside it passes, and the table in the matcher test is the place a
-    // missed paraphrase is added.
+    // **The word list is hand-maintained.** A paraphrase outside it passes, and
+    // the tables in the matcher tests are the place a missed one is added.
+    //
+    // Two walks, for two reaches. Each group's own walk (`replyComposerOpen`,
+    // `replyGateShut`) is the one with anchors, so it cannot silently collect
+    // nothing. The walk beside the rows covers the whole screen except the
+    // thread's rows, so text added beside the groups, in neither of them, is
+    // not unguarded. The rows are left out because the fixture's root is
+    // revised, so they render `edited` and "read the earlier versions": reports
+    // of what an author did, and an inert affordance on a post, which the
+    // requirement says it does not bear on.
+    // `test_the_walk_does_not_reach_the_thread_rows_that_report_a_revision`
+    // pins that exclusion.
+    //
+    // The requirement binds text the SCREEN authors. Text core supplies and
+    // the draft the user typed are rendered in the same places and are outside
+    // it, so a walk takes the strings the test itself fed the screen and does
+    // not flag them. `test_text_core_supplies_and_the_draft_are_outside_the_requirement`
+    // pins that scope in both directions.
     //
     // design.md Decision 3 covers the alternatives, and what breaks without
     // each guard below.
 
-    // True where `text` claims a reply can be edited (or amended, updated,
-    // corrected, republished), or mentions a version of it at all, which covers
-    // both "a later version can be published" and "earlier versions stay
-    // readable". Nothing this group renders has any reason to say "version".
-    function claimsEditing(text) {
-        return /\b(edit|revis|amend|rewrit|chang|updat|modif|correct|supersed|overwrit|republish|re-publish)\w*|\bversions?\b/i
+    // True where `text` mentions editing a reply (or amending, updating,
+    // correcting, republishing, undoing, replacing, retracting it), or mentions
+    // a version of it at all, which covers both "a later version can be
+    // published" and "earlier versions stay readable". Nothing the screen
+    // authors in these groups has any reason to say "version".
+    function mentionsEditOrVersion(text) {
+        return /\b(edit|revis|amend|rewrit|chang|updat|modif|correct|supersed|overwrit|republish|re-publish|fix|replac|undo|redo|retract|revert|withdr[ae]w)\w*|\bversions?\b|\b(newer|older)\s+(one|copy)\b/i
             .test(text)
     }
 
-    // The matcher, pinned both ways, one test per family of claim and one for
-    // what it must leave alone. A `claimsEditing` that always answered false
-    // would make all three scenario tests below pass on any tree; these are the
-    // tests that fail then. They are separate so that the first family to fail
-    // does not hide the others.
+    // The matcher, pinned both ways, one test per family of statement and one
+    // for what it must leave alone. A `mentionsEditOrVersion` that always
+    // answered false would make all three scenario tests below pass on any
+    // tree; these are the tests that fail then. They are separate so that the
+    // first family to fail does not hide the others.
     //
-    // Every string here is written out by hand: the claims from the
+    // Every string here is written out by hand: the statements from the
     // requirement, the truthful ones as the screen's copy was when this was
     // written. None is read off the screen at run time, so the matcher is never
     // asked to agree with what the implementation produced.
     function unflagged(strings) {
         var missed = []
         for (var i = 0; i < strings.length; i++)
-            if (!claimsEditing(strings[i]))
+            if (!mentionsEditOrVersion(strings[i]))
                 missed.push(strings[i])
         return missed
     }
@@ -491,8 +509,34 @@ TestCase {
             "You can update this reply afterwards.",
             "You can modify a reply once it is published.",
             "A correction can be published.",
-            "A reply can be republished with different text."
+            "A reply can be republished with different text.",
+            // Paraphrases that name none of the verbs above. The first is the
+            // spec-test review's surviving caption; the others are the
+            // promises a writer reaches for next.
+            "A reply is a signed record. You can fix typos later and replace it.",
+            "You can undo a reply after publishing it.",
+            "You can redo a reply that came out wrong.",
+            "A reply can be retracted.",
+            "A reply can be reverted to what you wrote before.",
+            "You can withdraw a reply and publish another."
         ]), [], "an edit claim the matcher let through")
+    }
+
+    // The requirement forbids a DENIAL as well as a promise: editing is planned,
+    // so "cannot be edited" goes false the day it lands. A matcher that let a
+    // denial through would be satisfied by exactly the sentence the owner did
+    // not ask for. Hand-written, one per topic the requirement names.
+    function test_the_matcher_flags_a_denial_as_well_as_a_promise() {
+        compare(unflagged([
+            "A reply cannot be edited.",
+            "Replies cannot be changed once they are published.",
+            "There is no way to edit a reply yet.",
+            "A published reply cannot be undone.",
+            "Editing is not available in this version.",
+            "Later versions of a reply cannot be published.",
+            "Earlier versions are not kept.",
+            "Nothing earlier than this version can be read."
+        ]), [], "a denial the matcher let through")
     }
 
     function test_the_matcher_flags_a_claim_that_a_later_version_can_be_published() {
@@ -500,7 +544,10 @@ TestCase {
             "A later version of this reply can be published.",
             "Publish a new version at any time.",
             "Newer versions of a reply can be published.",
-            "Another version can follow."
+            "Another version can follow.",
+            // No "version" and no edit verb: the sentence promises a newer
+            // copy by naming it.
+            "A newer one can take its place at any time."
         ]), [], "a later-version claim the matcher let through")
     }
 
@@ -514,6 +561,7 @@ TestCase {
             "Earlier versions of a reply can be read.",
             "You can read the previous version of a reply.",
             "Every version of a reply is kept.",
+            "You can read the older one.",
             // The thread rows' own label. It is no claim inside the composer's
             // group, but the matcher must recognise it, or the scope test
             // below would prove nothing about why the walk is scoped.
@@ -546,34 +594,62 @@ TestCase {
         ]
         var flaggedWrongly = []
         for (var j = 0; j < truthful.length; j++)
-            if (claimsEditing(truthful[j]))
+            if (mentionsEditOrVersion(truthful[j]))
                 flaggedWrongly.push(truthful[j])
         compare(flaggedWrongly, [],
-                "a sentence making no edit or version claim, flagged")
+                "a sentence making no edit or version statement, flagged")
     }
 
-    // Every `text` an item and its descendants carry. A TextField's placeholder
-    // is among them without being asked for: its default style renders the
-    // prompt through a child Text (measured, by putting a placeholder in the
-    // group). The walk reads `children` only, so text a popup or an attached
-    // tooltip carries is out of its reach, which this suite cannot see. It
-    // ignores `visible`, so a hidden Text is walked as well, which is stricter
-    // than "rendered" and cannot hide a claim that is merely shown later.
-    function stringsUnder(item, out) {
-        if (typeof item.text === "string")
-            out.push(item.text)
-        for (var i = 0; i < item.children.length; i++)
-            stringsUnder(item.children[i], out)
-    }
-
-    function editClaimsUnder(item) {
-        var texts = []
-        stringsUnder(item, texts)
+    // What the walks collect, and what they leave out. One walk, `collectTexts`
+    // above: it pushes every `text` an item and its descendants carry. A
+    // TextField's placeholder is among them without being asked for: its
+    // default style renders the prompt through a child Text (measured, by
+    // putting a placeholder in the group). The walk reads `children` only, so
+    // text a popup or an attached tooltip carries is out of its reach, which
+    // this suite cannot see.
+    //
+    // By default it ignores `visible`, so a hidden Text is walked as well. That
+    // is stricter than "rendered", for the claim walks: a statement that is
+    // hidden when the test looks and shown later cannot hide in it. The
+    // statement that a reply is signed is the opposite case, a positive
+    // requirement on what is RENDERED, so its walks pass `renderedOnly`:
+    // a caption hidden with `visible: false` satisfies nothing.
+    //
+    // `suppliedText` is the strings the test itself fed the screen as core's
+    // reply or as the user's draft. They are outside the requirement, so they
+    // are collected and not flagged. They are exact strings the test chose, so
+    // text the screen authors is never exempt by accident.
+    function mentionsAmong(texts, suppliedText) {
         var flagged = []
         for (var i = 0; i < texts.length; i++)
-            if (claimsEditing(texts[i]))
+            if (mentionsEditOrVersion(texts[i])
+                    && (suppliedText === undefined || suppliedText.indexOf(texts[i]) === -1))
                 flagged.push(texts[i])
-        return { texts: texts, flagged: flagged }
+        return flagged
+    }
+
+    function mentionsUnder(item, suppliedText) {
+        var texts = []
+        collectTexts(item, texts)
+        return { texts: texts, flagged: mentionsAmong(texts, suppliedText) }
+    }
+
+    // Every text in the screen's content column outside the thread's rows. The
+    // rows are `threadItems`' delegates, which a Repeater parents beside itself
+    // and not under itself, in the column the screen's items are laid out in
+    // (the screen's own single child), so they are named by `itemAt` rather
+    // than found by structure.
+    function textsBesideTheRows(screen) {
+        var rows = findChild(screen, "threadItems")
+        var column = rows.parent
+        var skip = [rows]
+        for (var r = 0; r < rows.count; r++)
+            skip.push(rows.itemAt(r))
+        var texts = []
+        for (var c = 0; c < column.children.length; c++)
+            if (skip.indexOf(column.children[c]) === -1)
+                collectTexts(column.children[c], texts)
+        return { rowCount: rows.count, texts: texts }
     }
 
     // Non-vacuity for the open group: a walk that reached the wrong item, or
@@ -581,12 +657,13 @@ TestCase {
     // group's two stable pieces of its own, the attribution line and the
     // composer's submit label, which together show the walk covers the group
     // and descends into the composer inside it. They are not the caption: the
-    // caption's removal is `test_the_caption_beside_the_composer_is_kept`'s to
-    // report, and must not be reported as an inability to look for a claim.
+    // caption's removal is the signed-statement tests' to report, and must not
+    // be reported as an inability to look for a claim.
     //
     // A caption anywhere on the screen must lie inside the walked group. A
     // caption moved out of it, carrying a claim, would otherwise be text beside
-    // the composer that no walk reaches.
+    // the composer that the group's walk does not reach (the walk beside the
+    // rows does, and this fails first, naming the cause).
     function verifyWalkCoversTheOpenGroup(screen, open, found) {
         verify(found.texts.indexOf("REPLYING AS") !== -1,
                "the walk reached the attribution line of the composer group")
@@ -605,22 +682,52 @@ TestCase {
         var open = findChild(screen, "replyComposerOpen")
         verify(open !== null && open.visible, "an open gate renders the composer group")
 
-        var found = editClaimsUnder(open)
+        var found = mentionsUnder(open)
         verifyWalkCoversTheOpenGroup(screen, open, found)
         compare(found.flagged, [],
-                "no text rendered with the reply composer may claim a reply can be "
-                + "edited, that a later version of it can be published, or that "
-                + "an earlier version of it can be read")
+                "no text rendered with the reply composer may state whether a reply "
+                + "can be edited, whether a later version of it can be published, or "
+                + "whether an earlier version of it can be read")
         screen.destroy()
     }
 
-    // The walk is scoped to the composer's group and the shut gate, because the
-    // thread's own rows legitimately render `edited` and "read the earlier
-    // versions" on a revised post, and `thread-view` says the requirement does
-    // not bear on them. This pins that the scoping is what keeps the tests
-    // above green on those two strings, and not a matcher that fails to see
-    // them: the matcher flags both, on the screen as a whole, and neither is in
-    // either group's walk.
+    // The walk of a group does not reach text beside it. A Text added between
+    // the two groups, or after them, is rendered with the reply composer in the
+    // requirement's sense and sits in neither subtree, so the group walks pass
+    // over it. This walks every text on the screen outside the thread's rows,
+    // for each of the three states, so the guard is on the screen and not on two
+    // containers.
+    function test_no_text_beside_the_thread_rows_makes_an_edit_or_version_claim() {
+        var states = [
+            { name: "an open gate", canPost: true, anchor: "REPLYING AS", publish: false },
+            { name: "a shut gate", canPost: false, anchor: "You cannot reply in this Stoa yet.", publish: false },
+            { name: "an open gate after a publish", canPost: true, anchor: "REPLYING AS", publish: true }
+        ]
+        for (var s = 0; s < states.length; s++) {
+            var screen = states[s].publish ? publishedScreen([]) : makeScreen([], states[s].canPost)
+
+            var beside = textsBesideTheRows(screen)
+            verify(beside.rowCount > 0,
+                   states[s].name + ": the thread has rows, so there is something to leave out")
+            verify(beside.texts.indexOf(states[s].anchor) !== -1,
+                   states[s].name + ": the walk reached the composer's place")
+            compare(beside.texts.indexOf("edited"), -1,
+                    states[s].name + ": the walk leaves out the revised marker in the rows")
+            compare(mentionsAmong(beside.texts), [],
+                    states[s].name + ": no text beside the thread rows may state whether "
+                    + "a reply can be edited, whether a later version of it can be "
+                    + "published, or whether an earlier version of it can be read")
+            screen.destroy()
+        }
+    }
+
+    // The walks leave out the thread's own rows, because they legitimately
+    // render `edited` and "read the earlier versions" on a revised post, and
+    // `thread-view` says the requirement does not bear on them. This pins that
+    // leaving them out is what keeps the tests above green on those two
+    // strings, and not a matcher that fails to see them: the matcher flags
+    // both, on the screen as a whole, and neither is in either group's walk or
+    // in the walk beside the rows.
     function test_the_walk_does_not_reach_the_thread_rows_that_report_a_revision() {
         var gates = [
             { canPost: true, group: "replyComposerOpen" },
@@ -629,30 +736,134 @@ TestCase {
         for (var g = 0; g < gates.length; g++) {
             var calls = []
             var screen = makeScreen(calls, gates[g].canPost)
+            var allTexts = []
+            collectTexts(screen, allTexts)
 
-            var wholeScreen = editClaimsUnder(screen)
-            verify(wholeScreen.flagged.indexOf("edited") !== -1,
+            var wholeScreen = mentionsAmong(allTexts)
+            verify(wholeScreen.indexOf("edited") !== -1,
                    "the revised marker is on screen and the matcher flags it")
-            verify(wholeScreen.flagged.indexOf("read the earlier versions") !== -1,
+            verify(wholeScreen.indexOf("read the earlier versions") !== -1,
                    "so is the earlier-versions label, and the matcher flags it")
 
             var group = findChild(screen, gates[g].group)
             verify(group !== null && group.visible, gates[g].group + " is rendered")
-            var inGroup = editClaimsUnder(group)
+            var inGroup = mentionsUnder(group)
             compare(inGroup.flagged.indexOf("edited"), -1,
                     gates[g].group + "'s walk does not reach the revised marker")
             compare(inGroup.flagged.indexOf("read the earlier versions"), -1,
                     gates[g].group + "'s walk does not reach the earlier-versions label")
             compare(findChild(group, "earlierVersionsInert"), null,
                     "the earlier-versions row is not inside " + gates[g].group)
+
+            var beside = textsBesideTheRows(screen)
+            compare(beside.texts.indexOf("edited"), -1,
+                    "the walk beside the rows does not reach the revised marker")
+            compare(beside.texts.indexOf("read the earlier versions"), -1,
+                    "nor the earlier-versions label")
             screen.destroy()
         }
     }
 
-    // The caption stays on screen across a publish, so the check is repeated
-    // after one, with the re-read returning the published reply.
-    function test_no_edit_or_version_claim_appears_after_a_reply_is_published() {
-        var calls = []
+    // The walk ignores `visible` for the claim tests, which is the choice
+    // collectTexts's comment names: a statement that is hidden when the test
+    // looks and shown later is still one. Nothing in the screen's own tree is
+    // hidden with a claim in it, so a walk narrowed to visible items would pass
+    // every other test here. This one is on a hand-made tree.
+    Component {
+        id: hiddenClaimComponent
+        Item {
+            Text { text: "Replies can be edited later."; visible: false }
+        }
+    }
+
+    function test_the_claim_walk_reaches_a_text_that_is_hidden() {
+        var tree = hiddenClaimComponent.createObject(null)
+        compare(mentionsUnder(tree).flagged, ["Replies can be edited later."],
+                "a hidden Text is walked, and flagged")
+        var rendered = []
+        collectTexts(tree, rendered, true)
+        compare(rendered, [],
+                "and `renderedOnly` is what leaves it out, for the signed-statement walk")
+        tree.destroy()
+    }
+
+    // The requirement binds text the screen AUTHORS. Core's reason behind a shut
+    // gate, core's message on a refused publish, and the draft are rendered in
+    // the same places and are not its. The fixtures elsewhere supply strings
+    // that avoid the matcher, so they cannot show this. These strings are the
+    // ones that would trip it: both are real core wordings (the keystore's
+    // "keystore format version {v} is newer than this build understands" and the
+    // identity record's layout-version refusal), and a draft that talks about
+    // editing, as a person's draft may.
+    function test_text_core_supplies_and_the_draft_are_outside_the_requirement() {
+        var reason = "keystore format version 9 is newer than this build understands; upgrade dialectica"
+        var refusal = "the identity record declares layout version 2, which this build cannot read"
+        var draft = "I will edit this and publish a newer version later"
+
+        // A shut gate rendering core's reason.
+        Core.bridge = {
+            callModule: function (module, method, args) {
+                if (method === "get_capabilities")
+                    return JSON.stringify({ canPost: false, reason: reason })
+                if (method === "read_thread")
+                    return JSON.stringify({ items: [rootItem()], page: 0, hasMore: false })
+                return '{"error":"no fake reply for ' + method + '"}'
+            }
+        }
+        var shutScreen = threadComponent.createObject(null, {
+            stoaAddress: "ab".repeat(32), stoaGenesis: "00ff", threadId: "root1"
+        })
+        var shutFound = mentionsUnder(findChild(shutScreen, "replyGateShut"))
+        verify(shutFound.texts.indexOf(reason) !== -1,
+               "the shut gate renders core's reason verbatim")
+        verify(shutFound.flagged.indexOf(reason) !== -1,
+               "and the matcher does flag it, so what spares it is the scope")
+        compare(mentionsUnder(findChild(shutScreen, "replyGateShut"), [reason]).flagged, [],
+                "core's reason is not text the screen authors")
+        compare(mentionsAmong(textsBesideTheRows(shutScreen).texts, [reason]), [],
+                "nor beside the rows")
+        shutScreen.destroy()
+
+        // An open gate with a draft in the field and core's refusal under it.
+        Core.bridge = {
+            callModule: function (module, method, args) {
+                if (method === "get_capabilities")
+                    return '{"canPost":true,"reason":""}'
+                if (method === "read_thread")
+                    return JSON.stringify({ items: [rootItem()], page: 0, hasMore: false })
+                if (method === "publish_reply")
+                    return JSON.stringify({ error: refusal })
+                return '{"error":"no fake reply for ' + method + '"}'
+            }
+        }
+        var openScreen = threadComponent.createObject(null, {
+            stoaAddress: "ab".repeat(32), stoaGenesis: "00ff", threadId: "root1"
+        })
+        var composer = findChild(openScreen, "replyComposer")
+        composer.draft = draft
+        composer.submit()
+        compare(composer.outcome, "refused", "the publish was refused, so the draft stays")
+
+        var open = findChild(openScreen, "replyComposerOpen")
+        var openFound = mentionsUnder(open)
+        verify(openFound.texts.indexOf(draft) !== -1, "the walk collects the draft")
+        verify(openFound.texts.indexOf(refusal) !== -1, "and core's refusal, verbatim")
+        verify(openFound.flagged.indexOf(draft) !== -1
+               && openFound.flagged.indexOf(refusal) !== -1,
+               "and the matcher does flag both, so what spares them is the scope")
+        compare(mentionsUnder(open, [draft, refusal]).flagged, [],
+                "neither is text the screen authors")
+        compare(mentionsAmong(textsBesideTheRows(openScreen).texts, [draft, refusal]), [],
+                "nor beside the rows")
+        openScreen.destroy()
+    }
+
+    // A screen with a reply published through its composer, and the re-read it
+    // triggers. The composer stored the op and the thread holds the reply.
+    // Both are asserted here, so a caller never walks the pre-publish tree and
+    // passes: a fixture whose `publish_reply` and `read_thread` stop agreeing
+    // fails loudly on these two lines.
+    function publishedScreen(calls) {
         var published = false
         Core.bridge = {
             callModule: function (module, method, args) {
@@ -685,25 +896,26 @@ TestCase {
         composer.draft = "Bye!"
         composer.submit()
 
-        // Non-vacuity, in two parts, so the walk below is of the state the
-        // scenario names. The composer reports the publish stored the op, and
-        // the screen's re-read returned the fixture's second item. Each fails
-        // loudly, rather than passing on the pre-publish tree, if the fixture's
-        // `publish_reply` and `read_thread` stop agreeing with each other.
         compare(composer.outcome, "stored",
                 "the publish went through the composer and was newly stored")
         compare(screen.items.length, 2,
                 "the thread was read again and holds the published reply")
+        return screen
+    }
 
+    // The caption stays on screen across a publish, so the check is repeated
+    // after one, with the re-read returning the published reply.
+    function test_no_edit_or_version_claim_appears_after_a_reply_is_published() {
+        var screen = publishedScreen([])
         var open = findChild(screen, "replyComposerOpen")
         verify(open !== null && open.visible, "the composer group is still rendered")
 
-        var found = editClaimsUnder(open)
+        var found = mentionsUnder(open)
         verifyWalkCoversTheOpenGroup(screen, open, found)
         compare(found.flagged, [],
                 "after a publish, no text rendered with the reply composer may "
-                + "claim the reply can be edited, that a later version of it can "
-                + "be published, or that an earlier version of it can be read")
+                + "state whether the reply can be edited, whether a later version of "
+                + "it can be published, or whether an earlier version of it can be read")
         screen.destroy()
     }
 
@@ -715,27 +927,104 @@ TestCase {
         verify(shut !== null && shut.visible, "a shut gate renders in the composer's place")
 
         // Non-vacuity, as above: the gate's own heading is in the walk.
-        var found = editClaimsUnder(shut)
+        var found = mentionsUnder(shut)
         verify(found.texts.indexOf("You cannot reply in this Stoa yet.") !== -1,
                "the walk reached the shut gate's text")
         compare(found.flagged, [],
-                "no text rendered in place of the reply composer may claim a reply "
-                + "can be edited, that a later version of it can be published, or "
-                + "that an earlier version of it can be read")
+                "no text rendered in place of the reply composer may state whether a "
+                + "reply can be edited, whether a later version of it can be published, "
+                + "or whether an earlier version of it can be read")
         screen.destroy()
     }
 
-    // NO SPEC: the spec forbids an edit or version claim but does not say
-    // whether the caption stays. This change keeps its true half, that a reply is a signed
-    // record (design.md Decision 1), so removing the caption entirely is a
-    // visible choice rather than a silent one.
-    function test_the_caption_beside_the_composer_is_kept() {
+    // ---- the open composer states that a reply is signed ------------------
+    //
+    // `thread-view`'s "The open reply composer states that a reply is signed":
+    // text rendered with the composer states it, and still does after a
+    // publish. The obligation is on the statement, not on a string, so these
+    // look for the statement in whatever the group renders (`renderedOnly`: a
+    // caption that is not shown states nothing) and not for the caption by
+    // name. A caption cut to unrelated copy, deleted, or hidden fails them.
+    //
+    // The matcher is hand-written like the other one, and pinned the same way,
+    // both directions, below. A negation is not a statement that a reply is
+    // signed.
+    function statesReplyIsSigned(text) {
+        return /\bsigned\b/i.test(text)
+            && !/(\bnot|\bnever|n't)\s+(yet\s+)?(be\s+)?signed\b/i.test(text)
+    }
+
+    function test_the_signed_matcher_accepts_what_states_it_and_refuses_what_does_not() {
+        var states = [
+            "A reply is a signed record.",
+            "Every reply you publish is signed with your key.",
+            "Replies are signed.",
+            "Your reply will be signed by the key above."
+        ]
+        var notStates = [
+            "A reply is not signed.",
+            "Replies are never signed.",
+            "A reply isn't signed.",
+            "An unsigned reply.",
+            "A signature is not required.",
+            "REPLYING AS",
+            "Publish the reply",
+            "Your reply was saved on this machine.",
+            ""
+        ]
+        var accepted = []
+        for (var i = 0; i < notStates.length; i++)
+            if (statesReplyIsSigned(notStates[i]))
+                accepted.push(notStates[i])
+        compare(accepted, [], "a text taken for a statement that a reply is signed")
+        var refused = []
+        for (var j = 0; j < states.length; j++)
+            if (!statesReplyIsSigned(states[j]))
+                refused.push(states[j])
+        compare(refused, [], "a statement that a reply is signed, not recognised")
+    }
+
+    // The rendered texts of a group that state a reply is signed.
+    function signedStatementsIn(group) {
+        var texts = []
+        collectTexts(group, texts, true)
+        var found = []
+        for (var i = 0; i < texts.length; i++)
+            if (statesReplyIsSigned(texts[i]))
+                found.push(texts[i])
+        return { texts: texts, statements: found }
+    }
+
+    function test_the_open_composers_text_states_that_a_reply_is_signed() {
         var calls = []
         var screen = makeScreen(calls, true)
 
-        var caption = findChild(screen, "replyCaption")
-        verify(caption !== null && caption.visible, "the caption is rendered")
-        verify(caption.text.length > 0, "and says something")
+        var open = findChild(screen, "replyComposerOpen")
+        verify(open !== null && open.visible, "an open gate renders the composer group")
+
+        var found = signedStatementsIn(open)
+        // The anchor is the attribution line, which is rendered whatever the
+        // draft, unlike the submit label that appears once there is one.
+        verify(found.texts.indexOf("REPLYING AS") !== -1,
+               "the walk reached the composer group's rendered text")
+        verify(found.statements.length > 0,
+               "text rendered with the reply composer states that a reply is signed")
+        screen.destroy()
+    }
+
+    function test_the_statement_that_a_reply_is_signed_survives_a_publish() {
+        var screen = publishedScreen([])
+
+        var open = findChild(screen, "replyComposerOpen")
+        verify(open !== null && open.visible, "the composer group is still rendered")
+
+        var found = signedStatementsIn(open)
+        verify(found.texts.indexOf("REPLYING AS") !== -1,
+               "the walk reached the composer group's rendered text")
+        verify(found.texts.indexOf("Your reply was saved on this machine.") !== -1,
+               "and the group is the one the publish reported into")
+        verify(found.statements.length > 0,
+               "text rendered with the reply composer still states that a reply is signed")
         screen.destroy()
     }
 
