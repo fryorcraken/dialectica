@@ -506,3 +506,18 @@ is the only closing keyword. One place still says the run has not happened.
       path, since `lgs basecamp launch` clears module data). `design.md`
       (Decision 5's "not measured" bullet, Decision 17, Risks, Open Questions),
       `tasks.md` 7.3 (ticked) and PR #190's body say the same.
+
+## Re-review round 9 `43844f2b..87596ac4`
+
+Round 8's box is answered as its outcome says: `proposal.md` now states the first build was
+declined for its content topic and the second passed, with #194 and the restart-path limit. The
+story is the same in `proposal.md`, `design.md` (Decisions 5 and 17, Risks, Open Questions),
+`tasks.md` 7.3 and 15.3, and PR #190's body (first build failed on the content topic, second
+passed, feed refresh #194, lamp #151). The pin-check decision is in Decision 17 with what it does
+(fails when the lock moves off `DELIVERY_REV`, with a found-at-least-one assert) and does not do
+(does not make anyone re-read; cannot see a Basecamp built from another rev). Its failure message
+names `channel_lifecycle.nim`. `Closes #176` is the only closing keyword beside an issue number in
+the PR body, `CLAUDE.md`, `proposal.md` and `design.md`. The round-0 `closer` box stays the
+closer's.
+
+- [x] **re-review round 9 `43844f2b..87596ac4`: no findings** — read the round's design.md, proposal.md, tasks.md diffs, PR #190's body and the pin test's message; clean
