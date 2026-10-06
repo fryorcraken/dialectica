@@ -832,3 +832,51 @@ Taste, not a box: "record" elsewhere in this spec means a log record, and the ne
 requirement uses it for in-memory state. A reader could take "MUST hold no record
 of that message's wait" as a log rule. Harmless as built, since nothing logs a
 wait; the spec-writer may prefer "hold nothing of".
+
+## Re-review round 8 `ae44f364..43844f2b`
+
+- [x] **re-review round 8 `ae44f364..43844f2b`: no findings** — read `43844f2b`'s
+      `transport.rs`, `delivery/tests.rs`, `CLAUDE.md` and design.md Decision 17
+      diffs against `logos-delivery` `bfdb5afd`'s `content_topic.nim`,
+      `sharding.nim` and `channel_lifecycle.nim`; clean
+
+Dimension: **security** only. Suite at `588a1a3e`: 1315 + 30 + 3 passed, 0 failed.
+
+**Nothing a peer controls reaches the topic or the channel id.**
+`ChannelIdentity::of` is the only constructor and takes one `&Address`; both
+strings are `format!` of fixed constants and `Address::to_hex`, 64 lowercase hex
+characters, so neither can carry a `/` or an empty part. `TOPIC_PREFIX` has one
+use (`transport.rs:175`) and nothing parses a topic back into a Stoa, so the
+prefix change moved no inbound comparison. The receive boundary still keys on the
+channel id through `OpenChannels`, whose prefix is unchanged. The only peer
+lever is the one the design already accepts: anyone can mint a genesis, and so an
+address, and so a topic of the same fixed shape.
+
+**One channel per Stoa, and both peers derive the same one.** The derivation
+is still a pure function of the address, so two peers with the same genesis
+compute byte-identical topics; the known-answer pin moved, and Decision 17's
+"no network to migrate" holds, because `channel_lifecycle.nim`'s
+`createReliableChannel` subscribes before it inserts the channel and returns
+`err` on a failed subscribe. No node ever held a channel on the old topic.
+
+**The autosharding claim now holds.** `getGenZeroShard` hashes
+`toBytes(application) & toBytes(version)` of the *parsed* topic. Under the
+four-part parse those are `dialectica` and `1` for every Stoa, so every Stoa
+lands on `sha256("dialectica1")[24..32] mod shardCountGenZero` in the cluster.
+That is the spec's intent, and it means all dialectica traffic shares one shard's
+load and one shard's spam exposure, and reveals itself as dialectica by the
+plaintext application segment anyway. Both are pre-existing, spec-level
+properties, not introduced here. The new test asserts `generation == None`, and
+that matters: `getShard` refuses any generation other than 0.
+
+**The transcription is faithful in every way that decides accept or refuse,
+except one, and that one is stricter than delivery and harmless.** The leading
+`/`, the split, the four-or-five count, each empty-part check and its message, and
+the order of checks all match `content_topic.nim:60-123`. Overflow refuses in both,
+with the same message: Nim's `rawParseInt` raises `ValueError` past `int` (64-bit)
+range, and Rust's `i64` parse errors. The divergence is that Nim's
+`parseutils.parseInt` skips `_` after a digit, so a five-part topic with
+generation `1_0` or `0_` parses in delivery and is refused by the transcription.
+The comment at `transport.rs` ("an optional sign and decimal digits") omits this.
+This is not a box. It makes the fake refuse more than delivery does, never less,
+and dialectica never emits a five-part topic.
