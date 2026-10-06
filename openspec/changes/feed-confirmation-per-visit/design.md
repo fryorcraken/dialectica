@@ -160,7 +160,11 @@ reproduces it: `publish_post` goes out with B's address and A's text. The reply
 composer has the same shape by reading (`parentOp` follows `threadId`). That one
 is not tested. This change does not fix either. The test pins today's behaviour
 under `NO SPEC:` so the gap is visible, and a fix flips its assertions. Which
-Stoa (or thread) a draft belongs to is a behaviour question for the spec.
+Stoa (or thread) a draft belongs to is a behaviour question for the spec, and
+the owner decided it is not decided in this change. It is deferred to #203,
+which covers both composers: the feed's cross-Stoa draft and the reply
+composer's cross-thread equivalent, whose missing test is part of that issue's
+scope.
 
 ### 3. The composer owns the reset
 

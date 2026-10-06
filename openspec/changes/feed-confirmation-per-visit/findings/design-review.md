@@ -36,7 +36,7 @@ by me.
       Decision 5 describes the red sets by class and names the tests that are
       not absence tests, so the text does not go stale when a test is added.
 
-- [ ] **`dev-writer`** — `design.md:89-97` the cross-Stoa draft hazard is
+- [x] **`dev-writer`** — `design.md:89-97` the cross-Stoa draft hazard is
       recorded as "a behaviour question for the spec" but is deferred nowhere.
       Submitting publishes Stoa A's text into Stoa B, which is a harm beyond the
       stale-message defect the issue reports. A deferral needs a destination:
@@ -45,6 +45,7 @@ by me.
       that anyone meant to leave it. Also say whether the reply composer's
       identical shape (`parentOp` follows `threadId`, "not tested") is in that
       same issue.
+      **Deferred to #203.** The owner decided the draft rule is not decided in this change; `design.md` Decision 2 now names #203 as the destination and says the reply composer's cross-thread equivalent is in the same issue.
 
 - [x] **`dev-writer`** — `design.md` Decision 2 and Decision 3 are guard
       decisions with no mutation evidence. Decision 2 should say which test

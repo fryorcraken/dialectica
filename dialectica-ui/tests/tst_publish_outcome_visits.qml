@@ -793,6 +793,7 @@ TestCase {
     // survives leaving the screen. This change clears only the outcome, so the
     // draft is kept: the smallest change meeting the requirement, and the
     // behaviour the view already had. `design.md` records the alternative.
+    // Which target a draft belongs to is deferred to issue #203.
     function test_an_unsubmitted_draft_is_still_held_when_the_same_stoa_is_reopened() {
         var s = spec.openedOnStoaA()
         spec.visibleNamed(s.view, "postDraftField")[0].text = "half-written"
@@ -810,7 +811,8 @@ TestCase {
     // publishes it to the Stoa now open. This test pins what the view does
     // today so the decision is visible; it was not widened into this change,
     // and the spec does not yet say which Stoa a draft belongs to. A fix flips
-    // both assertions.
+    // both assertions. Tracked as issue #203, which also covers the reply
+    // composer's untested cross-thread equivalent.
     function test_a_draft_typed_in_one_stoa_is_still_held_and_published_in_another() {
         var s = spec.openedOnStoaA()
         spec.visibleNamed(s.view, "postDraftField")[0].text = "meant for A"

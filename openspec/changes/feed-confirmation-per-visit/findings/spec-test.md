@@ -105,7 +105,7 @@ visit boundary.
       change to what a screen lists, so each scenario has a sentence of
       prose to rest on rather than an inference.
 
-- [ ] **`dev-writer`** — `test_a_draft_typed_in_one_stoa_is_still_held_and_published_in_another`
+- [x] **`dev-writer`** — `test_a_draft_typed_in_one_stoa_is_still_held_and_published_in_another`
       (lines 668-691, `NO SPEC:`) pins what its own comment calls "very probably
       a defect". **Scenario:** the suite asserts that a draft typed for Stoa A
       is submitted to Stoa B and sent as `stoa: B`. That is a permanent,
@@ -116,8 +116,9 @@ visit boundary.
       spec is the `spec-writer`'s to decide, see the next entry), or if the
       owner wants it visible, mark it skipped with the issue number. **Severity:**
       medium, because the test defends a data-integrity bug.
+      **Deferred to #203.** The owner decided the draft rule is not decided in this change; the test stays as the pin of today's behaviour until #203 lands, and #203 says a fix flips its assertions, so the red is expected and named rather than a surprise.
 
-- [ ] **`spec-writer`** — the draft's fate across visits is explicitly left
+- [x] **`spec-writer`** — the draft's fate across visits is explicitly left
       undecided by the delta (lines 29-31), and two `NO SPEC:` tests pin it:
       `test_an_unsubmitted_draft_is_still_held_when_the_same_stoa_is_reopened`
       and the cross-Stoa test above. Decide it or leave it undecided on purpose.
@@ -129,6 +130,7 @@ visit boundary.
       view already held) and can stay until the spec decides; the cross-Stoa
       one should not (previous entry). **Severity:** medium for the cross-Stoa
       half, low for the rest.
+      **Deferred to #203.** The owner decided the draft rule is left undecided on purpose in this change; #203 asks which target owns a draft and whether it survives leaving the screen, and names both `NO SPEC:` tests as the pins a decision will flip.
 
 No unmarked behaviour beyond the above: `test_the_outcome_stays_whatever_the_re_read_returns`
 asserts `feedReadState` as a precondition for its fourth case (an answer with no
