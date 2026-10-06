@@ -34,11 +34,13 @@ request for exactly the `.claude/` changes below.
 
 **Not a no-op for the flow.** The issue says the change is behaviour-neutral
 for the flow. That held at `6a7e02b9`; since then `5ec12953` (#174) changed
-the in-repo flow — a re-review round, `NO SPEC:` routed before the `tester`,
-the `closer` merging `main` instead of rebasing, and no `--admin` merges — and
-plugin v0.1.0 carries none of it. `design.md` says what the overlay could keep
-and what it cannot; the rest is tracked by an issue on the flow repo,
-`agent-spec-flow`: <https://github.com/fryorcraken/agent-spec-flow/issues/1>.
+the in-repo flow. Among its rules are a re-review round, `NO SPEC:` routed
+before the `tester`, the `closer` merging `main` instead of rebasing, and no
+`--admin` merges. Plugin v0.1.0 carries none of them. `design.md` lists every
+rule and says what the overlay keeps. The rest are tracked by an issue on the
+flow repo, `agent-spec-flow`:
+<https://github.com/fryorcraken/agent-spec-flow/issues/1>. The owner accepted
+the regression on condition that the issue tracks the rules accurately.
 
 ## Capabilities
 

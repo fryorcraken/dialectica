@@ -70,9 +70,11 @@ Corrections to the draft, each checked against the file named:
 
 ### #174's flow rules: what the overlay keeps, and what it cannot
 
-Plugin v0.1.0 was extracted before `5ec12953`, and searching its `skills/` and
-`agents/` for `re-review`, `--admin` and `fast-forward` returns nothing. So
-adopting it removes from the active flow:
+Plugin v0.1.0 was extracted before `5ec12953`, which is the only commit to
+`.claude/agents/` since `6a7e02b9` (`git log 6a7e02b9..origin/main --
+.claude/agents/`). Searching the plugin's `skills/` and `agents/` for
+`re-review`, `--admin` and `fast-forward` returns nothing. So adopting it
+removes from the active flow the five headline rules:
 
 1. **The re-review round** — every commit landing after the review round is
    reviewed before the `closer`, recorded on a runner-owned
@@ -90,6 +92,51 @@ adopting it removes from the active flow:
    even under merge-on-green; a PR `BLOCKED` with every required check green is
    a stop.
 
+#174 also added these rules. Each is gone from the active flow too. The
+locations are in `.claude/agents/` at `origin/main`:
+
+6. **A cherry-pick that stops on a conflict is aborted, and the agent is
+   continued so it rebases its own branch.** The review round meets this
+   every time, because six reviewers fork from one HEAD and tick adjacent
+   rows (`RUNNER.md:277-291`, `spec-writer.md:47-52`). The plugin's `run`
+   skill says nothing about a conflicting pick, and its "You do not write the
+   work" leaves the runner no route.
+7. **A reviewer holding uncommitted mutations rebases through a patch**:
+   `git diff --binary --output=…`, then `git restore`, then rebase, then
+   `git apply` (`RUNNER.md:293-328`). `git rebase` refuses a dirty tree, and a
+   stash lands on the stack every worktree shares.
+8. **What a runner commits** (`RUNNER.md:23-51`). The runner ticks no other
+   agent's row. An edit the owner asks for is a dispatch. An edit an agent
+   refused is reported, not made. Output an agent could not commit is
+   committed by continuing that agent, or redone by a fresh one, never copied
+   by the runner.
+9. **Nothing lands on the piece while the review round is out**
+   (`RUNNER.md:519-531`). The plugin freezes the piece only while the `tester`
+   runs.
+10. **Rebuilding the state after the `closer` has archived.** The change
+    folder is found under `archive/` with `git ls-files`, and a re-dispatched
+    `closer` does not archive again (`RUNNER.md:123-130`,
+    `closer.md:75-95`, `closer.md:229-238`). The plugin's `run` and `closer`
+    grep only `openspec/changes/<name>/`, although its `closer` archives
+    before CI, so a red run comes back already archived.
+11. **The `closer` checks the archive commit for a change to
+    `openspec/specs/` and stops before CI if it finds one**, so the promoted
+    contract is reviewed (`closer.md:281-293`, `311-322`).
+12. **The `closer` deletes `findings/` at the start of Step 3, not in Step 1**
+    (`closer.md:130-134`). An uncommitted deletion makes `git merge` refuse,
+    and `git rebase` too.
+
+Rules 1 to 4 also carry detail the list above compresses: which commits need
+re-review and which are only tracking, the record forms and checks, the
+red-run fix going through re-review, a fresh `spec-writer` for markers, no
+markers put to the owner, a refused push as a stop with no fetch-and-merge,
+and fast-forwarding to a `closer` that returns without merging. The
+`agent-spec-flow` issue comment cited below lists each, with its location.
+
+Rules 6, 7, 8 and 10 describe v0.1.0's behaviour as written. Rule 12 does
+as well, because the plugin's own rebase refuses an uncommitted deletion. Rule
+11 closes a gap the plugin opens. None of them depends on rules 1 to 5.
+
 **Item 5 is in the overlay's `## closer`.** It adds a prohibition the plugin
 does not make and contradicts none it does, so it is a role rule the overlay may
 carry. It is the one item with a merged incident behind it: #170 records a
@@ -101,6 +148,15 @@ rebase, and the cherry-pick route. The re-review row also cannot enter through
 `## Extra stages`: a row there names a project agent the runner dispatches
 (`run` skill, "Dispatching"), and this row names the runner itself.
 
+**Items 6 to 12 are not in the overlay either, mostly for a different
+reason.** Rule 11's stop hands its commit to rule 1's round, which the overlay
+cannot add. Rules 6 to 10 and 12 add to the plugin without contradicting it,
+so the overlay could carry them; the `run` skill reads the overlay in
+preflight, and the `closer` reads its `## closer` section. The owner chose to
+carry them upstream instead.
+Every rule then has one source, and the gap until the plugin carries them is
+accepted (see "The owner accepted the regression" below).
+
 What was considered instead:
 
 - **Write them into the overlay anyway.** Rejected: the plugin's agents are
@@ -111,9 +167,13 @@ What was considered instead:
   `closer` would still be the one dispatched as `specflow:closer`.
 - **Carry them upstream, in the plugin.** Chosen. The loss is tracked by an
   issue on the flow repo, `agent-spec-flow`:
-  <https://github.com/fryorcraken/agent-spec-flow/issues/1>. That repo is
-  where a rule about the runner, the stage roster or the `closer` belongs. The reasoning for all five
-  items is not lost: it is in
+  <https://github.com/fryorcraken/agent-spec-flow/issues/1>. The issue body
+  lists rules 1 to 5. Its first comment
+  (<https://github.com/fryorcraken/agent-spec-flow/issues/1#issuecomment-6010040773>)
+  adds rules 6 to 12 and the detail under rules 1 to 4, each with its location
+  and what the plugin does instead. That repo is where a rule about the runner,
+  the stage roster or the `closer` belongs. The reasoning for every item is not
+  lost: it is in
   `openspec/changes/archive/2026-09-27-171-workflow-rules/design.md` and
   `proposal.md`, archived with the change that made them. What is lost is the
   rule's place in the flow that runs.
@@ -123,6 +183,39 @@ tree, and the stage block that `specflow:spec-writer` writes has twelve rows
 where this repo's has thirteen. Pieces already archived are unaffected; no
 change is in flight with a stage block (`relevance-votes`, the one other live
 change, has a `tasks.md` with no `## Stages` block).
+
+### The owner accepted the regression, on condition it is tracked accurately
+
+The owner **accepted** the loss of rules 1 to 4 and 6 to 12 from the active
+flow, on one condition: they are tracked accurately in
+<https://github.com/fryorcraken/agent-spec-flow/issues/1>. That issue is the
+record of what the plugin owes, and this section is the record that the gap was
+a decision, not an oversight. `/specflow:run` is not held back, and the overlay
+does not carry the rules.
+
+**The accepted risk is that unreviewed content can reach `main`.** Under plugin
+v0.1.0 there are three routes:
+
+1. The `closer` resolves a rebase conflict itself and pushes over the reviewed
+   commits with `--force-with-lease` (plugin `agents/closer.md:92-98`). Rule 3
+   closed this.
+2. An archive commit's delta merge rewrites a live requirement in
+   `openspec/specs/`, and the plugin's `closer` has no stop for that. Rule 11
+   closed this.
+3. A red run goes to a fixer and then straight back to the `closer` with no
+   review in between (plugin `skills/run/SKILL.md:220-232`). Rule 1's
+   red-run route closed this.
+
+Each route ends in `gh pr merge --squash`. **Branch protection does not catch
+any of them.** `gh api repos/fryorcraken/dialectica/branches/main/protection`
+reports `required_approving_review_count: 0`, so a merge needs no review at
+all. The settings that are on cannot tell reviewed content from unreviewed:
+strict status checks, signed commits and `enforce_admins` all pass a green,
+signed squash whatever it holds. The specs this repo protects include
+op-authenticity and moderation-authorisation requirements, so content that
+skips review can weaken a security contract. Route 3 is not new: `main`'s
+`closer.md` also merged after a fixer, and rule 1 is what covered it. Routes 1
+and 2 occur only when a rebase conflicts or an archive changes a spec.
 
 ### `docs/PROJECT-MANAGEMENT.md` is deleted, not reduced
 
@@ -193,16 +286,22 @@ Dialectica-specific sentences in deleted text with no home in the overlay:
   `OPENSPEC-ARCHIVE.md` example of a cross-capability contradiction. Resolved
   history; the plugin keeps the rule.
 - **`git log --oneline origin/<orphan> --not origin/piece/<name>`** for proving
-  an orphaned PR is redundant (`.claude/agents/README.md`). Generic, and not in
-  the plugin: a candidate for upstream, not for the overlay.
+  an orphaned PR is redundant (`.claude/agents/README.md`). This rule is not
+  actually dropped: the plugin already carries it in
+  `skills/worktree-discipline/SKILL.md`, under "PR refs", and the overlay need
+  not repeat it.
 
 ## Risks / Trade-offs
 
-- [The flow regresses on #174's five rules until the plugin carries them] →
-  item 5 is in the overlay; items 1 to 4 are tracked by an issue on the flow
-  repo, `agent-spec-flow`
-  (<https://github.com/fryorcraken/agent-spec-flow/issues/1>), and are absent
-  from the active flow until the plugin carries them.
+- [The flow regresses on #174's rules until the plugin carries them] → item 5
+  is in the overlay. Items 1 to 4 and 6 to 12 are tracked in
+  <https://github.com/fryorcraken/agent-spec-flow/issues/1>, in its body and
+  its first comment, and are absent from the active flow until the plugin
+  carries them. The owner accepted this on the condition that the issue tracks
+  them accurately. Accepting it accepts three routes to `main` for unreviewed
+  content, and branch protection does not catch them
+  (`required_approving_review_count: 0`). "The owner accepted the regression"
+  above names the three routes.
 - [The overlay draws on `ci.yml` and branch protection, both of which move] →
   it names commands (`gh api …/protection`) rather than lists where it can,
   and names the step whose output a claim comes from.
