@@ -963,12 +963,12 @@ TestCase {
     // both directions, below. It is a pattern and not a reading of the
     // sentence: a text counts when it says `signed` and `reply` (or `replies`)
     // and has no negator (`not`, `never`, `no`, `cannot`, `n't`) within two
-    // words before `signed` in the same clause. A paraphrase that says the
-    // opposite without a negator ("A reply is unverifiable"), or one with a
-    // negator further off ("Not every reply you publish here is signed"),
-    // passes as a statement; so does a sentence about something else that
-    // happens to name a reply and say `signed`. The table is where such a miss
-    // is added.
+    // words before `signed` in the same clause. Two shapes pass as a statement
+    // that should not, measured: a negator further than two words off ("Not
+    // every reply you publish here is signed."), and a sentence about something
+    // else that happens to name a reply and say `signed` ("Your reply draft is
+    // signed off by the app."). Neither is caught, and the matcher does not
+    // grow a clause for each; the shipped caption is the one literal.
     function statesReplyIsSigned(text) {
         return /\bsigned\b/i.test(text)
             && /\brepl(y|ies)\b/i.test(text)
