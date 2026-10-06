@@ -41,7 +41,7 @@ Dimension: readability only. Scope: `20643177..HEAD`, excluding `findings/`
       no-argument run to be unsupported, and loops over specs one at a time.
       Severity: low.
 
-- [ ] **`dev-writer`** — `openspec/changes/adopt-specflow-plugin/design.md:187-191`
+- [x] **`dev-writer`** — `openspec/changes/adopt-specflow-plugin/design.md:187-191`
       — "What was considered instead" opens with *"Write them into the overlay
       anyway. Rejected: … an overlay rule that contradicts a plugin rule leaves
       two instructions and no precedence."* It now comes straight after the
@@ -55,8 +55,17 @@ Dimension: readability only. Scope: `20643177..HEAD`, excluding `findings/`
       options list, finds "contradicts a plugin rule", and finds the paragraph
       just above saying it does not.
       Severity: low. Internal inconsistency introduced by the insertion.
+      **Fixed** in the commit "Classify #174's rules 6 to 12 by their
+      dependence on rules 1 to 5". The bullet gives both reasons, each scoped:
+      for rules 1 to 4, an overlay rule that contradicts the plugin leaves no
+      precedence; for rules 6 to 10 and 12, which contradict nothing, the
+      owner chose one source per rule over a copy that would have to be
+      removed again; rule 11 is the first reason at one remove, since its
+      stop hands over to rule 1's round. The paragraph above it now says
+      "Rules 6 to 12", and the section's "items" are "rules" throughout,
+      which also settles this file's unboxed rules/items observation.
 
-- [ ] **`dev-writer`** — `openspec/changes/adopt-specflow-plugin/design.md:163-165`
+- [x] **`dev-writer`** — `openspec/changes/adopt-specflow-plugin/design.md:163-165`
       — *"Rules 6, 7, 8 and 10 describe v0.1.0's behaviour as written. Rule 12
       does as well…"* reads as "the plugin already does this", which is the
       opposite of the list it summarises. Rule 6 says *"The plugin's `run` skill
@@ -72,6 +81,11 @@ Dimension: readability only. Scope: `20643177..HEAD`, excluding `findings/`
       v0.1.0" and concludes the issue comment over-reports.
       Severity: low-medium. The sentence can be read with the opposite meaning,
       in the section that justifies the accepted regression.
+      **Fixed** in the commit "Classify #174's rules 6 to 12 by their
+      dependence on rules 1 to 5". The paragraph now opens "Each of rules 6
+      to 12 closes a gap that plugin v0.1.0 has as written; none describes
+      something the plugin already does", and classifies all seven,
+      rule 9 included, in three bullets.
 
 - [ ] **`dev-writer`** — `openspec/changes/adopt-specflow-plugin/design.md:433-435`
       — *"What moved is instruction trust only: … It is low today because the

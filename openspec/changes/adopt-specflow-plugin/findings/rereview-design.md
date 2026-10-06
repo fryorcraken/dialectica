@@ -41,9 +41,17 @@ repos/fryorcraken/agent-spec-flow`.
 
 ## Findings
 
-- [ ] **`dev-writer`** — `design.md:163-165` against `design.md:178-179` — the two paragraphs disagree on whether rules 6–12 depend on rule 1
+- [x] **`dev-writer`** — `design.md:163-165` against `design.md:178-179` — the two paragraphs disagree on whether rules 6–12 depend on rule 1
       **Scenario:** line 165 says of rules 6–12, "None of them depends on rules 1 to 5". Line 179, fourteen lines on, says "Rule 11's stop hands its commit to rule 1's round, which the overlay cannot add", and uses that as the reason 11 is not in the overlay. A reader of agent-spec-flow#1 specifying v0.2.0 gets two answers on which rules can land alone. The upstream comment the design cites does not make line 165's claim: it names "Rules 6, 7, 8, 10 and 12" as independent of the original five, not all seven. Rule 9 is classified nowhere in design.md, and its own text depends on rule 1: `RUNNER.md:527-531` justifies the freeze by "Record the call" (step 3), which is the re-review record.
       **Measured:** `origin/main:.claude/agents/RUNNER.md:527-531`; the comment's "Does this issue's own text stand?" section. Restate line 165 as the comment does: 6, 7, 8, 10 and 12 independent; 11 a stop that feeds rule 1's round; 9 justified by rule 1's record but useful without it.
+      **Fixed** in the commit "Classify #174's rules 6 to 12 by their
+      dependence on rules 1 to 5", as proposed. design.md now says each of
+      rules 6 to 12 closes a gap v0.1.0 has as written, then classifies them
+      in three bullets: 6, 7, 8, 10 and 12 stand alone (the comment's
+      classification, cited); 9 is justified by rule 1's record, quoting
+      `RUNNER.md:527-531` at `origin/main` ("Record the call" reads back the
+      dispatch commit), and still holds back an unread `dev-writer` push
+      without it; 11 feeds rule 1's round. Rule 9 is now classified.
 
 - [ ] **`dev-writer`** — `design.md:286-288` — "The reasons stay only in the overlay, so the two cannot disagree on a reason" is false for one of the six lines
       **Scenario:** `CLAUDE.md:420-421` reads "the repository root has no flake, so `.#lgx` fails there", which is the reason, and the overlay's `## Build` (`PROJECT.md:45-46`) states the same reason. They agree today. design.md's sentence is what tells the next editor they need not check. `findings/architecture.md` box 1's outcome repeats it ("copies no reason"). Separately, `design.md:279` calls one rule "no-`/nix/store`-read", and the PR body says "no `/nix/store` reads". The rule at `CLAUDE.md:416-417` and `PROJECT.md:126-128` forbids only `readlink` or `ls` of a store path to find an artefact. The overlay says reading builder source does mean reading the store.

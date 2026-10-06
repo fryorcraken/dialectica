@@ -19,9 +19,16 @@ the answered boxes in `findings/*.md` read as claims, and PR #196's body
       so the block is still byte-identical. `findings/rereview-spec-test.md`
       box 2 has the mutation runs.
 
-- [ ] **`dev-writer`** — `openspec/changes/adopt-specflow-plugin/design.md:163-165` against `:179` — design.md contradicts itself on whether rule 11 depends on rule 1.
+- [x] **`dev-writer`** — `openspec/changes/adopt-specflow-plugin/design.md:163-165` against `:179` — design.md contradicts itself on whether rule 11 depends on rule 1.
       **Scenario:** lines 163-165 say "Rules 6, 7, 8 and 10 describe v0.1.0's behaviour as written. Rule 12 does as well … Rule 11 closes a gap the plugin opens. **None of them depends on rules 1 to 5.**" "Them" includes rule 11, which the previous sentence names. Line 179 says "Rule 11's stop hands its commit to rule 1's round, which the overlay cannot add". That dependency is why rule 11 is the one item 6–12 the overlay could not carry. The issue comment design.md cites agrees with line 179: rule 11 is "the closer-side stop that makes [rule 1] happen". A reader asking whether rule 11 could ship upstream without rule 1 gets both answers from the same section. Fix: narrow "None of them" to rules 6–10 and 12, or say rule 11 depends on rule 1.
       **Measured:** read both lines at HEAD. The issue comment's rule 11 "Why it matters" says: "Rule 1 says such commits are reviewed. This rule is the closer-side stop that makes it happen." Severity: low.
+      **Fixed** in the commit "Classify #174's rules 6 to 12 by their
+      dependence on rules 1 to 5". The paragraph is now three bullets, in the
+      issue comment's classification: 6, 7, 8, 10 and 12 stand alone; 9 is
+      justified by rule 1's record but useful without it; 11 feeds rule 1's
+      round, quoting the comment's "closer-side stop" line. The later
+      paragraph's "Rule 11's stop hands its commit to rule 1's round" now
+      agrees with it. `findings/rereview-design.md` box 1 is the same defect.
 
 - [ ] **`dev-writer`** — PR #196 body, the `CLAUDE.md` bullet under "What changes" — the reason for "Shell rules for every session" is cited as "(owner's decision, `findings/architecture.md` box 1)". After the squash, no commit on `main` will contain that file.
       **Scenario:** the `closer` deletes `findings/` before the archive commit (the stage row "findings all ticked, `findings/` deleted"), and the squash writes the PR body into `main`'s history. The commit message then cites a file that never existed on `main`. A reader following it finds nothing, while the decision is recorded in a file that survives: `design.md`, "Six shell rules are listed in `CLAUDE.md`, outside the block", which quotes the owner. Point the body there.

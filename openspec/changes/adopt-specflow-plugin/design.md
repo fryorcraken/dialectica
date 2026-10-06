@@ -160,22 +160,38 @@ markers put to the owner, a refused push as a stop with no fetch-and-merge,
 and fast-forwarding to a `closer` that returns without merging. The
 `agent-spec-flow` issue comment cited below lists each, with its location.
 
-Rules 6, 7, 8 and 10 describe v0.1.0's behaviour as written. Rule 12 does
-as well, because the plugin's own rebase refuses an uncommitted deletion. Rule
-11 closes a gap the plugin opens. None of them depends on rules 1 to 5.
+Each of rules 6 to 12 closes a gap that plugin v0.1.0 has as written; none
+describes something the plugin already does. They differ in how they relate
+to rules 1 to 5, which is what decides whether one could land upstream alone:
 
-**Item 5 is in the overlay's `## closer`.** It adds a prohibition the plugin
+- **Rules 6, 7, 8, 10 and 12 stand alone.** Each closes a gap in v0.1.0's own
+  behaviour and needs none of rules 1 to 5. Rule 12 counts here because the
+  plugin's own rebase refuses an uncommitted deletion, just as `main`'s
+  merge does. This is the classification the issue comment cited below
+  makes.
+- **Rule 9 is justified by rule 1 but useful without it.** Its stated reason
+  is rule 1's record: "Record the call" reads back the commit the reviewers
+  were dispatched from, and a commit landing first would be read in its
+  place (`RUNNER.md:527-531`). Without rule 1 it still holds back a
+  `dev-writer` that would push commits no reviewer read onto the PR, and
+  v0.1.0 freezes the piece only while the `tester` runs.
+- **Rule 11 feeds rule 1's round.** It stops the `closer` after an archive
+  commit that changes `openspec/specs/`, so that commit is reviewed; the
+  review it hands over to is rule 1's re-review round. In the issue comment's
+  words, it is "the closer-side stop that makes it happen".
+
+**Rule 5 is in the overlay's `## closer`.** It adds a prohibition the plugin
 does not make and contradicts none it does, so it is a role rule the overlay may
-carry. It is the one item with a merged incident behind it: #170 records a
+carry. It is the one rule with a merged incident behind it: #170 records a
 `closer` merging PR #165 with `--admin`.
 
-**Items 1 to 4 are not in the overlay, because each would override a specflow
+**Rules 1 to 4 are not in the overlay, because each would override a specflow
 rule** — the stage-block roster, the runner's dispatch order, the `closer`'s
 rebase, and the cherry-pick route. The re-review row also cannot enter through
 `## Extra stages`: a row there names a project agent the runner dispatches
 (`run` skill, "Dispatching"), and this row names the runner itself.
 
-**Items 6 to 12 are not in the overlay either, mostly for a different
+**Rules 6 to 12 are not in the overlay either, mostly for a different
 reason.** Rule 11's stop hands its commit to rule 1's round, which the overlay
 cannot add. Rules 6 to 10 and 12 add to the plugin without contradicting it,
 so the overlay could carry them; the `run` skill reads the overlay in
@@ -186,9 +202,15 @@ accepted (see "The owner accepted the regression" below).
 
 What was considered instead:
 
-- **Write them into the overlay anyway.** Rejected: the plugin's agents are
-  told the overlay never overrides them, so an overlay rule that contradicts a
-  plugin rule leaves two instructions and no precedence.
+- **Write them into the overlay anyway.** Rejected, for two reasons that
+  split the rules. For rules 1 to 4: the plugin's agents are told the
+  overlay never overrides them, so an overlay rule that contradicts a plugin
+  rule leaves two instructions and no precedence. For rules 6 to 10 and 12,
+  which contradict nothing: the owner chose one source per rule, the
+  plugin, over a second copy in the overlay that would have to be removed
+  again when the plugin carries it. Rule 11 is the first reason at one
+  remove: its stop hands over to rule 1's round, which the overlay cannot
+  add.
 - **Keep the in-repo `RUNNER.md` and `closer.md` beside the plugin.** Rejected:
   that is the two-sources problem this change exists to end, and the plugin's
   `closer` would still be the one dispatched as `specflow:closer`.
@@ -199,7 +221,7 @@ What was considered instead:
   (<https://github.com/fryorcraken/agent-spec-flow/issues/1#issuecomment-6010040773>)
   adds rules 6 to 12 and the detail under rules 1 to 4, each with its location
   and what the plugin does instead. That repo is where a rule about the runner,
-  the stage roster or the `closer` belongs. The reasoning for every item is not
+  the stage roster or the `closer` belongs. The reasoning for every rule is not
   lost: it is in
   `openspec/changes/archive/2026-09-27-171-workflow-rules/design.md` and
   `proposal.md`, archived with the change that made them. What is lost is the
@@ -405,8 +427,8 @@ Dialectica-specific sentences in deleted text with no home in the overlay:
 
 ## Risks / Trade-offs
 
-- [The flow regresses on #174's rules until the plugin carries them] → item 5
-  is in the overlay. Items 1 to 4 and 6 to 12 are tracked in
+- [The flow regresses on #174's rules until the plugin carries them] → rule 5
+  is in the overlay. Rules 1 to 4 and 6 to 12 are tracked in
   <https://github.com/fryorcraken/agent-spec-flow/issues/1>, in its body and
   its first comment, and are absent from the active flow until the plugin
   carries them. The owner accepted this on the condition that the issue tracks
