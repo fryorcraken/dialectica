@@ -556,3 +556,37 @@ Rust's `i64::parse` does not, so the transcription is stricter on a generation l
       Decision 17 says what it still cannot see (it prompts the re-read; it does
       not do it). The taste note (1), a file of its own, is not taken: no box,
       and moving 200 lines would bury this round's diff.
+
+## Re-review round 9 `43844f2b..87596ac4`
+
+Read: `git diff 43844f2b 87596ac4` over `transport.rs`, `delivery.rs`,
+`delivery/tests.rs`, and `dialectica/flake.lock` against the new test's node filter.
+
+**The round-8 box is answered as its outcome says.** I ran the direction the
+dev-writer could not: `DELIVERY_REV` edited to `cfdb5afd…` in my own tree, `cargo test
+-p dialectica-core --lib the_transcribed_revision` fails on the `assert_eq!`, naming node
+`logos-delivery`, both revs, and the files to re-read. That is what a pin bump does, with
+the lock fixed and the constant stale. The filter matches only the `logos-delivery` node
+(`url` ends `/logos-delivery`); `delivery_module`'s repo is `logos-delivery-module` and
+matches neither arm, so a module-only bump does not trip it, which is right. The path
+`../../../flake.lock` from `src/transport.rs` resolves to `dialectica/flake.lock`; CI's
+`cargo test` runs from the checkout, and the lock is read only under `cfg(test)`.
+
+**`subscribable` sits right.** It is built on `parse`, so the fake and the derivation's
+test share one entry point and both consume the step that `channelCreate` meets. I read
+`sharding.nim` at `bfdb5afd`: `getShard(ContentTopic)` is lines 45-51, the generation
+case 32-43, with the message verbatim, and `subscription_manager.nim:161` calls it from
+`getShardForContentTopic`. The cited line ranges and the message are faithful.
+
+**Taste, no box.** (1) `DELIVERY_REV`'s doc says it names the rev of "every
+transcription of delivery's source in this crate"; `delivery.rs:109` also cites
+`networks_config.nim` at `bfdb5afd` for the `logos.test` preset facts. Those are cited
+reads, not matched text, so nothing can go wrong in a test, but the failure message's
+re-read list omits that file. (2) The `parseInt` `_` comment records two reviewers'
+unverified recollection in source; the direction it names is the stricter one, so it
+is harmless, but "unverified" is a note to the owner more than to a reader.
+
+- [x] **re-review round 9 `43844f2b..87596ac4`: no findings** — read the range's code
+      (`transport.rs`, `delivery.rs`, `delivery/tests.rs`), `flake.lock`'s `logos-delivery`
+      node against the filter, and `sharding.nim` at `bfdb5afd` against `subscribable`;
+      ran the rev-mismatch mutation (red, as it must be); clean
