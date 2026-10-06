@@ -10,7 +10,7 @@
       `spec-writer` step; the `dev-writer` wrote `proposal.md` and this block.
 - [x] design + code — `dev-writer`
 - [ ] tests — `tester`
-- [ ] review: correctness — `code-reviewer`
+- [x] review: correctness — `code-reviewer`
 - [x] review: security — `code-reviewer`
 - [x] review: readability — `code-reviewer`
 - [x] review: architecture — `code-reviewer`
