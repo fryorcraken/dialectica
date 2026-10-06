@@ -11,7 +11,7 @@
 - [x] review: architecture — `code-reviewer`
 - [x] review: spec-test — `spec-test-reviewer`
 - [x] review: design — `design-reviewer`
-- [ ] re-review: every commit after the review round — runner
+- [x] re-review: every commit after the review round — runner
       round 1 `7a2a3335..369561d1` findings passes (spec-writer ×2, dev-writer ×2, tester): spec deltas, delivery.rs/transport.rs/wire.rs/sender.rs rewrite, tests, design.md, CLAUDE.md — all six lanes; security and correctness on the strongest model (opus), readability, architecture, spec-test and design on role defaults: a rewrite of hostile-input handling needs the full set
       round 2 `369561d1..2cb71aaf` round 1 findings passes (spec-writer ×2, dev-writer ×2, tester): per-open settle deadline, receive_via boundary refactor, "already exists" wording, compile-time timeout asserts, new tests, design.md — all six lanes; security and correctness on the strongest model (opus), readability, architecture, spec-test and design on role defaults: the wait logic and boundary shape changed again
       round 3 `2cb71aaf..7462ded8` round 2 findings passes (spec-writer, dev-writer, tester): timeout-order requirement and two-open scenario, is_opening one-predicate refactor, Decision 11 re-argued (SETTLE_LIMIT kept at 40 s), three tests — all six lanes, each confirming its round-2 answers and reading the new ground; security on the strongest model (opus), the other five on role defaults: narrower than round 2, no new boundary code
