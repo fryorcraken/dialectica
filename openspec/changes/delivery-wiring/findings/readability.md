@@ -1253,3 +1253,31 @@ with `findings/`, and a reader will want the Nim stdlib's `parseutils` cited or 
 remark dropped. `DPublishOutcome.qml:150-152` leaves one line ending at "and a" after
 the reword, the edit-residue shape earlier rounds noted. `design.md:1010-1011` does the
 same at "LIP-23 states the four-part".
+
+## Re-review round 10 `87596ac4..c0190bda`
+
+- [x] **re-review round 10 `87596ac4..c0190bda`: no findings** — read round 9's three boxes against their outcomes (the `composer-view` MODIFIED delta, the `op-transport` sentence, Decision 17's "A pin bump fails a test"), the new `composer-view` delta diffed against the live requirement at `openspec/specs/composer-view/spec.md:294-363`, `proposal.md`'s new bullet, Decision 17's new paragraph and its Risks bullet, the `docs/SCAFFOLD.md` paragraph, and the `transport.rs` doc comments (`lock_nodes_of`, `scaffold_delivery_module_rev`, the new test and the module doc); clean
+
+Read, so the clean verdict is checkable: the delta carries the live requirement
+and all five scenarios verbatim except the one clause ("delivery is not wired at
+all" now "where core hands the op to the network, it learns nothing of whether
+any peer received it"), and that clause is true (`delivery.rs` consumes no
+send-acknowledgement event); `git grep -F "delivery is not wired"` now finds only
+the live spec the delta replaces. The `op-transport` sentence parses and its claim
+holds (a name beginning `/dialectica/1/` is either four-part and read as
+`dialectica` and `1`, or refused). `include_str!("../../../../scaffold.toml")`
+from `dialectica/rust-lib/dialectica-core/src/` resolves to the repository root,
+`scaffold.toml:27-29` has the `[modules.delivery_module]` table with the `flake`
+key and `role = "dependency"` the doc and Decision 17 describe, and
+`dialectica/flake.lock:156-158` has `delivery_module` taking the `logos-delivery`
+node as its own input. `delivery_topic_rule::tests` is a real module, so the path
+`docs/SCAFFOLD.md` writes resolves; the new paragraph is compatible with that
+file's "does not assert the pins" (it says the tie is to another file, not to a
+value). Not re-run: the two mutation results in Decision 17 (the checkout holds no
+SDK symlink for `cargo test`, and the correctness lane ran them).
+
+Not boxes (taste): `design.md:1121` and `proposal.md:154` run long beside 80-column
+neighbours and the composer-view delta wraps a line at "received" / "it;", the
+edit-residue shape earlier rounds noted. `CLAUDE.md:538-539` says the test fails
+"when `dialectica/flake.lock` moves delivery off the rev"; still true, and it now
+omits the second test, but the file is outside this range.
