@@ -13,12 +13,14 @@ that produced it.
 - A publish outcome — newly stored, already published, or refused — is
   displayed only on the visit to the screen in which that publish was made. A
   later visit to that screen, whether by reopening the Stoa from the list or by
-  returning from a thread, displays no outcome until its own composer reports
-  one.
+  returning from a thread or the moderation screen, displays no outcome until
+  its own composer reports one.
 - The rule covers every composer the view mounts: the feed's post composer and
   the thread screen's reply composer.
-- Within the visit that produced it, the outcome stays: the re-read that
-  follows a successful publish does not withdraw it.
+- Within the visit that produced it, the outcome stays: neither the re-read that
+  follows a successful publish nor paging or changing what the screen lists
+  withdraws it. Where a failed read takes the composer off screen, the outcome
+  is displayed again once a read on that visit succeeds.
 - What becomes of an unsubmitted draft when the screen is left is **not**
   decided by this change, and the requirement says so.
 

@@ -47,7 +47,7 @@ reports six absence tests failing before the fix; by reading, each of those
 tests would fail on it, since each asserts presence first and absence after the
 visit boundary.
 
-- [ ] **`spec-writer`** — delta line 22-24 ("Within the visit in which a publish
+- [x] **`spec-writer`** — delta line 22-24 ("Within the visit in which a publish
       was submitted, its outcome MUST remain displayed across the re-read ...
       whatever that re-read returns")
       **Scenario:** a reply is published, the re-read fails. The thread screen
@@ -62,8 +62,23 @@ visit boundary.
       composer ("the composer displays no publish outcome" is vacuous while the
       composer is absent). **Severity:** low, a wording defect, not a coverage
       gap.
+      **Outcome (`spec-writer`): fixed.** The requirement now states that a
+      composer the screen is not rendering displays nothing, and that every
+      obligation applies whenever the composer is rendered. The within-visit
+      obligation reads "MUST be displayed whenever that composer is rendered,
+      until the visit ends or a later publish from that composer reports its
+      own outcome", with an explicit clause that where a failed read takes the
+      composer off screen the outcome MUST be displayed again once a read on
+      the same visit succeeds. The later-visit obligation reads "MUST display
+      no publish outcome whenever it is rendered", including "after a failed
+      read is retried and succeeds on that visit". Two scenarios added: "A
+      reply's outcome is displayed again when a failed re-read recovers"
+      (pinned by `test_a_replys_outcome_stays_across_a_failed_re_read_of_the_thread`)
+      and "A failed read on the later visit to the thread carries no outcome
+      once it recovers" (pinned by
+      `test_a_failed_read_on_the_later_visit_to_the_thread_carries_no_outcome`).
 
-- [ ] **`spec-writer`** — the requirement's prose has no scenario for six
+- [x] **`spec-writer`** — the requirement's prose has no scenario for six
       behaviours the tests pin: re-read, paging and changing what a screen lists
       do not begin a visit (tests `test_paging_...`, `test_changing_what_the_feed_...`,
       `test_changing_what_the_thread_...`); returning from the moderation screen
@@ -77,6 +92,18 @@ visit boundary.
       to "what is scenario-ed" and the paging rule, the one that guards against
       the over-clearing fix, loses its stated contract (mutation 2 above shows
       the test is what stops it). **Severity:** low.
+      **Outcome (`spec-writer`): fixed.** Six scenarios added, one per
+      behaviour: "A confirmation is gone after returning from the moderation
+      screen", "Every kind of reply outcome is gone on the next visit to the
+      thread", "A reply's outcome does not follow the user into another
+      thread", "Paging the feed does not withdraw the outcome", "Changing what
+      the feed lists does not withdraw the outcome" and "Changing what the
+      thread lists does not withdraw the outcome". Each matches the
+      observation its named test already makes. The visit definition now
+      names the moderation screen among the ways back to the feed, says a
+      retried read is a re-read, and says the hidden-content toggle is a
+      change to what a screen lists, so each scenario has a sentence of
+      prose to rest on rather than an inference.
 
 - [ ] **`dev-writer`** — `test_a_draft_typed_in_one_stoa_is_still_held_and_published_in_another`
       (lines 668-691, `NO SPEC:`) pins what its own comment calls "very probably
