@@ -1116,3 +1116,113 @@ declined by every node: the test-only `delivery_topic_rule` below cites the
 parser."), and line 104 runs to about 95 columns where its neighbours wrap at 80.
 The "below" is some 750 lines away. An edit residue; the sentence reads better with
 the parser pointer as its own sentence.
+
+## Re-review round 9 `43844f2b..87596ac4`
+
+Dimension: readability only. Reviewed at `286a2314` (the range's code and prose are
+unchanged by the findings commits after `87596ac4`). Round 8's one box is answered as
+its outcome says: `transport.rs:984`'s comment now reads line 16 (`git grep -n`
+at `bfdb5afd` answers `content_topic.nim:16`), and the parser pointer on
+`TOPIC_PREFIX` is its own sentence ("further down this file"). Three new defects, all
+low, all prose.
+
+- [ ] **`spec-writer`** — `openspec/specs/composer-view/spec.md:322` — the live spec
+      still says "delivery is not wired at all", the sentence this range just
+      removed from the QML comment that quotes it.
+      **Scenario:** `DPublishOutcome.qml:149-151` (and `FeedScreen.qml:1078`) were
+      reworded this round because delivery is wired by this change. They are
+      comments copied from `composer-view`'s requirement on the delivery denial,
+      whose paragraph at `:321-327` reads "A publish reply carries no delivery
+      outcome by design; delivery is not wired at all; and a post whose body is
+      legal but near the cap ...". After this change merges, `git grep -F "wired at
+      all" -- openspec/specs` still finds the live spec asserting what the code no
+      longer does, and the comment and the spec it mirrors disagree. Nothing under
+      `openspec/changes/delivery-wiring/` (proposal, delta, findings) mentions
+      `composer-view`, so no one has decided to leave it. The user-facing string
+      ("... not something this software can tell you yet.") is unchanged and still
+      true, so the requirement itself stands; only its rationale paragraph is stale.
+      **Fix shape:** a one-sentence MODIFIED delta on `composer-view` that carries
+      the requirement verbatim with that clause replaced ("core hands the op to the
+      network without hearing whether any peer received it"), or a recorded decision
+      that the paragraph stays and a follow-up issue for it.
+      **Severity:** low (rationale prose in a live spec; no behaviour).
+
+- [ ] **`spec-writer`** — `openspec/changes/delivery-wiring/specs/op-transport/spec.md:15`
+      — "or read with segments other than `dialectica` and `1`" names a failure that
+      a name beginning with `/dialectica/1/` cannot have.
+      **Scenario:** the paragraph says beginning with the literal prefix does not
+      meet the rule on its own, because such a name "has any other number of parts
+      ... and is refused by that rule, or read with segments other than
+      `dialectica` and `1` as its application and version". Take any string that
+      begins `/dialectica/1/`: after the leading `/` its first two parts are exactly
+      `dialectica` and `1`. In the four-part form they are the application and
+      version, so the rule reads it as required. In the five-part form the first part
+      is the generation, `dialectica` is not numeric, and the rule refuses it (the
+      live message). Any other count is refused. So the second alternative never
+      occurs; the first is the only way a prefixed name fails. The scenario's own
+      bullet "the rule reads `dialectica` as its application and `1` as its version"
+      is likewise implied by acceptance plus the prefix, which `the_content_topic_is_one_delivery_parses_with_dialectica_as_application`
+      asserts anyway. A reader takes from the sentence that a prefixed name can be
+      accepted and misread, and looks for the protection the requirement adds
+      against it.
+      **Fix shape:** drop the clause ("... has any other number of parts is refused
+      by that rule"), or say the reading follows from the prefix once the rule
+      accepts the name, so the version-and-application check restates the prefix.
+      **Severity:** low.
+
+- [ ] **`dev-writer`** — `design.md:1097-1099` — the last sentence of "A pin bump
+      fails a test" does not parse, and "(Decision 14's wording)" at `:1093` points at
+      wording Decision 14 does not hold.
+      **Scenario:** "Before it, the only prompt was 'a pin bump should re-read' in
+      three places that no command triggered — the repo's own `.lidl` gap (`ci.yml`)
+      in a second place." The last clause has no verb and its referent is unclear:
+      `ci.yml:1783` is about nothing checking the checked-in `delivery_module.lidl`
+      for drift, a different gap that this test does not touch, offered here as "a
+      second place" of the same kind. The three places are not named, so the reader
+      cannot count them (`git grep -F "pin bump should re-read"` finds none in the
+      tree now, since this range replaced them). Separately `:1092-1093` says the
+      test message names `content_topic.nim`, `sharding.nim` and
+      `channel_lifecycle.nim` "(Decision 14's wording)", but Decision 14
+      (`:927-928`) says only that the message "names `channel_lifecycle.nim` among
+      what to re-read"; the three-file list is the test's own
+      (`transport.rs:1050-1056`).
+      **Fix shape:** "Before it, the only prompt was a sentence, 'a pin bump should
+      re-read', in Decisions 14 and 17 and the Risks list, which no command
+      triggered; `ci.yml`'s note on the unchecked `delivery_module.lidl` is the same
+      kind of gap elsewhere." and drop "(Decision 14's wording)" or say "the list is
+      the test's own".
+      **Severity:** low.
+
+Read: the whole range outside `findings/` (`CLAUDE.md`'s trap entry, `delivery.rs`'s
+`ALREADY_EXISTS` doc, `transport.rs`, the spec delta against the live `op-transport`
+requirement, `proposal.md`, `design.md`'s Decisions 5, 14, 17, Risks and Open Questions,
+`tasks.md` 7.3 and section 15, both QML comments). The new `op-transport` requirement
+is the live one verbatim plus the new paragraphs and scenario, as `proposal.md:152`
+says. `CLAUDE.md`'s trap entry holds no count a command answers, says why, and
+invalidates visibly (it names `transport::delivery_topic_rule`, a test, and
+`dialectica/flake.lock`); "generation `0`" matches `subscribable`. Both QML edits
+change comments only, and the user-facing strings are identical.
+Citations into `logos-delivery` at `bfdb5afd263c5ff634ef8c59b2fe1ebbbcd0f306`,
+re-read: `sharding.nim:32-51` holds both `getShard` overloads (`:32-43` the
+`NsContentTopic` one with `Generation > 0 are not supported yet` at `:43`, `:45-51`
+the `ContentTopic` one, as the doc says); `sharding.nim:20-30` is `getGenZeroShard`;
+`content_topic.nim:16` is `DefaultContentTopic`, `:60-123` is `parse`;
+`channel_lifecycle.nim:46-48` is the subscribe and `:43` the "channel already exists"
+return; `subscription_manager.nim:157` is `getShardForContentTopic` and `:249` the
+`subscribe(topic)` that calls it, reached from `channel_lifecycle` through the
+`MessagingSubscribe` provider (`messaging_client_lifecycle.nim:29`) and
+`waku/api/subscriptions.nim`; the doc's `channel_lifecycle.nim` → `getShardForContentTopic`
+→ `getShard` skips those two hops, which reads as a path summary and is not wrong. The
+`logos-delivery-module` pin `b8b9ac2f…` is `dialectica/flake.lock:169` and the delivery
+rev `bfdb5afd…` is `:1086`; `include_str!("../../../flake.lock")` from
+`src/transport.rs` resolves to `dialectica/flake.lock`. Not re-run: the tests'
+red-before-fix measurements and the live-run figures in `tasks.md` 7.3 and Risks,
+which only the owner's logs hold.
+
+Not boxes (taste): `transport.rs:928-930` records "Two reviewers recall" Nim's
+`parseInt` skipping `_`, unverified; the hedge is honest and the direction ("the
+stricter side") is right, but the provenance is two review rounds that are deleted
+with `findings/`, and a reader will want the Nim stdlib's `parseutils` cited or the
+remark dropped. `DPublishOutcome.qml:150-152` leaves one line ending at "and a" after
+the reword, the edit-residue shape earlier rounds noted. `design.md:1010-1011` does the
+same at "LIP-23 states the four-part".
