@@ -14,7 +14,7 @@ Dimension: readability only. Diff read with `git diff origin/main...HEAD`.
       **Measured:** `git grep -n -E "function (collectTexts|stringsUnder)" HEAD -- dialectica-ui/tests`
       returns both definitions, 174 lines apart.
 
-- [ ] **`dev-writer`** — `dialectica-ui/src/qml/DThreadScreen.qml:725-733` — the caption's comment narrates change history and points at a document that moves
+- [x] **`dev-writer`** — `dialectica-ui/src/qml/DThreadScreen.qml:725-733` — the caption's comment narrates change history and points at a document that moves
       **Scenario:** "this caption carried the first until `thread-view` forbade it. The
       reply-caption-no-edit change's design.md says why the first survived the cut." This
       records what the code used to be, which is the commit's job and `CLAUDE.md`'s "write down
@@ -27,6 +27,14 @@ Dimension: readability only. Diff read with `git diff origin/main...HEAD`.
       history sentence, and cite the capability (`thread-view`) or the archived path rather than
       the in-flight change.
       **Severity:** low. Genuine defect (comment that rots), partly taste.
+      **Fixed** in the commit "Record why the reply caption may not deny editing
+      either, and drop the caption comment's history (#177)": the history sentence
+      ("this caption carried the first until ...") and the pointer to the in-flight
+      change are gone. The comment keeps the standing rule, now in both directions as
+      the moved spec requires ("promise or denial"), says why the caption is kept
+      (`thread-view` requires the text to state a reply is signed), and cites
+      `thread-view`. Comment-only; `tst_thread_reply.qml` stays 27 passed, 0 failed,
+      and the three static QML gates pass.
 
 - [ ] **`tester`** — `dialectica-ui/tests/tst_thread_reply.qml:462` — `claimsEditing` (and `editClaimsUnder`, line 569) are named for a narrower job than they do
       **Scenario:** the regex also matches `\bversions?\b`, and the tests rely on that: "earlier

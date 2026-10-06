@@ -50,6 +50,15 @@ mutated (`DThreadScreen.qml` caption, `DPublishOutcome.qml` stored headline).
       than the spec, on purpose") and the third Risks bullet say the spec permits a
       denial; rewrite both, and record the reason above as a Decision. The renamed
       title also appears in `tasks.md` line 26.
+      **`dev-writer` follow-up done** in the commit "Record why the reply caption may
+      not deny editing either, and drop the caption comment's history (#177)": the
+      Decision 3 paragraph now says the word matcher fits the contract because the
+      spec forbids a denial too; the third Risks bullet now names a denial as
+      forbidden rather than permitted; new Decision 4, "Say nothing on editing,
+      rather than deny it", records the staleness reason and the owner's "drop the
+      text", with the permitted-denial alternative and why it was rejected; the
+      Goals say "neither that it can nor that it cannot"; `tasks.md` 1.3 carries the
+      renamed title.
 
 - [x] **`spec-writer`** — `NO SPEC:` at `test_the_caption_beside_the_composer_is_kept`
       (line 728). The spec forbids a claim but says nothing on whether a caption
@@ -73,6 +82,11 @@ mutated (`DThreadScreen.qml` caption, `DPublishOutcome.qml` stored headline).
       design.md Decision 1's last alternative and Decision 3's "removing the caption is
       a choice the `NO SPEC:` test reports" now refer to a marker that should be gone;
       point them at the requirement.
+      **`dev-writer` follow-up done** in the same commit: Decision 1's alternative and
+      Decision 3's anchor bullet both cite *The open reply composer states that a
+      reply is signed*, and Decision 1 folds in the issue's expected behaviour it
+      comes from. `tasks.md` 1.4 no longer names the marker. The `NO SPEC:` comment
+      itself is in `tst_thread_reply.qml` and is the `tester`'s.
 
 - [x] **`spec-writer`** — the shut-gate scenario ("text rendered in place of the reply
       composer"). That group renders core's `reason` verbatim, and `composer-view`

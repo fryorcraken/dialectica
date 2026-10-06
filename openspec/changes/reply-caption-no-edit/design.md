@@ -17,10 +17,12 @@ later."
 
 **Goals:**
 
-- The caption, and every other string rendered with the reply composer or in
-  its place behind a shut posting gate, makes no claim that a reply can be
-  edited or re-published in a later version.
-- A QML component test that fails if such a claim is reintroduced, worded
+- The caption, and every other string the screen authors with the reply
+  composer or in its place behind a shut posting gate, says nothing about
+  whether a reply can be edited, re-published in a later version, or read in
+  an earlier one: neither that it can nor that it cannot (Decision 4).
+- The caption keeps stating what a reply is, that it is signed.
+- A QML component test that fails if such a statement is reintroduced, worded
   differently or not.
 
 **Non-Goals:**
@@ -62,10 +64,13 @@ post is edited. That is about how core resolves revisions it receives
 - *Remove the caption entirely.* "Drop the text" could be read that way. It is
   not how this change reads it. The owner was choosing between the issue's two
   options, and the first was explicitly "drop the sentence to what is true
-  today ('A reply is a signed record.')". The remaining half is true, because a
-  reply is a signed op. The spec does not say whether the caption stays, so the
-  test that keeps it carries a `NO SPEC:` marker. That makes it something the
-  spec-writer can confirm or overturn, not a contracted fact.
+  today ('A reply is a signed record.')". The issue's expected behaviour is
+  that "the caption describes what a reply is, and promises only what the app
+  does", and the remaining half does exactly that: a reply is a signed op.
+  `thread-view`'s *The open reply composer states that a reply is signed*
+  contracts it, before a publish and after one, on the statement rather than
+  the string, so removing the caption, or rewording it to something that no
+  longer says a reply is signed, breaks a requirement.
 
 ### 2. The reasoning this replaces was wrong on its own terms
 
@@ -81,14 +86,18 @@ This document supersedes the archived bullet's last sentence. The archive is
 not edited, because an archived design records what was decided when it was
 decided. Anyone who greps the archive for the caption will find both documents.
 The code comment above the caption is rewritten here so the false claim is no
-longer repeated in the tree. It now says what a reply is, and why no editing or
-version claim may be added beside it.
+longer repeated in the tree. It states the standing rule and its reasons, and
+cites the capability, `thread-view`, rather than this change: the rule outlives
+the change, and this folder moves under `changes/archive/` when the change
+lands, so a pointer to it by name would read as a live path that is not one.
+It carries no history of what the caption used to say; `git log` has that.
 
-### 3. How the test recognises an edit or version claim
+### 3. How the test recognises an edit or version statement
 
-The spec forbids a *claim*, not a particular string, and the claim has three
-parts: a reply can be edited, a later version of it can be published, an
-earlier version of it can be read. The test therefore walks the rendered text
+The spec forbids a *statement*, not a particular string, on three topics:
+whether a reply can be edited, whether a later version of it can be
+published, whether an earlier version of it can be read. It forbids it in
+both directions (Decision 4). The test therefore walks the rendered text
 of the composer's group (`replyComposerOpen`) and of the shut gate
 (`replyGateShut`), and fails on any string the matcher `claimsEditing` flags.
 The matcher is case-insensitive and flags two things:
@@ -101,16 +110,40 @@ The second is deliberately a bare word, not a list of qualifiers. "Earlier
 versions stay readable", "the previous version", "every version is kept" and
 "a later version can be published" are one family, and a list of qualifiers
 (earlier, previous, prior, older, later, newer, ...) misses whichever one a
-future sentence picks. Nothing the group renders has a reason to say
-"version", so the bare word costs no true sentence today.
+future sentence picks. Nothing the *screen authors* in either group has a
+reason to say "version", so the bare word costs no sentence the screen may
+write.
 
-The matcher is stricter than the spec, on purpose. It flags a word, so it also
-flags a sentence that denies the claim ("A reply cannot be edited"), which the
-spec permits. When such honest copy is wanted, the failing test is the prompt
-to read the requirement and narrow the matcher deliberately. A denial-aware
-matcher was not built: telling "cannot be edited" from "can be edited" by
-pattern is a second hand-maintained list, and a wrong exemption passes the
-claim it was meant to catch.
+That holds for authored text only. The walk also collects text the screen
+renders but does not author, which the requirement does not bind: core's
+probe reason behind a shut gate, core's message on a refused publish, and the
+user's draft. Core's reasons can say "version" truthfully. The probe answers
+an unreadable or malformed keystore as a reason rather than an error (the
+probe handler's doc in `wire.rs`), and core's own error texts include the
+keystore's "keystore format version {v} is newer than this build understands"
+(`keystore.rs`) and the identity store's "the identity record declares layout
+version {found} ..." (`identity_store.rs`). The matcher flags both. The component suite cannot fail on them today, because
+every core string the fixtures supply is hand-written ("no keystore") and
+avoids the matcher. A fixture that drove a real reason would fail for a reason
+the requirement does not hold, so whether the walk excludes core-supplied text
+and the draft, or keeps them and documents why the fixtures avoid the matcher,
+is the test suite's to settle against the requirement's two exclusions.
+
+Because the spec forbids a denial as well as a promise, a matcher that flags a
+word fits the contract: "A reply cannot be edited" is flagged, and the spec
+forbids it. No denial-aware matcher is needed, which is as well, since telling
+"cannot be edited" from "can be edited" by pattern would be a second
+hand-maintained list in which a wrong exemption passes the claim it was meant
+to catch. The matcher approximates the spec from the other side only: a
+paraphrase outside its word list passes (Risks).
+
+The walk ignores `visible`: a hidden Text is walked as well. A walk of visible
+items only was the alternative, and it would let through a statement that is
+hidden when the test looks and shown later, for example one bound to the
+composer's `outcome`. Walking everything is stricter than "rendered", and no
+item in either group is hidden for a reason that makes it safe to say what the
+requirement forbids. Nothing in the guards below fails if the walk is narrowed
+to visible items; the choice is recorded on the walk and here.
 
 The walk is scoped to those two subtrees, not the whole screen. The fixture's
 root post is revised, so the screen legitimately renders `edited` and "read
@@ -168,9 +201,11 @@ would look the same as a walk that stopped reaching them.
   Without the anchor, a walk that reached the wrong item, or none, would
   collect nothing and report no claim.
 
-  The anchor is not the caption because removing the caption is a choice the
-  `NO SPEC:` test reports (Decision 1), and the claim tests must not report it
-  as an inability to look. Measured: hiding the caption turns only
+  The anchor is not the caption because the caption's removal breaks a
+  different requirement, *The open reply composer states that a reply is
+  signed* (Decision 1), which `test_the_caption_beside_the_composer_is_kept`
+  pins; the claim tests must not report that as an inability to look.
+  Measured: hiding the caption turns only
   `test_the_caption_beside_the_composer_is_kept` red. What the caption's
   absence leaves open is a caption moved out of the group with a claim in it,
   so a caption anywhere on the screen must lie inside the walked group.
@@ -198,6 +233,39 @@ would look the same as a walk that stopped reaching them.
   does not read `placeholderText`. Text a popup or an attached tooltip carries
   is outside a walk of `children`, and this suite does not see it.
 
+### 4. Say nothing on editing, rather than deny it
+
+`thread-view` forbids the screen's text to say whether a reply can be edited,
+re-published or read in an earlier version, in either direction. "A reply
+cannot be edited" is as forbidden as "It can be edited later".
+
+A denial is true today, and that is not enough. Editing is planned work:
+the owner's decision names it (#99, `revisePost`) as out of 0.0.1, not out of
+the product. A denial written now goes false on the day editing lands, and
+nothing on that day prompts anyone to remove it. That is the failure this
+issue fixed, run in the other direction: copy describing a facility's state,
+left behind when the facility moved. The issue asks for a caption that
+"describes what a reply is, and promises only what the app does". A
+statement that a reply is signed describes what a reply is. A statement
+about editing describes what the app does, and is exactly as perishable
+whichever way it points.
+
+The owner's decision was also to drop the text: "The reply confirmation
+should not say a reply can be edited later." It was not a request to replace
+the text with its negation.
+
+**Alternatives considered:**
+
+- *Permit an honest denial*, and have the test tell a denial from a promise.
+  Rejected for the staleness above, and because the test would need a
+  denial-aware matcher, a second hand-maintained list in which a wrong
+  exemption passes the claim it was meant to catch (Decision 3).
+
+**What breaks without it:** nothing in the component suite, which flags
+both directions because it reads words. The rule is what makes that matcher
+fit the contract rather than exceed it: without it, a test flagging "A reply
+cannot be edited" would be failing on text the spec allows.
+
 ## Risks / Trade-offs
 
 - [The pattern is a word list, and a paraphrase outside it would pass] →
@@ -213,14 +281,13 @@ would look the same as a walk that stopped reaching them.
   it as well, because nothing reads a prior version, so it would promise an
   absent facility exactly as the edit claim did. The matcher flags it, and the
   matcher test pins that string.
-- [A future, true sentence in this group that uses one of those words, such as
-  "the draft can be edited before publishing" or "A reply cannot be edited",
-  fails the test] → That is the right moment to read the requirement, which
-  the comment above the tests names. The second sentence is permitted by the
-  spec, which forbids claiming a reply can be edited and not saying it
-  cannot; the matcher flags it anyway, because it reads words. If the sentence
-  is about the draft, or denies the claim, the pattern or the scope needs
-  narrowing, and that is a deliberate edit.
+- [A future sentence the spec permits in this group, using one of those words,
+  fails the test; "the draft can be edited before publishing" is about the
+  draft, not a published reply] → That is the right moment to read the
+  requirement, which the comment above the tests names, and narrow the pattern
+  or the scope deliberately. A denial ("A reply cannot be edited") is not such
+  a sentence: the spec forbids it too (Decision 4), so the matcher flagging it
+  is the contract, not over-reach.
 - [The test sees what `qmltestrunner` renders, not what Basecamp renders] →
   The caption is a static string in the plugin's own file with no host
   dependency, so the two cannot diverge in what text is set.

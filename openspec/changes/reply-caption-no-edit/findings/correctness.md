@@ -26,6 +26,19 @@ allowed, `tst_thread_reply.qml` on the tree as committed, passed 27 of 27.
       the `version` clause to a claim shape (for example a version of *a reply*),
       and adding a real keystore reason to the matcher's "leaves alone" table.
       **Measured:** not mutated. The regex was read against the two strings above.
+      **`dev-writer` half, fixed** in the commit "Record why the reply caption may not
+      deny editing either, and drop the caption comment's history (#177)":
+      `design.md` Decision 3 no longer says nothing the group renders has a reason to
+      say "version". It now says that holds for text the screen authors, names the
+      core-supplied text and the draft the walk also collects, quotes both strings
+      above (re-found at `keystore.rs:621` and `identity_store.rs:137`), and says the
+      fixtures cannot trip on them today because every core string they supply is
+      hand-written. The spec has since put core-supplied text outside the requirement
+      (`findings/spec-test.md`, third entry), so this finding's "the spec is not
+      violated" is now contracted. **Box left open for the `tester`**: the comment at
+      `tst_thread_reply.qml:460-461` is in a test file this pass may not edit, and
+      whether to exclude core text from the walk or scope the `version` clause, plus
+      the keystore row for the "leaves alone" table, are the test half.
 
 Areas that were clean, in prose:
 

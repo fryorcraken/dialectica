@@ -23,11 +23,12 @@
       `objectName: "replyCaption"`, leaving its text unchanged, so the tests
       below can find it
 - [x] 1.3 Add one test per scenario of "The text around the reply composer
-      does not promise that a reply can be edited" (open composer, after a
-      publish, shut gate). Each asserts that its walk found text before it
-      asserts there is no claim. Verify the open-composer and after-publish
-      tests fail on the old caption, on the claim assertion
-- [x] 1.4 Add the `NO SPEC:` test that the caption is kept and is not empty
+      says nothing about editing a reply or reading its earlier versions"
+      (open composer, after a publish, shut gate). Each asserts that its walk
+      found text before it asserts there is no claim. Verify the
+      open-composer and after-publish tests fail on the old caption, on the
+      claim assertion
+- [x] 1.4 Add a test that the caption is kept and is not empty
 
 ## 2. The fix
 
@@ -42,3 +43,17 @@
 - [x] 3.2 Static QML gates green, each after its own test:
       `check_qml_names.py`, `check_qml_reachable.py`, `check_qml_members.sh`
 - [x] 3.3 `openspec validate reply-caption-no-edit --strict` passes
+
+## 4. Review findings (`dev-writer`'s)
+
+- [x] 4.1 Rewrite `design.md`'s passages that said the spec permits a denial,
+      and record why a denial is forbidden (Decision 4)
+- [x] 4.2 Point Decisions 1 and 3 at *The open reply composer states that a
+      reply is signed* in place of the `NO SPEC:` marker
+- [x] 4.3 Record in Decision 3 that the walk ignores `visible`, and that it
+      collects core-supplied text and the draft the requirement does not bind
+- [x] 4.4 Rewrite the caption's comment in `DThreadScreen.qml` as the standing
+      rule, citing `thread-view`, with no history and no pointer into this
+      change's folder; verify
+      `sh dialectica-ui/tests/run-qml-tests.sh dialectica-ui/tests/tst_thread_reply.qml`
+      and the static QML gates stay green
