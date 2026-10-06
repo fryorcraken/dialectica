@@ -28,14 +28,16 @@ request for exactly the `.claude/` changes below.
   `specflow@agent-spec-flow`. `worktree.baseRef: "head"` stays.
 - **`.gitignore`**: re-admit `.claude/specflow/`.
 - The marketplace entry is machine-local while the plugin is unpublished, so
-  it goes in the untracked `.claude/settings.local.json`, not in this change.
+  it is not in this change: `README.md` documents the `claude plugin
+  marketplace add` command each contributor runs once.
 
 **Not a no-op for the flow.** The issue says the change is behaviour-neutral
 for the flow. That held at `6a7e02b9`; since then `5ec12953` (#174) changed
 the in-repo flow — a re-review round, `NO SPEC:` routed before the `tester`,
 the `closer` merging `main` instead of rebasing, and no `--admin` merges — and
 plugin v0.1.0 carries none of it. `design.md` says what the overlay could keep
-and what it cannot.
+and what it cannot; the rest is tracked by an issue on the flow repo,
+`agent-spec-flow`.
 
 ## Capabilities
 
@@ -53,4 +55,4 @@ not the system. `.openspec.yaml` declares `skip_specs: true`.
 - Agent and session instructions only. No code, test, workflow or spec file
   changes behaviour.
 - After merge, the next piece starts with `/specflow:run <issue#>`, and needs
-  the marketplace entry in the owner's `.claude/settings.local.json`.
+  the marketplace added with the command in `README.md`.

@@ -85,6 +85,24 @@ The `-p` flags are load-bearing. Nearly every test lives in `dialectica-core`,
 the pure inner crate; without them cargo tests only the outer package and
 reports `ok` having run almost nothing.
 
+## Working with the agent flow
+
+Changes go through a spec-driven agent flow that runs on the **specflow**
+Claude Code plugin, `specflow@agent-spec-flow`, which `.claude/settings.json`
+enables. Until `agent-spec-flow` is published, Claude Code cannot find it on its
+own: add its marketplace from a local checkout once, before starting a session
+here:
+
+```
+claude plugin marketplace add /home/fryorcraken/src/fryorcraken/agent-spec-flow
+```
+
+That path is where the checkout sits on the maintainer's machine; substitute
+the path to your own `agent-spec-flow` checkout.
+
+This step goes away once the plugin is published and its marketplace entry
+moves into `.claude/settings.json` as a pinned `github` source.
+
 ## Where it lives
 
 Developed on [Radicle](https://radicle.xyz) at

@@ -53,9 +53,9 @@ reading named on it.
 - [x] 3.1 `.claude/settings.json`: add `enabledPlugins`; `worktree.baseRef`
       unchanged.
 - [x] 3.2 `.gitignore`: add `!.claude/specflow/`; keep `!.claude/agents/`.
-- [ ] 3.3 Owner: add the `extraKnownMarketplaces` entry to the main checkout's
-      untracked `.claude/settings.local.json`. A dispatched agent cannot write
-      outside its worktree; the JSON is in the PR description.
+- [ ] 3.3 Owner: run the `claude plugin marketplace add` command in
+      `README.md`'s "Working with the agent flow". It changes the owner's
+      Claude Code configuration, which a dispatched agent does not touch.
 
 ### 4. Deletions and references
 

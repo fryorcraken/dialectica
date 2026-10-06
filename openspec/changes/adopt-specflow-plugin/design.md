@@ -19,9 +19,9 @@ stage under `## Extra stages`."** That sentence decides most of what follows.
 dialectica-specific rule is lost silently; `CLAUDE.md`'s block is exactly what
 `/specflow:sync` would write, so a later sync replaces it in place.
 
-**Non-Goals:** changing the plugin, filing issues on `agent-spec-flow`, or
-publishing the marketplace entry. Lessons about specflow go to the owner
-first (the block's own rule).
+**Non-Goals:** changing the plugin, or publishing the marketplace entry.
+Lessons about specflow go to the owner first (the block's own rule), and the
+owner files them on `agent-spec-flow`.
 
 ## Decisions
 
@@ -109,8 +109,10 @@ What was considered instead:
 - **Keep the in-repo `RUNNER.md` and `closer.md` beside the plugin.** Rejected:
   that is the two-sources problem this change exists to end, and the plugin's
   `closer` would still be the one dispatched as `specflow:closer`.
-- **Report it, and let the owner decide before the next piece runs.** Chosen.
-  The reasoning for all five items is not lost: it is in
+- **Carry them upstream, in the plugin.** Chosen. The loss is tracked by an
+  issue on the flow repo, `agent-spec-flow`, which is where a rule about the
+  runner, the stage roster or the `closer` belongs. The reasoning for all five
+  items is not lost: it is in
   `openspec/changes/archive/2026-09-27-171-workflow-rules/design.md` and
   `proposal.md`, archived with the change that made them. What is lost is the
   rule's place in the flow that runs.
@@ -159,11 +161,15 @@ worktree, the failure shape the `settings.json` comment above it records.
 
 ### The marketplace entry is not in this change
 
-`extraKnownMarketplaces` points at a local checkout, so it is machine-local and
-belongs in the untracked `.claude/settings.local.json`; `settings.json` gets
-only `enabledPlugins`. A dispatched agent cannot write the main checkout's
-`settings.local.json` (the harness refuses an edit outside its worktree), so the
-owner adds it. The JSON is in the PR description.
+While the plugin is unpublished its marketplace is a local checkout, so the
+entry is machine-local and `settings.json` gets only `enabledPlugins`. Each
+contributor registers the marketplace with `claude plugin marketplace add
+<checkout path>`, the command `README.md`'s "Working with the agent flow"
+documents; its default scope is `user` (`claude plugin marketplace add
+--help`), so it reaches every worktree rather than one checkout. The owner
+runs it; a dispatched agent does not change the owner's Claude Code
+configuration. The README note goes when the plugin is published and the entry
+moves into `settings.json` as a pinned `github` source.
 
 ### Dropped, deliberately
 
@@ -189,11 +195,12 @@ Dialectica-specific sentences in deleted text with no home in the overlay:
 ## Risks / Trade-offs
 
 - [The flow regresses on #174's five rules until the plugin carries them] →
-  item 5 is in the overlay; items 1 to 4 are reported to the owner, to file on
-  `agent-spec-flow` or to accept before running `/specflow:run`.
+  item 5 is in the overlay; items 1 to 4 are tracked by an issue on the flow
+  repo, `agent-spec-flow`, and are absent from the active flow until the plugin
+  carries them.
 - [The overlay draws on `ci.yml` and branch protection, both of which move] →
   it names commands (`gh api …/protection`) rather than lists where it can,
   and names the step whose output a claim comes from.
-- [A session cannot see the plugin until the marketplace entry exists] → the
-  PR description carries the entry, and the issue's fourth check (a fresh
+- [A session cannot see the plugin until the marketplace entry exists] →
+  `README.md` carries the command that adds it, and the issue's fourth check (a fresh
   session lists the `specflow:*` agents) is the owner's to run after merge.
