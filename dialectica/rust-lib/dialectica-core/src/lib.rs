@@ -30,6 +30,7 @@ pub mod moderation;
 pub mod names;
 pub mod onboarding;
 pub mod op;
+pub mod parked;
 pub mod revision;
 pub mod sanitise;
 pub mod sender;
