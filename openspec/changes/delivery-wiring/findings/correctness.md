@@ -734,3 +734,89 @@ Notes, none needing action:
 - **An ended wait keeps its unused extension.** Harmless: the waiter breaks on
   the wake-up that follows, since `wait_ends` returns a past instant and nothing
   but an ask writes `ends`.
+
+## Re-review round 8 `ae44f364..43844f2b`
+
+Dimension: **correctness only**. Reviewed at `588a1a3e`, against `logos-delivery`
+`bfdb5afd263c5ff634ef8c59b2fe1ebbbcd0f306` and `logos-delivery-module` `b8b9ac2f`.
+
+- [ ] **`dev-writer`** — `CLAUDE.md:529-531` (the new trap entry) — states
+      `channelCreate`'s acceptance rule as "exactly four non-empty parts — or
+      five with a numeric generation first, or `channelCreate` is declined".
+      That leaves out a refusal on the same path: after the parse,
+      `sharding.nim` `getShard(NsContentTopic)` accepts only generation `0` or
+      none, and declines every other generation with `Generation > 0 are not
+      supported yet`. The path is `subscription_manager.nim`
+      `getShardForContentTopic` → `getShard(ContentTopic)` (parse, then
+      `getShard(parsed)`). `delivery_topic_rule` copies only the parse, so the
+      fake accepts those topics too.
+      **Scenario:** a topic `/1/dialectica/1/s-<hex>/proto` (or `/-1/…`) meets
+      the CLAUDE.md rule and passes the fake's `channel_create`. A live node
+      declines it with `ChannelCreate failed: failed to subscribe to content
+      topic: Generation > 0 are not supported yet`. That is the same "green
+      suite, refused live" class Decision 17 exists to close, and CLAUDE.md is
+      the rule every agent reads.
+      **Not reachable today:** the derived topic has no generation, and
+      `the_content_topic_is_one_delivery_parses_with_dialectica_as_application`
+      asserts `generation == None`. So the danger is the stated rule, not the
+      shipped topic. Severity low.
+      **Measured:** a probe test `assert!(parse("/1/waku/2/default-content/proto").is_err())`
+      in `delivery_topic_rule::tests` fails (`parse` returns `Ok`). Fix
+      either by narrowing the sentence to "five with generation `0` first", or
+      by having the fake (or the rule) also decline a generation other than
+      `Some(0)`/`None` with delivery's `getShard` message. If the rule changes,
+      the module doc's "transcribes `NsContentTopic.parse`" needs widening to
+      match.
+
+Checked and clean:
+
+- **The new topic parses on delivery's real path.** `/dialectica/1/s-<64 hex>/proto`
+  splits after the leading `/` into four non-empty parts. Delivery's 4-arm returns
+  `application = "dialectica"`, `version = "1"` and no generation. Then
+  `getShard` takes the gen-zero branch and hashes `"dialectica" & "1"`. The
+  `s-<hex>` name is never inspected, and nothing limits a topic's length or
+  character set. The send path (`MessagingClient.send` →
+  `waku.isSubscribed`/`subscribe`) re-resolves the shard through the same
+  parse and gets the same answer.
+- **The channel id and sender id really are opaque.**
+  `logos-delivery-module`'s `channelCreate`/`channelSend` copy all three strings
+  into the request struct without inspecting them. `channel_api.nim` wraps them
+  as `ChannelId(...)`/`SdsParticipantID(...)`. `createReliableChannel` uses the
+  channel id only as a `Table` key (`hasKey`, then insert) and parses only the
+  topic. `ReliableChannel.new` and `SdsHandler.new` store both ids. SDS compares
+  the channel id for equality (`msg.channelId != self.channelId`) and hashes the
+  sender id into the message id. `sds_persistency.nim` uses the channel id as a
+  key prefix. None of these parse either id. `send` refuses only an empty
+  payload. Encryption is `setNoopEncryption()`, installed by
+  `ReliableChannelManager.start` (`reliable_channel_manager.nim:58`), so no
+  `Encrypt` request is left without a provider.
+- **The transcription agrees with `content_topic.nim:60-123` arm for arm.** That
+  covers the leading-`/` check, the `split("/")` count (an empty remainder is one
+  part in both languages, so it falls to the catch-all), the 4- and 5-part arms,
+  the empty-generation check ahead of the integer parse, and the order of the
+  missing-part checks. The messages match `parsing.nim`'s `$` (`invalid format: `
+  / `missing part: `) exactly. The fake's prefix
+  `ChannelCreate failed: failed to subscribe to content topic: ` is
+  `channel_api.nim`'s `"ChannelCreate failed: " & $error` around
+  `channel_lifecycle.nim`'s `"failed to subscribe to content topic: " & error`,
+  with `getShard`'s `err($error)` innermost: verbatim.
+  One possible divergence, unverified here: as I recall Nim's
+  `parseutils.rawParseInt`, it skips `_` between digits (`"1_0"`), while Rust's
+  `i64::from_str` does not. If so, the comment "an optional sign and decimal
+  digits" is incomplete. Even then the error is conservative (the fake would
+  refuse something delivery accepts), and no topic we build has five parts.
+  Prose only.
+- **The fake's new refusal changes no other assertion.** Every topic reaching the
+  fake comes from `ChannelIdentity::of`. `content_topic` is built in one place,
+  `transport.rs:175`, and both `delivery.rs:1022` and the adapter `lib.rs:612-619`
+  pass it through. So with the fixed prefix the refusal never fires. The full
+  suite is green at `588a1a3e`: 1315 + 30 + 3, and clippy `--all-targets -D
+  warnings` is clean. The refusal comes after `create_replies.pop_front()`, so a
+  refused topic would use up a scripted reply. That only matters while the
+  refusal is firing, which is a red run anyway.
+- **Decision 17's "what breaks without it" holds.** With `TOPIC_PREFIX` set back to
+  `/dialectica/1/s/`, 27 `delivery::` tests fail (each with the live message
+  `…generation should be a numeric value`), and so do the three named `transport::`
+  tests.
+- `nix build ./dialectica#lgx` not run: `src/lib.rs` is untouched in this range,
+  and the adapter takes the topic as `&str` from the unchanged accessor.
