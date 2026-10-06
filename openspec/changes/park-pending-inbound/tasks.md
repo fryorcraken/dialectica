@@ -23,8 +23,9 @@
   and `plan_park`'s discard rule; verified by the known-answer pin, the
   ordering test against a literal 150 KiB, and one store test per discard
   rule
-- [x] 1.3 Add `shed`, the one shedding rule, for the queue and the parked
-  totals both; verified by `shed_picks_the_most_then_the_latest_newest`
+- [x] 1.3 Add the one shedding rule, for the queue and the parked totals both
+  (`shedding::choose`, moved out of `parked.rs` in 5.2); verified by
+  `shedding::tests`
 
 ## 2. The seams in `delivery.rs`
 
@@ -58,8 +59,10 @@
 
 - [x] 3.1 `cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p
   dialectica -p dialectica-core` green from this worktree
-- [x] 3.2 `cargo mutants` over `parked.rs` and the seams in `delivery.rs`,
-  with each surviving mutant either killed by a test or argued in the PR
+- [x] 3.2 `cargo mutants` over `parked.rs`, `shedding.rs` and the seams in
+  `delivery.rs`, with each surviving mutant either killed by a test or argued
+  under the Decision it guards: none survived; the runs are recorded in
+  `design.md` Decisions 3 and 5
 - [x] 3.3 `nix build ./dialectica#lgx` green: the adapter compiles against the
   changed `Delivering::start`
 
@@ -78,3 +81,32 @@
 - [ ] 4.3 A live two-peer rerun under `lgs basecamp launch`. The race parking
   exists for happens only against a real delivery node, and `cargo test`
   drives a fake. This is the owner's, as #176's was
+
+## 5. Review findings addressed to `dev-writer`
+
+- [x] 5.1 A payload discarded for a total bound evicts nothing (`ParkOutcome`,
+  `Plan`, `Total::make_room`); verified by
+  `a_payload_discarded_for_the_byte_total_evicts_nothing_the_count_total_chose`
+  and `a_count_eviction_is_not_kept_for_a_payload_the_byte_total_then_discards`
+- [x] 5.2 One shedding rule in `shedding.rs`, the arrival's "newest of all"
+  written once as `Newest::Arrival`; verified by `shedding::tests` and the
+  queue's and store's tie tests
+- [x] 5.3 A taken payload is judged on its one reading
+  (`Taken::Judge(Option<Address>)`); verified by
+  `a_payload_taken_on_an_unknown_channel_is_refused_though_its_channel_opens_before_it_is_judged`
+- [x] 5.4 `parked.sqlite` keeps neither the size nor the bytes of what a review
+  took (`secure_delete`, `auto_vacuum = FULL`); verified by
+  `a_review_leaves_neither_the_size_nor_the_bytes_of_what_it_took_in_the_file`
+- [x] 5.5 The running wiring parks by `PARK_BOUNDS` and never closes the queue,
+  by construction (a `#[cfg(test)]` field and flag); verified by the non-test
+  build refusing to compile a `start` that sets the bounds, and by
+  `a_review_due_after_deliverys_events_end_is_still_run`
+- [x] 5.6 Readability: `Opening::finish`, the `drain` barrier, the review split
+  per event, one discard loop, `ensure_schema`, `take_channel` without a block,
+  `spawn_processor`, the startup order in `start`'s doc, design citations that
+  name their change
+- [x] 5.7 `design.md`: the flood lockout and the per-park cost under Risks,
+  the per-channel rule, reviews unbounded, Decision 6's costs, Decision 7's
+  unreadable-review path, a fifth Stoa at restart, mutation evidence
+- [x] 5.8 Deferred with a destination: the per-park cost (#206), the shared
+  store skeleton (#204), the `delivery.rs` split (#205)

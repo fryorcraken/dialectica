@@ -12,7 +12,7 @@ a preference, safe to reject.
 
 ## `delivery.rs`
 
-- [ ] **`dev-writer`** — `delivery.rs:1602-1609` — **defect (stale comment).**
+- [x] **`dev-writer`** — `delivery.rs:1602-1609` — **defect (stale comment).**
       The doc on `Delivering::start` says "In order: count the channel of every
       Stoa … as being opened, subscribe to `channelMessageReceived` …, start the
       processor and the worker, ask for the node, then ask for each of those
@@ -26,8 +26,13 @@ a preference, safe to reject.
       put it, and may queue it after `subscribe()` or after the opens are sent,
       where the inline comment's "set of known channels is exactly startup's"
       no longer holds.
+      **Fixed** in `09eca672`. The doc on `Delivering::start` is now a
+      numbered list, and step 2 is "queue the startup review (review event 3),
+      whose set of known channels is exactly those — after step 1, and before
+      anything can settle". Step 4 says the processor's first take is that
+      review.
 
-- [ ] **`dev-writer`** — `delivery.rs:926-934` — **defect (misleading name).**
+- [x] **`dev-writer`** — `delivery.rs:926-934` — **defect (misleading name).**
       `Opening::settle(mut self, held)` does not settle anything: it sets
       `self.held` and returns, and the settle happens in `Drop` when `self` goes
       out of scope at the closing brace. The doc says "Settle the open now",
@@ -42,8 +47,19 @@ a preference, safe to reject.
       Suggest `Opening::settle` become `Opening::finish(held)` or
       `give_answer(held)` with one line saying the drop does the work, and the
       barrier pair keep their name or become `drain`/`Drain`.
+      **Fixed** in `09eca672`, both halves.
+      - **`Opening::settle` is now `Opening::finish(held)`.** Its body says in a
+        comment that `self` is dropped at the closing brace and that the drop is
+        the settle, so one path settles whether the worker finishes the open or
+        the guard is merely dropped.
+      - **The test barrier is `Delivering::drain` / `Action::Drain`.** Every call
+        site in `delivery/tests.rs` and `delivery/tests/parking.rs` is renamed,
+        and its doc says it is named apart from the settles of an open.
+      - **`settle` now names only the real settles**, `ChannelBook::settle` and
+        `Channels::settle`, which the module doc's seam map points at.
+      - Also in `design.md` Decision 9.
 
-- [ ] **`dev-writer`** — `delivery.rs:1432-1450` — **shape + naming.**
+- [x] **`dev-writer`** — `delivery.rs:1432-1450` — **shape + naming.**
       `Processor::park` binds `let parked = self.stores.parked()…` to a
       `Result<Parking, ParkError>` and then destructures
       `let Parking { parked, evicted } = match parked {…}`, so `parked` is a
@@ -53,15 +69,28 @@ a preference, safe to reject.
       Rename `Parking` to `ParkOutcome` (fields `kept`, `evicted`) and name the
       `Result` `outcome`. The shadow then goes and `Parking { parked: false }`
       stops reading as a tautology.
+      **Fixed** in `09eca672`, with an enum rather than renamed fields.
+      - **`Parking` is now `ParkOutcome`, with two variants**,
+        `Parked { evicted }` and `Discarded`. The spec revision (security finding
+        2) means a discarded payload evicts nothing, and the enum makes that the
+        only shape there is. There is no `parked: bool` left to read as a
+        tautology.
+      - **The `Result` is bound as `outcome`**, so the shadow is gone.
+      - **`Parked` (a stored row), `ParkedStore`, `ParkError`, `Taken::Park`,
+        `Note::Parked` and `Processor::park` keep their names.** Each names a
+        different thing, and none was a misreading.
 
-- [ ] **`dev-writer`** — `delivery.rs:1440-1449` — **shape.**
+- [x] **`dev-writer`** — `delivery.rs:1440-1449` — **shape.**
       The two discard branches of `Processor::park` repeat the same two lines
       (`let total = self.channels.count_discard(); record(…ParkDiscarded{total})`),
       once in a loop over `evicted` and once for `!parked`. The number of
       discards is `evicted + (!parked as usize)`; one loop does it. As written, a
       reader must check that the two copies stay identical.
+      **Fixed** in `09eca672`. `Processor::park` maps the outcome to
+      `(discards, parked)`, which is `(evicted, true)` or `(1, false)`. One loop
+      counts and logs each discard, and one `if` logs the park.
 
-- [ ] **`dev-writer`** — `delivery.rs:1458-1481` — **shape + stale doc.**
+- [x] **`dev-writer`** — `delivery.rs:1458-1481` — **shape + stale doc.**
       `Processor::review` is one `match` whose three arms are three different
       jobs: `Held` decides each message under its own `contained`, `Unopened`
       refuses, and `Startup` lists the store's channels, filters by `known`, and
@@ -73,8 +102,18 @@ a preference, safe to reject.
       `decide_parked(channel)` and `refuse_unknown_at_startup(known)` so
       `review` is a three-line dispatch, and the startup arm can be tested
       without a `Review` value.
+      **Fixed** in `09eca672`.
+      - **`Processor::review` is a three-arm dispatch:** `Held` to
+        `decide_parked`, `Unopened` to `refuse_parked`, and `Startup` to
+        `refuse_unknown_at_startup`.
+      - **Each function's doc names its event**, the review doc says "one
+        function per event", and `refuse_parked`'s doc says it serves event 2
+        and each channel event 3 refuses.
+      - **`refuse_unknown_at_startup(&known)` can be called directly.** I added
+        no test that does, since the startup arm's behaviour is pinned through
+        `start` by the existing startup tests.
 
-- [ ] **`dev-writer`** — `delivery.rs:1204-1214` and `parked.rs:447-455` —
+- [x] **`dev-writer`** — `delivery.rs:1204-1214` and `parked.rs:447-455` —
       **shape.** The convention "the arriving payload is counted with its own
       channel as that channel's newest of all" is written twice, once for the
       queue (`own.newest = u64::MAX`) and once for the parked messages
@@ -85,8 +124,15 @@ a preference, safe to reject.
       `shed` and its test stay green. Give `parked.rs` a small constructor
       (for example `Load::arrival(measure)`) or a `tally` helper both callers
       use, and name the sentinel.
+      **Fixed** in `09eca672`. This is the same change as architecture entry 2.
+      - **The convention lives once, in `shedding::choose`.** Both callers pass
+        their held messages in hand-over order and the arrival, and neither
+        builds loads any more.
+      - **The sentinel is now a type.** `Newest` is `Held(place)` then
+        `Arrival`, with derived `Ord`, so "the arrival is the newest of all" is
+        the variant order and cannot be changed in one copy.
 
-- [ ] **`dev-writer`** — `delivery.rs:1619-1707` — **shape (low).**
+- [x] **`dev-writer`** — `delivery.rs:1619-1707` — **shape (low).**
       `Delivering::start` is 89 lines and does nine jobs in a fixed order the
       comments defend (guard, build channels, count opens, queue the startup
       review, subscribe, spawn the processor, spawn the worker, send the node
@@ -95,8 +141,12 @@ a preference, safe to reject.
       processor spawn (a four-argument `Processor::new` inside a `self.spawn`
       call) is the part that does not need to be inline. Say so or leave it:
       this is the weakest finding here.
+      **Fixed** in `09eca672`, as you suggested. The processor spawn is now
+      `Delivering::spawn_processor(channels, stores, clock)`, beside
+      `spawn_listener`. `start` keeps the ordered sequence as one function,
+      because the order is the point.
 
-- [ ] **`dev-writer`** — `delivery.rs:226`, `delivery.rs:1328`,
+- [x] **`dev-writer`** — `delivery.rs:226`, `delivery.rs:1328`,
       `parked.rs:69` — **defect (ambiguous reference).**
       Comments cite "design.md Decision 14", "design Decision 10" and "`design.md`
       Decision 4" with no change name. Two designs now carry numbered Decisions
@@ -108,17 +158,31 @@ a preference, safe to reject.
       `changes/<name>/design.md`. `delivery.rs:495` already qualifies
       ("`delivery-wiring`'s design, Decision 13"); do the same at the other
       three.
+      **Fixed** in `09eca672`, at your three sites and two more I found with
+      `grep -n "Decision\|design"` over both files.
+      - **Your three:** `delivery.rs`'s Decision 14 and Decision 10 now say
+        "`delivery-wiring`'s design", and `parked.rs`'s Decision 4 says
+        "`park-pending-inbound`'s design".
+      - **The two more:** `node_config`'s "`design.md` records the choice" is
+        now `delivery-wiring`'s, since its design is where the `Edge` mode
+        decision is. The `the_park_bounds_are_pinned` comment now names
+        `park-pending-inbound`'s Decision 4.
+      - **Left as it was:** the module doc's
+        "`design.md` (the `park-pending-inbound` change)", which already names
+        its change.
 
-- [ ] **`dev-writer`** — `delivery.rs:495-497` — **style (low).**
+- [x] **`dev-writer`** — `delivery.rs:495-497` — **style (low).**
       The `Stores` doc runs two paragraphs together: "…design, Decision 13." is
       followed directly by "A path and not open handles: …" with no `///` blank
       line, so rustdoc renders one paragraph and the second half answers a
       question ("why a path?") the first never asked. The line before it was
       edited by this change.
+      **Fixed** in `09eca672`: a blank `///` line now separates the two
+      paragraphs.
 
 ## `parked.rs`
 
-- [ ] **`dev-writer`** — `parked.rs:384-437` — **shape.**
+- [x] **`dev-writer`** — `parked.rs:384-437` — **shape.**
       `plan_park` is 54 lines doing two jobs: the per-channel check (lines
       385-394) and the total-shedding loop (396-436), the latter three levels
       deep (`for` → `loop` → `match` → `match`) with three separate
@@ -130,8 +194,21 @@ a preference, safe to reject.
       with a load.` is followed by code that silently discards the payload while
       keeping the evictions already planned; say why that is the safe default,
       or return the evictions-free plan.
+      **Fixed** in `09eca672`, with your `shed_to_fit` shape under another name.
+      - **`plan_park` does two things in sequence.** The per-channel check comes
+        first, then a loop over two `Total { measure, arriving, bound }` values,
+        each with named fields. Each `Total` calls `Total::make_room(kept,
+        evict, channel) -> bool`.
+      - **Every exit that does not park returns `Plan::Discard`**, which carries
+        no evictions, so the planned evictions are never kept when the payload
+        goes.
+      - **The unreachable arm now returns the evictions-free plan**, with a
+        comment saying why: it keeps the bound and loses nothing already
+        parked. That is the spec's rule since its revision (security finding
+        2).
+      - **`Plan` is now an enum**, `Park { evict }` or `Discard`.
 
-- [ ] **`dev-writer`** — `parked.rs:195-239` — **style (low).**
+- [x] **`dev-writer`** — `parked.rs:195-239` — **style (low).**
       `create_schema` "creates the schema if the file has none, returning the
       layout version the file then stamps". It reads the version, creates or not,
       and returns the version: the name says one job and the signature says
@@ -139,13 +216,23 @@ a preference, safe to reject.
       or a `Created` (`log/sqlite.rs`). `found != PARKED_LAYOUT_VERSION` in
       `from_connection` is then the only reason it returns anything. Rename
       (`ensure_schema`) or return the `Created`-style enum the op log's does.
+      **Fixed** in `09eca672` by the rename. It is now `ensure_schema`, and its
+      doc says it makes sure the file has a schema, creating it if none, and
+      returns the version the file stamps for the caller to check. The siblings'
+      `create_schema` shapes are left for #204, the shared store skeleton.
 
-- [ ] **`dev-writer`** — `parked.rs:285-310` — **style (low).**
+- [x] **`dev-writer`** — `parked.rs:285-310` — **style (low).**
       `take_channel` builds `taken` inside a bare `{ … }` block with no comment;
       the block exists to end `select`'s borrow of `tx` before `tx.execute`.
       A reader asks "why the braces?". `query_map(...)?.collect::<Result<Vec<_>,_>>()`
       followed by a `.map` into `Parked` removes both the block and the manual
       `push` loop; or say in one comment why the borrow needs ending.
+      **Fixed** in `09eca672`, as you suggested.
+      - **The block and the `push` loop are gone.** `take_channel` is now
+        `tx.prepare(…).and_then(|mut select| select.query_map(…)?.collect())`
+        into a `Vec<Vec<u8>>`, then a `.map` into `Parked`.
+      - **No comment is needed:** the statement that prepared the select ends
+        inside the closure, before `tx.execute`.
 
 ## Tests (`delivery/tests/parking.rs`, `delivery/tests.rs`, `parked.rs` tests)
 

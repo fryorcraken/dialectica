@@ -119,6 +119,30 @@ shape, so a second thread opening the file later does not reopen the race.
 the rows held, a larger `seq` was handed over later. Both orderings need only
 that: the hand-over order a review decides in, and "newest" for shedding.
 
+**What a review decided leaves no trace in the file.** Every open sets
+`PRAGMA secure_delete = ON` and `PRAGMA auto_vacuum = FULL`.
+
+- **Without them**, SQLite keeps freed pages on its freelist and deleted rows'
+  bytes in the pages' free space. A flood that filled the 32 MiB total left the
+  file at that size for good, still holding the attacker's bytes after every
+  review had decided them. The security review measured it: 1,000 parked
+  messages of 1 KiB, then every channel taken, left the file at 1,396,736 bytes
+  before and after.
+- **`auto_vacuum` is fixed when the first table is created, and SQLite ignores
+  it inside a transaction.** So it is set before `ensure_schema`'s
+  `BEGIN IMMEDIATE`, and on a file that already has the table it changes
+  nothing. The file is new in this change, so no store needs migrating.
+- **Deleting the file when the last row goes was the alternative.** That
+  reopens the schema-creation race on every park after a review, for no gain
+  over a file that shrinks to a few pages.
+- **The rollback journal is outside this.** It is deleted at each commit, and
+  its blocks on disk are the file system's.
+- **Guard:**
+  `a_review_leaves_neither_the_size_nor_the_bytes_of_what_it_took_in_the_file`.
+  Tried by hand, it goes red without either pragma: with no `auto_vacuum` the
+  file stays at 286,720 bytes, and with no `secure_delete` a payload's marker is
+  still in the file.
+
 Alternatives considered:
 
 - **A table in `ops.sqlite`.** The op log's `check_layout` names its own
@@ -156,6 +180,30 @@ construction:
   `Taken::Judge`, so the review for the parked messages must already have run.
   Since the processor is one thread, a payload parked before the event is
   written to the store before the processor takes the review that reads it.
+- **The take's one reading carries the Stoa.** The spec says "the state is read
+  once for each payload, and the payload is parked or judged on that one
+  reading". So `Taken::Judge(Option<Address>)` holds the Stoa the channel was
+  open for at the take, and the processor judges against that.
+  - **Why not a lookup at judgement:** the processor looked the channel up again
+    after releasing the lock. A join answered held in that gap turned a payload
+    taken as "unknown channel" into a stored op. The architecture review found
+    the gap by reading the code. It could not reach it from the running wiring,
+    but a test that takes, settles and then acts reaches it deterministically.
+  - **A review still looks up at judgement**, because the spec judges a parked
+    message "against the channels open when it is judged". `Processor::pass`
+    takes the lookup as an argument, so these are two named paths, not one
+    function's timing.
+  - **Guard:**
+    `a_payload_taken_on_an_unknown_channel_is_refused_though_its_channel_opens_before_it_is_judged`
+    goes red when the payload path looks the channel up again.
+
+**Reviews are never discarded and count towards no bound.** Each review is one
+of this peer's own requests settling, so the queue of reviews is bounded by the
+requests this peer has made (one per create, join or startup Stoa), not by
+anything a peer can send. A bounded review queue was the alternative. It would
+need a rule for which review to drop, and a dropped review leaves its channel's
+parked messages undecided until the next startup, which is the loss parking
+exists to prevent.
 
 `ChannelBook::settle` is the review trigger for events 1 and 2:
 
@@ -182,6 +230,19 @@ Alternatives considered:
   appends.
 - **Two locks, book and queue, as before.** A settle could land between the
   processor popping a payload and reading its state.
+
+**Mutation evidence.** In this pass, `cargo mutants --in-place` over
+`delivery.rs`, narrowed with `--re` to the functions this pass changed
+(`on_take`, `InboundQueue::offer`, `Processor::park`, `review`,
+`decide_parked`, `refuse_unknown_at_startup`, `act`, `bounds`) and tests to
+`delivery::`, gave 15 mutants: 9 caught, 3 timed out, 3 unviable, 0 missed.
+
+- **The three timeouts are detections:** `offer`'s `<` made `==` or `>`, and
+  `act` emptied, each leave a test waiting on a take or a slot that never comes.
+- **The seams this pass did not change were run by the reviews**, at
+  `30b9d14f`. The correctness review ran `settle`, `startup_review`, `take`,
+  `hand_over`, `Opening` and others: 46 mutants, 0 missed. The security review
+  covered 27 of 59 before its budget ran out, also with 0 missed.
 
 These tests go red if each part is removed:
 
@@ -211,50 +272,148 @@ Parked messages exist only while an open is in flight. The total bounds what a
 peer opening several Stoas at once can be made to hold, for example at a
 restart.
 
+**What a fifth Stoa costs at a restart.** The total is four channels' worth, so
+a peer in more than four Stoas, all being opened at once, can reach the total
+count before every channel reaches its own bound. Then the channel holding the
+most gives up its newest message to each arrival on a channel holding fewer
+(Decision 5). The bounds therefore level the channels towards an equal share
+rather than shutting the fifth one out. With 1,024 between them, eight Stoas
+being opened together keep 128 messages each, and an arrival on a channel
+already at that share is the one discarded. A per-channel bound of 256 against
+a total of 1,024 is the trade: one busy Stoa may use a quarter of the store,
+and no Stoa can be starved by the others while it holds less than its share.
+Raising the total instead buys more for every Stoa at a restart, at the price
+of more attacker-chosen bytes on disk (Risks).
+
 The ordering the spec requires is held at compile time: each per-channel bound
 is at most its total, and each byte bound is at least 150 KiB. The compile-time
 check cannot see a lowered `MAX_MESSAGE_BYTES`. The values themselves are not
 measured: how much honest traffic one open catches has not been observed live.
 A bound that is too small shows up as "discarded from the parked messages"
-lines, each with the running count.
+lines, each with the running count. The same lines are also a flood's signature
+(Risks).
 
-The processor carries its bounds as a field that `Processor::new` sets to
-`PARK_BOUNDS`. That is the lesson of the wait's limit, which was set wrongly in
-`start` and passed every test. Three tests guard it:
-
-- `the_processor_the_running_wiring_builds_parks_by_the_pinned_bounds` reads
-  the field.
-- `the_running_wiring_builds_its_processor_with_the_one_constructor_and_never_changes_its_bounds`
-  pins the field by reading the source as text.
-- `parked::tests::the_park_bounds_are_pinned` pins the values. `cargo mutants`
-  does not mutate a `const`.
+**The running wiring parks by `PARK_BOUNDS` by construction.** That is the
+lesson of the wait's limit, which was set wrongly in `start` and passed every
+test.
+- **Outside a test build, `Processor` has no bounds field.** `Processor::bounds()`
+  returns the constant, so neither `new` nor `start` can give a running
+  processor other bounds. Only a test build has the field, so a test can shrink
+  it.
+- **Guard:** a `start` that sets the field does not compile in the module's own
+  build (`cargo build -p dialectica-core`, and the `nix build ./dialectica#lgx`
+  gate). Tried by hand: `E0615`, "attempted to take value of method `bounds`".
+  It replaced a test that pinned the field by counting substrings of
+  `delivery.rs`'s source, which the architecture review rejected. That test
+  would also have failed the day any struct in the file gained a field named
+  `bounds`.
+- `a_processor_parks_by_the_pinned_bounds_until_a_test_shrinks_them` holds the
+  test build's starting point.
+- `parked::tests::the_park_bounds_are_pinned` pins the values, because
+  `cargo mutants` does not mutate a `const`.
+- The test-only `Channels::closed` flag follows the same rule. The running
+  wiring's build has no way to close the queue, which is what keeps the
+  processor alive for reviews (Decision 10).
 
 ### 5. One shedding rule, shared by the queue and the parked messages
 
-`parked::shed` returns the channel holding the most, by whatever the bound
-counts. Among channels tied for the most, it returns the one whose newest
-message was handed over latest. The arriving message is counted with its own
-channel, as that channel's newest, which makes it the newest of all.
+`shedding::choose` takes what is held, in hand-over order, as each message's
+channel and what the bound counts of it, plus the arriving message. It answers
+`Victim::Arrival` or `Victim::NewestOf(channel)`: the channel holding the most,
+and among channels tied for the most, the one whose newest message was handed
+over latest. The arriving message is counted with its own channel, as that
+channel's newest, which makes it the newest of all.
 
 The spec says the arrival's own channel is chosen "if it is among them". With
 the arrival counted as newest, that is the same tie-break, not a second rule:
 the arrival's channel always has the latest newest. When the arrival's channel
 is chosen, its newest message is the arrival.
 
+**The convention lives once, in a module neither caller owns.** At first each
+caller built its own loads, and each wrote "the arrival is the newest of all"
+as a `u64::MAX` sentinel. Two copies of the half of the rule that makes the
+tie-break come out right meant the queue and the store could drift apart while
+the shared function's test stayed green. The architecture and readability
+reviews both raised it. Now:
+
+- `Newest` is an `enum` (`Held(place)`, then `Arrival`) with derived `Ord`. The
+  arrival is later than every held message by variant order, not by a magic
+  number.
+- `shedding.rs` is private to the crate and sits beside `parked.rs` and
+  `delivery.rs`, not inside the store, so the in-memory queue does not import
+  its policy from a persistence module.
+
+The callers:
+
 - `InboundQueue::offer` sheds this way by count.
-- `plan_park` sheds by count, then by bytes, after the per-channel check.
-  `plan_park` is a pure function over the held rows, and the store applies it
-  in one transaction.
+- `plan_park` sheds by count, then by bytes, after the per-channel check, one
+  `Total` at a time. `plan_park` is a pure function over the held rows, and the
+  store applies it in one transaction.
+
+**A payload that is discarded evicts nothing**, even when the count total chose
+an eviction before the byte total chose the payload. Both the correctness and
+the security reviews found the earlier code keeping the count total's eviction
+in that case, and their probes measured one arrival costing two messages. An
+attacker on a small channel could evict an honest message with one 150 KiB
+payload it never needed parked. The spec now says "if the payload being parked
+is chosen, for either total bound, that payload MUST be discarded and every
+message already parked MUST be kept", which matches the per-channel rule.
+
+- `ParkOutcome` is `Parked { evicted }` or `Discarded`, so "discarded, with
+  evictions" is a value the store cannot return.
+- The same goes for `Plan::Park { evict }` and `Plan::Discard`.
+- Guards:
+  `a_payload_discarded_for_the_byte_total_evicts_nothing_the_count_total_chose`
+  (the security review's table) and
+  `a_count_eviction_is_not_kept_for_a_payload_the_byte_total_then_discards`
+  (the correctness review's).
+
+**The per-channel rule discards the arrival, and nothing already parked.** This
+is the spec's rule. The alternatives were to drop the channel's oldest parked
+message, or its newest, to make room. Two things decided against them:
+
+- **Within one channel, the arrival is the newest anyway**, so "discard the
+  arrival" and "discard the channel's newest" differ only in whether a slot is
+  churned.
+- **Dropping the oldest favours whoever sends last.** On a channel being
+  opened, that means a flood that keeps arriving would push out the honest
+  backlog parked before it.
+
+What the rule costs against a flood that arrives first is the lockout entry
+under Risks. The owner holds that decision.
 
 This changes the queue's rule from "discard the arrival" to "discard the newest
 payload of the channel holding the most". When one channel holds everything, it
-is the old rule exactly. The old reason for it still applies within the
-flooding channel: a backlog arrives roughly oldest first, so the newest messages
-are leaves of their threads. What changes is that a flood on one Stoa no longer
-costs another Stoa its arrivals. Tests:
+is the old rule exactly. What changes is that a flood on one Stoa no longer
+costs another Stoa its arrivals.
+
+**"Newest" is a heuristic on transport behaviour nothing here measures.** A
+waiting or parked payload is undecoded and unverified, so its op's counter
+cannot be read, and "newest" can only mean "handed over last". The hope that
+losing the newest loses least rests on SDS handing a catch-up backlog over
+roughly oldest first, so that the newest messages are leaves of their threads.
+Nothing in this repository has observed that order. No correctness property
+depends on it: a discarded op is a missing op until another peer's copy
+arrives, and ordering stays the Lamport clock's.
+
+Tests: `shedding::tests` for the rule itself, both tie-breaks included;
 `a_full_queue_discards_the_newest_payload_of_the_channel_holding_the_most` and
-`the_arriving_payloads_channel_loses_a_tie_for_the_most_waiting`, beside the
-store's own tests in `parked.rs`.
+`the_arriving_payloads_channel_loses_a_tie_for_the_most_waiting` for the queue;
+and the store's own tests in `parked.rs`.
+
+**Mutation evidence.** `cargo mutants --in-place` over `shedding.rs` and
+`parked.rs`, with tests narrowed to `parked::` and `shedding::`, gave 48
+mutants: 32 caught, 16 unviable, 0 missed. Two things it cannot see:
+
+- **The `const` bounds**, which `the_park_bounds_are_pinned` holds.
+- **A missing property.** The eviction kept for a discarded payload was found
+  by reading, not by mutation.
+
+The spec-test review found two survivors that this run's operators do not
+generate: the count and byte totals restored in swapped order, and the queue's
+"newest" read as a channel's first place. Both now have scenarios in the spec.
+`shedding::tests::among_other_channels_tied_for_the_most_the_latest_newest_gives_it_up`
+pins the second at the rule. The `tester` owns the scenario tests for both.
 
 ### 6. Every message decided once: a review takes its messages out in the same transaction that reads them
 
@@ -265,10 +424,24 @@ deleted and they stay parked for the channel's next review, as the spec
 requires.
 
 The alternative was to decide each message and then delete it. A failed delete
-after a successful store would decide the message twice. **The cost of the
-choice:** a module that stops part-way through a review loses what it had taken
-out. The spec puts that case out of scope, and the alternative would re-decide
-those messages instead.
+after a successful store would decide the message twice.
+
+**The costs of the choice.** Once taken out, a message is the review's to
+decide, and nothing puts it back:
+
+- **A module that stops part-way through a review loses what it had taken
+  out.** The spec puts that case out of scope, and the alternative would
+  re-decide those messages instead.
+- **A review that meets an op log that will not open loses the channel's whole
+  parked backlog.** Each message is refused as a storage failure, and none is
+  parked again. The spec requires this ("it MUST NOT be parked afterwards"),
+  the same rule a live message meets, and
+  `a_parked_op_the_op_log_cannot_take_at_its_review_is_logged_and_not_parked_again`
+  pins it. It is still the one path where a slow or broken disk, not a slow
+  open, costs honest messages, against the issue's "no honest message is lost
+  because an open was slow". Each loss is logged as `refused (storage: …)`.
+- **A panic judging one parked message loses that message.** It is contained,
+  logged, and the review goes on to the next.
 
 `a_message_a_review_decided_is_not_decided_again` and
 `parked::tests::a_review_takes_a_channels_messages_in_hand_over_order_and_leaves_none`
@@ -284,6 +457,17 @@ timer would bring back the original defect: a slow open costing an honest
 message. A parked message cannot outlive the open it is waiting for by more
 than one process lifetime, and the bounds cap how much can be waiting.
 
+**One path keeps a message parked after its open has settled: a review that
+cannot read the store.** When delivery reports a channel held and its review
+cannot read the parked messages, they stay parked, as the spec requires. The
+channel is then open, so nothing in this process begins another review of it
+unless the Stoa is joined again. The messages wait for the next startup's open
+of that channel, and its answer decides them. They are refused at that startup
+if the peer has left the Stoa. This is the one case where a parked message
+outlives its open, and the bounds are still what cap it.
+`parked_messages_a_review_could_not_read_are_decided_by_the_channels_next_review`
+pins the rule with a repeated join as the next review.
+
 ### 8. The receive window is judged at review
 
 This is the spec's answer to the issue's question. `Processor::pass` reads the
@@ -296,8 +480,11 @@ timestamp, because none was kept. The boundary decides nothing from either.
 
 ### 9. The worker settles an open before it logs the outcome
 
-`Opening::settle(held)` settles the guard explicitly, and the worker calls it
-before writing "channel open", "NOT open" or "no sender identifier could be
+`Opening::finish(held)` settles the guard explicitly, and the worker calls it
+before writing. It consumes the guard, and its drop is the settle, so one path
+settles whether the open is finished or merely dropped. It was called `settle`
+until the readability review pointed at four other `settle`s in the file. The
+worker calls it before writing "channel open", "NOT open" or "no sender identifier could be
 retained". So once a line saying an open was answered or given up can be read,
 the review it began is already queued and the channel is no longer being
 opened. Without this, a message sent "once the log has recorded" a given-up
@@ -314,8 +501,15 @@ that is gone, or a worker that never started.
 Before this change, the listener closed the queue when delivery's events ended,
 and the processor drained it and stopped. Now a review can still be due after
 that point: an open answered after the subscription ended has parked messages
-waiting for it. So the processor keeps taking. `Channels::close` exists for
-tests only, so that a processor run on the test thread can end.
+waiting for it. So the processor keeps taking.
+
+- `Channels::close` and the flag it sets exist in test builds only, so that a
+  processor run on the test thread can end. The running wiring's build has no
+  way to close the queue.
+- **Guard:** `a_review_due_after_deliverys_events_end_is_still_run` parks a
+  message, ends delivery's events, and only then answers the open. It goes red
+  (the op is never stored) when the listener's end closes the queue again.
+  Tried by hand.
 
 ### 11. Tests hold the boundary up with the module's log, not with an open
 
@@ -327,14 +521,69 @@ fixture only. No production code changed for it.
 
 ## Risks / Trade-offs
 
+- **[A flood that reaches a channel being opened ahead of its honest backlog
+  locks that backlog out]** → Not mitigated. This is the owner's decision, and
+  is open.
+  - **The attack.** A peer in a Stoa restarts, and delivery replays that Stoa's
+    backlog on its channel while startup's `channelCreate` is unanswered.
+    Channel identifiers are computable from the public Stoa id, so anyone who
+    can publish to the channel can send 256 minimal messages, or 54 of
+    150 KiB, just ahead of the replay.
+  - **Why it works.** "Parking judges nothing", so the flood parks and reaches
+    the channel's own count or byte bound. Each honest message after it meets
+    the per-channel rule ("that payload MUST be discarded, and nothing already
+    parked is") and is discarded.
+  - **Why it is permanent.** SDS already counts each one delivered and does
+    not re-send it. That Stoa's honest backlog is gone for this peer, which is
+    the race this change exists to close, reopened by a few hundred messages.
+    It is bounded to channels being opened.
+  - **What an operator sees.** The "discarded from the parked messages" lines,
+    each with the running count, are the attack's signature as well as the
+    sign of a bound set too small (Decision 4). The log cannot tell the two
+    apart.
+  - **The alternatives.** The per-channel rule could evict the channel's oldest
+    parked message instead, or reserve part of the bound. Decision 5 says why
+    oldest-first favours a flood that keeps arriving. Either is a spec change,
+    and it goes back to `spec-writer` before any code moves.
+  - **If the question is still open when this PR merges,** it moves to a GitHub
+    issue of its own, since #199 closes with the PR.
 - [Up to 32 MiB of attacker-chosen bytes on disk while an open is in flight]
   → The bounds cap it, a channel's share goes when its open settles, and the
-  next startup clears channels it does not open. The file holds no sender
-  identifier or timestamp, so it records nothing about who sent what.
+  next startup clears channels it does not open. The file shrinks back and
+  keeps no freed bytes once a review has decided them (Decision 2). The file
+  holds no sender identifier or timestamp, so it records nothing about who
+  sent what.
+- **[Every park is a synchronous, fsynced transaction on the one thread that
+  decides every Stoa's messages]** → Bounded. It is latency, not loss.
+  - **The cost.** Each park opens `parked.sqlite`, reads every parked row to
+    plan the bounds, and commits with SQLite's default durability.
+  - **Measured** on this repository's development machine, opening per park as
+    `Processor::park` does: 1,024 parks of 600 bytes across four channels took
+    6.08 s in a release build, 5.9 ms per park, and 6.4 ms in a debug build.
+    The commit's fsyncs dominate. The security review measured 5.2 ms on tmpfs
+    and the architecture review 4.6 ms on btrfs-on-LUKS, both in debug builds.
+  - **What it holds up.** A 256-message burst on a channel being opened holds
+    the processor for about 1.5 s (extrapolated, not run), and every other
+    Stoa's messages wait behind it in the queue. A full queue sheds the
+    flooding channel's newest, so nothing honest is lost. This is the
+    head-of-line block the change set out to remove, now made of disk writes
+    instead of an open's answer.
+  - **Rejected: lowering `synchronous` to `OFF`.** With a rollback journal, a
+    power loss mid-commit can corrupt the file. A corrupt `parked.sqlite` fails
+    every later park, which would turn latency into loss.
+  - **Deferred:** WAL with `synchronous = NORMAL`, one connection held across a
+    burst, or per-channel aggregates instead of every row. All of these are
+    #206.
 - [A review holds up to 8 MiB in memory] → The per-channel byte bound. A
   startup review takes one channel at a time.
-- [A module stopping part-way through a review loses what it took out]
-  → Decision 6. Out of the spec's scope.
+- [A module stopping part-way through a review loses what it took out, and an
+  op log that will not open at a review loses that channel's parked backlog]
+  → Decision 6. The first is out of the spec's scope. The second is the spec's
+  "not parked afterwards", and each loss is logged as a storage refusal.
+- [`parked.rs` is a fifth hand-copied SQLite store skeleton, and
+  `delivery.rs` grew rather than splitting first] → Deferred to #204 (one
+  shared skeleton) and #205 (move the pure channel book and queue into
+  `delivery/book.rs`). Both are no-behaviour changes for their own PRs.
 - [Every held answer opens `parked.sqlite`, even with nothing parked] → One
   SQLite open per channel answer: a few per join or startup.
 - [A later build with smaller bounds could restore a store over them] → A

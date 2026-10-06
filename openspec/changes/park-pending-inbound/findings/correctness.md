@@ -6,7 +6,7 @@ were not reviewed by this instance.
 Reviewed against `specs/op-transport/spec.md`: `parked.rs` and `delivery.rs`
 in full, plus `transport::receive_via` and `judge`, which the review path calls.
 
-- [ ] **`dev-writer`** — `parked.rs:407-435` (`plan_park`) — a message already
+- [x] **`dev-writer`** — `parked.rs:407-435` (`plan_park`) — a message already
       parked is discarded to make room for a payload that is then discarded too.
       **Scenario:** bounds per-channel count 5, per-channel bytes 100, total
       count 3, total bytes 100. Channel `a` holds three 30-byte messages. A
@@ -27,6 +27,19 @@ in full, plus `transport::receive_via` and `judge`, which the review path calls.
       state that evictions already made stay. **Measured:** no test exercises a
       count eviction followed by a byte-bound discard of the arrival; the probe
       above was written for this review and is not in the tree.
+      **Fixed** in `09eca672`, after the spec took the cheaper reading ("If the
+      payload being parked is chosen, for either total bound, that payload MUST
+      be discarded and every message already parked MUST be kept, a message
+      chosen before it included"). `plan_park` now runs each total through
+      `Total::make_room` and returns `Plan::Discard` with no evictions the
+      moment the payload is chosen. `ParkOutcome` is `Parked { evicted }` or
+      `Discarded`, so a discard with evictions cannot be returned. Your probe is
+      now `parked::tests::a_count_eviction_is_not_kept_for_a_payload_the_byte_total_then_discards`,
+      a table over `plan_park`. It also checks the other side, that a count
+      eviction is kept when the byte total then holds. Your measured
+      `{ parked: false, evicted: 1 }` on these inputs is the red. The new types
+      cannot express that outcome, so I did not re-run it. Recorded in
+      `design.md` Decision 5.
 
 ## Areas checked and clean
 
