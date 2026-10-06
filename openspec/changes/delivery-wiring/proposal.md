@@ -198,9 +198,16 @@ requirements use `MUST`.
   other receives it and shows it. The owner asked for this on #176 (comment of
   2026-09-29). It is the first point at which a second peer can prove anything,
   and it automates #102's items 5–7. The by-hand check with two
-  `lgs basecamp launch` profiles (`tasks.md` 7.3) has **not yet been run**;
-  `design.md`'s Open Questions puts that departure from #176 to the owner.
-  **Follow-up, for the project manager to file.**
+  `lgs basecamp launch` profiles (`tasks.md` 7.3) is what verifies this change
+  until then, and the owner ran it under Basecamp 0.2.3. The first build
+  created the node and had every channel declined for its content topic, which
+  is why the content topic changed (above). The second build passed: each peer
+  opened the Stoa's channel, and ops sent each way were stored by the other peer
+  within about 5 s, with no refusal, discard or crash. A post shows on the other
+  peer only after its Stoa is re-entered (#194), and the restart path cannot be
+  exercised through `lgs`, which clears module data on every launch;
+  `design.md`'s Risks has the detail. **Follow-up, for the project manager to
+  file.**
 - **Delivery outcomes.** `op-transport`'s three owed things are the bound, the
   in-flight record, and the never-propagated record. This change does not
   subscribe to `channelMessageSent` or `channelMessageError`. Because nothing

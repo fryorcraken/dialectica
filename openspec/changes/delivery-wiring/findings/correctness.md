@@ -740,7 +740,7 @@ Notes, none needing action:
 Dimension: **correctness only**. Reviewed at `588a1a3e`, against `logos-delivery`
 `bfdb5afd263c5ff634ef8c59b2fe1ebbbcd0f306` and `logos-delivery-module` `b8b9ac2f`.
 
-- [ ] **`dev-writer`** — `CLAUDE.md:529-531` (the new trap entry) — states
+- [x] **`dev-writer`** — `CLAUDE.md:529-531` (the new trap entry) — states
       `channelCreate`'s acceptance rule as "exactly four non-empty parts — or
       five with a numeric generation first, or `channelCreate` is declined".
       That leaves out a refusal on the same path: after the parse,
@@ -767,6 +767,22 @@ Dimension: **correctness only**. Reviewed at `588a1a3e`, against `logos-delivery
       `Some(0)`/`None` with delivery's `getShard` message. If the rule changes,
       the module doc's "transcribes `NsContentTopic.parse`" needs widening to
       match.
+      **Fixed** (`dev-writer`) in the commit `Take getShard's generation step
+      into the topic rule, and fail a test on a delivery pin bump`, the second
+      way: the rule, not only the sentence. `delivery_topic_rule::subscribable`
+      is `getShard(ContentTopic)` (`sharding.nim:45-51` → `:32-43` at
+      `bfdb5afd`): the parse, then `Generation > 0 are not supported yet` for
+      any generation other than `Some(0)`/`None`. The fake's `channel_create`
+      and `the_content_topic_is_one_delivery_parses_with_dialectica_as_application`
+      now consult it; `parse` stays the faithful transcription of
+      `NsContentTopic.parse`. Your probe is ported as
+      `a_generation_other_than_zero_parses_and_is_then_refused_for_its_shard`
+      (`/1/…` and `/-1/…` parse, then are refused with `getShard`'s message;
+      `/0/…` and the four-part form accepted): red before the fix,
+      `Ok(Parsed { generation: Some(1), … })`. `CLAUDE.md` now says "five with
+      generation `0` first" and names both refusals; the module doc and
+      Decision 17 cover both steps. The `1_0` note is in the comment beside the
+      integer parse, marked unverified.
 
 Checked and clean:
 

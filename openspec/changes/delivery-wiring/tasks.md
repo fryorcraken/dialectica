@@ -61,7 +61,7 @@
 
 - [x] 7.1 `cargo test -p dialectica -p dialectica-core`, `cargo clippy … --all-targets`, and `nix build ./dialectica#lgx` green.
 - [x] 7.2 Each refusal path and the bound shown red by a reverted mutation; the mutation and what it turns red are recorded beside each decision in `design.md` (Decisions 6, 10, 11 and 15), re-run under §10 where the first-pass count had gone stale.
-- [ ] 7.3 Two peers exchange a post under two `lgs basecamp launch` profiles (#102 items 5–7). A manual check no test here can stand in for: every test runs both sides in one process against a fake delivery. The first run created the node and had every channel declined for its content topic (§14); the rerun is the owner's.
+- [x] 7.3 Two peers exchange a post under two `lgs basecamp launch` profiles (#102 items 5–7). A manual check no test here can stand in for: every test runs both sides in one process against a fake delivery. The owner ran it under Basecamp 0.2.3. The first build created the node and had every channel declined for its content topic (§14). The second build, with the four-part topic, passed: alice and bob each logged `channel open for Stoa 1024b9fd…`, and the ops `84aa65c8…` (alice→bob), `f4f72c6d…` and `d0578af7…` (bob→alice) were each `handed to the channel` by the sender and `stored inbound op` by the receiver within about 5 s, with no refusal, discard or crash. Not shown by it: the restart-reopen path, since `lgs basecamp launch` scrubs `module_data/` on every launch; a post appears on the other screen only after re-entering the Stoa (#194).
 
 ## 8. Review round
 
@@ -112,3 +112,10 @@ Each regression test below was seen red before its change.
 
 - [x] 14.1 The content topic is `/dialectica/1/s-<hex>/proto`, four parts, which delivery's `NsContentTopic.parse` accepts with `dialectica` as application and `1` as version (design Decision 17). `the_content_topic_is_one_delivery_parses_with_dialectica_as_application` was red before the fix with the live message, `generation should be a numeric value`. The known-answer pin and the pure-function test moved with it; the channel id and sender id are unchanged, since delivery does not parse them.
 - [x] 14.2 `transport::delivery_topic_rule` (test-only) transcribes the parser at `logos-delivery` `bfdb5afd`, held both ways by its own tests (the live-refused topic refused with the live message; delivery's default topic accepted). The fake delivery's `channel_create` declines a topic it refuses; with the old prefix every `delivery::` test that opens a channel and relies on it went red.
+
+## 15. Re-review round 8
+
+- [x] 15.1 The rule takes `getShard`'s step after the parse (correctness round 8): `delivery_topic_rule::subscribable` refuses a generation other than `0` or none with `Generation > 0 are not supported yet`, and the fake and the content-topic test consult it. `a_generation_other_than_zero_parses_and_is_then_refused_for_its_shard` was red before the fix (`subscribable("/1/…")` returned `Ok`). `CLAUDE.md`'s trap entry says "generation `0`".
+- [x] 15.2 A delivery pin bump fails a test (architecture round 8): `the_transcribed_revision_is_the_one_delivery_is_locked_at` reads `dialectica/flake.lock` and asserts every `logos-delivery` node is locked at `DELIVERY_REV`, naming the files to re-read, `ALREADY_EXISTS`'s included. Red with the node match renamed, on its found-at-least-one assert.
+- [x] 15.3 The owner's second live run passed; 7.3 ticked on it, and `proposal.md`, `design.md` (Decision 5, 17, Risks, Open Questions) and PR #190 say so (design round 8). The stale "delivery is not wired" comment in `DPublishOutcome.qml` corrected.
+- [x] 15.4 The two tests that satisfy `op-transport`'s "The network's content-topic rule reads the content topic as dialectica version 1" say so in their comments; `DefaultContentTopic` cited at line 16 (readability round 8).

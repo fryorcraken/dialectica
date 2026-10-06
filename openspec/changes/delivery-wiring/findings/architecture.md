@@ -512,7 +512,7 @@ at `bfdb5afd` it is line 16. (3) Nim's `parseInt` also skips `_` inside digits, 
 Rust's `i64::parse` does not, so the transcription is stricter on a generation like
 `1_0`; unreachable, since dialectica never emits a five-part topic.
 
-- [ ] **`dev-writer`** — `transport.rs:852-854`, `CLAUDE.md:535-537`, `design.md:1067-1070` —
+- [x] **`dev-writer`** — `transport.rs:852-854`, `CLAUDE.md:535-537`, `design.md:1067-1070` —
       the transcription's tie to delivery's pin is a sentence, not a check
       **Scenario:** `logos-delivery-module` is bumped; `dialectica/flake.lock` now locks a
       `logos-delivery` rev other than `bfdb5afd…`, delivery tightens `NsContentTopic.parse`
@@ -538,3 +538,21 @@ Rust's `i64::parse` does not, so the transcription is stricter on a generation l
       the test. Low severity: a latent drift, no defect today. **Measured:** not run;
       `git grep -n -F flake.lock -- dialectica/rust-lib` finds the lock named only in
       doc comments, no test reads it.
+      **Fixed** (`dev-writer`) in the commit `Take getShard's generation step
+      into the topic rule, and fail a test on a delivery pin bump`, as proposed.
+      `delivery_topic_rule::DELIVERY_REV` names the rev, and
+      `the_transcribed_revision_is_the_one_delivery_is_locked_at` parses
+      `include_str!("../../../flake.lock")` as JSON and asserts every node whose
+      `locked` is `logos-delivery` (by `repo`, or a `url` ending
+      `/logos-delivery`) carries that rev. Its message names `content_topic.nim`,
+      `sharding.nim` and `channel_lifecycle.nim` against `ALREADY_EXISTS`, so
+      Decision 14's pin shares it; `ALREADY_EXISTS`'s doc points at it. It also
+      asserts at least one node matched, so a renamed input cannot make it
+      vacuous: **measured** red with the match renamed, on that assert. The
+      rev-mismatch direction (`DELIVERY_REV` edited) was **not run** — the edit
+      for that mutation was refused by this session's permission classifier;
+      the assertion is a plain `assert_eq!` on the rev. Decisions 14 and 17,
+      Risks, the trap table and `CLAUDE.md` now say a pin bump fails a test, and
+      Decision 17 says what it still cannot see (it prompts the re-read; it does
+      not do it). The taste note (1), a file of its own, is not taken: no box,
+      and moving 200 lines would bury this round's diff.

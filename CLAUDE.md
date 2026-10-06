@@ -528,12 +528,15 @@ These are structural and bite at build time, not review time.
   is ISO-8601 (delivery bug #26).
 - **Delivery parses a content topic; it treats a channel id and a sender id as
   opaque.** A topic must be `/<app>/<version>/<name>/<encoding>` — exactly four
-  non-empty parts — or five with a numeric generation first, or `channelCreate`
-  is declined with `invalid format: generation should be a numeric value`. Our
+  non-empty parts — or five with generation `0` first. Anything else and
+  `channelCreate` is declined: a non-numeric generation by the parse
+  (`invalid format: generation should be a numeric value`), any other number by
+  the shard lookup after it (`Generation > 0 are not supported yet`). Our
   first topic had five parts and every channel was refused live while every
   test passed, because the fake took any string. The fake now declines what
-  `transport::delivery_topic_rule` (delivery's parser, transcribed) refuses; a
-  delivery pin bump re-reads `content_topic.nim`. `delivery-wiring`'s design,
+  `transport::delivery_topic_rule` (delivery's parse and shard step,
+  transcribed) refuses, and a test there fails when `dialectica/flake.lock`
+  moves delivery off the rev it was transcribed at. `delivery-wiring`'s design,
   Decision 17.
 - **`messageReceived` fires for your own messages; `channelMessageReceived`
   does not** — own sends come back as `channelMessageSent`. The consequence is

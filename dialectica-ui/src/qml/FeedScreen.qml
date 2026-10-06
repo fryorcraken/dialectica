@@ -1075,7 +1075,7 @@ ScreenFrame {
         // actually send", which promises a delivery outcome nothing in this
         // system checks. The probe establishes whether a publish would be
         // accepted and stored LOCALLY. Publishing and delivering are two events
-        // at two times, and the second is not wired.
+        // at two times, and nothing in this system observes the second.
         Text {
             text: "You cannot post, reply or vote in this Stoa yet."
             font: DTheme.heading

@@ -101,9 +101,9 @@ pub const MAX_MESSAGE_BYTES: usize = 150 * 1024;
 /// `/dialectica/1/s-<hex>/proto`. Delivery reads a five-part topic as
 /// `/<generation>/<application>/…` and refuses one whose first part is not a
 /// number, so the earlier `/dialectica/1/s/<hex>/proto` was declined by every
-/// node: the test-only `delivery_topic_rule` below cites the parser. The `s` discriminant is
-/// therefore part of the name segment, joined by `-`, and never a segment of its
-/// own.
+/// node. The test-only `delivery_topic_rule`, further down this file, cites the
+/// parser. The `s` discriminant is therefore part of the name segment, joined by
+/// `-`, and never a segment of its own.
 ///
 /// The `/dialectica/1/` head is load-bearing and not a naming preference:
 /// autosharding hashes only `application` + `version`, so this prefix is what
@@ -832,7 +832,7 @@ fn addressed(
     })
 }
 
-/// Delivery's content-topic parser, transcribed so a test can refuse what
+/// Delivery's content-topic rule, transcribed so a test can refuse what
 /// delivery refuses. Test support only; nothing in the module calls it.
 ///
 /// # Why this exists
@@ -849,10 +849,12 @@ fn addressed(
 ///
 /// # Source
 ///
-/// `logos-messaging/logos-delivery` at `bfdb5afd263c5ff634ef8c59b2fe1ebbbcd0f306`
-/// (the revision `logos-delivery-module` at `b8b9ac2f…` locks),
-/// `logos_delivery/waku/waku_core/topics/content_topic.nim:60-123`,
-/// `NsContentTopic.parse`:
+/// `logos-messaging/logos-delivery` at [`delivery_topic_rule::DELIVERY_REV`]
+/// (the revision `logos-delivery-module` at `b8b9ac2f…` locks). Two steps, in
+/// the order `channelCreate` meets them:
+///
+/// [`parse`](delivery_topic_rule::parse) is `NsContentTopic.parse`,
+/// `logos_delivery/waku/waku_core/topics/content_topic.nim:60-123`:
 ///
 /// - the topic starts with `/`;
 /// - the rest splits on `/` into exactly **four** non-empty parts,
@@ -861,10 +863,31 @@ fn addressed(
 ///   must parse as an integer;
 /// - any other count is refused.
 ///
+/// [`subscribable`](delivery_topic_rule::subscribable) is what the subscription
+/// does with it, `getShard(ContentTopic)` in
+/// `logos_delivery/waku/waku_core/topics/sharding.nim:32-51`: the parse, then a
+/// refusal of any generation other than `0` or none. The path is
+/// `channel_lifecycle.nim` → `subscription_manager.nim`
+/// `getShardForContentTopic` → `getShard`. The fake delivery applies this one.
+///
 /// The messages are delivery's own, verbatim, so a test can match a refusal
 /// against the one a live node logged.
+///
+/// # When delivery's pin moves
+///
+/// `the_transcribed_revision_is_the_one_delivery_is_locked_at` fails the moment
+/// `dialectica/flake.lock` locks `logos-delivery` at any other revision. A fake
+/// that agrees with an old parser hides a new one's refusal exactly as the
+/// accept-everything fake did, so that test turns the pin bump into a prompt to
+/// re-read these files rather than relying on whoever bumps it having read
+/// design.md.
 #[cfg(test)]
 pub(crate) mod delivery_topic_rule {
+    /// The `logos-delivery` revision every transcription of delivery's source in
+    /// this crate was read at: this module, and the wording
+    /// [`crate::delivery::ALREADY_EXISTS`] matches.
+    pub(crate) const DELIVERY_REV: &str = "bfdb5afd263c5ff634ef8c59b2fe1ebbbcd0f306";
+
     /// A topic delivery accepted, split the way delivery splits it.
     #[derive(Debug, PartialEq, Eq)]
     pub(crate) struct Parsed<'a> {
@@ -873,6 +896,18 @@ pub(crate) mod delivery_topic_rule {
         pub version: &'a str,
         pub name: &'a str,
         pub encoding: &'a str,
+    }
+
+    /// What `channelCreate` does to a topic before it builds a channel:
+    /// `sharding.nim`'s `getShard(ContentTopic)`, which parses the topic and then
+    /// resolves its shard. Refuses what either step refuses, with that step's
+    /// message.
+    pub(crate) fn subscribable(topic: &str) -> Result<Parsed<'_>, String> {
+        let parsed = parse(topic)?;
+        match parsed.generation {
+            None | Some(0) => Ok(parsed),
+            Some(_) => Err("Generation > 0 are not supported yet".to_string()),
+        }
     }
 
     /// `NsContentTopic.parse`, transcribed. See the module docs for the source.
@@ -890,6 +925,9 @@ pub(crate) mod delivery_topic_rule {
                     return Err("missing part: generation".to_string());
                 }
                 // Nim's `parseInt` takes an optional sign and decimal digits.
+                // Two reviewers recall it also skipping `_` between digits
+                // (`1_0`), which Rust's does not; unverified, and if so this is
+                // the stricter side, on a form no topic built here takes.
                 let generation = parts[0].parse::<i64>().map_err(|_| {
                     "invalid format: generation should be a numeric value".to_string()
                 })?;
@@ -930,16 +968,20 @@ pub(crate) mod delivery_topic_rule {
             // `bcacb91b…` and the topic the old derivation built for it. A
             // transcription that accepted everything — which is what the fake
             // delivery was — fails here.
+            //
+            // Also the refusal half of `op-transport`'s scenario "The network's
+            // content-topic rule reads the content topic as dialectica version
+            // 1": a name beginning with `/dialectica/1/` with five parts is
+            // refused, by the rule as written rather than by the derivation.
             let refused = "/dialectica/1/s/bcacb91b8700eec5f9d77d051f1d422779c82cc209bc9ae9c7fd4e65d3e79dda/proto";
-            assert_eq!(
-                parse(refused),
-                Err("invalid format: generation should be a numeric value".to_string())
-            );
+            let live = Err("invalid format: generation should be a numeric value".to_string());
+            assert_eq!(parse(refused), live);
+            assert_eq!(subscribable(refused), live);
         }
 
         #[test]
         fn delivery_s_own_default_topic_is_accepted() {
-            // `DefaultContentTopic` in the same file, line 15, in both forms the
+            // `DefaultContentTopic` in the same file, line 16, in both forms the
             // parser documents. A transcription that refused everything fails
             // here.
             assert_eq!(
@@ -969,6 +1011,74 @@ pub(crate) mod delivery_topic_rule {
                 "//waku/2/default-content/proto",
             ] {
                 assert!(parse(topic).is_err(), "{topic} was accepted");
+            }
+        }
+
+        #[test]
+        fn the_transcribed_revision_is_the_one_delivery_is_locked_at() {
+            // `dialectica/flake.lock`, read as text the way `delivery/tests.rs`
+            // reads the adapter's source. Compiled only under `cfg(test)`, so the
+            // `lgx` build never needs the path; `cargo test` runs from a checkout
+            // where it resolves, and nix's `src = ./.` holds the lock too.
+            let lock: serde_json::Value = serde_json::from_str(include_str!("../../../flake.lock"))
+                .expect("dialectica/flake.lock is JSON");
+            let nodes = lock["nodes"]
+                .as_object()
+                .expect("a flake lock has a `nodes` table");
+            let locked: Vec<(&String, Option<&str>)> = nodes
+                .iter()
+                .filter(|(_, node)| {
+                    let at = &node["locked"];
+                    at["repo"] == "logos-delivery"
+                        || at["url"].as_str().is_some_and(|url| {
+                            url.trim_end_matches(".git").ends_with("/logos-delivery")
+                        })
+                })
+                .map(|(name, node)| (name, node["locked"]["rev"].as_str()))
+                .collect();
+            // Without this, renaming the input would make the loop below check
+            // nothing and pass.
+            assert!(
+                !locked.is_empty(),
+                "no logos-delivery node in dialectica/flake.lock; find where \
+                 delivery is locked now and point this test at it"
+            );
+            for (name, rev) in locked {
+                assert_eq!(
+                    rev,
+                    Some(DELIVERY_REV),
+                    "dialectica/flake.lock node `{name}` locks logos-delivery at \
+                     {rev:?}, not the {DELIVERY_REV} this crate's transcriptions were \
+                     read at. Re-read, at the new rev: \
+                     waku/waku_core/topics/content_topic.nim and sharding.nim against \
+                     `delivery_topic_rule`, and channels/api/channel_lifecycle.nim \
+                     against `delivery::ALREADY_EXISTS`; then update DELIVERY_REV."
+                );
+            }
+        }
+
+        #[test]
+        fn a_generation_other_than_zero_parses_and_is_then_refused_for_its_shard() {
+            // `getShard(NsContentTopic)` takes generation `0` or none and refuses
+            // every other value, after the parse has accepted it. A rule that
+            // stopped at the parse let `/1/…` through the fake while a live node
+            // declined it.
+            for topic in [
+                "/1/waku/2/default-content/proto",
+                "/-1/waku/2/default-content/proto",
+            ] {
+                assert!(parse(topic).is_ok(), "the parse itself refused {topic}");
+                assert_eq!(
+                    subscribable(topic),
+                    Err("Generation > 0 are not supported yet".to_string()),
+                    "{topic}"
+                );
+            }
+            for topic in [
+                "/0/waku/2/default-content/proto",
+                "/waku/2/default-content/proto",
+            ] {
+                assert!(subscribable(topic).is_ok(), "{topic} was refused");
             }
         }
     }
@@ -1392,7 +1502,13 @@ mod tests {
         // Two things are checked, against delivery's rule rather than against
         // what the derivation produced:
         //
-        // - delivery parses it at all (`delivery_topic_rule` cites the parser);
+        // This is `op-transport`'s scenario "The network's content-topic rule
+        // reads the content topic as dialectica version 1"; its refusal half is
+        // `delivery_topic_rule`'s
+        // `the_topic_a_live_node_refused_is_refused_with_its_message`.
+        //
+        // - delivery accepts it at all (`delivery_topic_rule` cites the parser
+        //   and the shard step after it);
         // - it parses with `dialectica` as the APPLICATION and `1` as the
         //   VERSION, and no generation. Autosharding hashes exactly those two
         //   fields (`sharding.nim:20-30` at the same revision), so this is what
@@ -1402,7 +1518,7 @@ mod tests {
         for title in ["Agora", "Lyceum", "Academy", "The Zzyzx Assembly"] {
             let identity = ChannelIdentity::of(&a_stoa(title));
             let topic = identity.content_topic();
-            let parsed = delivery_topic_rule::parse(topic)
+            let parsed = delivery_topic_rule::subscribable(topic)
                 .unwrap_or_else(|why| panic!("delivery refuses {topic}: {why}"));
             assert_eq!(parsed.generation, None, "{topic}");
             assert_eq!(parsed.application, "dialectica", "{topic}");

@@ -160,10 +160,10 @@ the channel after the callback has given up, and says so only when asked again
   on a user's machine. `Edge` matches #30 and is the lighter choice for a desktop
   module; the dependence on the fleet is the trade, raised with the owner under
   Open Questions.
-- **Not measured: that an `Edge` node on `logos.test` receives
-  `channelMessageReceived` on a reliable channel at all.** That is the whole
-  feature, and only task 7.3's two live peers can show it. Nothing in this
-  change's tests can.
+- **Measured live, not by a test: an `Edge` node on `logos.test` receives
+  `channelMessageReceived` on a reliable channel.** That is the whole feature,
+  and only task 7.3's two live peers could show it: the owner's second run had
+  each peer store the other's ops (Risks). Nothing in this change's tests can.
 
 `the_node_preset_and_mode_are_pinned` fails on a change to either, so a change is
 a decision rather than an edit.
@@ -923,7 +923,9 @@ the verbatim string: `a_channel_delivery_reports_already_existing_is_open`,
 `a_creation_delivery_did_not_complete_in_time_opens_on_the_next_request`,
 `a_module_restarted_while_delivery_kept_running_has_its_channels_open` and
 `only_delivery_s_already_exists_answer_opens_a_declined_channel` all go red without
-the `AlreadyHeld` arm. A delivery pin bump should re-read `channel_lifecycle.nim`.
+the `AlreadyHeld` arm. A delivery pin bump fails
+`the_transcribed_revision_is_the_one_delivery_is_locked_at` (Decision 17), whose
+message names `channel_lifecycle.nim` among what to re-read.
 
 ### 15. The processor judges before it opens the op log, and holds no lock while it does
 
@@ -990,7 +992,8 @@ sender id:      /dialectica/1/p/<64 hex chars>           (unchanged)
 created the node and then declined every channel, on both peers:
 `ChannelCreate failed: failed to subscribe to content topic: invalid format:
 generation should be a numeric value`. Every test in this change was green,
-because the fake delivery accepted any string as a topic.
+because the fake delivery accepted any string as a topic. The rerun on the
+build carrying this decision passed (Risks).
 
 **The rule.** `channelCreate` subscribes to the topic before it builds the
 channel (`logos_delivery/channels/api/channel_lifecycle.nim:46-48` at
@@ -1000,7 +1003,11 @@ resolves the topic's shard by autosharding, which parses it first.
 takes a leading `/` and then exactly **four** non-empty parts,
 `/<application>/<version>/<topic-name>/<encoding>`, or exactly **five**,
 `/<generation>/<application>/<version>/<topic-name>/<encoding>`, whose first must
-parse as an integer; any other count is refused. LIP-23 states the four-part
+parse as an integer; any other count is refused. A parsed topic then meets
+`getShard` (`waku_core/topics/sharding.nim:32-51`, reached through
+`subscription_manager.nim`'s `getShardForContentTopic`), which takes generation
+`0` or none and refuses any other with `Generation > 0 are not supported yet`.
+LIP-23 states the four-part
 form (`logos-lips/docs/messaging/informational/draft/23/topics.md:141`) and the
 sharding RFC the five-part one (`docs/messaging/core/raw/relay-sharding.md:230-231`).
 The old topic split into five, `dialectica` was read as a generation, and the
@@ -1042,22 +1049,34 @@ there is no network on it to strand. The archived `op-transport` design
 format") records the old form; this entry supersedes it.
 
 **The guard is the transcription, and it runs in the fake.**
-`transport::delivery_topic_rule::parse` (test-only) is `NsContentTopic.parse`
-transcribed with delivery's messages verbatim. Its own tests hold it in both
-directions: it refuses the exact topic the live node refused with the live
-message (an accept-everything rule — what the fake was — fails that), and it
-accepts delivery's own `DefaultContentTopic` in both forms (a refuse-everything
-rule fails that). Two places consult it:
+`transport::delivery_topic_rule` (test-only) transcribes both steps with
+delivery's messages verbatim: `parse` is `NsContentTopic.parse`, and
+`subscribable` is `getShard(ContentTopic)` — the parse, then the generation
+refusal. Its own tests hold it in both directions: it refuses the exact topic
+the live node refused with the live message (an accept-everything rule — what
+the fake was — fails that), it accepts delivery's own `DefaultContentTopic` in
+both forms (a refuse-everything rule fails that), and
+`a_generation_other_than_zero_parses_and_is_then_refused_for_its_shard` holds
+the shard step (it was red, `Ok(Parsed { generation: Some(1), … })`, while
+`subscribable` was the parse alone). Two places consult `subscribable`:
 
 - `the_content_topic_is_one_delivery_parses_with_dialectica_as_application`
-  asserts each derived topic parses, with no generation, `dialectica` as
+  asserts each derived topic is accepted, with no generation, `dialectica` as
   application and `1` as version. It failed before the fix with the live
-  message.
+  message. With the refusal test above it is `op-transport`'s scenario "The
+  network's content-topic rule reads the content topic as dialectica version 1".
 - The fake delivery's `channel_create` declines a topic the rule refuses, in the
   observed decline shape and with delivery's wording, ahead of any scripted
   reply. With the old prefix, every `delivery::` test that opens a channel and
   then relies on it went red; so a topic delivery cannot parse can no longer
   reach the running wiring through a green suite.
+
+*Why the shard step and not a narrower sentence.* The correctness re-review
+found `CLAUDE.md` and the rule both accepting `/1/…`, which a live node declines
+in `getShard`. Narrowing only the prose would have left the fake more lenient
+than the node it models — the defect this decision exists for, moved one
+function along. No topic built here has a generation, so nothing shipped was
+affected.
 
 What breaks without it: setting `TOPIC_PREFIX` back to `/dialectica/1/s/` turns
 the test above, `the_derivation_is_pinned_to_a_known_answer`,
@@ -1065,10 +1084,24 @@ the test above, `the_derivation_is_pinned_to_a_known_answer`,
 red. Removing the check from the fake leaves only the `transport::` tests to
 catch it.
 
-**What it still cannot see.** The rule is a transcription at one rev. A delivery
-pin bump should re-read `content_topic.nim` beside `channel_lifecycle.nim`
-(Decision 14), since a fake that agrees with an old parser hides a new one's
-refusal exactly as the accept-everything fake did.
+**A pin bump fails a test.** The rule is a transcription at one rev, and a fake
+that agrees with an old parser hides a new one's refusal exactly as the
+accept-everything fake did. `delivery_topic_rule::DELIVERY_REV` names the rev,
+and `the_transcribed_revision_is_the_one_delivery_is_locked_at` reads
+`dialectica/flake.lock` with `include_str!` and asserts every `logos-delivery`
+node there is locked at it; its message names `content_topic.nim`,
+`sharding.nim` and `channel_lifecycle.nim` (Decision 14's wording) as what to
+re-read. It also asserts it found at least one such node: without that, a
+renamed input would leave the loop checking nothing and the test passing over
+any lock. Measured with the match renamed: it fails on that assert. It is
+`cfg(test)`, so the `lgx` build never reads the path. Before it, the only prompt
+was "a pin bump should re-read" in three places that no command triggered — the
+repo's own `.lidl` gap (`ci.yml`) in a second place.
+
+**What it still cannot see.** It sees the lock move; it does not do the re-read.
+Whoever bumps the pin can update `DELIVERY_REV` without reading a line, and the
+test goes green again. It also cannot see a Basecamp whose delivery module was
+built from another rev than this lock's, which is the live check's to find.
 
 ### Behaviour chosen during implementation, now in the spec
 
@@ -1120,7 +1153,7 @@ The reasoning that chose each is here; the contract is the requirement cited.
 | The node is a singleton per Logos Core instance | This application asks once per process (Decision 6). delivery refuses a second `createNode` ("Context already initialized"); that is logged as a decline and channels are still requested. |
 | `createNode` exactly once; never `stop()` | Once per process by `Delivering`; no `stop` on the seam; the adapter-source test. |
 | `messageReceived` timestamps are nanoseconds | Not subscribed to. `channelMessageReceived`'s timestamp (v0.2.1: `currentTimestampNs()` at receipt) is carried in `Arriving` and read by nothing; the window uses the host clock at processing time. |
-| Delivery parses the content topic; a fake that takes any string hides it | The topic has four parts (Decision 17); the fake declines what delivery's parser refuses. |
+| Delivery parses the content topic; a fake that takes any string hides it | The topic has four parts (Decision 17); the fake declines what delivery's parse and shard step refuse, and a test fails when the lock moves delivery off the transcribed rev. |
 | A decline arrives as `Ok` with an error envelope | `declined` reads `callee_error` first (an empty string is no reason), then `success: false`, then treats a transport `Err` as a decline (Decision 6). |
 
 ## Risks / Trade-offs
@@ -1154,18 +1187,27 @@ The reasoning that chose each is here; the contract is the requirement cited.
   `unknown-channel` refusals] → one line each, on hand-over, carrying no channel
   id, and taking no place in the queue (Decision 10).
 - [The already-exists match depends on delivery's wording] → Decision 14; a pin
-  bump should re-read it.
-- [The fake's content-topic rule is a transcription of delivery's parser at one
-  rev] → Decision 17; a pin bump should re-read `content_topic.nim` too.
+  bump fails a test that names the file to re-read (Decision 17).
+- [The fake's content-topic rule is a transcription of delivery's source at one
+  rev] → Decision 17; a pin bump fails that test, and the re-read is a person's.
 - [The adapter is compiled only by `nix build ./dialectica#lgx`] → it is four
   calls, one subscription and one decoder mapping; the generated names it relies
   on (`create_node_with_timeout`, `on_channel_message_received`,
   `decode_channel_message_received` and its fields) are checked by that build and
-  by nothing else. **Two peers exchanging an op has not been verified live**:
-  task 7.3 is open, and issue #176 names that check as the verification this
-  change needs (Open Questions). The first live run got as far as node creation
-  and found the content-topic defect (Decision 17), which is the kind of thing
-  only that check sees.
+  by nothing else. **Two peers exchanging ops was verified live**, by the owner
+  under Basecamp 0.2.3 (`lgs basecamp launch alice` / `bob`), on the second
+  build. The first created the node and had every channel declined for its
+  content topic (Decision 17), the kind of defect only that check sees. On the
+  build with the four-part topic, alice and bob each logged `channel open for
+  Stoa 1024b9fd…`; the alice→bob op `84aa65c8…` and the bob→alice ops
+  `f4f72c6d…` and `d0578af7…` were each `handed to the channel` by the sender
+  and `stored inbound op` by the receiver within about 5 s, with no refusal,
+  discard or crash. What that run could not show: a post reaches the other
+  peer's screen only after the Stoa is re-entered (#194, out of scope here); the
+  DELIVERY lamp stays orange, deliberately unbound (#151); and `lgs basecamp
+  launch` scrubs `module_data/` on every launch, so the restart-reopen path
+  (Decision 14) cannot be exercised live through `lgs`. The run also filed #191,
+  #192 and #193.
 
 ## Migration Plan
 
@@ -1178,14 +1220,15 @@ schema-race fix changes how a fresh store is created, not what is written.
   meaning. Either can change without changing the spec — a constant and its pin —
   but both decide which network dialectica peers meet on and whether they relay,
   so the owner should confirm them.
-- **Live verification (a departure from issue #176, put to the owner).** #176
-  says "Verification has to be two live peers under `lgs basecamp launch`". Every
+- **Live verification is done by hand; automating it is follow-up.** #176 says
+  "Verification has to be two live peers under `lgs basecamp launch`". Every
   test here drives both sides in one process against a fake delivery, and a live
-  run needs a person to click each profile's tile. The owner's first run created
-  the node and had every channel declined for its content topic (Decision 17);
-  the rerun after that fix is the owner's, and task 7.3 stays open until two
-  peers exchange a post.
-  The automated two-peer test the owner asked for on #176 is follow-up.
+  run needs a person to click each profile's tile. The owner ran it: the first
+  build failed on the content topic (Decision 17), the second passed, and task
+  7.3 is ticked on that run (Risks has what it showed and what it could not).
+  The restart-reopen path stays unverified live while `lgs basecamp launch`
+  scrubs `module_data/`. The automated two-peer test the owner asked for on #176
+  is follow-up.
 - **`proposal.md`'s questions 1–4 are settled by the spec, and implemented**: a
   failed open leaves the join's reply unchanged and is logged (Decisions 9 and
   11); the sender identifier is per installation and per Stoa (Decision 7); a

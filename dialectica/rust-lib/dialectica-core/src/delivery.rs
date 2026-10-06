@@ -194,7 +194,9 @@ pub fn channel_answer(reply: &Result<serde_json::Value, String>) -> ChannelAnswe
 /// holds the channel: `logos-delivery` `channel_lifecycle.nim`,
 /// `err("channel already exists: " & channelId)`, which delivery v0.2.1 passes
 /// through behind a `"ChannelCreate failed: "` prefix — read at `bfdb5afd`, the
-/// `logos-delivery` rev v0.2.1's `flake.lock` pins.
+/// `logos-delivery` rev v0.2.1's `flake.lock` pins. A test-only constant,
+/// `transport::delivery_topic_rule::DELIVERY_REV`, names that rev, and a test
+/// beside it fails when `dialectica/flake.lock` locks delivery anywhere else.
 ///
 /// Matched as a substring of the reason, not the whole reason: the prefix and
 /// the trailing channel id are the C API's and the manager's, and neither is

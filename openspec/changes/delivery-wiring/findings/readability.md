@@ -1080,7 +1080,7 @@ security re-review" the same way, so nothing is lost.
 
 ## Re-review round 8 `ae44f364..43844f2b`
 
-- [ ] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/transport.rs:942` —
+- [x] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/transport.rs:942` —
       a test comment cites the wrong line of delivery's source.
       **Scenario:** the comment reads "`DefaultContentTopic` in the same file, line
       15"; at `bfdb5afd263c5ff634ef8c59b2fe1ebbbcd0f306`,
@@ -1093,6 +1093,11 @@ security re-review" the same way, so nothing is lost.
       LIP-23 and relay-sharding line numbers. A reader following this one lands on
       the wrong line of a file the comment is the only pointer into.
       Low severity; prose only.
+      **Fixed** (`dev-writer`) in the commit `Take getShard's generation step
+      into the topic rule, and fail a test on a delivery pin bump`: line 16,
+      confirmed with `git grep -n -F "DefaultContentTopic* ="` at `bfdb5afd`.
+      The taste note on `transport.rs:103-104` is taken too: the parser pointer
+      is its own sentence and says "further down this file".
 
 Read: the whole range, `CLAUDE.md`'s new trap entry against that file's "Keeping
 this file true" rules (it holds no count a command could answer, names its own

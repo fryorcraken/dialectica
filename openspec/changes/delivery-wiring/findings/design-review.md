@@ -488,7 +488,7 @@ carries a self-invalidating pin-bump instruction. `design.md` (Risks, Open Quest
 `tasks.md` 7.3 and PR #190's body all say the first live run failed and why. `Closes #176`
 is the only closing keyword. One place still says the run has not happened.
 
-- [ ] **`dev-writer`** — `proposal.md:185-187` still says the live check "has **not yet been
+- [x] **`dev-writer`** — `proposal.md:185-187` still says the live check "has **not yet been
       run**", where `design.md`, `tasks.md` 7.3 and the PR body now say the owner's first run
       happened, created the node, and had every channel declined for its content topic
       (Decision 17). The round's brief required the first-run failure and its cause to be
@@ -497,3 +497,12 @@ is the only closing keyword. One place still says the run has not happened.
       first run failed on the content topic and the rerun is the owner's. **Verified:**
       `git grep -n -i -E "live|7\.3" -- openspec/changes/delivery-wiring/proposal.md`
       finds no mention of the failed run, and the range's diff does not touch the file.
+      **Fixed** (`dev-writer`) in the commit `Take getShard's generation step
+      into the topic rule, and fail a test on a delivery pin bump`, and
+      overtaken: the owner has since rerun the check and it passed on the
+      second build. `proposal.md`'s follow-up bullet now says the first build
+      had every channel declined for its content topic (why the topic changed)
+      and the second passed, with what it could not show (#194; the restart
+      path, since `lgs basecamp launch` clears module data). `design.md`
+      (Decision 5's "not measured" bullet, Decision 17, Risks, Open Questions),
+      `tasks.md` 7.3 (ticked) and PR #190's body say the same.

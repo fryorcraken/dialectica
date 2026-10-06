@@ -300,7 +300,7 @@ impl Delivery for Fake {
         // Refuse a topic real delivery refuses, ahead of any scripted reply: a
         // fake that accepted any string is how a topic delivery cannot parse
         // passed every test here and failed on the first live run.
-        if let Err(why) = crate::transport::delivery_topic_rule::parse(content_topic) {
+        if let Err(why) = crate::transport::delivery_topic_rule::subscribable(content_topic) {
             return the_observed_decline(&format!(
                 "ChannelCreate failed: failed to subscribe to content topic: {why}"
             ));
