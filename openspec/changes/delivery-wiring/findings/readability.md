@@ -1126,7 +1126,7 @@ at `bfdb5afd` answers `content_topic.nim:16`), and the parser pointer on
 `TOPIC_PREFIX` is its own sentence ("further down this file"). Three new defects, all
 low, all prose.
 
-- [ ] **`spec-writer`** — `openspec/specs/composer-view/spec.md:322` — the live spec
+- [x] **`spec-writer`** — `openspec/specs/composer-view/spec.md:322` — the live spec
       still says "delivery is not wired at all", the sentence this range just
       removed from the QML comment that quotes it.
       **Scenario:** `DPublishOutcome.qml:149-151` (and `FeedScreen.qml:1078`) were
@@ -1146,8 +1146,17 @@ low, all prose.
       network without hearing whether any peer received it"), or a recorded decision
       that the paragraph stays and a follow-up issue for it.
       **Severity:** low (rationale prose in a live spec; no behaviour).
+      **Outcome (`spec-writer`):** fixed as a MODIFIED delta,
+      `openspec/changes/delivery-wiring/specs/composer-view/spec.md`. The live
+      requirement and all five of its scenarios are carried verbatim; the only
+      change is the clause "delivery is not wired at all", now "where core hands
+      the op to the network, it learns nothing of whether any peer received it"
+      (`git diff --no-index --stat` against the live file: 4 insertions, the
+      header and the three re-wrapped lines). Every obligation stands, so no test
+      or UI string changes. `proposal.md` lists `composer-view` under Modified
+      Capabilities. `openspec validate delivery-wiring --strict` passes.
 
-- [ ] **`spec-writer`** — `openspec/changes/delivery-wiring/specs/op-transport/spec.md:15`
+- [x] **`spec-writer`** — `openspec/changes/delivery-wiring/specs/op-transport/spec.md:15`
       — "or read with segments other than `dialectica` and `1`" names a failure that
       a name beginning with `/dialectica/1/` cannot have.
       **Scenario:** the paragraph says beginning with the literal prefix does not
@@ -1169,6 +1178,14 @@ low, all prose.
       by that rule"), or say the reading follows from the prefix once the rule
       accepts the name, so the version-and-application check restates the prefix.
       **Severity:** low.
+      **Outcome (`spec-writer`):** fixed, both halves of the fix shape. The
+      impossible alternative is dropped, so the sentence ends "... is refused by
+      that rule.", and a new sentence says a name that begins with the prefix and
+      is accepted is read with `dialectica` and `1` as its application and
+      version, "so that half of the rule restates the prefix rather than adding to
+      it." The requirement heading's SHALL and the scenario bullet are kept: both
+      remain true, and the bullet costs nothing against the test that asserts it.
+      `openspec validate delivery-wiring --strict` passes.
 
 - [ ] **`dev-writer`** — `design.md:1097-1099` — the last sentence of "A pin bump
       fails a test" does not parse, and "(Decision 14's wording)" at `:1093` points at

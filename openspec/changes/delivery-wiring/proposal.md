@@ -188,6 +188,14 @@ Stoa-lifecycle obligation that `op-transport` assigns to `stoa-membership`.
   - ADDED *Creating or joining a Stoa opens its reliable channel*.
   - ADDED *Every Stoa the peer is in has its channel opened when the module
     starts*.
+- `composer-view`:
+  - MODIFIED *A successful publish claims local storage and never delivery*.
+    One clause of its rationale said delivery is not wired at all, which this
+    change makes false. It now says that where core hands the op to the
+    network, it learns nothing of whether any peer received it. Every
+    obligation and every scenario is kept as it was: no delivery outcome
+    reaches the view, so the success message still claims local storage only
+    and still denies delivery knowledge, and no user-facing string changes.
 
 The MODIFIED blocks keep the live capability's `SHALL` wording. ADDED
 requirements use `MUST`.
