@@ -27,6 +27,13 @@ below are gaps or suggestions, not code defects.
       hidden when the test looks). It also says outright that no guard fails if the
       walk is narrowed, so the choice is recorded rather than tested. Prose only; no
       test fails without it.
+      **`tester` addendum**: the choice is now tested.
+      `test_the_claim_walk_reaches_a_text_that_is_hidden` walks a hand-made tree
+      holding a hidden Text with a claim and asserts it is collected and flagged,
+      and that `renderedOnly` is what leaves it out. Measured: narrowing the claim
+      walk to visible items turns it red, and also the two group tests, on their
+      "Publish the reply" anchor (that button is hidden until a draft exists).
+      design.md Decision 3 no longer says nothing fails if the walk is narrowed.
 
 - [x] **`dev-writer`** — `DThreadScreen.qml:732-733` — pointer to a document that
       is about to move (suggestion). The caption's comment says "The

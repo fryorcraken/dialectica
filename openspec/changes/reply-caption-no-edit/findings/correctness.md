@@ -7,7 +7,7 @@ whole-suite QML run, so **no mutation was measured** and the matcher analysis
 below is by reading the regex against hand-written strings. The one run that was
 allowed, `tst_thread_reply.qml` on the tree as committed, passed 27 of 27.
 
-- [ ] **`dev-writer` / `tester`** — `dialectica-ui/tests/tst_thread_reply.qml:460-461` —
+- [x] **`dev-writer` / `tester`** — `dialectica-ui/tests/tst_thread_reply.qml:460-461` —
       the matcher's justifying comment is false for the shut gate, and the matcher
       would flag copy the spec permits there.
       **Scenario:** the comment says "Nothing this group renders has any reason to
@@ -39,6 +39,26 @@ allowed, `tst_thread_reply.qml` on the tree as committed, passed 27 of 27.
       `tst_thread_reply.qml:460-461` is in a test file this pass may not edit, and
       whether to exclude core text from the walk or scope the `version` clause, plus
       the keystore row for the "leaves alone" table, are the test half.
+      **Outcome (tester, the test half): fixed, by exclusion.** The walks now take
+      the strings a test fed the screen as core's reply or as the draft, and
+      collect them without flagging them (`mentionsAmong(texts, suppliedText)`).
+      The exemption is exact strings the test chose, so text the screen authors
+      is never exempt. `test_text_core_supplies_and_the_draft_are_outside_the_requirement`
+      drives the two real wordings quoted above (`keystore format version 9 is
+      newer than this build understands; upgrade dialectica`, and `the identity
+      record declares layout version 2, ...`) as a shut gate's reason and as a
+      refused publish's message, plus a draft saying "I will edit this and
+      publish a newer version later". It asserts the walk collects each, that the
+      matcher flags each when unexempted (so the scope and not a blind matcher
+      spares them), and that the exempted walk is clean for the group and beside
+      the rows. The false comment ("Nothing this group renders has any reason to
+      say 'version'") is rewritten to "Nothing the screen authors in these
+      groups". Measured: ignoring `suppliedText` turns that test red on core's
+      reason; exempting only the refusal turns it red on the draft; with the
+      matcher mutated to `return false` it goes red on "and the matcher does flag
+      it". The keystore row is in this test and not in the "leaves alone" table,
+      because that table lists what the group's own copy renders and the reason
+      is not the group's copy. Predicted each; observed each.
 
 Areas that were clean, in prose:
 

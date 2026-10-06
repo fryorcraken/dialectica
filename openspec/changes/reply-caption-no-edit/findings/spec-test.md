@@ -4,7 +4,7 @@ Read: `specs/thread-view/spec.md`, `proposal.md`, `dialectica-ui/tests/tst_threa
 issue #177 with its comment. The implementation was read only at the lines
 mutated (`DThreadScreen.qml` caption, `DPublishOutcome.qml` stored headline).
 
-- [ ] **`tester`** — `tst_thread_reply.qml`, `claimsEditing` (line 462) and the three
+- [x] **`tester`** — `tst_thread_reply.qml`, `claimsEditing` (line 462) and the three
       scenario tests that depend on it. The word list lets a paraphrased promise through.
       **Scenario:** the caption becomes "A reply is a signed record. You can fix typos
       later and replace it." Every scenario test passes, though the requirement forbids
@@ -17,6 +17,24 @@ mutated (`DThreadScreen.qml` caption, `DPublishOutcome.qml` stored headline).
       dialectica-ui/tests/tst_thread_reply.qml` printed `Totals: 27 passed, 0 failed`.
       Severity: low to medium. Widen the list and add those strings to the matcher
       test, or say in the spec that the check is the word list.
+      **Outcome (tester): fixed, the first option.** The matcher (now
+      `mentionsEditOrVersion`) gained `fix`, `replac`, `undo`, `redo`, `retract`,
+      `revert`, `withdr[ae]w` and `(newer|older) (one|copy)`, and the edit-family
+      table gained six rows, the first being the reviewer's caption verbatim ("A
+      reply is a signed record. You can fix typos later and replace it."); the
+      later- and earlier-version tables gained "A newer one can take its place at
+      any time." and "You can read the older one.". Written first, watched
+      failing: predicted four red tests (edit family on its six new rows, later
+      version, earlier version, and the new denial test on "undone" only),
+      observed exactly those four. **Mutation 2 repeated** (caption set to the
+      reviewer's paraphrase): the open-composer, after-publish,
+      beside-the-rows and core-supplied-text tests go red, where it printed
+      `27 passed, 0 failed` before; predicted three, observed four (the
+      core-supplied-text test also walks the whole screen, so it sees the
+      caption in the group a shut gate hides). The list stays a word list, and
+      design.md's Risks names what it still lets through, measured: "Replies are
+      final.", "Replies are permanent.", "reread what it said before", "You can go
+      back to what it said before." pass; "You can redo it" no longer does.
 
 - [x] **`spec-writer`** — the requirement body ("MUST NOT state that a reply can be
       edited") against what the tests pin. The spec forbids a claim, which is a semantic
@@ -59,6 +77,21 @@ mutated (`DThreadScreen.qml` caption, `DPublishOutcome.qml` stored headline).
       text", with the permitted-denial alternative and why it was rejected; the
       Goals say "neither that it can nor that it cannot"; `tasks.md` 1.3 carries the
       renamed title.
+      **`tester` follow-up done**: the header comment above the matcher is
+      rewritten against the renamed requirement ("stricter than the spec on
+      purpose ... which the spec permits" is gone; it now says the requirement
+      forbids a denial and the word matcher fits that). A denial test,
+      `test_the_matcher_flags_a_denial_as_well_as_a_promise`, has one row per topic
+      ("A reply cannot be edited.", "Replies cannot be changed once they are
+      published.", "There is no way to edit a reply yet.", "A published reply
+      cannot be undone.", "Editing is not available in this version.", "Later
+      versions of a reply cannot be published.", "Earlier versions are not kept.",
+      "Nothing earlier than this version can be read."). Measured: with the `edit`
+      stem removed it goes red on exactly "A reply cannot be edited." and "There is
+      no way to edit a reply yet." (predicted those two; the other six are caught
+      by `chang`, `undo` or `version`). Seven of the eight rows pass on
+      the matcher as it stood before this pass, so the test pins the rule rather
+      than the new stems; only "undone" needed one.
 
 - [x] **`spec-writer`** — `NO SPEC:` at `test_the_caption_beside_the_composer_is_kept`
       (line 728). The spec forbids a claim but says nothing on whether a caption
@@ -87,6 +120,26 @@ mutated (`DThreadScreen.qml` caption, `DPublishOutcome.qml` stored headline).
       reply is signed*, and Decision 1 folds in the issue's expected behaviour it
       comes from. `tasks.md` 1.4 no longer names the marker. The `NO SPEC:` comment
       itself is in `tst_thread_reply.qml` and is the `tester`'s.
+      **`tester` follow-up done**: the `NO SPEC:` comment and
+      `test_the_caption_beside_the_composer_is_kept` are gone. Two tests replace
+      it, by the requirement's two scenarios and under a heading naming it:
+      `test_the_open_composers_text_states_that_a_reply_is_signed` and
+      `test_the_statement_that_a_reply_is_signed_survives_a_publish`. Neither
+      looks for the caption by name: each walks the composer group's **rendered**
+      text (`collectTexts` with `renderedOnly`, so a hidden caption states
+      nothing) and requires one text to state a reply is signed, by a matcher
+      (`statesReplyIsSigned`, `\bsigned\b` minus a negation clause) that
+      has its own both-directions test. The after-publish one goes through
+      `publishedScreen`, which asserts the composer's outcome is `"stored"` and the
+      thread holds two items first, and the test also asserts the group shows the
+      publish's own message. Measured, each predicted and observed: caption hidden
+      with `visible: false` turns exactly these two red; caption cut to "Replies
+      are kept on this machine." turns exactly these two red; a caption that reads
+      "Saved." once the outcome is `"stored"` turns only the survives-a-publish
+      test red; the matcher without its negation clause turns only the matcher
+      test red, on "A reply is not signed.", "Replies are never signed." and "A
+      reply isn't signed.". No `NO SPEC:` marker remains in the test file; this
+      was the only one, and the spec now carries the requirement it stood for.
 
 - [x] **`spec-writer`** — the shut-gate scenario ("text rendered in place of the reply
       composer"). That group renders core's `reason` verbatim, and `composer-view`
@@ -112,6 +165,13 @@ mutated (`DThreadScreen.qml` caption, `DPublishOutcome.qml` stored headline).
       today, but the scope is now contracted: either exclude the fixture's reason, any
       refusal message and the draft from the flagged set, or add a comment that the
       fixture's core strings are chosen to avoid the matcher and why that is safe.
+      **`tester` follow-up done**, the first option: the walks exclude by exact
+      string the core text and the draft that a test fed the screen
+      (`mentionsAmong(texts, suppliedText)`), and
+      `test_text_core_supplies_and_the_draft_are_outside_the_requirement` drives the
+      two real wordings quoted in design.md Decision 3 and a draft saying "edit"
+      and "newer version". See `findings/correctness.md`, the entry shared with
+      `dev-writer`, for the measurements.
 
 ## Coverage, per scenario
 

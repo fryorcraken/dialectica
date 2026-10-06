@@ -2,7 +2,7 @@
 
 Dimension: readability only. Diff read with `git diff origin/main...HEAD`.
 
-- [ ] **`tester`** — `dialectica-ui/tests/tst_thread_reply.qml:562` — `stringsUnder` is a second copy of `collectTexts` (line 388)
+- [x] **`tester`** — `dialectica-ui/tests/tst_thread_reply.qml:562` — `stringsUnder` is a second copy of `collectTexts` (line 388)
       **Scenario:** `collectTexts(item, out)` (pre-existing on `origin/main`) and the new
       `stringsUnder(item, out)` have identical bodies: push `item.text` when it is a string,
       recurse over `item.children`. Two functions with two names for one walk in one file means
@@ -13,6 +13,9 @@ Dimension: readability only. Diff read with `git diff origin/main...HEAD`.
       **Severity:** low-medium, a genuine defect (duplication), not taste.
       **Measured:** `git grep -n -E "function (collectTexts|stringsUnder)" HEAD -- dialectica-ui/tests`
       returns both definitions, 174 lines apart.
+      **Outcome (tester): fixed**, the same fix as architecture finding 1:
+      `stringsUnder` is deleted and every walk is `collectTexts`, with an optional
+      `renderedOnly` argument. See `findings/architecture.md`.
 
 - [x] **`dev-writer`** — `dialectica-ui/src/qml/DThreadScreen.qml:725-733` — the caption's comment narrates change history and points at a document that moves
       **Scenario:** "this caption carried the first until `thread-view` forbade it. The
@@ -36,7 +39,7 @@ Dimension: readability only. Diff read with `git diff origin/main...HEAD`.
       `thread-view`. Comment-only; `tst_thread_reply.qml` stays 27 passed, 0 failed,
       and the three static QML gates pass.
 
-- [ ] **`tester`** — `dialectica-ui/tests/tst_thread_reply.qml:462` — `claimsEditing` (and `editClaimsUnder`, line 569) are named for a narrower job than they do
+- [x] **`tester`** — `dialectica-ui/tests/tst_thread_reply.qml:462` — `claimsEditing` (and `editClaimsUnder`, line 569) are named for a narrower job than they do
       **Scenario:** the regex also matches `\bversions?\b`, and the tests rely on that: "earlier
       versions stay readable" and "Every version of a reply is kept" are asserted flagged in
       `test_the_matcher_flags_a_claim_that_an_earlier_version_can_be_read`. A reader of
@@ -46,13 +49,26 @@ Dimension: readability only. Diff read with `git diff origin/main...HEAD`.
       filter. A name covering both claim families (`promisesEditOrVersion`) would let the
       call sites read as the requirement does.
       **Severity:** low, stylistic.
+      **Outcome (tester): fixed, with a different name than suggested.**
+      `claimsEditing` is `mentionsEditOrVersion`, not `promises...`: the
+      requirement forbids a denial too (design.md Decision 4), so the matcher flags
+      a mention, and "promise" would name half of what it checks. `editClaimsUnder`
+      is gone with `stringsUnder`; its two jobs are `collectTexts` (the walk) and
+      `mentionsAmong` (the filter), composed by `mentionsUnder`, which returns
+      both `texts` and `flagged` for the callers that anchor on the former.
+      design.md carries the new names (`git grep -F claimsEditing` over the change
+      folder and the test returns only the findings' own text).
 
-- [ ] **`tester`** — `dialectica-ui/tests/tst_thread_reply.qml:443` — the comment cites a test by a truncated name, `test_the_walk_does_not_reach_the_thread_rows_...`
+- [x] **`tester`** — `dialectica-ui/tests/tst_thread_reply.qml:443` — the comment cites a test by a truncated name, `test_the_walk_does_not_reach_the_thread_rows_...`
       **Scenario:** the real function is
       `test_the_walk_does_not_reach_the_thread_rows_that_report_a_revision` (line 624). The
       ellipsis form matches nothing under `git grep -F` as written, so a reader following the
       pointer has to guess the suffix; spell it in full.
       **Severity:** low, stylistic.
+      **Outcome (tester): fixed.** The comment spells
+      `test_the_walk_does_not_reach_the_thread_rows_that_report_a_revision` in
+      full. The new comment cites `test_text_core_supplies_and_the_draft_are_outside_the_requirement`
+      in full too; checked with `git grep -F` for each name in the test file.
 
 Clean, in prose:
 

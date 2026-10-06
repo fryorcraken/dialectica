@@ -28,7 +28,8 @@
       found text before it asserts there is no claim. Verify the
       open-composer and after-publish tests fail on the old caption, on the
       claim assertion
-- [x] 1.4 Add a test that the caption is kept and is not empty
+- [x] 1.4 Add tests that the text rendered with the open composer states that a
+      reply is signed, before a publish and after one
 
 ## 2. The fix
 
