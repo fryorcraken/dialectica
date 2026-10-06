@@ -106,7 +106,8 @@ both directions needs. The matcher is case-insensitive and flags three things:
 
 - a word stemming from edit, revise, amend, rewrite, change, update, modify,
   correct, supersede, overwrite, republish (the last also hyphenated), fix,
-  replace, undo, redo, retract, revert or withdraw;
+  replace, undo, redo, retract, revert, withdraw, alter or immutable, with or
+  without an `un` or `non` prefix ("unchanged", "uneditable", "unrevised");
 - the word "version" or "versions", in any phrase; and
 - "newer" or "older" followed by "one" or "copy", which names a later or an
   earlier version without the word.
@@ -145,7 +146,10 @@ two keystore and identity-store wordings above as a shut gate's reason and a
 refused publish's message, with a draft that says "edit" and "newer version".
 It asserts the walk collects each string, that the matcher does flag each (so
 what spares it is the scope, not a blind matcher), and that the exempted walk
-is clean, for the group and for the screen beside the rows.
+is clean, for the group. For the screen beside the rows it asserts the same of
+the two or three supplied strings themselves (reached, flagged, exempted), and
+not that the rest of the column is clean: another claim there is the
+beside-the-rows test's to report, so the two tests fail for different causes.
 
 Because the spec forbids a denial as well as a promise, a matcher that flags a
 word fits the contract: "A reply cannot be edited" is flagged, and the spec
@@ -178,8 +182,8 @@ covers the screen outside the thread's rows (`textsBesideTheRows`). The third
 exists because a walk scoped to two containers leaves a statement beside them
 unguarded: a Text added as a sibling of the two groups is rendered with the
 composer in the requirement's sense and is in neither subtree. Measured: such a
-Text, "A reply can be edited later.", turns only the beside-the-rows test and
-the test that drives core's wording red, with all the group tests green. It
+Text, "Replies can be edited later.", turns only the beside-the-rows test red,
+with all the group tests and the core-supplied-text test green. It
 leaves the thread's rows out, because the fixture's root post is revised, so
 the screen legitimately renders `edited` and "read the earlier versions" in
 them, and a walk including them would fail on exactly the reports the
@@ -218,21 +222,25 @@ the walk does not flag.
   of claim (`test_the_matcher_flags_a_claim_that_a_reply_can_be_edited`,
   `..._a_later_version_can_be_published`, `..._an_earlier_version_can_be_read`),
   `test_the_matcher_flags_a_denial_as_well_as_a_promise`, and
-  `test_the_matcher_leaves_alone_what_the_composers_group_renders`. They are
-  separate so the first family to fail does not hide the others. Each asserts
-  against strings written out by hand, never against what the screen renders.
-  The earlier-version table opens with the bundle's own clause, "earlier
-  versions stay readable", and includes the thread rows' own label, "read the
-  earlier versions". The denial table has one row per topic the requirement
-  names ("A reply cannot be edited.", "Earlier versions are not kept.", and so
-  on), so the both-directions rule is pinned by a test that fails if a denial
-  is let through. The last test lists the group's real strings, the composer's
-  outcome messages after a publish included.
+  `test_the_matcher_leaves_alone_what_the_screen_authors_in_both_gate_states`.
+  They are separate so the first family to fail does not hide the others. Each
+  asserts against strings written out by hand, never against what the screen
+  renders. The earlier-version table opens with the bundle's own clause,
+  "earlier versions stay readable", and includes the thread rows' own label,
+  "read the earlier versions". The denial table has one row per topic the
+  requirement names ("A reply cannot be edited.", "Earlier versions are not
+  kept.", and so on), plus the prefixed forms and the two extra stems
+  ("unchanged", "uneditable", "immutable", "altered"), so the both-directions
+  rule is pinned by a test that fails if a denial is let through. The last test
+  lists the strings the screen authors in the composer's group and in the shut
+  gate, the composer's outcome messages after a publish included; core's reason
+  is not in it, being no copy of the screen's.
 
-  A matcher that always says "no claim" makes the three scenario tests pass on
-  any tree. Measured: with `mentionsEditOrVersion` mutated to `return false`,
-  the four flag tests, the scope test, the hidden-claim test and the
-  core-supplied-text test go red, and all three scenario tests stay green.
+  A matcher that always says "no claim" makes the scenario tests pass on any
+  tree. Measured: with `mentionsEditOrVersion` mutated to `return false`, the
+  four flag tests, the scope test, the hidden-claim test and the
+  core-supplied-text test go red (seven), and the three scenario tests, the
+  beside-the-rows test and the leaves-alone test stay green.
   Measured with the `edit` stem removed from the pattern: the edit-family test
   goes red on "It can be edited later.", the denial test on "A reply cannot be
   edited." and "There is no way to edit a reply yet.", and the scope test
@@ -255,7 +263,7 @@ the walk does not flag.
   and core-supplied-text tests (five in all); a matcher without the
   `versions?` term turns it red on the label, with the four tests that need
   that term. A walk beside the rows that does not leave the rows out turns red
-  this test, the beside-the-rows test and the core-supplied-text test.
+  this test and the beside-the-rows test, and no other.
 - **Each scenario test first asserts its walk found text**, anchored on the
   group's own strings and not on the caption. For the open gate that is
   "REPLYING AS", the attribution line, and "Publish the reply", the composer's
@@ -277,15 +285,29 @@ the walk does not flag.
   caption anywhere on the screen must lie inside the walked group. Measured:
   moving it out, carrying "Earlier versions stay readable.", turns the
   open-composer and after-publish tests red on that assertion, and the
-  beside-the-rows, core-supplied-text and both signed-statement tests too
-  (six in all).
+  beside-the-rows and both signed-statement tests too (five in all; the
+  core-supplied-text test stays green, since the group it walks no longer
+  holds the caption).
 - **The statement that a reply is signed is a matcher of its own**
   (`statesReplyIsSigned`), tested in both directions by
   `test_the_signed_matcher_accepts_what_states_it_and_refuses_what_does_not`:
   "A reply is a signed record." and other wordings are accepted, and "A reply
   is not signed.", "An unsigned reply." and the composer's other strings are
-  refused. Measured: without its negation clause that test goes red on the
-  three negations, and nothing else.
+  refused. A text counts when it says `signed` and `reply` or `replies` and has
+  no negator (`not`, `never`, `no`, `cannot`, `n't`) within two words before
+  `signed`. Measured: without its negation clause that test goes red on the
+  three negations, and nothing else. The first version of the clause (a closed
+  list of negator forms) accepted "A reply cannot be signed.", "Your reply is
+  not cryptographically signed." and "Replies are not always signed.", and with
+  no subject check accepted "Signed in as alice." and "Your draft is signed off
+  by the app."; the matcher test went red on all five, and with the caption
+  changed to "A reply cannot be signed." both signed-statement tests go red and
+  no other, as they do for "Signed in as alice.". What is not caught, measured:
+  "Not every reply you publish here is signed." (the negator is three words off)
+  and "Your reply draft is signed off by the app." (a sentence that names a
+  reply and says `signed` about something else). The matcher is a pattern and
+  does not grow a clause for each; the caption is the one literal that has to
+  satisfy it.
 - **The after-publish tests are tests of their own, not copies of the open
   ones.** The claim test fails when only the post-publish caption carries the
   claim. Measured: a caption whose text becomes "A reply is a signed record. You
@@ -301,9 +323,10 @@ the walk does not flag.
   and passing.
 - **The old caption turns four tests red**: the open-composer test, the
   after-publish test, the beside-the-rows test and the core-supplied-text
-  test, the last two because they walk the whole screen, including the
-  caption in the group that a shut gate hides. Each fails on the claim
-  assertion and names the sentence. Measured on the old caption text.
+  test: the first three walk the group or the screen outside the rows, and the
+  last walks the open group with a draft and a refusal in it, which holds the
+  caption. Each fails on the claim assertion and names the sentence. Measured
+  on the old caption text.
 - **The caption can no longer be paraphrased past the tests.** The spec-test
   review's caption, "A reply is a signed record. You can fix typos later and
   replace it.", turns the open-composer, after-publish, beside-the-rows and
@@ -371,12 +394,16 @@ yet.".
   shape, and it is accepted here because the alternative, pinning exact
   strings, fails on every unrelated copy change. A paraphrase that avoids
   every stem and "version" passes. Measured against the matcher as it stands:
-  "Replies are final.", "Replies are permanent.", "reread what it said before"
-  and "You can go back to what it said before." all pass, while "You can redo
-  it" no longer does. The table in the matcher test is where a missed one is
-  added. The first two are denials by implication, which the requirement
+  "Replies are final.", "Replies are permanent.", "Once published a reply is
+  final.", "Publishing is irreversible.", "Replies cannot be deleted or taken
+  back.", "reread what it said before" and "You can go back to what it said
+  before." all pass, while "You can redo it" no longer does, nor do the
+  prefixed forms and "immutable" and "altered", which a review found passing
+  and the list now holds. The table in the matcher test is where a missed one
+  is added. The first five are denials by implication, which the requirement
   forbids and no word list can enumerate; they stay unguarded rather than the
-  list growing a clause for each.
+  list growing a clause for each. The same holds for the signed-statement
+  matcher, whose two measured misses are in Decision 3's guards.
 - [The guard on the screen is a walk of its content column minus the thread's
   rows, not of everything the screen renders] → A Text added beside the two
   composer groups is caught, because the third walk covers the column. A claim

@@ -92,7 +92,7 @@ findings below are gaps in the recorded reasoning, none a code defect.
       any copy on this screen, and of the shared composer's strings) and how to
       narrow it, or narrow the walk to the composer's place.
 
-- [ ] **`dev-writer`** — `dialectica-ui/tests/tst_thread_reply.qml:472` — a
+- [x] **`dev-writer`** — `dialectica-ui/tests/tst_thread_reply.qml:472` — a
       pointer into the change's own folder, the shape Decision 2 argues against
       (suggestion). "design.md Decision 3 covers the alternatives, and what breaks
       without each guard below." After archive that file is
@@ -105,6 +105,14 @@ findings below are gaps in the recorded reasoning, none a code defect.
       the pointer carries (a guard list lives in the archive). Other files in the
       tree cite a bare `design.md`, so this is the repository's habit, but this
       change has already decided against it once.
+
+      **Outcome (tester): fixed.** The comment now names the change and the
+      archive path it will have: "The alternatives, and what breaks without
+      each guard below, are Decision 3 of this change's design.md, which lands
+      at `openspec/changes/archive/<date>-reply-caption-no-edit/design.md`."
+      It names the change (so it greps) and says where the guard list lives
+      once archived. Took the entry although it names the dev-writer, as the
+      brief directs: it is an edit to a test-file comment.
 
 - [ ] **`dev-writer`** — `design.md` Decision 3, paragraph beginning "The suite
       excludes them" — a quoted fixture is not the quoted wording (suggestion).

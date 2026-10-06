@@ -11,40 +11,96 @@ binding check did not object. **No mutation was run**: this round's brief says
 to edit nothing but this file, so every claim below about what a matcher or
 walk does is read off the regex or the structure, and says so.
 
-- [ ] **`tester`** — `dialectica-ui/tests/tst_thread_reply.qml:952-955` — `statesReplyIsSigned` is satisfied by text that does not state a reply is signed, and its comment ("A negation is not a statement that a reply is signed") overclaims
+- [x] **`tester`** — `dialectica-ui/tests/tst_thread_reply.qml:952-955` — `statesReplyIsSigned` is satisfied by text that does not state a reply is signed, and its comment ("A negation is not a statement that a reply is signed") overclaims
       **Scenario:** the negation clause is a closed list, `(\bnot|\bnever|n't)\s+(yet\s+)?(be\s+)?signed\b`, so any word between the negator and `signed` defeats it. A caption reading "Your reply is not cryptographically signed." (or "Replies are not always signed.") matches `\bsigned\b`, matches no negation, and so counts as a statement that a reply is signed. `test_the_open_composers_text_states_that_a_reply_is_signed` and `test_the_statement_that_a_reply_is_signed_survives_a_publish` both pass. The same matcher never looks at the subject, so unrelated copy that merely contains the word ("Signed in as the key above.") also satisfies it. The matcher test's `notStates` table has no row with a word inside the negation, so nothing prompts the gap.
       **Severity:** low. A test-strength defect in a hand-maintained matcher, the same family design.md Risks already records for the claim matcher; the shipped caption is correct. Fix by adding the two paraphrases to `notStates` and widening the clause (for example, any `not|never|n't` within a few words before `signed`), or by saying in the comment that the matcher is a word list.
       **Measured:** not mutated; read against the regex.
 
-- [ ] **`tester`** — `dialectica-ui/tests/tst_thread_reply.qml:595-598` — `test_the_matcher_leaves_alone_what_the_composers_group_renders` writes out `mentionsAmong(truthful)` by hand
+      **Outcome (tester): fixed.** Same defect as the first two entries of
+      `re-spec-test.md`, whose outcomes carry the measurements: the clause now
+      sees `cannot` and up to two words between a negator and `signed`, the
+      matcher requires a `reply`/`replies` subject, and both paraphrases named
+      here are in `notStates` (watched failing on the old matcher). The comment
+      no longer says a negation is not a statement as if the clause were
+      complete: it says the matcher is a pattern and names the two shapes
+      measured to get past it (a negator three words off; a sentence about
+      something else that names a reply and says `signed`).
+
+- [x] **`tester`** — `dialectica-ui/tests/tst_thread_reply.qml:595-598` — `test_the_matcher_leaves_alone_what_the_composers_group_renders` writes out `mentionsAmong(truthful)` by hand
       **Scenario:** the loop that builds `flaggedWrongly` is `mentionsAmong(texts, undefined)` with the helper's body copied inline, and the helper is defined 25 lines below it in the same file. The fix round introduced `mentionsAmong` to be the one place "flag what the matcher flags" lives; a later change to what counts as flagged (say, a different exemption rule) reaches every caller but this one, which would go on testing the old rule without anyone noticing. `unflagged` (line 495) is the inverse filter and is a separate, fine helper.
       **Severity:** low-medium, a genuine defect (duplication introduced by this change's restructure), not taste. Replace the loop with `compare(mentionsAmong(truthful), [], ...)`.
       **Measured:** `git grep -n -F "flaggedWrongly" HEAD -- dialectica-ui/tests/tst_thread_reply.qml` shows the inline copy; the same loop was on `5cd2c8af`, but the helper it duplicates is new in this round.
 
-- [ ] **`tester`** — `dialectica-ui/tests/tst_thread_reply.qml:975-984`, `:988-996` — the signed matcher's tests and walk re-implement the filter helpers beside them
+      **Outcome (tester): fixed.** The test is now
+      `compare(mentionsAmong(truthful), [], ...)`; the inline loop is gone.
+      Measured, matcher made `return true`: this test goes red on the whole
+      table; matcher made `return false`: it stays green, as designed.
+
+- [x] **`tester`** — `dialectica-ui/tests/tst_thread_reply.qml:975-984`, `:988-996` — the signed matcher's tests and walk re-implement the filter helpers beside them
       **Scenario:** `test_the_signed_matcher_accepts_what_states_it_and_refuses_what_does_not` hand-writes two filter loops (accepted notStates, refused states) that are `unflagged`'s shape with a different predicate, and `signedStatementsIn` is `mentionsUnder`'s shape (`collectTexts`, then filter, return `{ texts, <matches> }`) with a different predicate. The file now has five collect-and-filter sites for two predicates. A fix to how a walk or a filter treats a text (for instance reaching a popup) is made in `collectTexts` once, but the filter halves are copies.
       **Severity:** low, stylistic. A `filterBy(list, predicate)` and a `textsUnder(item, predicate, renderedOnly)` would leave one site per concern. Say if the owner would rather keep the two matchers' tests independent; the cost of the copies is small today.
       **Measured:** not measured; read.
 
-- [ ] **`tester`** — `dialectica-ui/tests/tst_thread_reply.qml:603-621` and `:767-768` — the rationale for `collectTexts`'s `visible` default sits on `mentionsAmong`, a function that never reads `visible`, and a later comment points at the wrong place
+      **Outcome (tester): fixed by deleting the loops, not by adding helpers.**
+      QML's JS has `Array.prototype.filter`, so the five hand-written
+      collect-and-filter loops became one-line `filter` calls (`unflagged`,
+      `mentionsAmong`, the two filters in the signed matcher test, and
+      `signedStatementsIn`'s filter). The suggested `filterBy` and `textsUnder`
+      are rejected: `filter` is the first, and the second would be a wrapper
+      over `collectTexts` that two callers (`mentionsUnder`,
+      `signedStatementsIn`) use in three lines each; a fix to what a walk
+      reaches is still made once, in `collectTexts`.
+
+- [x] **`tester`** — `dialectica-ui/tests/tst_thread_reply.qml:603-621` and `:767-768` — the rationale for `collectTexts`'s `visible` default sits on `mentionsAmong`, a function that never reads `visible`, and a later comment points at the wrong place
       **Scenario:** `collectTexts`'s own comment (389-392) says what it reaches and ignores "is written where it is used for the no-claim tests, below". Below is a block (603-621) sitting directly above `mentionsAmong`, which is a pure filter. The block opens "What the walks collect, and what they leave out. One walk, `collectTexts` above", spends two paragraphs on `visible` and `renderedOnly`, and only then describes `suppliedText`, the one thing `mentionsAmong` takes. A reader changing `collectTexts` is sent 210 lines away to a comment attached to something else. Line 767 then says "the choice collectTexts's comment names", which is false: `collectTexts`'s comment names no choice, it forwards. Two hops to a rationale is what the fix round was meant to remove when it deleted `stringsUnder`.
       **Severity:** low, a genuine defect (a pointer that does not resolve) and partly taste. Move the `visible`/`renderedOnly`/children-only paragraphs onto `collectTexts` and keep the `suppliedText` paragraph on `mentionsAmong`; then 767 is true.
       **Measured:** `Read` of lines 389-400, 603-635 and 767-771.
 
-- [ ] **`tester`** — `dialectica-ui/tests/tst_thread_reply.qml:486-488` — "would make all three scenario tests below pass on any tree" is stale; four scenario tests pass
+      **Outcome (tester): fixed.** The `children`/placeholder, `visible` and
+      `renderedOnly` paragraphs are now on `collectTexts`; the `suppliedText`
+      paragraph is on `mentionsAmong`, the only function that takes it. The
+      comment that said "written where it is used ... below" is gone, and the
+      hidden-claim test's comment now says `collectTexts`'s comment "gives its
+      reason for" the choice, which is true.
+
+- [x] **`tester`** — `dialectica-ui/tests/tst_thread_reply.qml:486-488` — "would make all three scenario tests below pass on any tree" is stale; four scenario tests pass
       **Scenario:** the fix round added `test_no_text_beside_the_thread_rows_makes_an_edit_or_version_claim`, which asserts `mentionsAmong(...)` is empty and takes the matcher's word for it. With `mentionsEditOrVersion` returning `false`, that test, `test_the_open_composers_text_makes_no_edit_or_version_claim`, `test_no_edit_or_version_claim_appears_after_a_reply_is_published` and `test_the_shut_gates_text_makes_no_edit_or_version_claim` all stay green: four, not three. The beside-the-rows test's own anchors (`rowCount`, the composer's place, no `edited`) do not call the matcher. The comment under-counts what the flag tests are there to protect.
       **Severity:** low, stylistic (a count in a comment). Say "the scenario tests", with no number.
       **Measured:** not mutated; read. The four tests' only matcher use is `compare(<flagged>, [])`.
+
+      **Outcome (tester): fixed.** The comment says "the scenario tests", with
+      no number. Measured, with the matcher made `return false`: seven tests go
+      red (the four flag tests, the scope test, the hidden-claim test, the
+      core-supplied-text test) and the three scenario tests, the
+      beside-the-rows test and the leaves-alone test stay green. The
+      reviewer's four tests that stay green are the three scenario tests and
+      the beside-the-rows test.
 
 - [ ] **`dev-writer`** — `openspec/changes/reply-caption-no-edit/design.md:232-235` — the same count is stale in Decision 3's guards: "the three scenario tests" stay green under `return false`
       **Scenario:** the sentence lists the red tests (four flag tests, scope, hidden-claim, core-supplied-text) and says "all three scenario tests stay green". The beside-the-rows test is a fourth that stays green and is not named, so the measurement as recorded reads as if it had gone red or did not exist. It is a recorded measurement, so it should say which tests stayed green.
       **Severity:** low, a stale number in a document the closer will carry into the archive.
       **Measured:** not mutated; same read as the entry above.
 
-- [ ] **`tester`** — `dialectica-ui/tests/tst_thread_reply.qml:572-594` — the "leaves alone" table is described as the composer group's own copy, but holds core's text and the shut gate's copy
+      **Note (tester, box left for the dev-writer):** the tester re-measured the
+      `return false` red set (previous entry) and corrected this passage's
+      sentence in `design.md` to name the tests that stay green: the three
+      scenario tests and the beside-the-rows test (and the leaves-alone test).
+      The dev-writer should confirm and tick.
+
+- [x] **`tester`** — `dialectica-ui/tests/tst_thread_reply.qml:572-594` — the "leaves alone" table is described as the composer group's own copy, but holds core's text and the shut gate's copy
       **Scenario:** the comment says the table lists "the strings this group legitimately renders", and the fix round's outcome (correctness findings, first entry) says the keystore row is absent "because that table lists what the group's own copy renders and the reason is not the group's copy". The table holds `"no keystore"`, which is the fixture's core reason and is rendered by the shut gate, and two shut-gate strings (`"You cannot reply in this Stoa yet."`, `"There is no disabled composer here. ..."`). A reader following the scope comment (466-470) expects core text to be exempted by `suppliedText` and not listed as copy; the row proves nothing the exemption does not, and the recorded outcome is wrong about the tree.
       **Severity:** low, stylistic. Either remove the core row and say the table is the screen-authored copy of both groups, or rename the test and its comment to name both groups.
       **Measured:** `Read` of the table.
+
+      **Outcome (tester): fixed, and the earlier recorded outcome was wrong
+      about the tree.** The `"no keystore"` row is removed (core's text, not
+      the screen's copy, and exempted by `suppliedText` rather than listed).
+      The two shut-gate strings stay, because they are the screen's copy; the
+      test is renamed `test_the_matcher_leaves_alone_what_the_screen_authors_in_both_gate_states`
+      and its comment says it holds the composer group's and the shut gate's
+      authored strings. design.md Decision 3's guard list carries the new name.
+      The earlier outcome in the correctness findings said the keystore row was
+      absent from this table; it was present, which is what this entry found.
 
 ## Clean areas, in prose
 
