@@ -254,6 +254,13 @@ ScreenFrame {
     // D8).
     onThreadIdChanged: screen.reload()
 
+    // A visit to this screen has begun. The same hook, and the same reason, as
+    // `FeedScreen.beginVisit`: the reply composer's outcome belongs to the
+    // visit that produced it, and only the navigator knows when one begins.
+    function beginVisit() {
+        replyComposer.clearOutcome()
+    }
+
     function reload() {
         if (screen.stoaAddress === "" || screen.threadId === "") {
             screen.readState = "failed"
