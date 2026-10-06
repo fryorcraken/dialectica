@@ -57,7 +57,9 @@ not the system. `.openspec.yaml` declares `skip_specs: true`.
 ## Impact
 
 - Agent and session instructions only. No code, test, workflow or spec file
-  changes behaviour.
+  changes behaviour. Comments in eight source files, and one phrase in
+  `relevance-votes`' `tasks.md`, cited text this change deletes and are
+  repointed; `design.md`, "Edits outside the issue's scope", lists them.
 - After merge, the next piece starts with `/specflow:run <issue#>`, and needs
   the plugin cloned, its marketplace added on the clone and the plugin
   installed, as `README.md` says.

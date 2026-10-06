@@ -87,13 +87,43 @@ repos/fryorcraken/agent-spec-flow`.
       only README's unrelated "Logos module catalogue is published from
       GitHub Releases".
 
-- [ ] **`dev-writer`** — `design.md:214-221` — the decision to leave the overlay's `## Lessons` at `None.` after the regression was accepted and filed upstream is not recorded, and a round-one outcome misstates which branch the owner took
+- [x] **`dev-writer`** — `design.md:214-221` — the decision to leave the overlay's `## Lessons` at `None.` after the regression was accepted and filed upstream is not recorded, and a round-one outcome misstates which branch the owner took
       **Scenario:** the block's rule (`CLAUDE.md:469-471`) pairs two steps for a specflow gap the owner agrees to: record it under the overlay's `## Lessons`, and file it on `agent-spec-flow`. The plugin's `run` skill says the same (`skills/run/SKILL.md:239-244`). This change did the second (agent-spec-flow#1) but not the first: `PROJECT.md:139-141` still reads `None.`. `findings/architecture.md` box 4 asked for a `## Lessons` entry "if they accept the regression". Its outcome says the owner "took the box's second branch, filing upstream", that `## Lessons` was asked "only on the accept branch", and that "the plugin runner reads nothing that names the regression". design.md:216 records that the owner **accepted**. So the accept branch is the one taken, and its second half is neither done nor ruled out in design.md. The owner's "the overlay does not carry the rules" is not this question: a `## Lessons` line that points at the issue carries no rule. The issue named `PROJECT.md` among the `.claude/` changes the owner asked for, so "the owner's file" does not settle it either. This box does not ask for the entry. It asks that design.md say whether `## Lessons` points at agent-spec-flow#1, and if not, why, and what the plugin runner reads instead that names the regression.
       **Measured:** `Read .claude/specflow/PROJECT.md` 139-141; `findings/architecture.md:87-102`; `CLAUDE.md:469-471`; plugin `skills/run/SKILL.md:239-244`.
+      **Fixed** in the commit "Record why Lessons stays None., and the edits
+      outside the issue's scope". A new design.md section, "The overlay's
+      `## Lessons` stays `None.`", answers the three questions. Whether: it
+      does not point at agent-spec-flow#1, on the owner's instruction for
+      this change. Why: the overlay is read in full by every specflow agent
+      (`flow` skill, "Read the overlay before your first command") and by
+      the runner (`run` preflight 2), so a line naming twelve missing rules
+      is read as something to act on, and acting on rules 1 to 4 overrides
+      the plugin. What the runner reads instead: nothing; the regression is
+      named in design.md, #1 and its comment, and in the overlay only as
+      rule 5 under `## closer`, which is part of what the owner accepted.
+      The round-one misstatement is corrected beneath that outcome in
+      `findings/architecture.md` box 4: the accept branch was taken.
 
-- [ ] **`dev-writer`** — `design.md` (no entry) — the edits outside the issue's scope, eight source comments and one phrase in another live change's `tasks.md`, are argued only in `findings/`, which the `closer` deletes
+- [x] **`dev-writer`** — `design.md` (no entry) — the edits outside the issue's scope, eight source comments and one phrase in another live change's `tasks.md`, are argued only in `findings/`, which the `closer` deletes
       **Scenario:** issue #195's "What changes" table lists `.claude/`, `CLAUDE.md`, two docs, `settings.json` and `.gitignore`, and nothing under `dialectica/`, `dialectica-ui/` or another change's folder. This piece edits `feed.rs`, `keystore.rs`, `log/mod.rs`, `membership.rs`, `moderation.rs`, `src/lib.rs`, `Cargo.toml`, `tst_render_probe.qml` and `openspec/changes/relevance-votes/tasks.md`. The PR body says this in one bullet. design.md says nothing, and `design.md:211` still describes `relevance-votes` only as having no stage block, not as a folder this piece edits. The reasoning that makes these edits safe sits in `findings/readability.md:142-151` and `findings/spec-test.md:15-26`: they repoint citations of deleted text, they are comment-only, and `cargo test` passes. That includes the accepted gap that `src/lib.rs`'s `///` edit sits behind `cfg(logos_scaffold)`, which `cargo test` does not compile, and `nix build ./dialectica#lgx` "was not run for a `///` edit". All of it is deleted with `findings/` at close, and the `closer` is told to confirm durable reasoning moved to design.md first. A departure from the issue's scope has to be argued in design.md, and this one has an unrun gate behind it. Record the departure, why each edit was needed (each cited text this change deleted), and what makes it safe, the `lib.rs` build gap included.
       **Measured:** `git diff 20643177..HEAD --stat -- dialectica dialectica-ui openspec/changes/relevance-votes` (9 files, every hunk a comment); `git grep -n -F -e "relevance-votes" -e "Cargo.toml" -e "tst_render_probe" -- openspec/changes/adopt-specflow-plugin/design.md` hits only `:211`.
+      **Fixed** in the commit "Record why Lessons stays None., and the edits
+      outside the issue's scope". A new design.md section, "Edits outside the
+      issue's scope", lists all nine files from `git diff --stat
+      origin/main...HEAD -- dialectica dialectica-ui
+      openspec/changes/relevance-votes`, each with the deleted text it cited
+      and what it cites now. It says what makes them safe: every hunk is a
+      comment or prose line; the Rust suite passed after them at `b240b4b6`;
+      and the `lib.rs` gap stated plainly: the `///` edit is behind
+      `cfg(logos_scaffold)`, `nix build ./dialectica#lgx` was not run
+      locally, and that is accepted because rewording a doc attribute cannot
+      change whether the crate compiles and CI's `Build LGX` job
+      (`lgs basecamp build --variant all`, `ci.yml:1593`) compiles the
+      adapter on every PR run (`gh pr checks 196`, checked once: pass). It
+      also records the five comments left alone, and why. The live-change
+      paragraph near "#174's flow rules" now says this change edits one
+      phrase in `relevance-votes`, and `proposal.md`'s Impact names the
+      edits and points at the section.
 
 ## Outside this review's scope, for the runner
 

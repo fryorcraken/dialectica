@@ -225,7 +225,10 @@ What was considered instead:
   lists rules 1 to 5. Its first comment
   (<https://github.com/fryorcraken/agent-spec-flow/issues/1#issuecomment-6010040773>)
   adds rules 6 to 12 and the detail under rules 1 to 4, each with its location
-  and what the plugin does instead. That repo is where a rule about the runner,
+  and what the plugin does instead; a later comment
+  (<https://github.com/fryorcraken/agent-spec-flow/issues/1#issuecomment-6010986410>)
+  corrects its citation of rule 5 to the overlay's `## closer` section, by
+  name rather than line numbers. That repo is where a rule about the runner,
   the stage roster or the `closer` belongs. The reasoning for every rule is not
   lost: it is in
   `openspec/changes/archive/2026-09-27-171-workflow-rules/design.md` and
@@ -236,7 +239,8 @@ This makes the issue's "No behaviour change" false for the flow as of this
 tree, and the stage block that `specflow:spec-writer` writes has twelve rows
 where this repo's has thirteen. Pieces already archived are unaffected; no
 change is in flight with a stage block (`relevance-votes`, the one other live
-change, has a `tasks.md` with no `## Stages` block).
+change, has a `tasks.md` with no `## Stages` block; this change edits one
+phrase in it, under "Edits outside the issue's scope").
 
 ### The owner accepted the regression, on condition it is tracked accurately
 
@@ -446,6 +450,69 @@ failing. If it is ever run, for its `gh auth` and protection report, its
 skill reports a refused write and carries on (`init/SKILL.md`, "Claude Code
 asks the owner to approve each write under `.claude/`").
 
+### The overlay's `## Lessons` stays `None.`
+
+The block's rule, and the plugin's `run` skill ("Lessons"), pair two steps for
+a specflow gap the owner agrees to: record it under the overlay's `## Lessons`
+and file it on `agent-spec-flow`. The owner accepted the #174 regression and
+it is filed (agent-spec-flow#1), but `## Lessons` is left at `None.`, on the
+owner's instruction for this change, and does not point at #1.
+
+The reason a pointer there is not harmless: the overlay is read in full by
+every specflow agent before its first command (`flow` skill, "Read the overlay
+before your first command") and by the runner in preflight (`run` skill,
+preflight 2). A line naming twelve missing flow rules would be read by each of
+them as something to act on, and acting on rules 1 to 4 overrides the plugin,
+which is the two-instructions problem "#174's flow rules" rejects. The owner
+chose that the overlay carry none of the rules except rule 5.
+
+So the plugin runner reads nothing that names the regression. It is named in
+this file, archived with the change, in agent-spec-flow#1 and its first
+comment, and in the overlay only as rule 5's prohibition under `## closer`.
+That is part of what the owner accepted, and it ends when the plugin carries
+the rules (#1's acceptance list).
+
+### Edits outside the issue's scope
+
+Issue #195's "What changes" lists `.claude/`, `CLAUDE.md`, two docs,
+`settings.json` and `.gitignore`. This change also edits nine files it does
+not list, each because it cited or quoted text this change deletes:
+
+- **Six Rust doc and line comments** — `feed.rs`, `log/mod.rs`, `membership.rs`,
+  `moderation.rs` and `keystore.rs` under `dialectica-core/src/`, and the
+  adapter's `dialectica/rust-lib/src/lib.rs`. Five quoted `CLAUDE.md` wording
+  the block replaced ("stays a question with an answer", "over adding a
+  branch that checks it"); each now quotes the block's current wording.
+  `keystore.rs` cited "the agents README", deleted; it now names the `flow`
+  skill's rule to say what a check cannot see.
+- **`dialectica/rust-lib/Cargo.toml`** — a `#` comment pointed at "`cargo
+  test` handling in CLAUDE.md"; it now points at `README.md`, "Building".
+- **`dialectica-ui/tests/tst_render_probe.qml`** — a `//` comment said
+  `CLAUDE.md` records a blank view as indistinguishable from a failed plugin
+  load; it now points at the overlay's "Basecamp swallows QML errors" hazard.
+- **`openspec/changes/relevance-votes/tasks.md`** — one phrase cited "agents
+  README" for "never write a scenario that cannot be tested"; it now cites
+  the `flow` skill, which carries that sentence. It is another live change's
+  file; the edit touches no stage-block line, and that change has no stage
+  block (`tasks.md` 4.3).
+
+What makes them safe: every changed line is a comment (`//`, `///`, `//!`,
+`#`) or prose, which `git diff origin/main...HEAD -- dialectica dialectica-ui
+openspec/changes/relevance-votes` shows hunk by hunk. The Rust suite was run
+after them, at `b240b4b6`, and passed. `lib.rs`'s `///` edit is in the adapter
+behind `cfg(logos_scaffold)`, which `cargo test` never compiles, and
+`nix build ./dialectica#lgx` was not run locally for it. That is accepted: a
+`///` line is a doc attribute whose text the compiler does not interpret, so
+rewording one inside an existing doc block cannot change whether the crate
+compiles; and CI's `Build LGX` job (`lgs basecamp build --variant
+all`) compiles the adapter on every pull-request run; `gh pr checks 196` shows
+its result.
+
+Left alone deliberately: five more comments (`authoring.rs`, `wire.rs`,
+`Main.qml`, `FeedScreen.qml`, `DThreadScreen.qml`) use "stays a question with
+an answer" outside quotation marks, as paraphrase or their own prose; the only
+words any of them quotes is the question itself, which the block still has.
+
 ### Dropped, deliberately
 
 Dialectica-specific sentences in deleted text with no home in the overlay:
@@ -491,7 +558,7 @@ Dialectica-specific sentences in deleted text with no home in the overlay:
 ## Risks / Trade-offs
 
 - [The flow regresses on #174's rules until the plugin carries them] → rule 5
-  is in the overlay. Rules 1 to 4 and 6 to 12 are tracked in
+  is in the overlay's `## closer`. Rules 1 to 4 and 6 to 12 are tracked in
   <https://github.com/fryorcraken/agent-spec-flow/issues/1>, in its body and
   its first comment, and are absent from the active flow until the plugin
   carries them. The owner accepted this on the condition that the issue tracks

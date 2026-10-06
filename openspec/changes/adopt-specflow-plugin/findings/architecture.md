@@ -100,6 +100,12 @@ at `20643177` against `origin/main`. The plugin was read at its checkout HEAD
       asks for only on the accept branch, and which is the owner's file. So
       the gap the scenario ends on still holds until the plugin ships 0.2.0:
       the plugin runner reads nothing that names the regression.
+      **Correction** (re-review, `findings/rereview-design.md` box 4): the
+      outcome above misstates the branch. The owner **accepted** the
+      regression, on the condition that #1 tracks it, so the accept branch
+      was taken. Its `## Lessons` half was not done, on the owner's
+      instruction; design.md, "The overlay's `## Lessons` stays `None.`",
+      records why and what the runner reads instead.
 
 ## Checked and clean
 
