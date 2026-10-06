@@ -60,7 +60,7 @@
 
 - [x] 7.1 `cargo test -p dialectica -p dialectica-core`, `cargo clippy … --all-targets`, and `nix build ./dialectica#lgx` green.
 - [x] 7.2 Each refusal path and the bound shown red by a reverted mutation; the mutation and what it turns red are recorded beside each decision in `design.md` (Decisions 6, 10, 11 and 15), re-run under §10 where the first-pass count had gone stale.
-- [ ] 7.3 Two peers exchange a post under two `lgs basecamp launch` profiles (#102 items 5–7). A manual check no test here can stand in for: every test runs both sides in one process against a fake delivery. Not run; put to the owner in `design.md`'s Open Questions.
+- [ ] 7.3 Two peers exchange a post under two `lgs basecamp launch` profiles (#102 items 5–7). A manual check no test here can stand in for: every test runs both sides in one process against a fake delivery. The first run created the node and had every channel declined for its content topic (§14); the rerun is the owner's.
 
 ## 8. Review round
 
@@ -106,3 +106,8 @@ Each regression test below was seen red before its change.
 
 - [x] 13.1 An ask extends only a wait that has not ended (`op-transport`: a message whose wait has expired "MUST be judged without waiting on that open"; Decision 11): `Wait::extend_from` returns when the ask is at or past the wait's end. `an_ask_after_a_messages_wait_has_ended_does_not_make_it_wait_again` holds the book across the message's end and asks inside it, the correctness reviewer's probe ported; red before the fix, the message judged 1.00 s after the ask at a 1 s limit.
 - [x] 13.2 `design.md` cites no piece-branch commit in Decision 11, and 11.1 names `begin_wait` (readability round 4).
+
+## 14. The owner's first live run (7.3): delivery refused the content topic
+
+- [x] 14.1 The content topic is `/dialectica/1/s-<hex>/proto`, four parts, which delivery's `NsContentTopic.parse` accepts with `dialectica` as application and `1` as version (design Decision 17). `the_content_topic_is_one_delivery_parses_with_dialectica_as_application` was red before the fix with the live message, `generation should be a numeric value`. The known-answer pin and the pure-function test moved with it; the channel id and sender id are unchanged, since delivery does not parse them.
+- [x] 14.2 `transport::delivery_topic_rule` (test-only) transcribes the parser at `logos-delivery` `bfdb5afd`, held both ways by its own tests (the live-refused topic refused with the live message; delivery's default topic accepted). The fake delivery's `channel_create` declines a topic it refuses; with the old prefix every `delivery::` test that opens a channel and relies on it went red.

@@ -526,6 +526,15 @@ These are structural and bite at build time, not review time.
   runtime failure in someone else's module.
 - **`messageReceived`'s timestamp is nanoseconds**; every other delivery event
   is ISO-8601 (delivery bug #26).
+- **Delivery parses a content topic; it treats a channel id and a sender id as
+  opaque.** A topic must be `/<app>/<version>/<name>/<encoding>` — exactly four
+  non-empty parts — or five with a numeric generation first, or `channelCreate`
+  is declined with `invalid format: generation should be a numeric value`. Our
+  first topic had five parts and every channel was refused live while every
+  test passed, because the fake took any string. The fake now declines what
+  `transport::delivery_topic_rule` (delivery's parser, transcribed) refuses; a
+  delivery pin bump re-reads `content_topic.nim`. `delivery-wiring`'s design,
+  Decision 17.
 - **`messageReceived` fires for your own messages; `channelMessageReceived`
   does not** — own sends come back as `channelMessageSent`. The consequence is
   contracted in the `op-transport` spec ("A peer's own published op is not

@@ -94,21 +94,36 @@ use std::collections::HashMap;
 /// not.
 pub const MAX_MESSAGE_BYTES: usize = 150 * 1024;
 
-/// Domain prefix for a content topic. §4.1's format, verbatim.
+/// Head of a content topic: `/<application>/<version>/` and the start of the
+/// `<topic-name>` segment, `s-`.
 ///
-/// The `/dialectica/1/` head is load-bearing and not a naming preference: §4.2
-/// establishes that autosharding hashes only `application` + `version`, so this
-/// prefix is what places every dialectica topic on one shard. A different prefix
-/// would be a routing change disguised as a rename.
-const TOPIC_PREFIX: &str = "/dialectica/1/s/";
-/// Suffix of a content topic, completing §4.1's `/dialectica/1/s/<hex>/proto`.
+/// **A content topic has exactly four `/`-separated parts**,
+/// `/dialectica/1/s-<hex>/proto`. Delivery reads a five-part topic as
+/// `/<generation>/<application>/…` and refuses one whose first part is not a
+/// number, so the earlier `/dialectica/1/s/<hex>/proto` was declined by every
+/// node: the test-only `delivery_topic_rule` below cites the parser. The `s` discriminant is
+/// therefore part of the name segment, joined by `-`, and never a segment of its
+/// own.
+///
+/// The `/dialectica/1/` head is load-bearing and not a naming preference:
+/// autosharding hashes only `application` + `version`, so this prefix is what
+/// places every dialectica topic on one shard. A different prefix would be a
+/// routing change disguised as a rename. That holds only because the topic has
+/// four parts; in the five-part form delivery would have read `1` as the
+/// application.
+const TOPIC_PREFIX: &str = "/dialectica/1/s-";
+/// Suffix of a content topic: the `<encoding>` segment.
 const TOPIC_SUFFIX: &str = "/proto";
 /// Domain prefix for a channel id.
 ///
-/// A different discriminant in the same position as the topic's `s`, because the
-/// two are not one namespace: a content topic is disclosed to filtering, storage
-/// and forwarding peers, and a channel id is an application-chosen rendezvous
-/// string. One value for both would make a change to either a change to both.
+/// A different discriminant from the topic's `s`, because the two are not one
+/// namespace: a content topic is disclosed to filtering, storage and forwarding
+/// peers, and a channel id is an application-chosen rendezvous string. One value
+/// for both would make a change to either a change to both.
+///
+/// Delivery does not parse a channel id — it is an opaque `SdsChannelID` from
+/// `logosdelivery_channel_create` to the channel table — so the four-part rule
+/// that binds the topic does not bind this, and it keeps its `/c/` segment.
 ///
 /// Structured rather than the bare hex, so that §4.5's deferred `(stoa, thread)`
 /// split has somewhere to put a thread segment — and so that two applications
@@ -817,6 +832,148 @@ fn addressed(
     })
 }
 
+/// Delivery's content-topic parser, transcribed so a test can refuse what
+/// delivery refuses. Test support only; nothing in the module calls it.
+///
+/// # Why this exists
+///
+/// The fake delivery in `delivery/tests.rs` accepted any string as a content
+/// topic, and so did every test here. Real delivery does not: `channelCreate`
+/// subscribes to the topic, the subscription resolves the topic's shard by
+/// autosharding, and autosharding parses the topic first. The first live
+/// two-peer run declined every channel with
+/// `ChannelCreate failed: failed to subscribe to content topic: invalid format:
+/// generation should be a numeric value`, while every test in this crate stayed
+/// green. A topic is checked against this rule so that class of defect is red
+/// here rather than discovered by launching two peers.
+///
+/// # Source
+///
+/// `logos-messaging/logos-delivery` at `bfdb5afd263c5ff634ef8c59b2fe1ebbbcd0f306`
+/// (the revision `logos-delivery-module` at `b8b9ac2f…` locks),
+/// `logos_delivery/waku/waku_core/topics/content_topic.nim:60-123`,
+/// `NsContentTopic.parse`:
+///
+/// - the topic starts with `/`;
+/// - the rest splits on `/` into exactly **four** non-empty parts,
+///   `/<application>/<version>/<topic-name>/<encoding>`,
+/// - or exactly **five**, `/<generation>/<application>/…`, whose first part
+///   must parse as an integer;
+/// - any other count is refused.
+///
+/// The messages are delivery's own, verbatim, so a test can match a refusal
+/// against the one a live node logged.
+#[cfg(test)]
+pub(crate) mod delivery_topic_rule {
+    /// A topic delivery accepted, split the way delivery splits it.
+    #[derive(Debug, PartialEq, Eq)]
+    pub(crate) struct Parsed<'a> {
+        pub generation: Option<i64>,
+        pub application: &'a str,
+        pub version: &'a str,
+        pub name: &'a str,
+        pub encoding: &'a str,
+    }
+
+    /// `NsContentTopic.parse`, transcribed. See the module docs for the source.
+    pub(crate) fn parse(topic: &str) -> Result<Parsed<'_>, String> {
+        let Some(rest) = topic.strip_prefix('/') else {
+            return Err(format!(
+                "invalid format: content-topic '{topic}' must start with slash"
+            ));
+        };
+        let parts: Vec<&str> = rest.split('/').collect();
+        let (generation, named) = match parts.len() {
+            4 => (None, &parts[..]),
+            5 => {
+                if parts[0].is_empty() {
+                    return Err("missing part: generation".to_string());
+                }
+                // Nim's `parseInt` takes an optional sign and decimal digits.
+                let generation = parts[0].parse::<i64>().map_err(|_| {
+                    "invalid format: generation should be a numeric value".to_string()
+                })?;
+                (Some(generation), &parts[1..])
+            }
+            _ => {
+                return Err(
+                    "invalid format: Invalid content topic structure. Expected either \
+                     /<application>/<version>/<topic-name>/<encoding> or \
+                     /<gen>/<application>/<version>/<topic-name>/<encoding>"
+                        .to_string(),
+                )
+            }
+        };
+        for (part, what) in named
+            .iter()
+            .zip(["application", "version", "topic-name", "encoding"])
+        {
+            if part.is_empty() {
+                return Err(format!("missing part: {what}"));
+            }
+        }
+        Ok(Parsed {
+            generation,
+            application: named[0],
+            version: named[1],
+            name: named[2],
+            encoding: named[3],
+        })
+    }
+
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn the_topic_a_live_node_refused_is_refused_with_its_message() {
+            // Verbatim from the live two-peer run that found this: the Stoa
+            // `bcacb91b…` and the topic the old derivation built for it. A
+            // transcription that accepted everything — which is what the fake
+            // delivery was — fails here.
+            let refused = "/dialectica/1/s/bcacb91b8700eec5f9d77d051f1d422779c82cc209bc9ae9c7fd4e65d3e79dda/proto";
+            assert_eq!(
+                parse(refused),
+                Err("invalid format: generation should be a numeric value".to_string())
+            );
+        }
+
+        #[test]
+        fn delivery_s_own_default_topic_is_accepted() {
+            // `DefaultContentTopic` in the same file, line 15, in both forms the
+            // parser documents. A transcription that refused everything fails
+            // here.
+            assert_eq!(
+                parse("/waku/2/default-content/proto"),
+                Ok(Parsed {
+                    generation: None,
+                    application: "waku",
+                    version: "2",
+                    name: "default-content",
+                    encoding: "proto",
+                })
+            );
+            assert_eq!(
+                parse("/0/waku/2/default-content/proto").map(|p| p.generation),
+                Ok(Some(0))
+            );
+        }
+
+        #[test]
+        fn other_part_counts_and_empty_parts_are_refused() {
+            for topic in [
+                "waku/2/default-content/proto",
+                "/waku/2/proto",
+                "/a/b/c/d/e/f",
+                "/waku//default-content/proto",
+                "/waku/2/default-content/",
+                "//waku/2/default-content/proto",
+            ] {
+                assert!(parse(topic).is_err(), "{topic} was accepted");
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1119,7 +1276,7 @@ mod tests {
             );
             assert_eq!(
                 identity.content_topic(),
-                format!("/dialectica/1/s/{hex}/proto"),
+                format!("/dialectica/1/s-{hex}/proto"),
                 "the content topic for {title} is not the address and the affixes alone"
             );
         }
@@ -1175,10 +1332,17 @@ mod tests {
         //
         // That is where the value came from, via `sha256sum` rather than this
         // crate's hasher. The two strings below are that hex interpolated into
-        // §4.1's `/dialectica/1/s/<hex>/proto` and into the channel form.
+        // the topic form `/dialectica/1/s-<hex>/proto` and into the channel form
+        // `/dialectica/1/c/<hex>`.
         //
         // If this fails, do NOT update the expected values to match. Work out
         // what changed and whether the network can survive it.
+        //
+        // The topic expectation was changed once, from
+        // `/dialectica/1/s/<hex>/proto`: delivery cannot parse a five-part topic
+        // whose first part is not a number, so no peer ever opened a channel on
+        // the old value and there was no network to migrate. The design's
+        // "The content topic has four parts" records it.
         let stoa = crate::identity::stoa_address(b"a genesis record");
         assert_eq!(
             stoa.to_hex(),
@@ -1188,7 +1352,7 @@ mod tests {
         let identity = ChannelIdentity::of(&stoa);
         assert_eq!(
             identity.content_topic(),
-            "/dialectica/1/s/6b1f1c28061e99c72e3340fb4fd07e8192b394e1327012e140f240a990d89cd8/proto",
+            "/dialectica/1/s-6b1f1c28061e99c72e3340fb4fd07e8192b394e1327012e140f240a990d89cd8/proto",
             "the content topic derivation changed"
         );
         assert_eq!(
@@ -1215,6 +1379,35 @@ mod tests {
             "got {}",
             identity.channel_id()
         );
+    }
+
+    #[test]
+    fn the_content_topic_is_one_delivery_parses_with_dialectica_as_application() {
+        // The regression test for the first live two-peer run, where delivery
+        // declined every channel: `invalid format: generation should be a
+        // numeric value`. The old topic `/dialectica/1/s/<hex>/proto` has FIVE
+        // parts, and delivery reads a five-part topic as `/<generation>/…`, so
+        // `dialectica` was taken for a generation number.
+        //
+        // Two things are checked, against delivery's rule rather than against
+        // what the derivation produced:
+        //
+        // - delivery parses it at all (`delivery_topic_rule` cites the parser);
+        // - it parses with `dialectica` as the APPLICATION and `1` as the
+        //   VERSION, and no generation. Autosharding hashes exactly those two
+        //   fields (`sharding.nim:20-30` at the same revision), so this is what
+        //   makes the spec's "`/dialectica/1/` is what puts every Stoa on one
+        //   shard" true. Had the five-part form parsed, it would have read
+        //   `1` as the application and `s` as the version.
+        for title in ["Agora", "Lyceum", "Academy", "The Zzyzx Assembly"] {
+            let identity = ChannelIdentity::of(&a_stoa(title));
+            let topic = identity.content_topic();
+            let parsed = delivery_topic_rule::parse(topic)
+                .unwrap_or_else(|why| panic!("delivery refuses {topic}: {why}"));
+            assert_eq!(parsed.generation, None, "{topic}");
+            assert_eq!(parsed.application, "dialectica", "{topic}");
+            assert_eq!(parsed.version, "1", "{topic}");
+        }
     }
 
     #[test]
