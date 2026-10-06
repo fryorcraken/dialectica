@@ -165,6 +165,12 @@ A message refused when delivery hands it over is not among the waiting payloads,
 - **THEN** the arriving payload is the one discarded
 - **AND** every payload that was already waiting is kept
 
+#### Scenario: Among other channels tied for the most waiting, the one whose newest arrived latest gives up its newest
+
+- **WHEN** the boundary is held up deciding one payload, messages carrying distinct valid ops arrive on two open channels until the bound is reached with each of the two holding as many waiting payloads as the other, the first and the last of them arriving on the first channel, and a message carrying a valid op then arrives on a third open channel
+- **THEN** the payload that arrived last on the first channel is recorded as discarded
+- **AND** every other of those ops, the third channel's included, is stored once the boundary is released
+
 #### Scenario: Every discard is counted and logged apart from refusals
 
 - **WHEN** three payloads are discarded
@@ -203,7 +209,7 @@ Nothing other than the boundary taking a waiting payload parks a message. A mess
 
 **Parking judges nothing.** A parked message MUST NOT be refused for any reason before it is reviewed, save a discard under "Parked messages are bounded per channel and in total". A payload that does not decode, or that carries an op that does not verify, names another Stoa, or is ahead of this peer's time, is parked like any other, and refused, if it is, by its review.
 
-Each park MUST be recorded in the module's log as a park, distinguishably from a refusal, a discard and a store, and the record MUST NOT carry the payload or the sender identifier.
+Each park MUST be recorded in the module's log as a park, distinguishably from a refusal, a discard and a store, and the record MUST NOT carry the payload or the sender identifier. A parked message's channel is not open when the message is taken, so "A message a reliable channel delivers reaches the op log only through the inbound boundary" keeps that channel's identifier out of the record as well.
 
 If the parked messages cannot be written, the payload MUST NOT be parked, the module's log MUST record a storage failure, and the payload MUST NOT be held for another attempt.
 
@@ -213,6 +219,12 @@ If the parked messages cannot be written, the payload MUST NOT be parked, the mo
 - **THEN** the module's log records it as parked
 - **AND** the op is not in the op log
 - **AND** no refusal is recorded for it while delivery has still not answered
+
+#### Scenario: A park is logged without text the sender chose
+
+- **WHEN** a message carrying a distinctive sender identifier and payload is taken on a channel being opened
+- **THEN** the module's log records it as parked
+- **AND** the park's record contains neither that channel's identifier, nor that sender identifier, nor the payload's bytes
 
 #### Scenario: An unanswered open holds up no other channel
 
@@ -374,7 +386,9 @@ Each per-channel bound MUST be no greater than the matching total bound. Each by
 
 **When parking a payload would put its own channel over its count bound or its byte bound, that payload MUST be discarded**, and nothing already parked is.
 
-**Otherwise, while parking it would put the parked messages over a total bound, the newest parked message of the channel holding the most of what that bound counts MUST be discarded** — messages for the count bound, payload bytes for the byte bound — counting the payload being parked with its own channel. The count bound is restored first, then the byte bound. Newest means handed over latest. When several channels hold the most, the payload's own channel MUST be the one chosen if it is among them; otherwise the one among them whose newest parked message was handed over latest. When the message chosen is the payload being parked, it is discarded and nothing more is.
+**Otherwise, while parking it would put the parked messages over a total bound, the newest parked message of the channel holding the most of what that bound counts is chosen** — messages for the count bound, payload bytes for the byte bound — counting the payload being parked with its own channel, and leaving out every message already chosen. Messages are chosen for the count bound first, until it would hold, and then for the byte bound, until it would hold. Newest means handed over latest. When several channels hold the most, the payload's own channel MUST be the one chosen if it is among them; otherwise the one among them whose newest parked message was handed over latest.
+
+**If the payload being parked is chosen, for either total bound, that payload MUST be discarded and every message already parked MUST be kept**, a message chosen before it included. Otherwise every message chosen MUST be discarded, and the payload MUST be parked.
 
 A discarded parked message is not stored, and MUST NOT be decided by any review. Every discard from the parked messages MUST be counted from the module's start in the same running count as discards from the waiting payloads, and recorded in the module's log with that count. Its record MUST be distinguishable from a discard from the waiting payloads, from a park and from a refusal, and MUST NOT carry the payload or the sender identifier.
 
@@ -402,6 +416,27 @@ A discarded parked message is not stored, and MUST NOT be decided by any review.
 - **WHEN** the parked messages reach the total count bound, and a message is then taken on a channel being opened that, counting that message, holds as many parked messages as another channel holds, with no channel holding more, and is within its own channel's bounds
 - **THEN** the message taken is recorded as discarded from the parked messages
 - **AND** every message that was parked before it is still parked
+
+#### Scenario: Among other channels tied for the most parked, the one whose newest was handed over latest gives up its newest
+
+- **WHEN** the parked messages reach the total count bound with two channels holding as many parked messages as each other and more than any other, the first and the last of those two channels' messages to be handed over being on the first channel, and a message is then taken on a third channel being opened, which, counting that message, holds fewer, is within its own channel's bounds, and keeps the parked payload bytes within their total bound
+- **THEN** the message handed over last of those parked on the first channel is recorded as discarded from the parked messages
+- **AND** every message parked on the second channel is still parked
+- **AND** the message taken is recorded as parked
+
+#### Scenario: Over both total bounds at once, the count bound is restored first
+
+- **WHEN** the parked messages reach the total count bound, with one channel holding more parked messages than any other and a second channel holding more payload bytes than any other, and a message is then taken on a third channel being opened, which is within its own channel's bounds, holds, counting that message, fewer parked messages than the first channel and fewer payload bytes than the second, and whose payload puts the parked payload bytes over their total bound by more than the payload bytes of the first channel's newest parked message and by no more than those of the second channel's newest parked message
+- **THEN** the message handed over last of those parked on the first channel is recorded as discarded from the parked messages
+- **AND** the message handed over last of those parked on the second channel is recorded as discarded from the parked messages
+- **AND** the message taken is recorded as parked
+
+#### Scenario: A payload discarded for the byte total costs no message already parked
+
+- **WHEN** the parked messages reach the total count bound, with one channel holding more parked messages than any other, and a message is then taken on a second channel being opened, which is within its own channel's bounds, holds, counting that message, fewer parked messages than the first channel and more payload bytes than any other channel holds, and whose payload puts the parked payload bytes over their total bound even once the first channel's newest parked message is left out
+- **THEN** the message taken is recorded as discarded from the parked messages
+- **AND** every message that was parked before it is still parked
+- **AND** no other discard is recorded
 
 #### Scenario: Messages that survived a restart count towards the bounds
 

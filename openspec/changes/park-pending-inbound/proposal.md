@@ -29,7 +29,9 @@ on an open.
 - **The receive window is judged at review**, against this peer's clock then.
 - **Parked messages are bounded** in count and in payload bytes, per channel and
   in total. A channel over its own bound loses the arrival; over a total bound,
-  the channel holding the most loses its newest message, the arrival included.
+  the channel holding the most loses its newest message, the arrival included,
+  the count total before the byte total. An arrival that is discarded costs no
+  message already parked.
 - **The waiting-payloads queue takes the same discard rule.** **BREAKING** for
   the queue's behaviour: a full queue no longer always discards the arrival; it
   discards the newest payload of whichever channel holds the most, which is the
