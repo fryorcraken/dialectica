@@ -1,0 +1,12 @@
+# `schema` is REQUIRED for this file to be valid change metadata, and without it
+# `skip_specs` is silently NOT HONOURED. It must name a known schema; this
+# project's is the built-in `spec-driven`, set in `openspec/config.yaml`.
+schema: spec-driven
+created: 2026-10-06
+
+# No spec delta: this change replaces the in-repo agent instructions under
+# `.claude/agents/` with the specflow plugin, moves the project-specific rules
+# into `.claude/specflow/PROJECT.md`, and rewrites CLAUDE.md's generic sections
+# as the plugin's block. None of that is behaviour of dialectica, so no
+# requirement in `openspec/specs/` is added, changed or removed.
+skip_specs: true
