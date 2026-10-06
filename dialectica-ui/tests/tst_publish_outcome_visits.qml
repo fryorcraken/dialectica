@@ -39,6 +39,7 @@ TestCase {
     readonly property string keyA:
         "k:0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
     readonly property string rootOp: "cc" + "11".repeat(31)
+    readonly property string otherRootOp: "dd" + "22".repeat(31)
 
     // A feed row heading the thread `rootOp`, in the shape `wire.rs` pins.
     function rowFor(op, text) {
@@ -54,13 +55,22 @@ TestCase {
     //     outcome it wants, and a newly stored post becomes a row the next
     //     `list_threads` returns — so "the re-read returns a row for it" is the
     //     fake's consequence of the publish, not a fixture the test hard-wired.
-    //   - `list_threads` answers the error shape while `threadsFail` is set.
+    //   - `list_threads` answers the error shape while `threadsFail` is set, the
+    //     verbatim `threadsReply` while that is set, and otherwise the rows,
+    //     reporting `hasMoreThreads` as its `hasMore`.
+    //   - `read_thread` answers the error shape while `readThreadFail` is set.
+    //   - `publish_reply` answers with `replyReply`, as `publish_post` does with
+    //     `postReply`.
     function forumBridge() {
         return {
             calls: [],
             rows: [spec.rowFor(spec.rootOp, "the thread's root")],
             postReply: '{"opId":"newpost","wasNew":true}',
+            replyReply: '{"opId":"newreply","wasNew":true}',
             threadsFail: false,
+            threadsReply: "",
+            hasMoreThreads: false,
+            readThreadFail: false,
             callModule: function (module, method, args) {
                 this.calls.push({ method: method, args: args })
                 if (method === "list_stoas")
@@ -75,15 +85,21 @@ TestCase {
                 if (method === "list_threads") {
                     if (this.threadsFail)
                         return '{"error":"the store could not be read"}'
-                    return JSON.stringify({ items: this.rows, page: 0, hasMore: false })
+                    if (this.threadsReply !== "")
+                        return this.threadsReply
+                    return JSON.stringify({ items: this.rows, page: 0,
+                                            hasMore: this.hasMoreThreads })
                 }
-                if (method === "read_thread")
+                if (method === "read_thread") {
+                    if (this.readThreadFail)
+                        return '{"error":"that thread could not be read"}'
                     return JSON.stringify({ items: [{
                         thread: spec.rootOp, id: spec.rootOp, currentVersion: spec.rootOp,
                         author: spec.keyA, isRevised: false,
                         moderation: { state: "unmoderated" }, position: "0",
                         body: { text: "the thread's root", removed: 0, marked: 0 }
                     }], page: 0, hasMore: false })
+                }
                 if (method === "publish_post") {
                     var sent = JSON.parse(String(args[0]))
                     var answer = JSON.parse(this.postReply)
@@ -92,7 +108,7 @@ TestCase {
                     return this.postReply
                 }
                 if (method === "publish_reply")
-                    return '{"opId":"newreply","wasNew":true}'
+                    return this.replyReply
                 return '{"error":"no fake reply for ' + method + '"}'
             }
         }
@@ -180,6 +196,66 @@ TestCase {
         compare(root, spec.rootOp, "the fixture's root row is the one opened")
         spec.visibleNamed(view, "feed")[0].threadOpened(root)
         compare(view.screenShown, "thread")
+    }
+
+    // A displayed element whose own `text` is exactly `text`: how a control
+    // with no `objectName` ("Next", "Try reading again", "SHOW HIDDEN") is found
+    // by what a user reads on it.
+    function visibleWithText(item, text) {
+        var found = []
+        function walk(node, ancestorsVisible) {
+            if (!node)
+                return
+            var here = ancestorsVisible && node.visible !== false
+            if (here && node.text === text)
+                found.push(node)
+            var kids = node.children
+            if (kids !== undefined)
+                for (var i = 0; i < kids.length; i++)
+                    walk(kids[i], here)
+        }
+        walk(item, true)
+        return found
+    }
+
+    // Press the one displayed button reading `text`. A `FlatButton` and the
+    // label inside it both carry the text, so only what can be clicked counts.
+    function pressButtonReading(view, text) {
+        var buttons = spec.visibleWithText(view, text).filter(function (node) {
+            return typeof node.clicked === "function"
+        })
+        compare(buttons.length, 1, "exactly one displayed control reads '" + text + "'")
+        buttons[0].clicked()
+    }
+
+    // The "SHOW HIDDEN" toggle is a `Text` whose only child is the `MouseArea`
+    // that carries the handler, and the handler reads nothing from the event.
+    function toggleShowHidden(view) {
+        var labels = spec.visibleWithText(view, "SHOW HIDDEN")
+        compare(labels.length, 1, "the displayed screen offers one toggle")
+        compare(labels[0].children.length, 1, "carried by one MouseArea")
+        labels[0].children[0].clicked(null)
+    }
+
+    function countCalls(bridge, method) {
+        var n = 0
+        for (var i = 0; i < bridge.calls.length; i++)
+            if (bridge.calls[i].method === method)
+                n++
+        return n
+    }
+
+    function backToTheFeed(view) {
+        spec.visibleNamed(view, "threadBackButton")[0].clicked()
+        compare(view.screenShown, "feed")
+    }
+
+    // Open the thread whose root is `root` through the feed's own signal, so a
+    // thread other than the fixture's one row can be reached.
+    function openThreadNamed(view, root) {
+        spec.visibleNamed(view, "feed")[0].threadOpened(root)
+        compare(view.screenShown, "thread")
+        compare(view.reading.rootOp, root, "and it is the thread asked for")
     }
 
     function openedOnStoaA() {
@@ -352,6 +428,223 @@ TestCase {
                "the feed's composer displays the refusal")
         compare(spec.visibleTextsContaining(s.view, "saved on this machine"), [],
                 "and not the message for a newly stored op")
+        s.view.destroy()
+    }
+
+    // ---- what the scenarios above leave open ------------------------------
+    //
+    // The requirement is wider than its eight scenarios: it names "whatever
+    // that re-read returns", "a failed read included", every composer the view
+    // mounts, a different thread, and the rule that re-reading, paging and
+    // changing what a screen lists do not begin a visit. Each is a test here.
+
+    // Requirement: "its outcome MUST remain displayed across the re-read that
+    // follows a successful publish, whatever that re-read returns". The
+    // scenario above has the re-read return a row; these are the others. A fix
+    // that cleared the outcome on a failed or empty read passes that scenario.
+    function test_the_outcome_stays_whatever_the_re_read_returns() {
+        var stored = '{"opId":"newpost","wasNew":true}'
+        var existing = '{"opId":"newpost","wasNew":false}'
+        var cases = [
+            { label: "newly stored, then the read fails",
+              post: stored, set: { threadsFail: true },
+              state: "failed", says: "Your post was saved on this machine." },
+            { label: "already published, then the read fails",
+              post: existing, set: { threadsFail: true },
+              state: "failed", says: "This post was already published." },
+            { label: "newly stored, then an empty page",
+              post: stored,
+              set: { threadsReply: '{"items":[],"page":0,"hasMore":false}' },
+              state: "ok", says: "Your post was saved on this machine." },
+            { label: "newly stored, then an answer with no items",
+              post: stored, set: { threadsReply: '{"page":0,"hasMore":false}' },
+              state: "failed", says: "Your post was saved on this machine." }
+        ]
+        for (var i = 0; i < cases.length; i++) {
+            var s = spec.openedOnStoaA()
+            s.bridge.postReply = cases[i].post
+            for (var key in cases[i].set)
+                s.bridge[key] = cases[i].set[key]
+            var readsBefore = spec.countCalls(s.bridge, "list_threads")
+
+            spec.publish(s.view, "post", "a post")
+
+            compare(spec.countCalls(s.bridge, "list_threads"), readsBefore + 1,
+                    cases[i].label + ": the publish was followed by a re-read")
+            compare(s.view.feedReadState, cases[i].state,
+                    cases[i].label + ": and the re-read reached the state under test")
+            compare(spec.outcomesShown(s.view, "post"), 1,
+                    cases[i].label + ": the outcome is still displayed")
+            verify(spec.visibleTextsContaining(s.view, cases[i].says).length > 0,
+                   cases[i].label + ": and it is the one the publish reported")
+            s.view.destroy()
+        }
+    }
+
+    // The same, for the reply composer, where a re-read that fails also removes
+    // the composer from the screen (it is shown only on a successful read). So
+    // the outcome cannot be seen during the failure: it must be there again
+    // when the read recovers, on the same visit.
+    function test_a_replys_outcome_stays_across_a_failed_re_read_of_the_thread() {
+        var s = spec.openedOnStoaA()
+        spec.openTheThread(s.view)
+        s.bridge.readThreadFail = true
+
+        spec.publish(s.view, "reply", "a reply")
+        compare(s.view.threadReadState, "failed", "the re-read after the publish failed")
+        compare(spec.visibleNamed(s.view, "replyDraftField").length, 0,
+                "so the reply composer is not on screen")
+
+        s.bridge.readThreadFail = false
+        spec.pressButtonReading(s.view, "Try reading again")
+        compare(s.view.threadReadState, "ok", "the read recovered, on the same visit")
+
+        compare(spec.outcomesShown(s.view, "reply"), 1,
+                "the outcome of the reply published on this visit is displayed")
+        verify(spec.visibleTextsContaining(s.view, "Your reply was saved on this machine.").length > 0)
+        s.view.destroy()
+    }
+
+    // Requirement: "This holds whether the later visit is for the same Stoa or
+    // thread or a different one."
+    function test_a_replys_outcome_does_not_follow_the_user_into_another_thread() {
+        var s = spec.openedOnStoaA()
+        spec.openThreadNamed(s.view, spec.rootOp)
+        spec.publish(s.view, "reply", "a reply")
+        compare(spec.outcomesShown(s.view, "reply"), 1)
+
+        spec.backToTheFeed(s.view)
+        spec.openThreadNamed(s.view, spec.otherRootOp)
+
+        compare(spec.visibleNamed(s.view, "replyDraftField").length, 1,
+                "the other thread's reply composer is on screen")
+        compare(spec.outcomesShown(s.view, "reply"), 0,
+                "and displays no outcome of a reply made to the first thread")
+        s.view.destroy()
+    }
+
+    // Requirement: "This holds ... whatever state that visit's read reaches, a
+    // failed read included", and it applies to the reply composer too. On the
+    // thread screen a failed read hides the composer, so absence DURING the
+    // failure proves nothing: the outcome must be absent once the read recovers
+    // and the composer is back, on the visit that never published.
+    function test_a_failed_read_on_the_later_visit_to_the_thread_carries_no_outcome() {
+        var s = spec.openedOnStoaA()
+        spec.openTheThread(s.view)
+        spec.publish(s.view, "reply", "a reply")
+        compare(spec.outcomesShown(s.view, "reply"), 1)
+        spec.backToTheFeed(s.view)
+
+        s.bridge.readThreadFail = true
+        spec.openThreadNamed(s.view, spec.rootOp)
+        compare(s.view.threadReadState, "failed", "the later visit's read failed")
+        compare(spec.outcomesShown(s.view, "reply"), 0)
+
+        s.bridge.readThreadFail = false
+        spec.pressButtonReading(s.view, "Try reading again")
+        compare(s.view.threadReadState, "ok")
+        compare(spec.visibleNamed(s.view, "replyDraftField").length, 1,
+                "the composer is back on screen, so an outcome could be shown")
+        compare(spec.outcomesShown(s.view, "reply"), 0,
+                "and it shows none: nothing was published on this visit")
+        compare(spec.visibleTextsContaining(s.view, "saved on this machine"), [])
+        s.view.destroy()
+    }
+
+    // Scenario "Every kind of outcome is gone on the next visit", for the other
+    // composer. The requirement applies to every composer the view mounts, and
+    // the scenario's own text names only the feed.
+    function test_every_kind_of_reply_outcome_is_gone_on_the_next_visit_to_the_thread() {
+        var cases = [
+            { label: "already published", reply: '{"opId":"newreply","wasNew":false}',
+              says: "already published" },
+            { label: "refused", reply: '{"error":"the parent has not reached this peer"}',
+              says: "was not published" }
+        ]
+        for (var i = 0; i < cases.length; i++) {
+            var s = spec.openedOnStoaA()
+            s.bridge.replyReply = cases[i].reply
+            spec.openTheThread(s.view)
+            spec.publish(s.view, "reply", "a reply")
+            compare(spec.outcomesShown(s.view, "reply"), 1,
+                    cases[i].label + ": displayed on the visit that produced it")
+            verify(spec.visibleTextsContaining(s.view, cases[i].says).length > 0,
+                   cases[i].label + ": and it says so")
+
+            spec.backToTheFeed(s.view)
+            spec.openTheThread(s.view)
+
+            compare(spec.outcomesShown(s.view, "reply"), 0,
+                    cases[i].label + ": gone on the next visit")
+            compare(spec.visibleTextsContaining(s.view, cases[i].says), [],
+                    cases[i].label + ": nothing on screen still says it")
+            s.view.destroy()
+        }
+    }
+
+    // Requirement: a visit's definition names every main-area screen, so the
+    // moderation screen ends a visit to the feed and returning from it begins
+    // one, exactly as returning from a thread does.
+    function test_a_confirmation_is_gone_after_returning_from_moderation() {
+        var s = spec.openedOnStoaA()
+        spec.publish(s.view, "post", "first post")
+        compare(spec.outcomesShown(s.view, "post"), 1)
+
+        spec.visibleNamed(s.view, "feed")[0].moderationRequested()
+        compare(s.view.screenShown, "moderation")
+        spec.visibleNamed(s.view, "moderationBackButton")[0].clicked()
+        compare(s.view.screenShown, "feed")
+
+        compare(spec.outcomesShown(s.view, "post"), 0,
+                "returning from moderation begins a new visit to the feed")
+        s.view.destroy()
+    }
+
+    // Requirement: "Re-reading, paging or changing what a screen lists while it
+    // stays rendered does not begin a new visit." Paging.
+    function test_paging_the_feed_within_the_visit_keeps_the_outcome() {
+        var s = spec.openedOnStoaA()
+        s.bridge.hasMoreThreads = true
+        spec.publish(s.view, "post", "first post")
+        compare(spec.outcomesShown(s.view, "post"), 1)
+
+        spec.pressButtonReading(s.view, "Next")
+        compare(spec.argsOfLast(s.bridge, "list_threads").page, 1,
+                "the feed read the next page")
+        compare(spec.outcomesShown(s.view, "post"), 1,
+                "the outcome survives paging forward")
+
+        spec.pressButtonReading(s.view, "Previous")
+        compare(spec.argsOfLast(s.bridge, "list_threads").page, 0,
+                "the feed read the first page again")
+        compare(spec.outcomesShown(s.view, "post"), 1,
+                "and paging back")
+        s.view.destroy()
+    }
+
+    // The same rule, for changing what the screen lists.
+    function test_changing_what_the_feed_lists_within_the_visit_keeps_the_outcome() {
+        var s = spec.openedOnStoaA()
+        spec.publish(s.view, "post", "first post")
+        compare(spec.outcomesShown(s.view, "post"), 1)
+
+        spec.toggleShowHidden(s.view)
+        compare(spec.argsOfLast(s.bridge, "list_threads").includeHidden, true,
+                "the feed re-read asking for hidden posts")
+        compare(spec.outcomesShown(s.view, "post"), 1)
+        s.view.destroy()
+    }
+
+    function test_changing_what_the_thread_lists_within_the_visit_keeps_the_outcome() {
+        var s = spec.openedOnStoaA()
+        spec.openTheThread(s.view)
+        spec.publish(s.view, "reply", "a reply")
+        compare(spec.outcomesShown(s.view, "reply"), 1)
+
+        spec.toggleShowHidden(s.view)
+        compare(spec.argsOfLast(s.bridge, "read_thread").includeHidden, true,
+                "the thread re-read asking for hidden posts")
+        compare(spec.outcomesShown(s.view, "reply"), 1)
         s.view.destroy()
     }
 
