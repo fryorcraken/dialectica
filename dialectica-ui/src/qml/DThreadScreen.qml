@@ -722,11 +722,20 @@ ScreenFrame {
             onPublished: screen.reload()
         }
 
-        // What a reply IS. The bundle's own caveat ends "earlier versions stay
-        // readable", which promises the facility the control above is inert for
-        // — so the promise is dropped and what remains is true.
+        // What a reply IS, and nothing about what can be done to one afterwards.
+        // `thread-view` requires this text to state that a reply is signed, and
+        // forbids it to say whether a reply can be edited or its earlier
+        // versions read.
+        //
+        // **No editing or version statement belongs here, promise or denial.**
+        // Nothing on this screen edits a reply, no method on the module surface
+        // publishes a revision, and none reads a prior version, so a promise
+        // ("it can be edited later", "earlier versions stay readable") offers
+        // something absent. Editing is planned, so a denial would go false the
+        // day it lands, with nothing here to prompt its removal.
         Text {
-            text: "A reply is a signed record. It can be edited later."
+            objectName: "replyCaption"
+            text: "A reply is a signed record."
             font: DTheme.note
             color: DTheme.inkSoft
             wrapMode: Text.WordWrap
