@@ -147,7 +147,8 @@ ColumnLayout {
     // being fully compliant with every prohibition.
     //
     // The stakes are specific rather than general good manners. A publish reply
-    // carries no delivery outcome by design, delivery is not wired at all, and a
+    // carries no delivery outcome by design, core hands the op to the network
+    // without hearing whether any peer received it, and a
     // body that is legal but near the cap encodes past what the transport will
     // carry — so it is stored locally and silently refused by every receiving
     // peer. An author cannot tell a post nobody received from one everybody did,
