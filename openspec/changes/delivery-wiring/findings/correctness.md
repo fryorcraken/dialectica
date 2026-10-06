@@ -930,3 +930,7 @@ Checked and clean:
 Taste, no box: the failure message's re-read paths
 (`waku/waku_core/topics/…`, `channels/api/…`) drop the `logos_delivery/` prefix
 they carry in the tree.
+
+## Re-review round 10 `87596ac4..c0190bda`
+
+- [x] **re-review round 10 `87596ac4..c0190bda`: no findings** — read the `transport.rs` and `docs/SCAFFOLD.md` diffs; my round-9 box is answered as its outcome says (with `scaffold.toml:28`'s rev changed `b8b9…` to `c8b9…` and the lock untouched, `the_scaffold_installs_the_delivery_module_the_lock_holds` fails naming node `delivery_module`, both revs, and the other five `delivery_topic_rule` tests stay green; reverted); `ab104397` checked out alone leaves the suite green at 1317 + 30 + 3 (the tip is 1318 with the new test) and its `lock_nodes_of` is the old filter with `repo` and `"/{repo}"` substituted for the literals; the only source file in the range is `transport.rs`, every hunk of it a doc comment or inside `#[cfg(test)]` code, so no production code changed; the `include_str!` paths resolve (`../../../flake.lock` to `dialectica/flake.lock`, `../../../../scaffold.toml` to the repo root); clean
