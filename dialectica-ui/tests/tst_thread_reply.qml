@@ -425,68 +425,150 @@ TestCase {
         screen.destroy()
     }
 
-    // ---- no edit claim beside the reply composer -------------------------
+    // ---- no edit or version claim beside the reply composer ---------------
     //
     // `thread-view`'s "The text around the reply composer does not promise that
-    // a reply can be edited". The screen offers no way to edit a reply, and no
-    // method on the module surface publishes a revision. So any text promising
-    // either one is false.
+    // a reply can be edited, or that its earlier versions can be read". The
+    // screen offers no way to edit a reply, no method on the module surface
+    // publishes a revision, and none reads a prior version. So any text
+    // promising one of those is false.
     //
     // The spec forbids a CLAIM, not one sentence. These tests therefore match
     // a pattern rather than looking for the removed string, so a reworded
     // promise ("Replies may be revised") fails as well. They walk only the
     // composer's group and the shut gate: the fixture's root is revised, so
     // the thread's rows render `edited` and "read the earlier versions". Both
-    // are reports of what an author did, which the requirement says it does
-    // not bear on, and a whole-screen walk would fail on them.
+    // are reports of what an author did, or an inert affordance on a post,
+    // which the requirement says it does not bear on, and a whole-screen walk
+    // would fail on them. `test_the_walk_does_not_reach_the_thread_rows_...`
+    // pins that scope.
+    //
+    // **The matcher is stricter than the spec on purpose.** It flags a word,
+    // so it also flags a sentence that DENIES the claim ("A reply cannot be
+    // edited"), which the spec permits. Honest copy of that kind is a
+    // legitimate future edit, and when it comes the answer is to read the
+    // requirement and narrow this pattern deliberately, not to reword the
+    // sentence around it. The word list is hand-maintained: a paraphrase
+    // outside it passes, and the table in the matcher test is the place a
+    // missed paraphrase is added.
     //
     // design.md Decision 3 covers the alternatives, and what breaks without
     // each guard below.
 
-    // True where `text` claims a reply can be edited, or that a later version
-    // of it can be published.
+    // True where `text` claims a reply can be edited (or amended, updated,
+    // corrected, republished), or mentions a version of it at all, which covers
+    // both "a later version can be published" and "earlier versions stay
+    // readable". Nothing this group renders has any reason to say "version".
     function claimsEditing(text) {
-        return /\b(edit|revis|amend|rewrit|chang)\w*|\b(later|new|newer|another|next) versions?\b/i
+        return /\b(edit|revis|amend|rewrit|chang|updat|modif|correct|supersed|overwrit|republish|re-publish)\w*|\bversions?\b/i
             .test(text)
     }
 
-    // The matcher, pinned both ways. A `claimsEditing` that always answered
-    // false would make all three scenario tests below pass on any tree. This
-    // is the test that fails then.
-    function test_the_edit_claim_matcher_flags_edit_claims_and_nothing_else() {
-        var claims = [
+    // The matcher, pinned both ways, one test per family of claim and one for
+    // what it must leave alone. A `claimsEditing` that always answered false
+    // would make all three scenario tests below pass on any tree; these are the
+    // tests that fail then. They are separate so that the first family to fail
+    // does not hide the others.
+    //
+    // Every string here is written out by hand: the claims from the
+    // requirement, the truthful ones as the screen's copy was when this was
+    // written. None is read off the screen at run time, so the matcher is never
+    // asked to agree with what the implementation produced.
+    function unflagged(strings) {
+        var missed = []
+        for (var i = 0; i < strings.length; i++)
+            if (!claimsEditing(strings[i]))
+                missed.push(strings[i])
+        return missed
+    }
+
+    function test_the_matcher_flags_a_claim_that_a_reply_can_be_edited() {
+        compare(unflagged([
             "A reply is a signed record. It can be edited later.",
             "Replies may be revised.",
             "You can amend this reply after publishing it.",
             "You can change it later.",
+            "You can update this reply afterwards.",
+            "You can modify a reply once it is published.",
+            "A correction can be published.",
+            "A reply can be republished with different text."
+        ]), [], "an edit claim the matcher let through")
+    }
+
+    function test_the_matcher_flags_a_claim_that_a_later_version_can_be_published() {
+        compare(unflagged([
             "A later version of this reply can be published.",
             "Publish a new version at any time.",
-            "Newer versions of a reply can be published."
-        ]
-        for (var i = 0; i < claims.length; i++)
-            verify(claimsEditing(claims[i]),
-                   "the matcher must flag an edit claim: \"" + claims[i] + "\"")
+            "Newer versions of a reply can be published.",
+            "Another version can follow."
+        ]), [], "a later-version claim the matcher let through")
+    }
 
+    // The requirement's own clause for reading a prior version. The first
+    // string is the design bundle's clause, verbatim, which stood unguarded
+    // when only edit claims were forbidden.
+    function test_the_matcher_flags_a_claim_that_an_earlier_version_can_be_read() {
+        compare(unflagged([
+            "earlier versions stay readable",
+            "A reply is a signed record; earlier versions stay readable.",
+            "Earlier versions of a reply can be read.",
+            "You can read the previous version of a reply.",
+            "Every version of a reply is kept.",
+            // The thread rows' own label. It is no claim inside the composer's
+            // group, but the matcher must recognise it, or the scope test
+            // below would prove nothing about why the walk is scoped.
+            "read the earlier versions"
+        ]), [], "an earlier-version claim the matcher let through")
+    }
+
+    function test_the_matcher_leaves_alone_what_the_composers_group_renders() {
         // The strings this group legitimately renders, as the fixture drives
-        // it. If a sentence like these were flagged, these tests would be
+        // it, including everything the composer's outcome area says after a
+        // publish. If a sentence like these were flagged, these tests would be
         // reporting copy and not a claim.
         var truthful = [
             "A reply is a signed record.",
             "REPLYING AS",
             "Publish the reply",
+            "42 OF 153600 BYTES",
             "You cannot reply in this Stoa yet.",
             "no keystore",
-            "There is no disabled composer here. A box you could type into and not send would lose what you wrote."
+            "There is no disabled composer here. A box you could type into and not send would lose what you wrote.",
+            "Your reply was saved on this machine.",
+            "This reply was already published.",
+            "Your reply was not published.",
+            "It is in this machine's log.",
+            "The identical content is already in this machine's log, under the same op id. Nothing new was written.",
+            "Whether any other peer has received it is not something this software can tell you yet.",
+            "Nothing was published and what you wrote is still here. You can try again.",
+            "This reply is longer than the core module will accept, so it cannot be sent yet. Nothing has been removed from what you wrote.",
+            "This draft contains 2 invisible character(s). They will be published exactly as you typed them, and readers' software will remove them when it renders this reply."
         ]
+        var flaggedWrongly = []
         for (var j = 0; j < truthful.length; j++)
-            verify(!claimsEditing(truthful[j]),
-                   "the matcher must not flag a sentence making no edit claim: \""
-                   + truthful[j] + "\"")
+            if (claimsEditing(truthful[j]))
+                flaggedWrongly.push(truthful[j])
+        compare(flaggedWrongly, [],
+                "a sentence making no edit or version claim, flagged")
+    }
+
+    // Every `text` an item and its descendants carry. A TextField's placeholder
+    // is among them without being asked for: its default style renders the
+    // prompt through a child Text (measured, by putting a placeholder in the
+    // group). The walk reads `children` only, so text a popup or an attached
+    // tooltip carries is out of its reach, which this suite cannot see. It
+    // ignores `visible`, so a hidden Text is walked as well, which is stricter
+    // than "rendered" and cannot hide a claim that is merely shown later.
+    function stringsUnder(item, out) {
+        if (typeof item.text === "string")
+            out.push(item.text)
+        for (var i = 0; i < item.children.length; i++)
+            stringsUnder(item.children[i], out)
     }
 
     function editClaimsUnder(item) {
         var texts = []
-        collectTexts(item, texts)
+        stringsUnder(item, texts)
         var flagged = []
         for (var i = 0; i < texts.length; i++)
             if (claimsEditing(texts[i]))
@@ -494,33 +576,82 @@ TestCase {
         return { texts: texts, flagged: flagged }
     }
 
-    function test_the_open_composers_text_makes_no_edit_claim() {
+    // Non-vacuity for the open group: a walk that reached the wrong item, or
+    // nothing, would collect no text and report no claim. The anchors are the
+    // group's two stable pieces of its own, the attribution line and the
+    // composer's submit label, which together show the walk covers the group
+    // and descends into the composer inside it. They are not the caption: the
+    // caption's removal is `test_the_caption_beside_the_composer_is_kept`'s to
+    // report, and must not be reported as an inability to look for a claim.
+    //
+    // A caption anywhere on the screen must lie inside the walked group. A
+    // caption moved out of it, carrying a claim, would otherwise be text beside
+    // the composer that no walk reaches.
+    function verifyWalkCoversTheOpenGroup(screen, open, found) {
+        verify(found.texts.indexOf("REPLYING AS") !== -1,
+               "the walk reached the attribution line of the composer group")
+        verify(found.texts.indexOf("Publish the reply") !== -1,
+               "and went down into the composer's own submit label")
+        var caption = findChild(screen, "replyCaption")
+        if (caption !== null)
+            verify(findChild(open, "replyCaption") === caption,
+                   "a caption on the screen lies inside the group the walk covers")
+    }
+
+    function test_the_open_composers_text_makes_no_edit_or_version_claim() {
         var calls = []
         var screen = makeScreen(calls, true)
 
         var open = findChild(screen, "replyComposerOpen")
         verify(open !== null && open.visible, "an open gate renders the composer group")
 
-        // Non-vacuity: the caption beside the composer is in the walk's reach.
-        // A walk that reached the wrong item, or nothing, would collect no
-        // text and report no claim.
-        var caption = findChild(open, "replyCaption")
-        verify(caption !== null && caption.visible,
-               "the caption is inside the composer group the walk covers")
-
         var found = editClaimsUnder(open)
-        verify(found.texts.indexOf(caption.text) !== -1,
-               "and the walk collected it")
-        compare(found.flagged.length, 0,
+        verifyWalkCoversTheOpenGroup(screen, open, found)
+        compare(found.flagged, [],
                 "no text rendered with the reply composer may claim a reply can be "
-                + "edited or re-published as a later version; flagged: "
-                + JSON.stringify(found.flagged))
+                + "edited, that a later version of it can be published, or that "
+                + "an earlier version of it can be read")
         screen.destroy()
+    }
+
+    // The walk is scoped to the composer's group and the shut gate, because the
+    // thread's own rows legitimately render `edited` and "read the earlier
+    // versions" on a revised post, and `thread-view` says the requirement does
+    // not bear on them. This pins that the scoping is what keeps the tests
+    // above green on those two strings, and not a matcher that fails to see
+    // them: the matcher flags both, on the screen as a whole, and neither is in
+    // either group's walk.
+    function test_the_walk_does_not_reach_the_thread_rows_that_report_a_revision() {
+        var gates = [
+            { canPost: true, group: "replyComposerOpen" },
+            { canPost: false, group: "replyGateShut" }
+        ]
+        for (var g = 0; g < gates.length; g++) {
+            var calls = []
+            var screen = makeScreen(calls, gates[g].canPost)
+
+            var wholeScreen = editClaimsUnder(screen)
+            verify(wholeScreen.flagged.indexOf("edited") !== -1,
+                   "the revised marker is on screen and the matcher flags it")
+            verify(wholeScreen.flagged.indexOf("read the earlier versions") !== -1,
+                   "so is the earlier-versions label, and the matcher flags it")
+
+            var group = findChild(screen, gates[g].group)
+            verify(group !== null && group.visible, gates[g].group + " is rendered")
+            var inGroup = editClaimsUnder(group)
+            compare(inGroup.flagged.indexOf("edited"), -1,
+                    gates[g].group + "'s walk does not reach the revised marker")
+            compare(inGroup.flagged.indexOf("read the earlier versions"), -1,
+                    gates[g].group + "'s walk does not reach the earlier-versions label")
+            compare(findChild(group, "earlierVersionsInert"), null,
+                    "the earlier-versions row is not inside " + gates[g].group)
+            screen.destroy()
+        }
     }
 
     // The caption stays on screen across a publish, so the check is repeated
     // after one, with the re-read returning the published reply.
-    function test_no_edit_claim_appears_after_a_reply_is_published() {
+    function test_no_edit_or_version_claim_appears_after_a_reply_is_published() {
         var calls = []
         var published = false
         Core.bridge = {
@@ -554,25 +685,29 @@ TestCase {
         composer.draft = "Bye!"
         composer.submit()
 
+        // Non-vacuity, in two parts, so the walk below is of the state the
+        // scenario names. The composer reports the publish stored the op, and
+        // the screen's re-read returned the fixture's second item. Each fails
+        // loudly, rather than passing on the pre-publish tree, if the fixture's
+        // `publish_reply` and `read_thread` stop agreeing with each other.
+        compare(composer.outcome, "stored",
+                "the publish went through the composer and was newly stored")
         compare(screen.items.length, 2,
                 "the thread was read again and holds the published reply")
 
         var open = findChild(screen, "replyComposerOpen")
         verify(open !== null && open.visible, "the composer group is still rendered")
-        var caption = findChild(open, "replyCaption")
-        verify(caption !== null && caption.visible,
-               "the caption is still beside the composer after the publish")
 
         var found = editClaimsUnder(open)
-        verify(found.texts.indexOf(caption.text) !== -1, "and the walk collected it")
-        compare(found.flagged.length, 0,
+        verifyWalkCoversTheOpenGroup(screen, open, found)
+        compare(found.flagged, [],
                 "after a publish, no text rendered with the reply composer may "
-                + "claim the reply can be edited; flagged: "
-                + JSON.stringify(found.flagged))
+                + "claim the reply can be edited, that a later version of it can "
+                + "be published, or that an earlier version of it can be read")
         screen.destroy()
     }
 
-    function test_the_shut_gates_text_makes_no_edit_claim() {
+    function test_the_shut_gates_text_makes_no_edit_or_version_claim() {
         var calls = []
         var screen = makeScreen(calls, false)
 
@@ -583,14 +718,15 @@ TestCase {
         var found = editClaimsUnder(shut)
         verify(found.texts.indexOf("You cannot reply in this Stoa yet.") !== -1,
                "the walk reached the shut gate's text")
-        compare(found.flagged.length, 0,
+        compare(found.flagged, [],
                 "no text rendered in place of the reply composer may claim a reply "
-                + "can be edited; flagged: " + JSON.stringify(found.flagged))
+                + "can be edited, that a later version of it can be published, or "
+                + "that an earlier version of it can be read")
         screen.destroy()
     }
 
-    // NO SPEC: the spec forbids an edit claim but does not say whether the
-    // caption stays. This change keeps its true half, that a reply is a signed
+    // NO SPEC: the spec forbids an edit or version claim but does not say
+    // whether the caption stays. This change keeps its true half, that a reply is a signed
     // record (design.md Decision 1), so removing the caption entirely is a
     // visible choice rather than a silent one.
     function test_the_caption_beside_the_composer_is_kept() {
