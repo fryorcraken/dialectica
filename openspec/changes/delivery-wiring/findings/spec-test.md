@@ -1460,3 +1460,51 @@ changes the content topic's shape inside the reliable channel the issue asks for
 adds no scope.
 
 - [x] **re-review round 9 `43844f2b..87596ac4`: no findings** — read the MODIFIED op-transport block against the live requirement and its five scenarios (verbatim, additions only), the new scenario against the derived-topic test, the five-part refusal test and the lock-pin test, and my round-8 box; clean
+
+## Re-review round 10 `87596ac4..c0190bda`
+
+**The new `composer-view` MODIFIED delta loses nothing.** I read it against the live
+requirement "A successful publish claims local storage and never delivery"
+(`openspec/specs/composer-view/spec.md` lines 294-363) line by line: the lead
+`SHALL`/`SHALL NOT` paragraph, the "counts, state, progress" prohibition, the bold
+positive-denial obligation, the silence and prohibition-only rationale paragraphs,
+and all five scenarios are verbatim. The only difference is the one clause of the
+"stakes" paragraph: "delivery is not wired at all" became "where core hands the op
+to the network, it learns nothing of whether any peer received it". No `SHALL` was
+added, dropped or weakened, so no obligation moved. The proposal's note says exactly
+that and states that no user-facing string changes. The new clause agrees with
+`op-transport` ("the reply carries no delivery outcome"; "no delivery outcome for it
+ever arrives") and with `content-authoring`: a handoff report is not peer receipt.
+Every composer scenario still maps to the same view tests; none of those moved in
+this range.
+
+**The reworded `op-transport` sentence** drops the claim that a wrong-part-count
+name is "read with segments other than `dialectica` and `1`", and says a name that
+begins with the prefix and is accepted is read as `dialectica`/`1`, so that half of
+the rule restates the prefix. The requirement's obligation (the rule reads it with
+`dialectica` and `1`) is unchanged, and the sentence is now true: a
+generation-bearing form cannot start with a non-numeric `dialectica`. The scenarios
+and the tests that pin them (`the_content_topic_is_one_delivery_parses_with_dialectica_as_application`,
+the five-part refusal) are untouched and still apply.
+
+**The new `transport.rs` test can fail for its reason.**
+`the_scaffold_installs_the_delivery_module_the_lock_holds` compares two sources the
+implementation did not produce, `scaffold.toml`'s `[modules.delivery_module]` rev
+and `dialectica/flake.lock`'s `logos-delivery-module` node. It fails if the table or
+key is missing (`expect`) and if the lock has no such node (`assert!(!locked.is_empty())`),
+so neither a rename nor a deletion passes by matching nothing. The `lock_nodes_of`
+extraction leaves the existing logos-delivery test's behaviour unchanged (still
+asserts a non-empty set and each rev against `DELIVERY_REV`). No scenario names
+either test; they guard the fake's pin, as before, which is the design-level pin
+reading already recorded. No `NO SPEC:` marker is new in the range.
+
+**Ran:** after staging the SDK with the `nix build --inputs-from` command,
+`cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p dialectica-core
+delivery_topic_rule` passed (6 passed). **Mutation skipped:** I tried to change the
+first character of the scaffold's rev, and the permission classifier denied the
+edit to `scaffold.toml`, so I did not work round it. The test's discriminating
+power rests on reading only: two independent texts compared with `assert_eq`. No
+mutation is left in the tree. The staged `dialectica/logos-rust-sdk-src` symlink is
+gitignored.
+
+- [x] **re-review round 10 `87596ac4..c0190bda`: no findings** — read the composer-view MODIFIED delta against the live requirement and its five scenarios (verbatim except the one clause), the reworded op-transport sentence, and the transport.rs test hunks; clean
