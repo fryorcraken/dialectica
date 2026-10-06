@@ -62,5 +62,15 @@ archived (`2026-09-28`); the #174 reasoning is archived where `design.md` says.
 - [ ] **`dev-writer`** — `design.md:160-166` — unrecorded: `.claude/settings.json` departs from what `/specflow:init` writes. Init merges a `permissions.allow` block (`git`, `gh pr/run/issue/api`, `gh repo view`, `openspec`, `grep`, `pwd`) into the **tracked** `settings.json` (`init/SKILL.md:35-64`, plugin `DECISIONS.md` #15). This repo keeps its allowlist in the untracked `settings.local.json` (`.gitignore:60-63`), and this change follows the repo, not the plugin. That is a reasonable choice, but nothing records it.
       **Scenario:** the owner later runs `/specflow:init`, for example to re-check headings or `gh auth`. It merges an allowlist into the tracked `settings.json`, so every clone gets it, against `.gitignore`'s stated rule, and nothing fails. Record that the allowlist stays machine-local here, and whether `/specflow:init` may ever run in this repo or only `/specflow:sync`.
 
-- [ ] **`dev-writer`** — `design.md:28-69` — "Corrections to the draft" leaves out two overlay lines that differ from the issue's draft. (1) `PROJECT.md:50` gives `lgs basecamp launch <profile>`, where the draft has no argument. The correction is right (`README.md:60` runs `lgs basecamp launch alice`) but is not listed. (2) `PROJECT.md:24-25`, "The `-p` flags are load-bearing", is not in the draft or in any deleted file. It restates `README.md:84-86`, which makes a second copy of README text. `design.md:62-64` keeps the SDK-staging command in `README.md` only, so the two choices need reconciling or the duplicate needs a reason.
+- [x] **`dev-writer`** — `design.md:28-69` — "Corrections to the draft" leaves out two overlay lines that differ from the issue's draft. (1) `PROJECT.md:50` gives `lgs basecamp launch <profile>`, where the draft has no argument. The correction is right (`README.md:60` runs `lgs basecamp launch alice`) but is not listed. (2) `PROJECT.md:24-25`, "The `-p` flags are load-bearing", is not in the draft or in any deleted file. It restates `README.md:84-86`, which makes a second copy of README text. `design.md:62-64` keeps the SDK-staging command in `README.md` only, so the two choices need reconciling or the duplicate needs a reason.
       **Scenario:** the section reads as the complete set of departures ("Corrections to the draft, each checked against the file named"), so a reviewer comparing the overlay with the draft finds two changes nobody accounts for.
+      **Fixed** in the commit "Correct the overlay and CLAUDE.md where review
+      found them wrong". (1) `launch <profile>` is now listed, citing
+      `README.md`'s `lgs basecamp launch alice`. (2) Reconciled by removing the
+      duplicate: the overlay's `-p` bullet is gone, and its SDK bullet points
+      at `README.md`, "Building", for why the flags matter, the same
+      one-copy choice as the staging command; the Rust row keeps the flags in
+      its command. The same commit lists the other overlay lines that review
+      found wrong (`Main.qml`, the `grep -c` job, the `[basecamp.env]`
+      switches, the unprompted QML script, the `yq` probe), so the section
+      stays the complete set of departures.

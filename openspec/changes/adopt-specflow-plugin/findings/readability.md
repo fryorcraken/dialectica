@@ -7,7 +7,7 @@ Dimension: readability only. Reviewed the whole diff against `origin/main`:
 deleted file (`git grep` for the four deleted doc names, the nine role-file
 names, the removed section titles, and quoted `CLAUDE.md` sentences).
 
-- [ ] **`dev-writer`** — `CLAUDE.md:9-13` — the intro's last sentence, *"The
+- [x] **`dev-writer`** — `CLAUDE.md:9-13` — the intro's last sentence, *"The
       specflow block carries its own table for the flow, the runner and the
       project overlay:"*, ends in a colon that introduces the **dialectica**
       table (`docs/SCAFFOLD.md`, `docs/SOURCES.md`) directly below it, not the
@@ -16,8 +16,13 @@ names, the removed section titles, and quoted `CLAUDE.md` sentences).
       **Scenario:** a reader takes the two-row table as the specflow block's
       table and looks in it for the runner and the overlay.
       **Severity:** low; misleading transition, not a wrong fact.
+      **Fixed** in the commit "Correct the overlay and CLAUDE.md where review
+      found them wrong": the colon now ends "…worth reading in full", and the
+      specflow-table sentence follows the two-row table. The block is
+      untouched: `cmp` against the plugin's `skills/sync/SKILL.md` still exits
+      0 at the new offsets (see `tasks.md` 2.3).
 
-- [ ] **`dev-writer`** — `CLAUDE.md:250-256` and `:275` — the retained "Module
+- [x] **`dev-writer`** — `CLAUDE.md:250-256` and `:275` — the retained "Module
       contract traps" entry still says *"`qmllint --missing-property error`
       cannot see this defect: CI passes `-I dialectica-ui/src/qml`, which puts
       our own `Theme.qml` on the import path"*, and *"It does catch every
@@ -34,8 +39,20 @@ names, the removed section titles, and quoted `CLAUDE.md` sentences).
       --missing-property warning -W 0`.
       **Severity:** medium; contradictory instructions across two files every
       agent reads in full.
+      **Fixed** in the commit "Correct the overlay and CLAUDE.md where review
+      found them wrong". `CLAUDE.md` now says `qmllint` (no level), names the
+      singleton file `DTheme.qml`, says `check_qml_members.sh` runs
+      `--missing-property warning -W 0` because the pinned Qt rejects
+      `error`, and calls the later reference "qmllint's `missing-property`
+      check", the wording `ci.yml:260` uses. The same edit puts "no spec
+      instantiates `Main.qml`" in the past tense, which
+      `findings/correctness.md` noted outside its boxes. Re-measured:
+      `git ls-files dialectica-ui/src/qml/DTheme.qml` lists the file,
+      `git grep -n -F "missing-property error" -- CLAUDE.md` prints nothing.
+      The section is a kept one; this is the block's "Prune as you go", not a
+      rewrite.
 
-- [ ] **`dev-writer`** — `.claude/specflow/PROJECT.md:109-113` — *"`CLAUDE.md`'s
+- [x] **`dev-writer`** — `.claude/specflow/PROJECT.md:109-113` — *"`CLAUDE.md`'s
       "Module contract traps" has the full account"* is a cross-reference
       orphaned by the move. In the deleted `.claude/agents/README.md:570-579` it
       followed a sentence about the `Theme`/`DTheme` collision, which is what
@@ -48,8 +65,14 @@ names, the removed section titles, and quoted `CLAUDE.md` sentences).
       **Measured:** `git grep -n -E "QT_FORCE_STDERR_LOGGING|manifest field" --
       CLAUDE.md` prints nothing.
       **Severity:** low.
+      **Fixed** in the commit "Correct the overlay and CLAUDE.md where review
+      found them wrong", together with `findings/correctness.md`'s box on the
+      same lines. The hazard now points at `docs/SCAFFOLD.md`,
+      "`[basecamp.env]`", for the switches, and names what "Module contract
+      traps" does hold: the `DTheme` collision and the `check_bindings`
+      account.
 
-- [ ] **`dev-writer`** — `.claude/specflow/PROJECT.md:14` — the "Static QML
+- [x] **`dev-writer`** — `.claude/specflow/PROJECT.md:14` — the "Static QML
       gates" row's Sees column claims three properties (name collision,
       undefined member, unreachable type), but its Command column gives one
       gate, introduced with a colon as if it were the list: *"each gate as
@@ -61,6 +84,13 @@ names, the removed section titles, and quoted `CLAUDE.md` sentences).
       pairs, or say "for example".
       **Measured:** `ci.yml:313-316` and `:1010-1013` run the other two pairs.
       **Severity:** low.
+      **Fixed** in the commit "Correct the overlay and CLAUDE.md where review
+      found them wrong": the row names all three pairs, each with its job,
+      and the Sees column lists the three properties in the same order. Each
+      command was run on this tree: `tst_check_qml_reachable.py` "all cases
+      passed"; `check_qml_reachable.py dialectica-ui` "ok: 25 registered
+      type(s)…"; `check_qml_members.sh` "ok: 26 QML file(s) checked". The
+      member gate's Qt floor (6.5) is from its own error text.
 
 - [x] **`dev-writer`** — `dialectica-ui/tests/tst_render_probe.qml:14-15` —
       *"which CLAUDE.md records as indistinguishable from a plugin that failed

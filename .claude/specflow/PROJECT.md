@@ -10,8 +10,8 @@ this project's facts; it does not change specflow's rules.
 | Layer | Command | Sees | Cannot see |
 |---|---|---|---|
 | Rust core and module tests | `cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p dialectica -p dialectica-core` | pure logic in `dialectica-core` (`dialectica/rust-lib/dialectica-core/tests/`) and the module crate — no Qt, no network, no FFI | anything behind `cfg(logos_scaffold)`, which `cargo test` never compiles — the adapter in `dialectica/rust-lib/src/lib.rs` included; a real cross-process call |
-| QML component tests | `sh dialectica-ui/tests/run-qml-tests.sh`, or one spec: `sh dialectica-ui/tests/run-qml-tests.sh dialectica-ui/tests/tst_<name>.qml` | what one component decides on its own | wiring, a cross-process call, and a type-name collision with the host — under `qmltestrunner` the host is absent; `Main.qml` is instantiated by no spec |
-| Static QML gates | each gate as `ci.yml`'s `lint` and `qml` jobs run it, its own tests first: `dialectica-ui/tests/tst_check_qml_names.py`, then `dialectica-ui/tests/check_qml_names.py dialectica-ui` | a host type-name collision (the `D` prefix rule), an undefined member read off our own types, an unreachable registered type | behaviour; each reads names and structure, not what a binding evaluates to |
+| QML component tests | `sh dialectica-ui/tests/run-qml-tests.sh`, or one spec: `sh dialectica-ui/tests/run-qml-tests.sh dialectica-ui/tests/tst_<name>.qml` | what one component decides on its own, and the navigation in `Main.qml`, which `tst_navigation.qml` and `tst_stoa_screens.qml` drive | a cross-process call; a type-name collision with the host — under `qmltestrunner` the host is absent; an undefined binding in a component no spec constructs, which `check_bindings` never sees (`check_qml_members.sh` covers members in every file) |
+| Static QML gates | three gates, each with its own test, run as `ci.yml` runs them, test first: `dialectica-ui/tests/tst_check_qml_names.py` then `dialectica-ui/tests/check_qml_names.py dialectica-ui` (`lint` job); `dialectica-ui/tests/tst_check_qml_reachable.py` then `dialectica-ui/tests/check_qml_reachable.py dialectica-ui` (`lint`); `dialectica-ui/tests/tst_check_qml_members.sh` then `dialectica-ui/tests/check_qml_members.sh` (`qml`; needs a `qmllint` from Qt 6.5 or later) | in that order: a host type-name collision (the `D` prefix rule), an unreachable registered type, an undefined member read off our own types | behaviour; each reads names and structure, not what a binding evaluates to |
 | End-to-end UI specs | no one-command local form: `.github/workflows/ui-tests.yml` builds a Basecamp with `lgs` and drives each `dialectica-ui/tests/ui/<name>.yaml` with sitometres | real clicks in a real Basecamp against the real `dialectica` core module — the only layer inside the host | anything no spec drives; a spec missing from the workflow's matrix (the `Every spec in the tree is in the matrix` step catches that) |
 | Scaffold-gated Rust code | `nix build ./dialectica#lgx` | that the code behind `cfg(logos_scaffold)` compiles | behaviour; it is a build |
 
@@ -19,15 +19,20 @@ this project's facts; it does not change specflow's rules.
   `dialectica/logos-rust-sdk-src`, and cargo then fails with
   `failed to load manifest for dependency logos-rust-sdk` before compiling
   anything. The command is in `README.md`, "Building"; read it there rather
-  than from a copy. It is a plain `nix build`. Stage it yourself; do not stop
-  and wait for someone else to.
-- **The `-p` flags are load-bearing.** Without them cargo tests only the outer
-  package and reports `ok` having run almost none of the suite.
+  than from a copy, together with why the Rust row's `-p` flags are
+  load-bearing. It is a plain `nix build`. Stage it yourself; do not stop and
+  wait for someone else to.
 - **Counting tests:** `grep -c "function test_" <file>` for QML test
   functions, `grep -c "#\[test\]" <file>` for Rust ones.
 - Run the QML suite through the script, never through `qmltestrunner`
-  directly (see Hazards). A change touching no QML can break no QML test, so a
-  green component suite proves nothing about it.
+  directly (see Hazards). Passing it one spec file is the supported shape. A
+  change touching no QML can break no QML test, so a green component suite
+  proves nothing about it.
+- **This project's own commands**, the block's "the project's own" row:
+  `nix build …`, `lgs …`, and `sh dialectica-ui/tests/run-qml-tests.sh` with
+  one spec file. The block prices `sh <relative-path>` as a click in general;
+  this script is the exception here, so do not route around it to a bare
+  `qmltestrunner`.
 
 ## Build
 
@@ -85,7 +90,9 @@ coming back unviable.
     `Tests` step counts `#[test]` under `dialectica/rust-lib/`, and `every QML
     spec file actually ran` counts `dialectica-ui/tests/tst_*.qml`. A moved test
     directory can leave either measuring nothing.
-- The release job's `[ "$(… | grep -c …)" -gt 0 ]` form is deliberate; keep it.
+- The `build` job's "Stage artifacts" step tests each archive with
+  `[ "$(tar tzf … | grep -c …)" -gt 0 ]`, not `grep -q`, deliberately; keep
+  it. The step's own comment says why.
 
 ## Never commit
 
@@ -105,12 +112,17 @@ release outputs `basecamp/`, `ui-results/` and `dist/`.
   scaffold-gated Rust.
 - **Read YAML with `yq` and JSON with `jq`, never Python.** This repo's `yq` is
   the jq wrapper, so its filters are jq syntax and it ships `tomlq` for TOML.
-  The Go `yq` is a different tool, and the UI scripts refuse it by name.
+  The Go `yq` is a different tool. The UI scripts probe the `yq` on `PATH`
+  (`dialectica-ui/tests/require-jq-yq.sh`) and refuse any that does not turn
+  YAML into JSON.
 - **Basecamp swallows QML errors**: a view that fails to compile, a plugin
   skipped for a missing manifest field and a binding evaluating to `undefined`
-  all present as "clicking does nothing". To see them, set
-  `QT_FORCE_STDERR_LOGGING=1` and `QT_LOGGING_RULES=qt.qml.import.debug=true` in
-  `[basecamp.env]`. `CLAUDE.md`'s "Module contract traps" has the full account.
+  all present as "clicking does nothing". `scaffold.toml`'s `[basecamp.env]`
+  sets the two switches that make them visible, `QT_FORCE_STDERR_LOGGING` and
+  `QT_LOGGING_RULES`. Any `lgs basecamp` verb may rewrite that file, so check
+  with `git diff scaffold.toml` that they survived. `docs/SCAFFOLD.md`,
+  "`[basecamp.env]`", says what each one prevents; `CLAUDE.md`'s "Module
+  contract traps" has the `DTheme` collision and the `check_bindings` account.
 - **Never `readlink` or `ls` a `/nix/store` path** to find a build artefact; use
   the documented paths under `.scaffold/basecamp/`. Reading `logos-module-builder`
   or `logos-rust-sdk` source means reading the store, which needs `/add-dir`.

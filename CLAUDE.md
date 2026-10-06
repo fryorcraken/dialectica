@@ -7,14 +7,15 @@ bitten changes here, and — in the specflow block at the end — how to work in
 without costing the user a click per command.
 
 As the project grows, move trigger-specific material into `docs/` and link it
-from a table here, so that this file stays the thing worth reading in full. The
-specflow block carries its own table for the flow, the runner and the project
-overlay:
+from a table here, so that this file stays the thing worth reading in full:
 
 | Read | When |
 |---|---|
 | [`docs/SCAFFOLD.md`](docs/SCAFFOLD.md) | **Before changing a value in `scaffold.toml`**, or when a build, `install` or `launch` misbehaves. Every entry whose purpose is not visible from its value — why two `[repos.*]` tables exist for a zone we do not use, which pairs of `attr` values deadlock `install`, and what the settings under `[basecamp.env]` and `[basecamp.profiles.*]` are each preventing. It lives here because `lgs` deletes every comment in that file. |
 | [`docs/SOURCES.md`](docs/SOURCES.md) | **When a claim about the surrounding Logos ecosystem needs re-checking against source** — which local checkout has the delivery API, the SDS spec, the LEZ private-account construction, and which of those checkouts are stale working trees that will mislead if read directly. |
+
+The specflow block at the end carries its own table, for the flow, the runner
+and the project overlay.
 
 ## What this is
 
@@ -247,21 +248,24 @@ These are structural and bite at build time, not review time.
 
   Two things that log also settles, recorded so they are not re-argued.
   **`Core` does not collide** — 27 resolutions into the plugin's own `Core.qml`,
-  zero into the host namespace. And **`qmllint --missing-property error` cannot
-  see this defect**: CI passes `-I dialectica-ui/src/qml`, which puts our own
-  `Theme.qml` on the import path, so qmllint resolves to the correct singleton
-  where every member exists. It checks a different resolution than the app
-  performs, and a green from it says nothing about the collision.
+  zero into the host namespace. And **`qmllint` cannot see this defect**: CI
+  passes `-I dialectica-ui/src/qml`, which puts our own theme singleton
+  (`DTheme.qml`) on the import path, so qmllint resolves to the correct
+  singleton where every member exists. It checks a different resolution than
+  the app performs, and a green from it says nothing about the collision.
 
-  **It does catch every undefined MEMBER, which is a different and real class**
-  — and stating only the sentence above is precisely what left that unexamined.
-  `DTheme.noSuchDesk` in `Main.qml` passed the QML suite (no spec instantiates
-  `Main.qml`, so the runner's check never sees it), passed the name gate (a
-  D-prefixed typo contains no bare `Theme`), and passed qmllint, which printed
-  it as a **warning** into a green log. The escalation is now its own gate,
-  `dialectica-ui/tests/check_qml_members.sh`, with `tst_check_qml_members.sh`
-  beside it pinning both directions. Keep the two claims apart: it covers
-  members, never the collision.
+  **Its `missing-property` check does catch every undefined MEMBER, which is a
+  different and real class** — and stating only the sentence above is
+  precisely what left that unexamined. `DTheme.noSuchDesk` in `Main.qml` passed
+  the QML suite (at the time no spec instantiated `Main.qml`, so the runner's
+  check never saw it; specs drive it now, but a component no spec constructs
+  is still invisible to that check), passed the name gate (a D-prefixed typo
+  contains no bare `Theme`), and passed qmllint, which printed it as a
+  **warning** into a green log. The escalation is now its own gate,
+  `dialectica-ui/tests/check_qml_members.sh`, which runs `--missing-property
+  warning -W 0` — not the level `error`, which the Qt that CI pins rejects —
+  with `tst_check_qml_members.sh` beside it pinning both directions. Keep the
+  two claims apart: it covers members, never the collision.
 
   **A component test cannot catch this**, and that is the durable part. Under
   `qmltestrunner` the host is simply absent, so `verify(DTheme.x !== undefined)`
@@ -272,7 +276,7 @@ These are structural and bite at build time, not review time.
   renamed, if its `qmldir` entry is dropped, or if its file goes missing; an
   undeclared name throws rather than resolving. It is blind to the collision and
   to nothing else — and the overbroad version of the sentence is what left
-  qmllint's `--missing-property error` unexamined, so the imprecision cost
+  qmllint's `missing-property` check unexamined, so the imprecision cost
   coverage rather than being pedantic.
 
   The gate is therefore the static `no QML type name collides with the host`

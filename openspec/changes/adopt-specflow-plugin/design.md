@@ -53,6 +53,9 @@ Corrections to the draft, each checked against the file named:
   dialectica-ui/src/qml`; `check_qml_members.sh` is what escalates, with
   `--missing-property warning -W 0`, because Qt 6.8.3 rejects the level
   `error` (`ci.yml`'s Qt pin comment). The singleton is `DTheme`, not `Theme`.
+  `CLAUDE.md`'s "Module contract traps" carried the same wrong wording and is
+  corrected to match, so the two always-read files give one account of the
+  gate.
 - **The two layout-derived gates are named**: the Rust `Tests` step's
   `#[test]` count and `every QML spec file actually ran`. "Two gates" without
   names left the reader to find them.
@@ -67,6 +70,30 @@ Corrections to the draft, each checked against the file named:
 - **The current-version pointer**, `dialectica/metadata.json`, is in `## Build`:
   the block's own table says "the manifest that holds it" and the overlay names
   the manifest.
+- **`lgs basecamp launch <profile>`**, where the draft had no argument:
+  `README.md`, "Building", runs `lgs basecamp launch alice`.
+- **The `-p` explanation stays in `README.md`.** The overlay's Rust row keeps
+  the flags in its command, and its SDK bullet points at "Building" for why
+  they matter, rather than carrying a second copy of README text, the same
+  choice as the staging command.
+- **`Main.qml` is driven by specs.** The draft's "`Main.qml` is instantiated
+  by no spec" was history: `tst_navigation.qml` and `tst_stoa_screens.qml`
+  construct it, and `check_qml_members.sh`'s header says so. The QML row's
+  blind spot is now the narrower true one, a component no spec constructs.
+- **The `grep -c` form lives in the `build` job**, in "Stage artifacts". The
+  deleted `.claude/agents/README.md` said "release job", and the overlay
+  inherited the error; `release` contains no `grep`.
+- **The `[basecamp.env]` switches are already set** in the tracked
+  `scaffold.toml`, so the hazard says to check they survived an `lgs` verb
+  rather than to set them, and points at `docs/SCAFFOLD.md` for what each
+  prevents. `CLAUDE.md` names neither switch.
+- **`run-qml-tests.sh` with one spec is the unprompted shape.** The removed
+  `CLAUDE.md` text said so, and the block's table prices `sh <relative-path>`
+  as a click in general, so the overlay names the script, `nix build …` and
+  `lgs …` as the "project's own" commands the block's free row refers to.
+- **The `yq` guard probes, it does not match a name**:
+  `require-jq-yq.sh` feeds the `yq` on `PATH` a YAML document and refuses one
+  that does not return JSON.
 
 ### #174's flow rules: what the overlay keeps, and what it cannot
 
