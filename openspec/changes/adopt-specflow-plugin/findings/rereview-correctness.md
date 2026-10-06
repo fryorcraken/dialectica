@@ -6,9 +6,18 @@ the answered boxes in `findings/*.md` read as claims, and PR #196's body
 (`gh pr view 196`). Plugin checkout `agent-spec-flow` at `756e76a`, clean
 (`git -C <clone> status --short` prints nothing).
 
-- [ ] **`dev-writer`** — `openspec/changes/adopt-specflow-plugin/tasks.md:72-75` — 2.3's worked example says it was "worked at this change's last edit to `CLAUDE.md`" and gives begin 23900, end line 33368, byte length 33390. That stopped being true at `3b32d6f8` ("List the six shell rules"), which added the shell-rules section above the block and is now the last edit to `CLAUDE.md`.
+- [x] **`dev-writer`** — `openspec/changes/adopt-specflow-plugin/tasks.md:72-75` — 2.3's worked example says it was "worked at this change's last edit to `CLAUDE.md`" and gives begin 23900, end line 33368, byte length 33390. That stopped being true at `3b32d6f8` ("List the six shell rules"), which added the shell-rules section above the block and is now the last edit to `CLAUDE.md`.
       **Scenario:** a re-reviewer or the `closer` checks the example before trusting the procedure. `wc -c CLAUDE.md` prints 34434, not 33390. `grep -b -n -F "<!-- specflow:" CLAUDE.md` prints 24944 and 34412, not 23900 and 33368. `cmp -i 23900:1796 -n 9490 …`, the command the example says "exits 0", now compares the wrong bytes. The procedure above the example is correct; only the example is stale, and it is stated as a fact about the current tree. This is the block's "Keeping documents true" rule: say which commit the numbers were read at, or drop them.
       **Measured:** at `3b32d6f8`, `CLAUDE.md` begin 24944, end line 34412, 34412 + 22 = 34434 = `wc -c`. `SKILL.md` begin 1796, end line 11264. Span 9490 on both sides. `cmp -i 24944:1796 -n 9490 CLAUDE.md <clone>/skills/sync/SKILL.md` exits 0 with no output, so the block itself is still byte-identical. `git show --stat 3b32d6f8` touches `CLAUDE.md` but not `tasks.md`. Severity: low.
+      **Fixed** in the commit "Harden the tasks.md checks", by the box's
+      second option: the numbers are dropped, and 2.3 says none is written
+      down because any edit above the block moves them. The procedure now
+      derives every value, with `grep -b -n -x -F` on the two full marker
+      lines so `SKILL.md`'s prose mentions are not matched. Re-run at this
+      commit: `CLAUDE.md` 24944 and 34412, `SKILL.md` 1796 and 11264, span
+      9490 on both, and `cmp -i 24944:1796 -n 9490` exits 0 with no output,
+      so the block is still byte-identical. `findings/rereview-spec-test.md`
+      box 2 has the mutation runs.
 
 - [ ] **`dev-writer`** — `openspec/changes/adopt-specflow-plugin/design.md:163-165` against `:179` — design.md contradicts itself on whether rule 11 depends on rule 1.
       **Scenario:** lines 163-165 say "Rules 6, 7, 8 and 10 describe v0.1.0's behaviour as written. Rule 12 does as well … Rule 11 closes a gap the plugin opens. **None of them depends on rules 1 to 5.**" "Them" includes rule 11, which the previous sentence names. Line 179 says "Rule 11's stop hands its commit to rule 1's round, which the overlay cannot add". That dependency is why rule 11 is the one item 6–12 the overlay could not carry. The issue comment design.md cites agrees with line 179: rule 11 is "the closer-side stop that makes [rule 1] happen". A reader asking whether rule 11 could ship upstream without rule 1 gets both answers from the same section. Fix: narrow "None of them" to rules 6–10 and 12, or say rule 11 depends on rule 1.
