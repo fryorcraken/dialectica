@@ -88,3 +88,43 @@ by me.
       carries the table, the reason for the asymmetry, and what the tests can
       and cannot see of it. They see where a transition lands, not what it
       passes through.
+
+## Re-review
+
+Reviewed `git diff c933da11...HEAD` of `design.md` and `tasks.md` against the
+code and the final suite (21 tests). Every edit was made, run with
+`sh dialectica-ui/tests/run-qml-tests.sh dialectica-ui/tests/tst_publish_outcome_visits.qml`
+and reverted with `git checkout --`; the tree is clean. None was denied.
+
+Verified true on this tree:
+
+- Removing the `feed` branch of `Main.qml`'s hook reddens exactly the six tests
+  Decision 1 names, each at its absence assertion.
+- Removing the `thread` branch reddens exactly the four named. The thread
+  failed-read test fails at line 548 in that run, after the retry.
+- `test_a_publish_on_the_later_visit_displays_its_own_outcome` stays green with
+  the `feed` branch removed, as stated.
+- Decision 2: adding `root.draft = ""` to `clearOutcome()` reddens exactly the
+  two `NO SPEC:` draft tests.
+- Decision 3: clearing only `outcomeDetail` reddens the ten absence tests;
+  clearing only `outcome` (dropping the `outcomeDetail` line) leaves all 21
+  green. Every writer of `outcome` in `dialectica-ui/src/qml/` is in
+  `DComposer.qml` (lines 298, 314, 334) and each writes `outcomeDetail` on the
+  next line, so "satisfied by construction" holds. `DJoinScreen.outcome` is a
+  different property on a different component.
+- Decision 5: `composer.clearOutcome()` first in `FeedScreen.reload()` turns 11
+  tests red, including all four named and the feed absence tests at their
+  presence assertions. `replyComposer.clearOutcome()` first in
+  `DThreadScreen.reload()` turns 6 red, including the two named.
+- The return-path table matches the setters: `enterOnly` writes in
+  `stateNames` order and `screenShown` tests `moderating`, `reading`, then
+  `chosen`, so `closeThread` and `closeModeration` go straight to "feed" and
+  `openThread` and `moderateIn` pass through "list". I traced it; I did not
+  rerun the author's scratch spec, which was not committed.
+- `tasks.md` rows 1.2, 2.1, 2.3 and 2.4 say nothing the tree does not do.
+
+The two boxes above that carry a "Fixed" note (Decisions 2 and 3, and the
+return-path table) are confirmed by this pass and can be ticked. The first-round
+cross-Stoa box is the owner's and is left as it was.
+
+- [x] **none** — re-reviewed the design delta; no new findings
