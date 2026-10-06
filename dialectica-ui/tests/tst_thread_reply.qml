@@ -387,9 +387,19 @@ TestCase {
     // only assertions.
     //
     // The one walk in this file: every `text` an item and its descendants carry.
-    // What it reaches and what it ignores is written where it is used for the
-    // no-claim tests, below. `renderedOnly` skips an item that is not visible
-    // and everything under it.
+    // A TextField's placeholder is among them without being asked for: its
+    // default style renders the prompt through a child Text (measured, by
+    // putting a placeholder in the group). It reads `children` only, so text a
+    // popup or an attached tooltip carries is out of its reach, which this
+    // suite cannot see.
+    //
+    // By default it ignores `visible`, so a hidden Text is walked as well. That
+    // is stricter than "rendered", for the claim walks: a statement that is
+    // hidden when the test looks and shown later cannot hide in it. The
+    // statement that a reply is signed is the opposite case, a positive
+    // requirement on what is RENDERED, so its walks pass `renderedOnly`, which
+    // skips an item that is not visible and everything under it: a caption
+    // hidden with `visible: false` satisfies nothing.
     function collectTexts(item, out, renderedOnly) {
         if (renderedOnly === true && !item.visible)
             return
@@ -469,35 +479,39 @@ TestCase {
     // not flag them. `test_text_core_supplies_and_the_draft_are_outside_the_requirement`
     // pins that scope in both directions.
     //
-    // design.md Decision 3 covers the alternatives, and what breaks without
-    // each guard below.
+    // The alternatives, and what breaks without each guard below, are
+    // Decision 3 of this change's design.md, which lands at
+    // `openspec/changes/archive/<date>-reply-caption-no-edit/design.md`.
 
     // True where `text` mentions editing a reply (or amending, updating,
-    // correcting, republishing, undoing, replacing, retracting it), or mentions
-    // a version of it at all, which covers both "a later version can be
-    // published" and "earlier versions stay readable". Nothing the screen
+    // correcting, republishing, undoing, replacing, retracting, altering it, or
+    // calling it immutable), with or without an `un` or `non` prefix, or
+    // mentions a version of it at all, which covers both "a later version can
+    // be published" and "earlier versions stay readable". Nothing the screen
     // authors in these groups has any reason to say "version".
+    //
+    // It is a word list and says what it misses: "Replies are permanent.",
+    // "Once published a reply is final.", "Publishing is irreversible." and
+    // "Replies cannot be deleted or taken back." name none of these stems and
+    // pass. They are denials the requirement forbids and no list can enumerate,
+    // so the list does not grow a stem for each.
     function mentionsEditOrVersion(text) {
-        return /\b(edit|revis|amend|rewrit|chang|updat|modif|correct|supersed|overwrit|republish|re-publish|fix|replac|undo|redo|retract|revert|withdr[ae]w)\w*|\bversions?\b|\b(newer|older)\s+(one|copy)\b/i
+        return /\b(un|non-?)?(edit|revis|amend|rewrit|chang|updat|modif|correct|supersed|overwrit|republish|re-publish|fix|replac|undo|redo|retract|revert|withdr[ae]w|alter|immutab)\w*|\bversions?\b|\b(newer|older)\s+(one|copy)\b/i
             .test(text)
     }
 
     // The matcher, pinned both ways, one test per family of statement and one
     // for what it must leave alone. A `mentionsEditOrVersion` that always
-    // answered false would make all three scenario tests below pass on any
-    // tree; these are the tests that fail then. They are separate so that the
-    // first family to fail does not hide the others.
+    // answered false would make the scenario tests below pass on any tree;
+    // these are the tests that fail then. They are separate so that the first
+    // family to fail does not hide the others.
     //
     // Every string here is written out by hand: the statements from the
     // requirement, the truthful ones as the screen's copy was when this was
     // written. None is read off the screen at run time, so the matcher is never
     // asked to agree with what the implementation produced.
     function unflagged(strings) {
-        var missed = []
-        for (var i = 0; i < strings.length; i++)
-            if (!mentionsEditOrVersion(strings[i]))
-                missed.push(strings[i])
-        return missed
+        return strings.filter(function (s) { return !mentionsEditOrVersion(s) })
     }
 
     function test_the_matcher_flags_a_claim_that_a_reply_can_be_edited() {
@@ -535,7 +549,15 @@ TestCase {
             "Editing is not available in this version.",
             "Later versions of a reply cannot be published.",
             "Earlier versions are not kept.",
-            "Nothing earlier than this version can be read."
+            "Nothing earlier than this version can be read.",
+            // A prefixed form is not a word start, and a denial may use a word
+            // the edit verbs lack.
+            "A reply stays unchanged once published.",
+            "Replies are uneditable.",
+            "Replies are noneditable.",
+            "An unrevised reply stays as it was written.",
+            "Replies are immutable.",
+            "A reply cannot be altered."
         ]), [], "a denial the matcher let through")
     }
 
@@ -569,18 +591,19 @@ TestCase {
         ]), [], "an earlier-version claim the matcher let through")
     }
 
-    function test_the_matcher_leaves_alone_what_the_composers_group_renders() {
-        // The strings this group legitimately renders, as the fixture drives
-        // it, including everything the composer's outcome area says after a
-        // publish. If a sentence like these were flagged, these tests would be
-        // reporting copy and not a claim.
+    function test_the_matcher_leaves_alone_what_the_screen_authors_in_both_gate_states() {
+        // The strings the screen authors in the composer's group and in the
+        // shut gate, as the fixtures drive them, including everything the
+        // composer's outcome area says after a publish. Core's reason behind a
+        // shut gate is not in the table: it is not the screen's copy, and the
+        // scope test below is what covers it. If a sentence like these were
+        // flagged, the claim tests would be reporting copy and not a claim.
         var truthful = [
             "A reply is a signed record.",
             "REPLYING AS",
             "Publish the reply",
             "42 OF 153600 BYTES",
             "You cannot reply in this Stoa yet.",
-            "no keystore",
             "There is no disabled composer here. A box you could type into and not send would lose what you wrote.",
             "Your reply was saved on this machine.",
             "This reply was already published.",
@@ -592,40 +615,20 @@ TestCase {
             "This reply is longer than the core module will accept, so it cannot be sent yet. Nothing has been removed from what you wrote.",
             "This draft contains 2 invisible character(s). They will be published exactly as you typed them, and readers' software will remove them when it renders this reply."
         ]
-        var flaggedWrongly = []
-        for (var j = 0; j < truthful.length; j++)
-            if (mentionsEditOrVersion(truthful[j]))
-                flaggedWrongly.push(truthful[j])
-        compare(flaggedWrongly, [],
+        compare(mentionsAmong(truthful), [],
                 "a sentence making no edit or version statement, flagged")
     }
 
-    // What the walks collect, and what they leave out. One walk, `collectTexts`
-    // above: it pushes every `text` an item and its descendants carry. A
-    // TextField's placeholder is among them without being asked for: its
-    // default style renders the prompt through a child Text (measured, by
-    // putting a placeholder in the group). The walk reads `children` only, so
-    // text a popup or an attached tooltip carries is out of its reach, which
-    // this suite cannot see.
-    //
-    // By default it ignores `visible`, so a hidden Text is walked as well. That
-    // is stricter than "rendered", for the claim walks: a statement that is
-    // hidden when the test looks and shown later cannot hide in it. The
-    // statement that a reply is signed is the opposite case, a positive
-    // requirement on what is RENDERED, so its walks pass `renderedOnly`:
-    // a caption hidden with `visible: false` satisfies nothing.
-    //
-    // `suppliedText` is the strings the test itself fed the screen as core's
-    // reply or as the user's draft. They are outside the requirement, so they
-    // are collected and not flagged. They are exact strings the test chose, so
-    // text the screen authors is never exempt by accident.
+    // The texts among `texts` that the matcher flags. `suppliedText` is the
+    // strings the test itself fed the screen as core's reply or as the user's
+    // draft. They are outside the requirement, so they are collected and not
+    // flagged. They are exact strings the test chose, so text the screen
+    // authors is never exempt by accident.
     function mentionsAmong(texts, suppliedText) {
-        var flagged = []
-        for (var i = 0; i < texts.length; i++)
-            if (mentionsEditOrVersion(texts[i])
-                    && (suppliedText === undefined || suppliedText.indexOf(texts[i]) === -1))
-                flagged.push(texts[i])
-        return flagged
+        return texts.filter(function (t) {
+            return mentionsEditOrVersion(t)
+                && (suppliedText === undefined || suppliedText.indexOf(t) === -1)
+        })
     }
 
     function mentionsUnder(item, suppliedText) {
@@ -765,10 +768,9 @@ TestCase {
     }
 
     // The walk ignores `visible` for the claim tests, which is the choice
-    // collectTexts's comment names: a statement that is hidden when the test
-    // looks and shown later is still one. Nothing in the screen's own tree is
-    // hidden with a claim in it, so a walk narrowed to visible items would pass
-    // every other test here. This one is on a hand-made tree.
+    // `collectTexts`'s comment gives its reason for. Nothing in the screen's own
+    // tree is hidden with a claim in it, so a walk narrowed to visible items
+    // would pass every other test here. This one is on a hand-made tree.
     Component {
         id: hiddenClaimComponent
         Item {
@@ -820,8 +822,14 @@ TestCase {
                "and the matcher does flag it, so what spares it is the scope")
         compare(mentionsUnder(findChild(shutScreen, "replyGateShut"), [reason]).flagged, [],
                 "core's reason is not text the screen authors")
-        compare(mentionsAmong(textsBesideTheRows(shutScreen).texts, [reason]), [],
-                "nor beside the rows")
+        // Beside the rows, the same two directions, asked of the reason alone:
+        // another claim on the screen is the beside-the-rows test's to report,
+        // and must not fail the scope here.
+        var shutBeside = textsBesideTheRows(shutScreen).texts
+        verify(mentionsAmong(shutBeside).indexOf(reason) !== -1,
+               "the walk beside the rows reaches core's reason, and the matcher flags it")
+        compare(mentionsAmong(shutBeside, [reason]).indexOf(reason), -1,
+                "and it is not text the screen authors there either")
         shutScreen.destroy()
 
         // An open gate with a draft in the field and core's refusal under it.
@@ -853,8 +861,13 @@ TestCase {
                "and the matcher does flag both, so what spares them is the scope")
         compare(mentionsUnder(open, [draft, refusal]).flagged, [],
                 "neither is text the screen authors")
-        compare(mentionsAmong(textsBesideTheRows(openScreen).texts, [draft, refusal]), [],
-                "nor beside the rows")
+        var openBeside = textsBesideTheRows(openScreen).texts
+        var flaggedBeside = mentionsAmong(openBeside)
+        verify(flaggedBeside.indexOf(draft) !== -1 && flaggedBeside.indexOf(refusal) !== -1,
+               "the walk beside the rows reaches both, and the matcher flags them")
+        var exemptedBeside = mentionsAmong(openBeside, [draft, refusal])
+        compare(exemptedBeside.indexOf(draft), -1, "the draft is not text the screen authors there either")
+        compare(exemptedBeside.indexOf(refusal), -1, "nor is core's refusal")
         openScreen.destroy()
     }
 
@@ -947,11 +960,19 @@ TestCase {
     // name. A caption cut to unrelated copy, deleted, or hidden fails them.
     //
     // The matcher is hand-written like the other one, and pinned the same way,
-    // both directions, below. A negation is not a statement that a reply is
-    // signed.
+    // both directions, below. It is a pattern and not a reading of the
+    // sentence: a text counts when it says `signed` and `reply` (or `replies`)
+    // and has no negator (`not`, `never`, `no`, `cannot`, `n't`) within two
+    // words before `signed` in the same clause. A paraphrase that says the
+    // opposite without a negator ("A reply is unverifiable"), or one with a
+    // negator further off ("Not every reply you publish here is signed"),
+    // passes as a statement; so does a sentence about something else that
+    // happens to name a reply and say `signed`. The table is where such a miss
+    // is added.
     function statesReplyIsSigned(text) {
         return /\bsigned\b/i.test(text)
-            && !/(\bnot|\bnever|n't)\s+(yet\s+)?(be\s+)?signed\b/i.test(text)
+            && /\brepl(y|ies)\b/i.test(text)
+            && !/(\bnot\b|\bnever\b|\bno\b|\bcannot\b|n't)(\s+\w+){0,2}\s+signed\b/i.test(text)
     }
 
     function test_the_signed_matcher_accepts_what_states_it_and_refuses_what_does_not() {
@@ -959,7 +980,9 @@ TestCase {
             "A reply is a signed record.",
             "Every reply you publish is signed with your key.",
             "Replies are signed.",
-            "Your reply will be signed by the key above."
+            "Your reply will be signed by the key above.",
+            // A negation AFTER `signed` is not a denial of it.
+            "A reply is a signed record, not a private message."
         ]
         var notStates = [
             "A reply is not signed.",
@@ -967,32 +990,33 @@ TestCase {
             "A reply isn't signed.",
             "An unsigned reply.",
             "A signature is not required.",
+            // A negation the clause once could not see: `cannot` has no word
+            // boundary before `not`, and a word between negator and `signed`
+            // defeated a closed list. The first is the spec-test review's
+            // surviving caption.
+            "A reply cannot be signed.",
+            "Your reply is not cryptographically signed.",
+            "Replies are not always signed.",
+            "Replies can't be signed.",
+            // `signed`, said of something that is not a reply.
+            "Signed in as alice.",
+            "Your draft is signed off by the app.",
             "REPLYING AS",
             "Publish the reply",
             "Your reply was saved on this machine.",
             ""
         ]
-        var accepted = []
-        for (var i = 0; i < notStates.length; i++)
-            if (statesReplyIsSigned(notStates[i]))
-                accepted.push(notStates[i])
-        compare(accepted, [], "a text taken for a statement that a reply is signed")
-        var refused = []
-        for (var j = 0; j < states.length; j++)
-            if (!statesReplyIsSigned(states[j]))
-                refused.push(states[j])
-        compare(refused, [], "a statement that a reply is signed, not recognised")
+        compare(notStates.filter(statesReplyIsSigned), [],
+                "a text taken for a statement that a reply is signed")
+        compare(states.filter(function (s) { return !statesReplyIsSigned(s) }), [],
+                "a statement that a reply is signed, not recognised")
     }
 
     // The rendered texts of a group that state a reply is signed.
     function signedStatementsIn(group) {
         var texts = []
         collectTexts(group, texts, true)
-        var found = []
-        for (var i = 0; i < texts.length; i++)
-            if (statesReplyIsSigned(texts[i]))
-                found.push(texts[i])
-        return { texts: texts, statements: found }
+        return { texts: texts, statements: texts.filter(statesReplyIsSigned) }
     }
 
     function test_the_open_composers_text_states_that_a_reply_is_signed() {
