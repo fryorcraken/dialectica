@@ -1187,7 +1187,7 @@ low, all prose.
       remain true, and the bullet costs nothing against the test that asserts it.
       `openspec validate delivery-wiring --strict` passes.
 
-- [ ] **`dev-writer`** — `design.md:1097-1099` — the last sentence of "A pin bump
+- [x] **`dev-writer`** — `design.md:1097-1099` — the last sentence of "A pin bump
       fails a test" does not parse, and "(Decision 14's wording)" at `:1093` points at
       wording Decision 14 does not hold.
       **Scenario:** "Before it, the only prompt was 'a pin bump should re-read' in
@@ -1209,6 +1209,16 @@ low, all prose.
       kind of gap elsewhere." and drop "(Decision 14's wording)" or say "the list is
       the test's own".
       **Severity:** low.
+      **Fixed** (`dev-writer`) in the commit `Tie the delivery module
+      scaffold.toml installs to the lock the pin test reads`, both halves as the
+      fix shape has them. "(Decision 14's wording)" is now "(the list is the
+      test's own)". The last sentence now reads: the only prompt "was a sentence,
+      'a pin bump should re-read', in Decisions 14 and 17 and the Risks list, which
+      no command triggered; `ci.yml`'s note on the unchecked
+      `delivery_module.lidl` is the same kind of gap elsewhere." Checked against
+      `43844f2b`, the tree before the test: the phrase sat in Decision 14 (`:926`),
+      Decision 17 (`:1069`) and the Risks list (`:1157`, `:1159`), so the three
+      places are those.
 
 Read: the whole range outside `findings/` (`CLAUDE.md`'s trap entry, `delivery.rs`'s
 `ALREADY_EXISTS` doc, `transport.rs`, the spec delta against the live `op-transport`

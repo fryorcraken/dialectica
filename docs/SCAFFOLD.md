@@ -20,6 +20,15 @@ test failure — the reason a gate has to watch them at all. It deliberately doe
 *not* assert the pins, which are meant to be bumped. Change one of the three on
 purpose and the gate is what you update alongside this document.
 
+**One pin is tied to another file, though not to a value.** `delivery_module`'s
+rev must equal the `logos-delivery-module` rev `dialectica/flake.lock` locks, or
+`transport::delivery_topic_rule::tests::the_scaffold_installs_the_delivery_module_the_lock_holds`
+fails. The scaffold's pin is the delivery a Basecamp runs; the lock's is the one
+the crate's copy of delivery's content-topic rule is checked against, so a bump
+that moves one and not the other leaves every other test agreeing with a parser
+nobody runs. Bump both, and let the test beside it say what to re-read.
+`delivery-wiring`'s design, Decision 17.
+
 ## `[repos.lez]` and `[repos.spel]` are schema furniture, not dependencies
 
 `lgs` refuses a `scaffold.toml` without `[repos.lez]` — *"invalid scaffold.toml:

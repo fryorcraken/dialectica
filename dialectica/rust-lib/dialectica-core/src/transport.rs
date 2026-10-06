@@ -876,10 +876,13 @@ fn addressed(
 /// # When delivery's pin moves
 ///
 /// `the_transcribed_revision_is_the_one_delivery_is_locked_at` fails the moment
-/// `dialectica/flake.lock` locks `logos-delivery` at any other revision. A fake
-/// that agrees with an old parser hides a new one's refusal exactly as the
-/// accept-everything fake did, so that test turns the pin bump into a prompt to
-/// re-read these files rather than relying on whoever bumps it having read
+/// `dialectica/flake.lock` locks `logos-delivery` at any other revision, and
+/// `the_scaffold_installs_the_delivery_module_the_lock_holds` the moment
+/// `scaffold.toml` installs a `logos-delivery-module` other than the one that
+/// lock holds — the scaffold's is the delivery a Basecamp runs. A fake that
+/// agrees with an old parser hides a new one's refusal exactly as the
+/// accept-everything fake did, so those tests turn either pin bump into a prompt
+/// to re-read these files rather than relying on whoever bumps it having read
 /// design.md.
 #[cfg(test)]
 pub(crate) mod delivery_topic_rule {
@@ -1066,6 +1069,67 @@ pub(crate) mod delivery_topic_rule {
                      waku/waku_core/topics/content_topic.nim and sharding.nim against \
                      `delivery_topic_rule`, and channels/api/channel_lifecycle.nim \
                      against `delivery::ALREADY_EXISTS`; then update DELIVERY_REV."
+                );
+            }
+        }
+
+        /// The revision the tracked `scaffold.toml` installs
+        /// `logos-delivery-module` at: the commit in `[modules.delivery_module]`'s
+        /// `flake = "github:logos-co/logos-delivery-module/<rev>#lgx"`. `None` when
+        /// that table, its `flake` key or the repository segment is missing.
+        ///
+        /// Read with `include_str!` from the checkout's root: CI tests the
+        /// committed pin, and a local run sees an `lgs basecamp` verb's rewrite
+        /// of the file before it is committed. Text, not a TOML crate, for one
+        /// key in one table. `cfg(test)` only, like [`lock_nodes_of`]: the file is
+        /// outside the `lgx` build's `src = ./.`, and that build compiles no tests
+        /// (it is green with this test in place).
+        fn scaffold_delivery_module_rev() -> Option<&'static str> {
+            let scaffold = include_str!("../../../../scaffold.toml");
+            let table = scaffold
+                .split("\n[")
+                .find(|table| table.starts_with("modules.delivery_module]"))?;
+            let flake = table.lines().find_map(|line| {
+                let (key, value) = line.split_once('=')?;
+                (key.trim() == "flake").then(|| value.trim().trim_matches('"'))
+            })?;
+            let (_, rest) = flake.split_once("/logos-delivery-module/")?;
+            rest.split('#').next()
+        }
+
+        #[test]
+        fn the_scaffold_installs_the_delivery_module_the_lock_holds() {
+            // The delivery a Basecamp loads is the module `scaffold.toml` installs
+            // (`role = "dependency"`), not `dialectica/flake.lock`'s
+            // `delivery_module` input, which the build takes only for the client
+            // generator to read the impl header. The test above ties the lock's
+            // `logos-delivery` to DELIVERY_REV, and that node is the lock's
+            // `delivery_module`'s own input; this ties the installed module to
+            // the lock, so a scaffold pin bump that left the lock behind is a
+            // red test rather than a fake agreeing with a parser nobody runs.
+            let installed = scaffold_delivery_module_rev().expect(
+                "scaffold.toml has no `[modules.delivery_module]` flake ref of the form \
+                 github:logos-co/logos-delivery-module/<rev>#lgx; find where the \
+                 installed delivery module is pinned now and point this test at it",
+            );
+            let locked = lock_nodes_of("logos-delivery-module");
+            // Without this, renaming the input would make the loop below check
+            // nothing and pass.
+            assert!(
+                !locked.is_empty(),
+                "no logos-delivery-module node in dialectica/flake.lock; find where \
+                 the delivery module is locked now and point this test at it"
+            );
+            for (name, rev) in locked {
+                assert_eq!(
+                    rev.as_deref(),
+                    Some(installed),
+                    "scaffold.toml installs logos-delivery-module at {installed}, but \
+                     dialectica/flake.lock node `{name}` locks it at {rev:?}. A Basecamp \
+                     runs the scaffold's; this crate's transcriptions are checked \
+                     against the lock's. Lock dialectica/flake.nix's delivery_module at \
+                     the scaffold's rev, and the logos-delivery test beside this one \
+                     then says what to re-read."
                 );
             }
         }

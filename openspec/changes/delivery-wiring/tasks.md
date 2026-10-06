@@ -120,3 +120,9 @@ Each regression test below was seen red before its change.
 - [x] 15.2 A delivery pin bump fails a test (architecture round 8): `the_transcribed_revision_is_the_one_delivery_is_locked_at` reads `dialectica/flake.lock` and asserts every `logos-delivery` node is locked at `DELIVERY_REV`, naming the files to re-read, `ALREADY_EXISTS`'s included. Red with the node match renamed, on its found-at-least-one assert.
 - [x] 15.3 The owner's second live run passed; 7.3 ticked on it, and `proposal.md`, `design.md` (Decision 5, 17, Risks, Open Questions) and PR #190 say so (design round 8). The stale "delivery is not wired" comment in `DPublishOutcome.qml` corrected.
 - [x] 15.4 The two tests that satisfy `op-transport`'s "The network's content-topic rule reads the content topic as dialectica version 1" say so in their comments; `DefaultContentTopic` cited at line 16 (readability round 8).
+
+## 16. Re-review round 9
+
+- [x] 16.1 Make room, no behaviour change: `lock_nodes_of` reads `dialectica/flake.lock`'s nodes for one repository, and the delivery pin test asks it; the `delivery_topic_rule` tests pass unchanged.
+- [x] 16.2 The delivery a Basecamp installs is tied to the lock (correctness round 9): `the_scaffold_installs_the_delivery_module_the_lock_holds` reads the tracked `scaffold.toml` and asserts its `delivery_module` rev equals every `logos-delivery-module` node's in the lock. Red with `scaffold.toml`'s rev set to `0000…0000` (on the `assert_eq!`, naming the node and both revs) and with the table renamed (on its not-found message). `design.md` Decision 17 no longer files the scaffold pin as the live check's, and `docs/SCAFFOLD.md` says that pin is tied to the lock.
+- [x] 16.3 Decision 17's "A pin bump fails a test" parses, names where the old prompt sat, and calls the three-file list the test's own (readability round 9).

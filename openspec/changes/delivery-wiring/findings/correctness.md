@@ -842,7 +842,7 @@ Checked and clean:
 Dimension: **correctness only**. Reviewed at `286a2314` (range code identical to
 `87596ac4`), against `logos-delivery` `bfdb5afd263c5ff634ef8c59b2fe1ebbbcd0f306`.
 
-- [ ] **`dev-writer`** — `transport.rs:1018` (`the_transcribed_revision_is_the_one_delivery_is_locked_at`),
+- [x] **`dev-writer`** — `transport.rs:1018` (`the_transcribed_revision_is_the_one_delivery_is_locked_at`),
       `design.md:1103-1104` — the pin test watches the lock that does not decide
       which delivery runs. The delivery a Basecamp actually loads is installed from
       `scaffold.toml:28`, `[modules.delivery_module].flake =
@@ -875,6 +875,27 @@ Dimension: **correctness only**. Reviewed at `286a2314` (range code identical to
       **Measured:** with `scaffold.toml:28`'s rev set to `0000…0000` and
       `dialectica/flake.lock` unchanged, the full suite is green (1317 + 30 + 3);
       reverted.
+      **Fixed** (`dev-writer`), the first fix, in the commit `Tie the delivery
+      module scaffold.toml installs to the lock the pin test reads` (after a
+      no-behaviour refactor, `Read the flake lock's nodes by repository in one
+      helper`, which moves the lock read into `lock_nodes_of`). A second test,
+      `the_scaffold_installs_the_delivery_module_the_lock_holds`, reads the tracked
+      `scaffold.toml` with `include_str!("../../../../scaffold.toml")` and asserts
+      the rev in `[modules.delivery_module]`'s flake ref equals every
+      `logos-delivery-module` node's `locked.rev` in `dialectica/flake.lock`, with a
+      found-at-least-one assert and its own message if the table or key is gone.
+      Kept beside the logos-delivery test rather than folded into it: one asserts
+      the lock against `DELIVERY_REV`, the other the scaffold against the lock.
+      Red, then reverted: with `scaffold.toml:28`'s rev set to `0000…0000`, the
+      `assert_eq!` fails naming node `delivery_module`, `b8b9ac2f…` and the zero
+      rev, the other five `delivery_topic_rule` tests green; with the table header
+      renamed to `[modules.delivery]`, it fails on the not-found message. Full
+      suite 1318 + 30 + 3. `nix build ./dialectica#lgx` green, so the builder does
+      not compile the `cfg(test)` path outside `src = ./.`. `design.md` Decision 17
+      now records the scaffold pin as the runtime one and only a Basecamp installed
+      from outside the repository as live-only; Risks says either pin; and
+      `docs/SCAFFOLD.md` says this one pin is tied to the lock, since its line 20
+      says the pins are deliberately unasserted.
 
 Checked and clean:
 

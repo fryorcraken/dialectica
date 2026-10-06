@@ -1090,18 +1090,43 @@ accept-everything fake did. `delivery_topic_rule::DELIVERY_REV` names the rev,
 and `the_transcribed_revision_is_the_one_delivery_is_locked_at` reads
 `dialectica/flake.lock` with `include_str!` and asserts every `logos-delivery`
 node there is locked at it; its message names `content_topic.nim`,
-`sharding.nim` and `channel_lifecycle.nim` (Decision 14's wording) as what to
-re-read. It also asserts it found at least one such node: without that, a
+`sharding.nim` and `channel_lifecycle.nim` as what to re-read (the list is the
+test's own). It also asserts it found at least one such node: without that, a
 renamed input would leave the loop checking nothing and the test passing over
 any lock. Measured with the match renamed: it fails on that assert. It is
 `cfg(test)`, so the `lgx` build never reads the path. Before it, the only prompt
-was "a pin bump should re-read" in three places that no command triggered — the
-repo's own `.lidl` gap (`ci.yml`) in a second place.
+was a sentence, "a pin bump should re-read", in Decisions 14 and 17 and the
+Risks list, which no command triggered; `ci.yml`'s note on the unchecked
+`delivery_module.lidl` is the same kind of gap elsewhere.
 
-**What it still cannot see.** It sees the lock move; it does not do the re-read.
+**The lock is not what a Basecamp runs, so a second test ties the two.** The
+delivery a Basecamp loads is the module `scaffold.toml` installs
+(`[modules.delivery_module]`, `role = "dependency"`; `docs/SCAFFOLD.md`).
+`dialectica/flake.lock`'s `delivery_module` is a build-time input, there so the
+client generator can read the impl header, and the lock's `logos-delivery` node
+is that input's own. Nothing tied the two pins: with `scaffold.toml`'s rev moved
+and the lock untouched, every test stayed green (the correctness re-review
+measured it, round 9), while a live node ran whatever parser the new module's
+delivery carries — the failure this decision exists to close, through the one
+pin that decides it at runtime.
+`docs/SCAFFOLD.md` says the scaffold pins are meant to be bumped, and an
+`lgs basecamp` verb can rewrite a value in that file. So
+`the_scaffold_installs_the_delivery_module_the_lock_holds` reads the tracked
+`scaffold.toml` with `include_str!` and asserts its `delivery_module` rev equals
+the rev every `logos-delivery-module` node in the lock is locked at; with that,
+the test above covers the installed delivery too. It reads the checkout's file,
+so CI tests the committed pin and a local run sees a verb's rewrite before it is
+committed; it reads it as text rather than through a TOML crate — one key in one
+table does not earn a dependency — and fails with its own message when the table
+or key is gone. Measured: with `scaffold.toml`'s rev set to `0000…0000` it fails on the
+`assert_eq!` naming the lock node and both revs; with the table renamed, on the
+not-found message. Reverted both.
+
+**What they still cannot see.** They see a pin move; they do not do the re-read.
 Whoever bumps the pin can update `DELIVERY_REV` without reading a line, and the
-test goes green again. It also cannot see a Basecamp whose delivery module was
-built from another rev than this lock's, which is the live check's to find.
+tests go green again. And they cannot see a Basecamp whose delivery module was
+installed from outside this repository — a hand-installed `.lgx`, another
+checkout's `scaffold.toml` — which only the live check can find.
 
 ### Behaviour chosen during implementation, now in the spec
 
@@ -1189,7 +1214,8 @@ The reasoning that chose each is here; the contract is the requirement cited.
 - [The already-exists match depends on delivery's wording] → Decision 14; a pin
   bump fails a test that names the file to re-read (Decision 17).
 - [The fake's content-topic rule is a transcription of delivery's source at one
-  rev] → Decision 17; a pin bump fails that test, and the re-read is a person's.
+  rev] → Decision 17; a bump of either delivery pin, the lock's or
+  `scaffold.toml`'s, fails a test, and the re-read is a person's.
 - [The adapter is compiled only by `nix build ./dialectica#lgx`] → it is four
   calls, one subscription and one decoder mapping; the generated names it relies
   on (`create_node_with_timeout`, `on_channel_message_received`,
