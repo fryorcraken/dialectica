@@ -46,7 +46,7 @@ by me.
       identical shape (`parentOp` follows `threadId`, "not tested") is in that
       same issue.
 
-- [ ] **`dev-writer`** — `design.md` Decision 2 and Decision 3 are guard
+- [x] **`dev-writer`** — `design.md` Decision 2 and Decision 3 are guard
       decisions with no mutation evidence. Decision 2 should say which test
       turns red if `clearOutcome()` also clears the draft
       (`test_an_unsubmitted_draft_is_still_held_when_the_same_stoa_is_reopened`,
@@ -65,7 +65,7 @@ by me.
       the outcome is "refused". Decision 3 and `tasks.md` 2.1 now say this
       rather than implying a test pins it.
 
-- [ ] **`dev-writer`** — `design.md` Decision 1, last paragraph, claims a
+- [x] **`dev-writer`** — `design.md` Decision 1, last paragraph, claims a
       transition's intermediate `screenShown` values are harmless, and only the
       `openThread` case is argued. The return paths (thread to feed, moderation
       to feed) are not: the order in which `reading`/`moderating` and `chosen`
