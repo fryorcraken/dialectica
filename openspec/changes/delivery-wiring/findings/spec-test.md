@@ -1349,7 +1349,7 @@ outside the derivation, in the old form or the new. What is new is that the shap
 now grounded outside the implementation, by delivery's parser, which is what the
 regression test checks. I record this rather than box it.
 
-- [ ] **`spec-writer`** — `openspec/specs/op-transport/spec.md`, requirement "The
+- [x] **`spec-writer`** — `openspec/specs/op-transport/spec.md`, requirement "The
       content topic and the channel identifier SHALL each begin with the literal prefix
       `/dialectica/1/`", and its scenario "Both names keep the prefix autosharding
       reads"; the change deltas say nothing on the topic's shape either.
@@ -1373,3 +1373,31 @@ regression test checks. I record this rather than box it.
       version, with a scenario that checks it against the parser's rule rather than
       the implementation's output; or record why the behaviour is deliberately left
       to design. Then a changed topic fails a scenario rather than only a test.
+
+      **Outcome (`spec-writer`): fixed, as a requirement.** The change's
+      `op-transport` delta now carries a MODIFIED *A Stoa's ops travel on one
+      reliable channel per Stoa*, the live text and all five live scenarios
+      copied unchanged, with three paragraphs added after the prefix paragraph:
+      the content topic SHALL be a name the network's content-topic rule
+      accepts, in its four-part form `/<application>/<version>/<name>/<encoding>`
+      and not the generation-bearing one, read with `dialectica` as application
+      and `1` as version, and the prefix alone does not meet this; the rule
+      binds the content topic alone, not the channel identifier (delivery does
+      not parse it, Decision 17); and what is checkable is the topic against
+      the rule, not a live node's acceptance, in the way the size limit's
+      agreement with the network is out of reach. New scenario: *The network's
+      content-topic rule reads the content topic as dialectica version 1* —
+      the rule accepts the derived topic in the four-part form with no
+      generation, reads `dialectica` and `1`, refuses a five-part name that
+      begins with `/dialectica/1/`, and the check applies the rule as written
+      independently of the derivation. **No test is owed, as I read it:**
+      `the_content_topic_is_one_delivery_parses_with_dialectica_as_application`
+      asserts the first three THENs over four Stoas through
+      `delivery_topic_rule::parse` (`generation == None` is the four-part arm),
+      and the rule's own test at `transport.rs:933` refuses
+      `/dialectica/1/s/<hex>/proto`, which is the fourth. Whether those tests now
+      cite this scenario rather than Decision 17 is the `tester`'s call. I did
+      not add the `getShard` generation-0 refusal the correctness review found:
+      the requirement forbids the generation-bearing form outright, so no
+      generation is ever offered to it. `proposal.md` names the MODIFIED
+      block and gains a *What Changes* line for the topic's shape.

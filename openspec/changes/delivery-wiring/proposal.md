@@ -43,6 +43,12 @@ the design relies on.
   open that delivery declines leaves an already-open channel open. A create or
   join answered before startup has wired delivery asks for nothing then; startup
   asks for its channel along with every other Stoa the peer is in.
+- **The content topic** is a name delivery's content-topic rule accepts, in
+  its four-part form, so the rule reads `dialectica` as the application and `1`
+  as the version. The topic `op-transport`'s archived design gave,
+  `/dialectica/1/s/<hex>/proto`, has five parts and was refused by every node
+  in the first live two-peer check. It becomes `/dialectica/1/s-<hex>/proto`;
+  the channel identifier and sender identifier keep their form.
 - **Publishing.** Every successful `publishPost`, `publishReply` or `publishVote`
   hands the op's stored wire form to `channelSend` on the Stoa's channel. This
   replaces the logging no-op. The op is stored before it is sent, as
@@ -143,6 +149,15 @@ Stoa-lifecycle obligation that `op-transport` assigns to `stoa-membership`.
 ### Modified Capabilities
 
 - `op-transport`:
+  - MODIFIED *A Stoa's ops travel on one reliable channel per Stoa*. One
+    rule, a line on its scope and a line on what is checkable are added, with
+    one scenario; the live text and scenarios are kept as they were. The content topic must be a name the network's content-topic
+    rule accepts, in its four-part form with no generation, read with
+    `dialectica` as application and `1` as version. The prefix rule alone was
+    met by a topic the network refused, so every scenario stayed green over a
+    derivation no node could use. The channel identifier keeps only the prefix
+    rule. The new scenario is *The network's content-topic rule reads the
+    content topic as dialectica version 1*.
   - MODIFIED *The delivery node is shared and is never stopped by this peer*.
     The prohibitions stay: no site stops the node, and no site creates a node
     of its own. The requirement now adds one site that asks the delivery module

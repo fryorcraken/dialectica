@@ -1,5 +1,60 @@
 ## MODIFIED Requirements
 
+### Requirement: A Stoa's ops travel on one reliable channel per Stoa
+
+A Stoa's ops SHALL travel on exactly one reliable channel, and that channel SHALL carry nothing but signed ops of that Stoa.
+
+The channel SHALL be identified by a channel identifier and a content topic, both derived from the Stoa's address. The channel identifier names the conversation every peer in the Stoa must join; the content topic names what the underlying network filters on.
+
+A thread identifier, a parent op identifier, an author, or any other property of an individual op SHALL NOT appear in either the channel identifier or the content topic. Every such value is already inside the signed op.
+
+The content topic SHALL NOT contain a Stoa's human-readable title or any other human-readable name. A content topic is disclosed to peers that serve filtering, storage and forwarding, so a readable name in one links a network address to an interest.
+
+**The content topic and the channel identifier SHALL each begin with the literal prefix `/dialectica/1/`, and that prefix SHALL NOT be changed as though it were a naming choice.** The network's autosharding places a topic by hashing only the application and version segments of its name and ignores the rest, so this prefix — and nothing further along the string — is what puts every dialectica Stoa on one shard. Changing it, shortening it, or bumping the version segment moves every Stoa that adopts the change to a different shard from every Stoa that has not, which is the same silent partition the next requirement exists to prevent, arrived at from the other direction. A change to this prefix is a network migration and SHALL be treated as one.
+
+**The content topic SHALL also be a name the network's content-topic rule accepts, and that rule SHALL read it with `dialectica` as its application and `1` as its version.** The content topic SHALL take that rule's four-part form: a leading `/`, then exactly four non-empty parts separated by `/`, read as `/<application>/<version>/<name>/<encoding>`. It SHALL NOT take the rule's generation-bearing form, in which a numeric generation precedes the application. Beginning with the literal prefix does not meet this on its own: a name that begins with `/dialectica/1/` and has any other number of parts is refused by that rule, or read with segments other than `dialectica` and `1` as its application and version.
+
+This rule binds the content topic alone. Nothing here constrains the channel identifier's shape beyond the prefix.
+
+**What is checkable here is the content topic against that rule, and not a deployed node's acceptance of it.** That a running node still applies the rule is observable only against a live node, and is outside this capability in the way the message-size limit's agreement with the network is.
+
+#### Scenario: One Stoa yields one channel identifier and one content topic
+
+- **WHEN** the channel identity for a Stoa address is derived
+- **THEN** exactly one channel identifier and one content topic are produced
+
+#### Scenario: Two Stoas do not share a channel
+
+- **WHEN** channel identities are derived for two different Stoa addresses
+- **THEN** the two channel identifiers differ
+- **AND** the two content topics differ
+
+#### Scenario: A Stoa's title does not appear in its content topic
+
+- **WHEN** a content topic is derived for a Stoa whose genesis title is a known string
+- **THEN** that string does not appear in the content topic
+- **AND** the content topic is derived from the Stoa's address alone
+
+#### Scenario: No per-op value reaches the channel identity
+
+- **WHEN** channel identity is derived for one Stoa, and ops of several threads and several authors are published on it
+- **THEN** the channel identifier and content topic are the same for every one of them
+
+#### Scenario: Both names keep the prefix autosharding reads
+
+- **WHEN** channel identity is derived for any Stoa
+- **THEN** the content topic begins with the literal `/dialectica/1/`
+- **AND** the channel identifier begins with the same literal
+- **AND** the check is against that literal rather than against whatever the implementation currently produces
+
+#### Scenario: The network's content-topic rule reads the content topic as dialectica version 1
+
+- **WHEN** channel identity is derived for any Stoa, and its content topic is put through the network's content-topic rule
+- **THEN** the rule accepts it in the four-part form, with no generation
+- **AND** the rule reads `dialectica` as its application and `1` as its version
+- **AND** the same rule refuses a name that begins with `/dialectica/1/` and has five parts
+- **AND** the check applies that rule as written independently of the derivation, rather than comparing against whatever the implementation currently produces
+
 ### Requirement: A locally-authored op is stored before it is published
 
 An op the local peer authored SHALL be appended to the peer's own op log before its bytes are handed to the transport.
