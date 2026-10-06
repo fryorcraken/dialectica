@@ -27,30 +27,57 @@
 //!   limit, and offers the rest to the bounded [`InboundQueue`] without waiting
 //!   on the boundary.
 //! - **The processor** takes them off in arrival order and puts each through the
-//!   inbound boundary, [`crate::transport::receive_via`].
+//!   inbound boundary, [`crate::transport::receive_via`] — or, when its channel
+//!   is being opened, **parks** it ([`crate::parked`]) and goes straight on. It
+//!   also runs the **reviews** that decide parked messages once their channel's
+//!   open settles. It never waits on an open.
+//!
+//! # The three seams parking turns on
+//!
+//! `op-transport`'s parking requirements come down to three questions, and each
+//! is answered in exactly one place:
+//!
+//! - **Is this payload parked?** [`ChannelBook::on_take`], asked once per payload
+//!   as the processor takes it.
+//! - **Does this event begin a review?** [`ChannelBook::settle`] for delivery's
+//!   answer and for an open given up, [`ChannelBook::startup_review`] for the
+//!   module's first startup. Nothing else makes a [`Review`].
+//! - **Is every message decided once, in order?** [`Channels::take`]: the channel
+//!   book, the waiting payloads and the waiting reviews share one lock, and a
+//!   waiting review is always taken before a waiting payload.
+//!   [`ParkedStore::take_channel`](crate::parked::ParkedStore::take_channel)
+//!   removes what a review decides in the same transaction that reads it.
+//!
+//! `design.md` (the `park-pending-inbound` change) says why each is shaped so.
 //!
 //! # Nothing here may unwind
 //!
 //! A panic on a dispatch thread aborts the module process (`PHASE0-FINDINGS`
 //! §3), and a panic on the worker or the processor would silently end delivery.
-//! Each action, each event the listener reads and each message decided is run
-//! under its own `catch_unwind`, and a panic is logged; a pending channel open is cleared by a `Drop` guard so a panic cannot
-//! leave the processor waiting on it.
+//! Each action, each event the listener reads, each message decided or parked
+//! and each parked message a review decides is run under its own
+//! `catch_unwind`, and a panic is logged. A channel open is settled by a `Drop`
+//! guard, so a panic cannot leave it being opened — and its parked messages
+//! unreviewed — for the rest of the process.
 
 use crate::identity::Address;
 use crate::log::{Appended, OpLog, OpLogError, SqliteOpLog};
 use crate::membership::{membership_path_in, MembershipError, MembershipStore};
 use crate::op::OpId;
+use crate::parked::{
+    parked_path_in, shed, Load, ParkBounds, ParkError, Parked, ParkedStore, Parking,
+    PARK_BOUNDS,
+};
 use crate::sender::{sender_path_in, SenderError, SenderStore};
 use crate::transport::{
     self, ChannelIdentity, InboundMessage, InboundRefusal, OpenChannels, PublishError,
 };
 use crate::wire::panic_detail;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc, Condvar, Mutex, MutexGuard};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 // ─── The seam ─────────────────────────────────────────────────────────────
 
@@ -91,11 +118,28 @@ pub trait Delivery: Send + 'static {
 /// each refused as an unknown channel. Waiting past delivery's own bound means
 /// delivery's answer, not this peer's impatience, decides.
 ///
-/// Nothing waits on this but the worker thread, so its length costs no reply.
-/// That it outlasts delivery's 30 s, and that `SETTLE_LIMIT` outlasts it, is
-/// checked at compile time beside `SETTLE_LIMIT`, and against delivery's 30 s
-/// itself by `the_call_timeout_outlasts_deliverys_own_and_the_settle_limit_outlasts_the_call`.
+/// Nothing waits on this but the worker thread, so its length costs no reply,
+/// and no inbound message waits on it either: a message on a channel being
+/// opened is parked. That it outlasts delivery's 30 s is checked at compile time
+/// beside [`DELIVERY_CALLBACK_TIMEOUT`], and against delivery's 30 s itself by
+/// `this_peers_wait_on_a_creation_outlasts_deliverys_own`.
 pub const CALL_TIMEOUT: Duration = Duration::from_secs(35);
+
+/// delivery v0.2.1's own callback timeout, `CALLBACK_TIMEOUT{30}` in
+/// `delivery_module_plugin.h`: how long delivery waits on its runtime before it
+/// answers a channel call. Named only so the relation below can be checked.
+const DELIVERY_CALLBACK_TIMEOUT: Duration = Duration::from_secs(30);
+
+// `op-transport`: "The longest this peer waits for delivery to answer one
+// channel creation MUST be longer than the time delivery allows itself to answer
+// one" — or an answer delivery gives at 25 s is recorded here as none, and the
+// channel's parked messages are refused while delivery holds it. This holds the
+// two constants against each other, so a shortened `CALL_TIMEOUT` fails to
+// compile. It cannot hold delivery's real 30 s: lowering
+// `DELIVERY_CALLBACK_TIMEOUT` along with it compiles, which
+// `this_peers_wait_on_a_creation_outlasts_deliverys_own` catches against a
+// literal.
+const _: () = assert!(DELIVERY_CALLBACK_TIMEOUT.as_millis() < CALL_TIMEOUT.as_millis());
 
 /// The configuration handed to `createNode`.
 ///
@@ -247,6 +291,10 @@ enum Note<'a> {
     AlreadyStored(&'a OpId),
     Refused(&'static str, Option<&'a str>),
     Discarded { total: u64, bound: usize },
+    Parked,
+    ParkDiscarded { total: u64 },
+    NotParked(&'a str),
+    ReviewUnreadable(&'a str),
     Unreadable,
     MembershipUnreadable(&'a MembershipError),
     NotSubscribed(&'a str),
@@ -338,6 +386,27 @@ impl std::fmt::Display for Note<'_> {
                 "dialectica: inbound message discarded unread, queue full at \
                  {bound}; {total} discarded since the module started"
             ),
+            // No channel identifier, though the channel is one this peer asked
+            // for: a park says only that the boundary moved on, and why.
+            Note::Parked => write!(
+                f,
+                "dialectica: inbound message parked until its channel's open settles"
+            ),
+            Note::ParkDiscarded { total } => write!(
+                f,
+                "dialectica: inbound message discarded from the parked messages, over a \
+                 parking bound; {total} discarded since the module started"
+            ),
+            Note::NotParked(why) => write!(
+                f,
+                "dialectica: inbound message dropped, not parked (storage: {why}); it is \
+                 not held for another attempt"
+            ),
+            Note::ReviewUnreadable(why) => write!(
+                f,
+                "dialectica: parked messages could not be read for review (storage: \
+                 {why}); they stay parked for their channel's next review"
+            ),
             Note::Unreadable => write!(
                 f,
                 "dialectica: inbound delivery event discarded: its fields could not be read"
@@ -418,11 +487,13 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 // ─── The stores ───────────────────────────────────────────────────────────
 
-/// The three files delivery's code opens, all in the host's directory: the op log
-/// (worker and processor), the sender identifiers (worker only), and the
-/// memberships (dispatch, once, at start).
+/// The four files delivery's code opens, all in the host's directory: the op log
+/// (worker and processor), the sender identifiers (worker only), the
+/// memberships (dispatch, once, at start), and the parked messages (processor
+/// only).
 ///
-/// Which threads open which file is what makes each safe: design Decision 13.
+/// Which threads open which file is what makes each safe: `delivery-wiring`'s
+/// design, Decision 13.
 /// A path and not open handles: a worker or processor opens what it needs per
 /// action, for the reason the adapter opens per call — a handle held for the
 /// module's lifetime would have to answer what happens when it goes stale.
@@ -442,6 +513,10 @@ impl Stores {
 
     fn senders(&self) -> Result<SenderStore, SenderError> {
         SenderStore::open(&sender_path_in(&self.dir))
+    }
+
+    fn parked(&self) -> Result<ParkedStore, ParkError> {
+        ParkedStore::open(&parked_path_in(&self.dir))
     }
 
     /// Every Stoa the peer is in, from the membership record and nothing else.
@@ -467,312 +542,259 @@ impl Stores {
 /// the loop pages to the end.
 const MEMBERSHIP_PAGE: usize = 100;
 
-// ─── Which channels are open ──────────────────────────────────────────────
+// ─── Which channels are open, and what waits on the processor ─────────────
 
 /// The channels this peer has open, and the ones it has asked for and not heard
 /// back about.
 ///
-/// # Pending is its own state, because of a race delivery really has
+/// # Being opened is its own state, because of a race delivery really has
 ///
 /// A channel counts as open only once delivery answers that it holds it —
-/// created it, or already had it ([`channel_answer`]). But
-/// delivery v0.2.1 emits `channelMessageReceived` from its runtime's callback
-/// thread whenever SDS hands it one — including after the runtime has created the
-/// channel and before the `channelCreate` answer has reached this peer. A message
-/// judged in that gap is refused as arriving on an unknown channel, and SDS has
-/// already treated it as delivered, so it is gone for this peer.
+/// created it, or already had it ([`channel_answer`]). But delivery v0.2.1 emits
+/// `channelMessageReceived` from its runtime's callback thread whenever SDS hands
+/// it one — including after the runtime has created the channel and before the
+/// `channelCreate` answer has reached this peer. A message judged in that gap is
+/// refused as arriving on an unknown channel, and SDS has already treated it as
+/// delivered, so it is gone for this peer.
 ///
-/// So the processor, meeting a message on a channel that is **not open but
-/// pending**, waits for the open to be answered before judging it. It does not
-/// wait on an open channel, or on one nobody asked for. Removing the wait makes
-/// `a_message_arriving_while_its_channel_opens_is_judged_after_the_answer` red.
+/// So a message taken on a channel that is **not open but being opened** is
+/// parked ([`ChannelBook::on_take`]), and decided by a review once the open
+/// settles ([`ChannelBook::settle`]).
 ///
-/// # Pending from the request, not from the call
+/// # Being opened from the request, not from the call
 ///
-/// An open is pending from the moment a create, a join or startup asks for it —
+/// An open counts from the moment a create, a join or startup asks for it —
 /// while it still waits in the worker's queue behind node creation and other
 /// opens — because delivery can hand over a message on a channel before this peer
 /// has asked delivery for it at all: a module restarted under a running delivery
 /// is handed its Stoas' messages as soon as it subscribes. The [`Opening`] guard
 /// is made where the request is made and travels to the worker inside
 /// [`Action::Open`], so every path that never reaches delivery — no worker, a
-/// worker gone, no sender identifier — settles the open by dropping it.
+/// worker gone, no sender identifier — settles the open by dropping it, and its
+/// parked messages are reviewed then rather than left for the next startup.
 /// `a_message_on_a_channel_whose_open_waits_behind_another_is_judged_once_that_open_settles`
 /// and `a_restarted_peer_keeps_what_delivery_hands_over_before_startup_asks_for_its_channel`
 /// are red while the worker made the guard as it called delivery.
-///
-/// # The wait is bounded per open, and restarted by this peer's ask
-///
-/// Each pending open carries its own time ([`OpenTime`]): one fixed time, started
-/// by the first message to wait on it after a request, and started again when
-/// the worker asks delivery to create the channel ([`Channels::asked`]). Once it
-/// has ended, that channel's messages are judged without waiting until a request
-/// or an ask starts it again. Each waiting message holds its own end ([`Wait`]),
-/// which an ask moves once.
 #[derive(Default)]
 struct ChannelBook {
     open: OpenChannels,
-    pending: HashMap<String, Pending>,
-    /// The next [`WaitId`] to hand out.
-    next_wait: u64,
+    /// Each channel being opened, with how many requests for it have not
+    /// settled. A count rather than a flag, because a repeated join can put a
+    /// second open in the queue before the first is answered, and the channel
+    /// is being opened until the last of them settles.
+    opening: HashMap<String, usize>,
 }
 
-/// A channel being opened: what the book holds for it until every request for it
-/// has settled.
-struct Pending {
-    /// How many requests for this channel have not settled. A count rather than
-    /// a flag, because a repeated join can put a second open in the queue before
-    /// the first is answered.
-    requests: usize,
-    /// The open's time: what a message beginning to wait on it waits until.
-    time: OpenTime,
-    /// The messages waiting on this open now, each with its own end.
-    waits: HashMap<WaitId, Wait>,
+/// What the boundary does with a payload it has taken: [`ChannelBook::on_take`]'s
+/// answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Taken {
+    /// Put it through the boundary now. On a channel neither open nor being
+    /// opened, the boundary refuses it as an unknown channel.
+    Judge,
+    /// Its channel is being opened and is not open: park it, judging nothing.
+    Park,
 }
 
-/// Where an open's time stands.
+/// A review of parked messages, named for the event that begins it.
 ///
-/// # The time is the open's, not the message's
-///
-/// `op-transport` bounds the wait "for each open, not for each message". With a
-/// clock per message, each message on a channel whose open is stuck waited the
-/// whole [`SETTLE_LIMIT`] again, and the one processor held every other Stoa up
-/// for all of them in a row: a sender putting n messages on that channel chose an
-/// n-fold stall (the security re-review measured ten messages holding a valid op
-/// back for ten limits). Kept here, the time passes once for each time it is
-/// started, however many messages arrive on its channel.
-/// `many_messages_on_one_unanswered_open_hold_other_channels_up_for_one_wait_not_one_each`
-/// is red with the clock per message.
-///
-/// # Three states, because the two things that start it know different things
-///
-/// A message beginning to wait knows the limit it waits by, and fixes the end.
-/// The worker's ask of delivery knows only the moment it asks: the end is fixed,
-/// from that moment, by the next message to wait. Once fixed it is kept as an
-/// end, so a time that has ended stays ended for every later message, whatever
-/// limit that message waits by.
-///
-/// **An end already past is the spec's expired wait**, and needs no state of its
-/// own: every later message on the channel is given that same instant and is
-/// judged at once. Nothing else about the open changes — it stays pending, so its
-/// messages are still handed over and delivery's answer still settles it — until
-/// a request ([`Channels::opening`]) or an ask ([`Channels::asked`]) starts the
-/// time again.
-#[derive(Clone, Copy)]
-enum OpenTime {
-    /// No message has waited since the latest request, and there has been no ask
-    /// since it.
-    NotStarted,
-    /// This peer asked delivery to create the channel at this instant, and no
-    /// message has begun waiting since.
-    StartedAt(Instant),
-    /// The time ends at this instant.
-    Ends(Instant),
-}
-
-impl OpenTime {
-    /// When the open's time ends, fixing it — `limit` after it started, or from
-    /// now if nothing has started it.
-    fn end(&mut self, limit: Duration) -> Instant {
-        let ends = match *self {
-            OpenTime::NotStarted => Instant::now() + limit,
-            OpenTime::StartedAt(asked) => asked + limit,
-            OpenTime::Ends(ends) => ends,
-        };
-        *self = OpenTime::Ends(ends);
-        ends
-    }
-}
-
-/// Names one message's wait in the book, so the ask can reach it and the waiter
-/// can read it back.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-struct WaitId(u64);
-
-/// One message's wait on an open.
-struct Wait {
-    /// When the message stops waiting if the open has not settled.
-    ends: Instant,
-    /// The extension an ask may still give it: the limit it waits by, until the
-    /// first ask made while it waits uses it up.
-    extension: Option<Duration>,
-}
-
-impl Wait {
-    /// This peer asked delivery for the channel at `asked`: the message now ends
-    /// its wait `limit` after the ask, in place of the end it began with —
-    /// **once**. `op-transport`: a later ask "MUST NOT move that message's end
-    /// again". Without the cap, asks chained against a hung delivery (a repeated
-    /// join, each ask answered by `CALL_TIMEOUT`) would postpone one message for as
-    /// long as they came, and "Requests made while a message waits do not lengthen
-    /// its wait" would be false. `Option::take` is the cap: a second ask finds
-    /// nothing to take. `a_second_ask_while_a_message_waits_does_not_extend_its_wait_again`
-    /// is red without it.
-    ///
-    /// **Only a wait that has not ended.** A wait stays in the book after its end
-    /// until the waiter re-takes the lock, and the ask can take it first — behind
-    /// the listener, a settle or a hand-over, an ordinary interleaving. Extended
-    /// then, a message whose wait had expired would wait again for a full limit,
-    /// against "the message waiting then ... MUST be judged without waiting on that
-    /// open". `an_ask_after_a_messages_wait_has_ended_does_not_make_it_wait_again`
-    /// is red without the check. An ask at the end itself counts as after it, as
-    /// [`Channels::await_settled`] counts no time left as ended.
-    fn extend_from(&mut self, asked: Instant) {
-        if asked >= self.ends {
-            return;
-        }
-        if let Some(limit) = self.extension.take() {
-            self.ends = asked + limit;
-        }
-    }
-}
-
-impl Pending {
-    /// This peer asked delivery to create the channel at `asked`: the open's
-    /// time starts again, whether or not it had ended, and every message waiting
-    /// now whose end has not yet passed is extended from the ask, if no earlier ask
-    /// has extended it. `waits` can still hold a wait whose end has passed (it
-    /// leaves when its waiter re-takes the lock); [`Wait::extend_from`] leaves that
-    /// one alone.
-    fn asked(&mut self, asked: Instant) {
-        self.time = OpenTime::StartedAt(asked);
-        for wait in self.waits.values_mut() {
-            wait.extend_from(asked);
-        }
-    }
+/// Made in exactly two places, [`ChannelBook::settle`] and
+/// [`ChannelBook::startup_review`]. The processor runs it ([`Processor::review`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Review {
+    /// Delivery reported that it holds this channel: judge each message parked
+    /// on it, as a message taken on an open channel is judged.
+    Held(String),
+    /// The last unsettled request for this channel settled some other way, and
+    /// it is not open: refuse each message parked on it as an unknown channel.
+    Unopened(String),
+    /// The module's first startup in this process: refuse each message parked on
+    /// a channel not in this set — the channels open or being opened then — as
+    /// an unknown channel, and leave the rest for their channel's next review.
+    Startup(HashSet<String>),
 }
 
 impl ChannelBook {
-    /// Whether a message on this channel waits for its open: pending, and not
-    /// already open.
-    fn is_opening(&self, channel_id: &str) -> bool {
-        !self.open.is_open(channel_id) && self.pending.contains_key(channel_id)
+    /// Whether a channel is open or being opened: what hand-over asks before a
+    /// message may take a place among the waiting payloads.
+    fn is_known(&self, channel_id: &str) -> bool {
+        self.open.is_open(channel_id) || self.opening.contains_key(channel_id)
     }
 
-    /// Begin a message's wait on its channel's open, ending when the open's time
-    /// ends — or `None` when it does not wait at all: the channel is open, or no
-    /// open for it is pending.
+    /// **Whether a payload just taken is parked** — the one place that decides
+    /// it, asked once per payload, under the lock it was taken under.
     ///
-    /// Guarded by [`ChannelBook::is_opening`], the question
-    /// [`Channels::await_settled`] asks again on each wake-up, so "does this
-    /// message wait" and "does it keep waiting" are one predicate and cannot
-    /// drift apart.
-    fn begin_wait(&mut self, channel_id: &str, limit: Duration) -> Option<WaitId> {
-        if !self.is_opening(channel_id) {
-            return None;
+    /// `op-transport`, "A message on a channel being opened is parked, and nothing
+    /// waits on an open": open, whether or not a further request is unsettled →
+    /// judged; not open and being opened → parked; neither → judged, and refused
+    /// as an unknown channel. Parked is the one state in which judging now would
+    /// refuse a message the open's answer may yet admit.
+    fn on_take(&self, channel_id: &str) -> Taken {
+        if !self.open.is_open(channel_id) && self.opening.contains_key(channel_id) {
+            Taken::Park
+        } else {
+            Taken::Judge
         }
-        let id = WaitId(self.next_wait);
-        self.next_wait = self.next_wait.wrapping_add(1);
-        let pending = self.pending.get_mut(channel_id)?;
-        let ends = pending.time.end(limit);
-        pending.waits.insert(
-            id,
-            Wait {
-                ends,
-                extension: Some(limit),
-            },
-        );
-        Some(id)
     }
 
-    /// When a waiting message stops waiting, as its wait stands now — `None` once
-    /// the open it began waiting on is no longer in the book.
-    fn wait_ends(&self, channel_id: &str, wait: WaitId) -> Option<Instant> {
-        Some(self.pending.get(channel_id)?.waits.get(&wait)?.ends)
+    /// A create, a join or startup asked for this channel.
+    fn request(&mut self, identity: &ChannelIdentity) {
+        let requests = self
+            .opening
+            .entry(identity.channel_id().to_string())
+            .or_insert(0);
+        *requests = requests.saturating_add(1);
     }
 
-    fn end_wait(&mut self, channel_id: &str, wait: WaitId) {
-        if let Some(pending) = self.pending.get_mut(channel_id) {
-            pending.waits.remove(&wait);
+    /// **One request for this channel settled; the review it begins, if any** —
+    /// the one place a settle becomes a review.
+    ///
+    /// `op-transport`, "Parked messages are reviewed on three events and no
+    /// others", events 1 and 2:
+    ///
+    /// - **Held**, in answer to any request: the channel is open, and its parked
+    ///   messages are judged ([`Review::Held`]). Whatever else is unsettled for it.
+    /// - **Not held, and the last unsettled request, and not open**: nothing will
+    ///   open the channel now, and its parked messages are refused
+    ///   ([`Review::Unopened`]).
+    /// - **Anything else** begins no review: a decline while another request is
+    ///   unsettled leaves the parked messages for that request's answer, and a
+    ///   decline of a repeat for a channel already open finds nothing parked.
+    ///
+    /// A declined or given-up request never closes an open channel:
+    /// `stoa-membership`, "A declined repeat request leaves an open channel
+    /// open", because delivery created it once and nothing has closed it.
+    fn settle(&mut self, identity: &ChannelIdentity, held: bool) -> Option<Review> {
+        let channel_id = identity.channel_id();
+        let last = match self.opening.get_mut(channel_id) {
+            Some(requests) if *requests > 1 => {
+                *requests -= 1;
+                false
+            }
+            _ => {
+                self.opening.remove(channel_id);
+                true
+            }
+        };
+        if held {
+            self.open.open(identity);
+            return Some(Review::Held(channel_id.to_string()));
         }
+        (last && !self.open.is_open(channel_id)).then(|| Review::Unopened(channel_id.to_string()))
+    }
+
+    /// **The review the module's first startup begins** — event 3 — once it has
+    /// counted the channel of every Stoa it asks for as being opened.
+    ///
+    /// The set is taken now, at the event, as the requirement reads ("whose
+    /// channel is then neither open nor being opened"). At startup the book is
+    /// new, so nothing is open yet and the set is startup's own requests.
+    fn startup_review(&self) -> Review {
+        Review::Startup(self.opening.keys().cloned().collect())
     }
 }
 
-#[derive(Default)]
+/// Everything the listener, the worker and the processor share, under one lock:
+/// the channel book, the payloads waiting to be taken, and the reviews waiting
+/// to be run.
+///
+/// # One lock, because two of the spec's guarantees are about an order
+///
+/// `op-transport`, "Every message is decided exactly once, however close to a
+/// settle it is taken": the taking of a message and an event that begins a
+/// review of its channel "MUST be ordered, one before the other". The event
+/// changes the book; the taking reads it. With the book and the waiting
+/// payloads behind two locks, a settle could land between the processor popping
+/// a payload and reading its channel's state, and which side of the event that
+/// payload fell on would be a matter of scheduling. Here [`Channels::settle`]
+/// changes the book and queues the review in one critical section, and
+/// [`Channels::take`] pops a payload and reads its channel's state in another,
+/// so every take is wholly before or wholly after every event.
+///
+/// # A waiting review is taken before any waiting payload
+///
+/// The same requirement's other half: a review "MUST decide all of them before
+/// any message on that channel taken after the event that began the review is
+/// judged". A payload taken after a settle that opened its channel reads
+/// [`Taken::Judge`]; were the review behind it in a queue, that payload would be
+/// judged before the parked messages the review decides. So reviews do not
+/// queue among payloads: [`Channels::take`] returns any waiting review first.
+/// Reviews are not counted towards the waiting payloads' bound, and are never
+/// discarded — each is one of this peer's own requests settling.
+///
+/// # Nothing here is held across a decision
+///
+/// Every method holds the lock for map and queue operations only — and, in
+/// [`Channels::handoff`], encoding one of this peer's own ops — never while a
+/// payload is decoded, verified, appended or parked. So an append waiting on a
+/// busy op log cannot hold up the worker's opens and sends, and hand-over
+/// cannot wait on a payload being decided.
+/// `the_channel_book_is_not_held_while_an_op_is_appended` is red if it is.
 struct Channels {
-    book: Mutex<ChannelBook>,
-    settled: Condvar,
+    shared: Mutex<Shared>,
+    /// Signalled when a payload or a review is queued, or the queue is closed.
+    ready: Condvar,
 }
 
-/// How long messages may wait on one pending open before they are judged anyway,
-/// counted from when the open's time started: when the first of them began
-/// waiting after a request, or when this peer last asked delivery for the channel.
-///
-/// `op-transport` requires the wait be "bounded by a fixed time for each open,
-/// not for each message", and leaves the value to design. See [`OpenTime`].
-///
-/// **What it bounds is a stall of every Stoa.** There is one processor, so while
-/// it waits, messages on every other channel wait behind it and the queue fills.
-/// Each start of an open's time holds every other Stoa up at most this long,
-/// whatever a sender puts on the channel, and only this peer's requests and asks
-/// start one. A message waiting when the worker asks delivery for its channel is
-/// extended once ([`Wait::extend_from`]), so it holds them up for less than twice
-/// this: under it before the ask, or its wait would have expired, and at most it
-/// after — in practice only until the call is answered or given up, which
-/// [`CALL_TIMEOUT`] bounds, unless another request for the channel is pending. No
-/// wait outlasts its own open's settle, so several stuck opens never hold every
-/// Stoa past the moment the last of them settles.
-///
-/// **Past [`CALL_TIMEOUT`], and started again by the ask, so it outlasts the
-/// call it is waiting on**: a message waiting on an open when the worker asks
-/// delivery for it (the first ask while it waits), or beginning to wait after, is
-/// judged only once that call is answered or given up, however long the open
-/// waited in the queue first. What it does **not** cover is a message whose wait
-/// ended before delivery was asked at all. An open is pending from when it is
-/// requested, so one queued behind node creation and other opens, each up to
-/// [`CALL_TIMEOUT`] against a slow delivery, can see its time run out in the
-/// queue: that message, and the channel's messages after it until the ask, are
-/// judged against what is open then — refused, and lost. design.md Decision 11
-/// says why a limit long enough for a queue of opens was not chosen.
-const SETTLE_LIMIT: Duration = Duration::from_secs(40);
+struct Shared {
+    book: ChannelBook,
+    waiting: InboundQueue,
+    reviews: VecDeque<Review>,
+    /// Discards since the module started, from the waiting payloads and from
+    /// the parked messages alike: `op-transport` keeps one running count.
+    discarded: u64,
+    /// Set only by tests, so a processor run on the test's thread ends once
+    /// what is queued is done. The running wiring never closes it: a review can
+    /// still be due after delivery's events end.
+    closed: bool,
+}
 
-/// delivery v0.2.1's own callback timeout, `CALLBACK_TIMEOUT{30}` in
-/// `delivery_module_plugin.h`: how long delivery waits on its runtime before it
-/// answers a channel call. Named only so the relation below can be checked.
-const DELIVERY_CALLBACK_TIMEOUT: Duration = Duration::from_secs(30);
+impl Default for Channels {
+    fn default() -> Self {
+        Channels::with_bound(INBOUND_BOUND)
+    }
+}
 
-// The order both limits' docs rest on, and `op-transport` requires: delivery's
-// own timeout < `CALL_TIMEOUT` (or an answer delivery gives at 25 s is recorded
-// here as none) < `SETTLE_LIMIT` (or a message racing its own join's creation is
-// refused before the creation is answered). These asserts hold the three
-// constants against each other, so a `CALL_TIMEOUT` or `SETTLE_LIMIT` shortened
-// past its neighbour fails to compile. They cannot hold delivery's real 30 s:
-// lowering `DELIVERY_CALLBACK_TIMEOUT` along with `CALL_TIMEOUT` compiles.
-// `the_call_timeout_outlasts_deliverys_own_and_the_settle_limit_outlasts_the_call`
-// holds both limits against delivery's 30 s, written there as a literal. No test
-// waits out any of the three.
-const _: () = assert!(DELIVERY_CALLBACK_TIMEOUT.as_millis() < CALL_TIMEOUT.as_millis());
-const _: () = assert!(CALL_TIMEOUT.as_millis() < SETTLE_LIMIT.as_millis());
+/// What handing a message over did.
+#[derive(Debug, PartialEq, Eq)]
+enum HandedOver {
+    /// Refused before it took a place: an unknown channel, or over the limit.
+    Refused(InboundRefusal),
+    /// It is waiting to be taken.
+    Waiting,
+    /// The queue was full, and a payload — perhaps this one — was discarded.
+    /// Carries the running count and the bound.
+    Discarded { total: u64, bound: usize },
+}
+
+/// What the processor takes next.
+#[derive(Debug)]
+enum Next {
+    Review(Review),
+    /// A payload, with what its channel's state when it was taken says to do.
+    Payload(Arriving, Taken),
+}
 
 impl Channels {
-    /// Mark an open as asked for, returning the guard that settles it.
-    ///
-    /// **A request starts a new wait.** `op-transport`: "Only a later create, join
-    /// or startup asking for that channel, or this peer asking delivery to create
-    /// it, lets a message wait on it again". So a request puts the open's time
-    /// back to [`OpenTime::NotStarted`], whether or not it had ended, and the next
-    /// message to wait starts it. It moves no waiting message's end: that is each
-    /// [`Wait`]'s own. Only this peer's own create, join and startup call this;
-    /// nothing a sender does can restart a wait.
-    /// `a_new_request_for_a_channel_whose_wait_has_expired_lets_a_message_wait_again`
-    /// is red without the reset.
+    fn with_bound(bound: usize) -> Self {
+        Channels {
+            shared: Mutex::new(Shared {
+                book: ChannelBook::default(),
+                waiting: InboundQueue::with_bound(bound),
+                reviews: VecDeque::new(),
+                discarded: 0,
+                closed: false,
+            }),
+            ready: Condvar::new(),
+        }
+    }
+
+    /// Count a channel as being opened, returning the guard that settles it.
     ///
     /// The guard owns a handle on the book rather than borrowing it, so it can
     /// outlive the call that made it.
     fn opening(self: &Arc<Self>, identity: &ChannelIdentity) -> Opening {
-        let mut book = lock(&self.book);
-        let pending = book
-            .pending
-            .entry(identity.channel_id().to_string())
-            .or_insert_with(|| Pending {
-                requests: 0,
-                time: OpenTime::NotStarted,
-                waits: HashMap::new(),
-            });
-        pending.requests += 1;
-        pending.time = OpenTime::NotStarted;
-        // Released before the guard exists: dropping a guard takes this lock.
-        drop(book);
+        lock(&self.shared).book.request(identity);
         Opening {
             channels: Arc::clone(self),
             identity: identity.clone(),
@@ -780,116 +802,90 @@ impl Channels {
         }
     }
 
+    /// One request settled: change the book and queue the review it begins, in
+    /// one critical section.
     fn settle(&self, identity: &ChannelIdentity, held: bool) {
-        let mut book = lock(&self.book);
-        if let Some(pending) = book.pending.get_mut(identity.channel_id()) {
-            pending.requests = pending.requests.saturating_sub(1);
-            if pending.requests == 0 {
-                book.pending.remove(identity.channel_id());
-            }
-        }
-        // `stoa-membership`, scenario "A declined repeat request leaves an open
-        // channel open": a repeat open that is declined leaves an already-open
-        // channel open, because delivery created it once and nothing has closed
-        // it. `a_declined_repeat_open_leaves_the_channel_open_for_the_next_message`
-        // states it through a message; `a_declined_repeat_open_leaves_an_open_channel_open`
-        // through this book.
-        if held {
-            book.open.open(identity);
-        }
-        self.settled.notify_all();
-    }
-
-    /// This peer is asking delivery to create the channel, now: the open's time
-    /// starts again, and each message waiting on it is extended from now, once.
-    ///
-    /// `op-transport`, "Asking delivery to create a channel starts the open's time
-    /// again". An open is pending from its request, so a message can begin waiting
-    /// on it while it is still queued behind other calls; kept from then, the
-    /// time could run out while delivery was being asked, and a message racing
-    /// delivery's answer — the race this wait exists for — would be refused and
-    /// lost (the security re-review's round-3 probe). Started again here, every
-    /// message waiting at or after the ask is judged only once that call is
-    /// answered or given up, because the fixed time outlasts [`CALL_TIMEOUT`].
-    ///
-    /// Only the worker calls this, as it calls delivery, so no sender can start an
-    /// open's time or extend a wait. What each of the new tests turns red without
-    /// is in design.md Decision 11.
-    fn asked(&self, identity: &ChannelIdentity) {
-        let mut book = lock(&self.book);
-        let now = Instant::now();
-        if let Some(pending) = book.pending.get_mut(identity.channel_id()) {
-            pending.asked(now);
+        let mut shared = lock(&self.shared);
+        if let Some(review) = shared.book.settle(identity, held) {
+            shared.reviews.push_back(review);
+            self.ready.notify_all();
         }
     }
 
-    /// Whether a channel is open or being opened: what the listener asks before
-    /// a message may take a place in the queue.
+    /// Queue the review the module's first startup begins.
+    fn begin_startup_review(&self) {
+        let mut shared = lock(&self.shared);
+        let review = shared.book.startup_review();
+        shared.reviews.push_back(review);
+        self.ready.notify_all();
+    }
+
+    /// Whether a channel is open or being opened. Tests only: the running code
+    /// asks [`ChannelBook::is_known`] under the lock it acts under.
+    #[cfg(test)]
     fn is_known(&self, channel_id: &str) -> bool {
-        let book = lock(&self.book);
-        book.open.is_open(channel_id) || book.pending.contains_key(channel_id)
+        lock(&self.shared).book.is_known(channel_id)
     }
 
-    /// Wait while a channel is pending and not open, until this message's wait
-    /// ends: the end of the open's time as it stood when the message began
-    /// waiting, or the fixed time after the first ask made while it waits. Once
-    /// the open's time has ended, this and every later message on the channel
-    /// returns at once, until a request or an ask starts it again.
+    /// Refuse a message before it waits, or offer it to the waiting payloads.
     ///
-    /// **The end is this message's own**, held in its [`Wait`] and read back on
-    /// each wake-up, and only an ask moves it, once. A request made meanwhile
-    /// starts a new wait for the messages after this one and moves no waiting
-    /// message's end. `a_request_made_while_a_message_waits_does_not_extend_that_messages_wait`
-    /// is red with the open's time read on each wake-up in place of the message's
-    /// own end.
-    ///
-    /// **A wait gone from the book ends the wait.** It goes only with the open's
-    /// pending entry, when every request it waited on has settled — which is what
-    /// the message waits for — and a request made since gives a new wait only to
-    /// the messages after it. That is reached only when the open settles and is
-    /// asked for again between two of this loop's wake-ups.
-    ///
-    /// **Its own loop, not `wait_timeout_while`**, because of a poisoned book:
-    /// that function returns `Err` at the first wake-up once the mutex is
-    /// poisoned, so the wait would end when *any* open settled and the message
-    /// would be refused in exactly the gap this wait exists to close. Here the
-    /// guard is taken back from a poisoned wake-up as [`lock`] takes it back, and
-    /// only this channel's condition or the message's end ends the wait.
-    /// `a_poisoned_channel_book_still_waits_for_this_channels_open` is red
-    /// without it.
-    fn await_settled(&self, channel_id: &str, limit: Duration) {
-        let mut book = lock(&self.book);
-        let Some(wait) = book.begin_wait(channel_id, limit) else {
-            return;
-        };
-        while book.is_opening(channel_id) {
-            let Some(ends) = book.wait_ends(channel_id, wait) else {
-                break;
-            };
-            let left = ends.saturating_duration_since(Instant::now());
-            if left.is_zero() {
-                break;
-            }
-            book = match self.settled.wait_timeout(book, left) {
-                Ok((guard, _)) => guard,
-                Err(poisoned) => poisoned.into_inner().0,
-            };
+    /// The check and the offer are one critical section, so whether a channel is
+    /// open or being opened "is judged when delivery hands the message over" and
+    /// not at some other moment.
+    fn hand_over(&self, message: Arriving) -> HandedOver {
+        let mut shared = lock(&self.shared);
+        if let Some(refusal) = refused_on_hand_over(&message, &shared.book) {
+            return HandedOver::Refused(refusal);
         }
-        book.end_wait(channel_id, wait);
+        let offered = shared.waiting.offer(message);
+        self.ready.notify_all();
+        match offered {
+            Offered::Waiting => HandedOver::Waiting,
+            Offered::Discarded => {
+                shared.discarded = shared.discarded.saturating_add(1);
+                HandedOver::Discarded {
+                    total: shared.discarded,
+                    bound: shared.waiting.bound,
+                }
+            }
+        }
+    }
+
+    /// **What the processor does next** — the seam that orders every take
+    /// against every event that begins a review.
+    ///
+    /// A waiting review first; otherwise the oldest waiting payload, with its
+    /// channel's state read once, now ([`ChannelBook::on_take`]); otherwise
+    /// block until there is one. `None` only once a test has closed it and
+    /// nothing is left.
+    fn take(&self) -> Option<Next> {
+        let mut shared = lock(&self.shared);
+        loop {
+            if let Some(review) = shared.reviews.pop_front() {
+                return Some(Next::Review(review));
+            }
+            if let Some(message) = shared.waiting.pop() {
+                let taken = shared.book.on_take(&message.channel_id);
+                return Some(Next::Payload(message, taken));
+            }
+            if shared.closed {
+                return None;
+            }
+            shared = self.ready.wait(shared).unwrap_or_else(|e| e.into_inner());
+        }
+    }
+
+    /// Count one discard from the parked messages in the running count.
+    fn count_discard(&self) -> u64 {
+        let mut shared = lock(&self.shared);
+        shared.discarded = shared.discarded.saturating_add(1);
+        shared.discarded
     }
 
     /// The Stoa a channel is open for now, copied out so the lock is released
     /// before anything is judged.
-    ///
-    /// **The book is never held across a decision.** Every method here holds the
-    /// guard for map operations only — and, in [`Channels::handoff`], encoding
-    /// one of this peer's own ops — never while a payload is decoded, verified
-    /// or appended. So an append waiting on a busy op log cannot hold up the
-    /// worker's opens and sends, and the listener's hand-over check cannot wait
-    /// on a payload being decided. `the_channel_book_is_not_held_while_an_op_is_appended`
-    /// is red if it is.
     fn stoa_of(&self, channel_id: &str) -> Option<Address> {
-        lock(&self.book).open.stoa_of(channel_id).copied()
+        lock(&self.shared).book.open.stoa_of(channel_id).copied()
     }
 
     /// What to send for an op already held, and on which channel.
@@ -897,14 +893,22 @@ impl Channels {
         &self,
         stored: &crate::op::SignedOp,
     ) -> Result<transport::Publishable, PublishError> {
-        transport::handoff(stored, &lock(&self.book).open)
+        transport::handoff(stored, &lock(&self.shared).book.open)
+    }
+
+    /// Let [`Channels::take`] return `None` once nothing is left. Tests only.
+    #[cfg(test)]
+    fn close(&self) {
+        lock(&self.shared).closed = true;
+        self.ready.notify_all();
     }
 }
 
-/// An open asked for and not yet settled. Dropping it settles the open — as open
-/// only if [`Opening::held`] was called — so no path between the request and
+/// An open asked for and not yet settled. Dropping it settles the open — as held
+/// only if [`Opening::settle`] said so — so no path between the request and
 /// delivery's answer, a panic, a refused send to the worker or a worker that
-/// never takes it included, can leave the channel pending.
+/// never takes it included, can leave the channel being opened, or the messages
+/// parked on it unreviewed.
 struct Opening {
     channels: Arc<Channels>,
     identity: ChannelIdentity,
@@ -913,15 +917,19 @@ struct Opening {
 
 impl Opening {
     /// Delivery reported that it holds the channel: created it, or already had it.
+    /// Tests only; the worker says so with [`Opening::settle`].
+    #[cfg(test)]
     fn held(&mut self) {
         self.held = true;
     }
 
-    /// This peer is asking delivery to create the channel, now
-    /// ([`Channels::asked`]). Called by the worker immediately before
-    /// `channelCreate`, and by nothing else outside tests.
-    fn asked(&self) {
-        self.channels.asked(&self.identity);
+    /// Settle the open now, as held or not, rather than whenever this is dropped.
+    ///
+    /// The worker settles before it logs the outcome, so a line saying the open
+    /// was answered or given up is never read while the channel still counts as
+    /// being opened.
+    fn settle(mut self, held: bool) {
+        self.held = held;
     }
 }
 
@@ -1001,24 +1009,22 @@ impl<D: Delivery> Worker<D> {
     /// Ask delivery to open a Stoa's channel under this installation's sender
     /// identifier for it — or, with no identifier retained, ask for nothing.
     ///
-    /// Every return settles the open, by dropping `opening`: as held only on
-    /// delivery's report that it holds the channel, and otherwise as given up —
-    /// the no-identifier return included, which never asks delivery at all.
-    fn open(&self, mut opening: Opening) {
+    /// Every return settles the open: as held only on delivery's report that it
+    /// holds the channel, and otherwise as given up — the no-identifier return
+    /// included, which never asks delivery at all. Each settles **before** its
+    /// log line, so the review it begins is queued by the time the line can be
+    /// read.
+    fn open(&self, opening: Opening) {
         let identity = opening.identity.clone();
         let stoa = identity.stoa();
         let sender = match self.stores.senders().and_then(|mut s| s.sender_for(stoa)) {
             Ok(sender) => sender,
             Err(why) => {
+                opening.settle(false);
                 record(&*self.journal, Note::SenderNotRetained(stoa, &why));
                 return;
             }
         };
-        // Marked before the call, not after: the call holds this thread until
-        // delivery answers, which is the time a message racing the answer must
-        // be able to wait through. `the_worker_marks_its_ask_of_delivery_in_the_channel_book`
-        // is red without it.
-        opening.asked();
         let reply = self.delivery.channel_create(
             identity.channel_id(),
             identity.content_topic(),
@@ -1026,14 +1032,15 @@ impl<D: Delivery> Worker<D> {
         );
         match channel_answer(&reply) {
             ChannelAnswer::Created => {
-                opening.held();
+                opening.settle(true);
                 record(&*self.journal, Note::ChannelOpened(stoa));
             }
             ChannelAnswer::AlreadyHeld => {
-                opening.held();
+                opening.settle(true);
                 record(&*self.journal, Note::ChannelAlreadyHeld(stoa));
             }
             ChannelAnswer::Declined(why) => {
+                opening.settle(false);
                 record(&*self.journal, Note::ChannelDeclined(stoa, &why))
             }
         }
@@ -1080,8 +1087,8 @@ impl<D: Delivery> Worker<D> {
 
 /// The dispatch side's handle on the worker: enqueue, never wait.
 ///
-/// It holds the channel book too, because a request for a channel marks the open
-/// pending here, on the dispatch side, before it is queued.
+/// It holds the channel book too, because a request for a channel counts the
+/// channel as being opened here, on the dispatch side, before it is queued.
 struct Outbox {
     actions: mpsc::Sender<Action>,
     channels: Arc<Channels>,
@@ -1120,87 +1127,114 @@ pub struct Arriving {
     pub timestamp: i64,
 }
 
+impl Arriving {
+    /// This message as the boundary takes it, every field included.
+    fn inbound(&self) -> InboundMessage<'_> {
+        InboundMessage {
+            channel_id: &self.channel_id,
+            sender_id: &self.sender_id,
+            payload: &self.payload,
+            timestamp: self.timestamp,
+        }
+    }
+}
+
+/// A parked message as the boundary takes it at its review: **with no sender
+/// identifier and no timestamp**, because none was kept. `op-transport`: "A
+/// parked message is put through the boundary without a sender identifier …
+/// The boundary decides nothing from one", and the window is judged against
+/// this peer's clock, never the event's timestamp. Empty and zero are what
+/// "none" is in a struct that mirrors the event's fields.
+fn parked_inbound(parked: &Parked) -> InboundMessage<'_> {
+    InboundMessage {
+        channel_id: &parked.channel_id,
+        sender_id: "",
+        payload: &parked.payload,
+        timestamp: 0,
+    }
+}
+
 /// What offering a message did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Offered {
     Waiting,
-    /// Discarded unread: the queue was full. Carries the running total.
-    Discarded(u64),
+    /// The queue was full, and the newest payload of the channel holding the
+    /// most — the offered one, or one already waiting — was discarded unread.
+    Discarded,
 }
 
-#[derive(Default)]
-struct Waiting {
-    messages: VecDeque<Arriving>,
-    discarded: u64,
-    closed: bool,
-}
-
-/// The messages waiting for the boundary, bounded by a fixed count.
+/// The payloads waiting to be taken, bounded by a fixed count. Plain data: the
+/// lock is [`Channels`]'s.
 ///
-/// # A full queue discards the ARRIVING message and keeps what waits
+/// # A full queue discards the newest payload of the channel holding the most
 ///
-/// This reverses #30, which discarded the oldest. A backlog burst — SDS
-/// catching a peer up — arrives roughly oldest first, so the oldest waiting
-/// messages are the thread roots, and the newest arrivals are the leaves.
-/// Discarding the oldest keeps replies whose parents are gone; discarding the
-/// arrival loses leaves and keeps every thread it holds whole.
+/// Counting the arrival with its own channel ([`crate::parked::shed`], the rule
+/// the parked messages' total bounds use too). This narrows #30's question —
+/// which payload a full queue loses — to the channel causing the pressure: a
+/// flood on one Stoa's channel loses that channel's own newest payloads, and a
+/// quiet Stoa's message arriving behind the flood is kept. Within the flooding
+/// channel it is still the newest that goes, for the reason the old rule
+/// discarded the arrival: a backlog burst arrives roughly oldest first, so the
+/// newest payloads are leaves, and losing them keeps every thread whole. When
+/// one channel holds everything waiting, this is the old rule exactly.
 ///
 /// # Offering never waits on the boundary
 ///
-/// [`InboundQueue::offer`] takes the lock, pushes or counts, and returns. Only
-/// [`InboundQueue::take`] blocks, and only the processor calls it.
+/// [`InboundQueue::offer`] pushes, or sheds and pushes, and returns: it is a
+/// scan of at most the bound under [`Channels`]'s lock, which no decision
+/// holds.
 struct InboundQueue {
-    waiting: Mutex<Waiting>,
-    arrived: Condvar,
+    messages: VecDeque<Arriving>,
     bound: usize,
 }
 
 impl InboundQueue {
     fn with_bound(bound: usize) -> Self {
         InboundQueue {
-            waiting: Mutex::new(Waiting::default()),
-            arrived: Condvar::new(),
+            messages: VecDeque::new(),
             bound,
         }
     }
 
-    fn offer(&self, message: Arriving) -> Offered {
-        let mut waiting = lock(&self.waiting);
-        if waiting.messages.len() >= self.bound {
-            waiting.discarded = waiting.discarded.saturating_add(1);
-            return Offered::Discarded(waiting.discarded);
+    fn offer(&mut self, message: Arriving) -> Offered {
+        if self.messages.len() < self.bound {
+            self.messages.push_back(message);
+            return Offered::Waiting;
         }
-        waiting.messages.push_back(message);
-        self.arrived.notify_one();
-        Offered::Waiting
+        // Each channel's waiting count and newest place, the arrival counted
+        // with its own channel as the newest of all.
+        let mut loads: HashMap<&str, Load> = HashMap::new();
+        for (place, waiting) in (0u64..).zip(&self.messages) {
+            let load = loads.entry(waiting.channel_id.as_str()).or_default();
+            load.measure = load.measure.saturating_add(1);
+            load.newest = place;
+        }
+        let own = loads.entry(message.channel_id.as_str()).or_default();
+        own.measure = own.measure.saturating_add(1);
+        own.newest = u64::MAX;
+        let victim = shed(loads).filter(|c| *c != message.channel_id).map(str::to_string);
+        // `None`: the arrival's channel holds the most, and the arrival is its
+        // newest. Discarded, and every waiting payload kept.
+        let Some(victim) = victim else {
+            return Offered::Discarded;
+        };
+        // `shed` names only a channel holding something, so `rposition` finds
+        // it; were it not to, the arrival is the one dropped, and the bound holds.
+        if let Some(at) = self.messages.iter().rposition(|m| m.channel_id == victim) {
+            self.messages.remove(at);
+            self.messages.push_back(message);
+        }
+        Offered::Discarded
     }
 
-    /// The oldest waiting message, blocking until there is one. `None` once the
-    /// queue is closed and empty — what is waiting is still decided.
-    fn take(&self) -> Option<Arriving> {
-        let mut waiting = lock(&self.waiting);
-        loop {
-            if let Some(message) = waiting.messages.pop_front() {
-                return Some(message);
-            }
-            if waiting.closed {
-                return None;
-            }
-            waiting = self
-                .arrived
-                .wait(waiting)
-                .unwrap_or_else(|e| e.into_inner());
-        }
-    }
-
-    fn close(&self) {
-        lock(&self.waiting).closed = true;
-        self.arrived.notify_all();
+    /// The oldest waiting payload.
+    fn pop(&mut self) -> Option<Arriving> {
+        self.messages.pop_front()
     }
 
     #[cfg(test)]
     fn len(&self) -> usize {
-        lock(&self.waiting).messages.len()
+        self.messages.len()
     }
 }
 
@@ -1239,7 +1273,7 @@ impl InboundQueue {
 /// The cost: an iterator that panicked on *every* call without consuming an
 /// event would spin here, logging. The SDK's does not — the event is received
 /// before it is decoded, so the next call receives the next one.
-fn listen<I>(mut events: I, channels: &Channels, queue: &InboundQueue, journal: &dyn Journal)
+fn listen<I>(mut events: I, channels: &Channels, journal: &dyn Journal)
 where
     I: Iterator<Item = Option<Arriving>>,
 {
@@ -1247,7 +1281,7 @@ where
         let taken = catch_unwind(AssertUnwindSafe(|| match events.next() {
             None => false,
             Some(Some(message)) => {
-                hand_over(message, channels, queue, journal);
+                hand_over(message, channels, journal);
                 true
             }
             Some(None) => {
@@ -1268,18 +1302,15 @@ where
 
 /// Offer one message to the queue — unless [`refused_on_hand_over`] refuses it
 /// here, when it takes no place and is logged as the boundary logs that refusal.
-fn hand_over(message: Arriving, channels: &Channels, queue: &InboundQueue, journal: &dyn Journal) {
-    if let Some(refusal) = refused_on_hand_over(&message, channels) {
-        return record(journal, Note::Refused(refusal_kind(&refusal), None));
-    }
-    if let Offered::Discarded(total) = queue.offer(message) {
-        record(
-            journal,
-            Note::Discarded {
-                total,
-                bound: queue.bound,
-            },
-        );
+fn hand_over(message: Arriving, channels: &Channels, journal: &dyn Journal) {
+    match channels.hand_over(message) {
+        HandedOver::Refused(refusal) => {
+            record(journal, Note::Refused(refusal_kind(&refusal), None))
+        }
+        HandedOver::Waiting => {}
+        HandedOver::Discarded { total, bound } => {
+            record(journal, Note::Discarded { total, bound })
+        }
     }
 }
 
@@ -1298,9 +1329,9 @@ fn hand_over(message: Arriving, channels: &Channels, queue: &InboundQueue, journ
 /// `traffic_on_a_channel_this_peer_is_not_opening_takes_no_place_in_the_queue`
 /// is red without it.
 ///
-/// The check takes the channel book's lock, which is never held while a
-/// payload is decided ([`Channels::stoa_of`]), so taking a message from delivery
-/// still does not wait on the boundary.
+/// The check is made under [`Channels`]'s lock, which is never held while a
+/// payload is decided, so taking a message from delivery still does not wait on
+/// the boundary.
 ///
 /// # Why an oversized payload is refused before the queue
 ///
@@ -1317,94 +1348,183 @@ fn hand_over(message: Arriving, channels: &Channels, queue: &InboundQueue, journ
 ///
 /// The unknown channel is asked first, so a message on a channel neither open
 /// nor being opened is refused as that whatever its size.
-fn refused_on_hand_over(message: &Arriving, channels: &Channels) -> Option<InboundRefusal> {
-    if !channels.is_known(&message.channel_id) {
+fn refused_on_hand_over(message: &Arriving, book: &ChannelBook) -> Option<InboundRefusal> {
+    if !book.is_known(&message.channel_id) {
         return Some(InboundRefusal::UnknownChannel);
     }
     transport::refuse_oversized(&message.payload).err()
 }
 
 struct Processor {
-    queue: Arc<InboundQueue>,
     channels: Arc<Channels>,
     stores: Stores,
     journal: Arc<dyn Journal>,
     clock: fn() -> u64,
-    /// How long a message waits on its channel's pending open: [`SETTLE_LIMIT`]
-    /// in the running wiring, shorter in a test of what happens when it passes.
-    settle_limit: Duration,
+    /// The bounds parking holds the parked messages to: [`PARK_BOUNDS`] in the
+    /// running wiring, smaller in a test of what happens at a bound.
+    bounds: ParkBounds,
 }
 
 impl Processor {
-    /// The processor the running wiring runs, waiting on a pending open for
-    /// [`SETTLE_LIMIT`].
+    /// The processor the running wiring runs, parking by [`PARK_BOUNDS`].
     ///
     /// **The one place a processor is built**, [`Delivering::start`] and the
-    /// tests' fixtures alike, so the limit a test reads here is the one the
-    /// running module waits by. Built separately, a wrong limit in `start` passed
-    /// every test (spec-test re-review round 3). A test of what happens when the
-    /// wait runs out shortens [`Processor::settle_limit`] on what this returns.
+    /// tests' fixtures alike, so the bounds a test reads here are the ones the
+    /// running module parks by — the lesson of the wait this replaces, whose
+    /// limit set wrongly in `start` passed every test (`delivery-wiring`'s
+    /// spec-test re-review, round 3). A test of a bound shrinks
+    /// [`Processor::bounds`] on what this returns.
     fn new(
-        queue: Arc<InboundQueue>,
         channels: Arc<Channels>,
         stores: Stores,
         journal: Arc<dyn Journal>,
         clock: fn() -> u64,
     ) -> Self {
         Processor {
-            queue,
             channels,
             stores,
             journal,
             clock,
-            settle_limit: SETTLE_LIMIT,
+            bounds: PARK_BOUNDS,
         }
     }
 
+    /// Take and act on each thing in turn, for the life of the module.
+    ///
+    /// It does not stop when delivery's events end: a review can still be due
+    /// — an open answered after the subscription ended — and the messages parked
+    /// for it would otherwise wait for the next startup.
     fn run(self) {
-        while let Some(message) = self.queue.take() {
-            if let Err(payload) = catch_unwind(AssertUnwindSafe(|| self.decide(&message))) {
-                record(
-                    &*self.journal,
-                    Note::Panicked("an inbound message", &panic_detail(&*payload)),
-                );
+        while let Some(next) = self.channels.take() {
+            self.act(next);
+        }
+    }
+
+    /// Run one review, or judge or park one payload, as [`Channels::take`]
+    /// decided when it took it.
+    fn act(&self, next: Next) {
+        match next {
+            Next::Review(review) => self.contained("a review of parked messages", || {
+                self.review(review)
+            }),
+            Next::Payload(message, Taken::Judge) => {
+                self.contained("an inbound message", || self.judge(message.inbound()))
+            }
+            Next::Payload(message, Taken::Park) => {
+                self.contained("parking an inbound message", || self.park(&message))
             }
         }
     }
 
-    /// Decide one message: wait on its channel's open if it has one, put it
-    /// through the boundary, and record the outcome — each its own call.
-    fn decide(&self, message: &Arriving) {
-        // `op-transport`, "A message arriving on a channel that is not open, but
-        // is being opened, MUST be judged only once that open is settled"
-        // (scenarios "…is stored once delivery reports the channel created" and
-        // "…is refused once delivery declines the open"), for no longer than the
-        // open's fixed time. See `ChannelBook` for why, and design Decision 11.
-        self.channels
-            .await_settled(&message.channel_id, self.settle_limit);
-        let decided = self.pass(message);
+    /// Run `work`, logging a panic rather than letting it end the processor.
+    fn contained(&self, what: &'static str, work: impl FnOnce()) {
+        if let Err(payload) = catch_unwind(AssertUnwindSafe(work)) {
+            record(&*self.journal, Note::Panicked(what, &panic_detail(&*payload)));
+        }
+    }
+
+    /// Park one payload taken on a channel being opened, judging nothing.
+    ///
+    /// `op-transport`: a parked message "MUST NOT be judged, refused or stored
+    /// then", whatever its bytes; save a discard under a parking bound. What
+    /// cannot be written is a storage failure, and the payload is not held for
+    /// another attempt.
+    fn park(&self, message: &Arriving) {
+        let parked = self.stores.parked().and_then(|mut store| {
+            store.park(&message.channel_id, &message.payload, &self.bounds)
+        });
+        let Parking { parked, evicted } = match parked {
+            Ok(parking) => parking,
+            Err(e) => return record(&*self.journal, Note::NotParked(&e.to_string())),
+        };
+        for _ in 0..evicted {
+            let total = self.channels.count_discard();
+            record(&*self.journal, Note::ParkDiscarded { total });
+        }
+        if parked {
+            record(&*self.journal, Note::Parked);
+        } else {
+            let total = self.channels.count_discard();
+            record(&*self.journal, Note::ParkDiscarded { total });
+        }
+    }
+
+    /// Decide every message the review's event left parked.
+    ///
+    /// `op-transport`, "Parked messages are reviewed on three events and no
+    /// others". Each channel's messages are taken out of the store and decided
+    /// in the order they were handed over; each is decided under its own
+    /// `catch_unwind`, so one that panics does not cost the rest.
+    fn review(&self, review: Review) {
+        match review {
+            Review::Held(channel_id) => {
+                for parked in self.take_parked(&channel_id) {
+                    self.contained("an inbound message", || {
+                        self.judge(parked_inbound(&parked))
+                    });
+                }
+            }
+            Review::Unopened(channel_id) => self.refuse_parked(&channel_id),
+            Review::Startup(known) => {
+                let channels = self.stores.parked().and_then(|store| store.channels());
+                let channels = match channels {
+                    Ok(channels) => channels,
+                    Err(e) => {
+                        return record(&*self.journal, Note::ReviewUnreadable(&e.to_string()))
+                    }
+                };
+                for channel_id in channels.iter().filter(|c| !known.contains(*c)) {
+                    self.refuse_parked(channel_id);
+                }
+            }
+        }
+    }
+
+    /// Refuse every message parked on a channel as arriving on an unknown
+    /// channel, logged as the boundary logs that refusal.
+    fn refuse_parked(&self, channel_id: &str) {
+        for _ in self.take_parked(channel_id) {
+            let refusal = InboundRefusal::UnknownChannel;
+            record(&*self.journal, Note::Refused(refusal_kind(&refusal), None));
+        }
+    }
+
+    /// Take a channel's parked messages out of the store — or, when they cannot
+    /// be read, log it and take nothing, leaving them for the channel's next
+    /// review.
+    fn take_parked(&self, channel_id: &str) -> Vec<Parked> {
+        match self
+            .stores
+            .parked()
+            .and_then(|mut store| store.take_channel(channel_id))
+        {
+            Ok(parked) => parked,
+            Err(e) => {
+                record(&*self.journal, Note::ReviewUnreadable(&e.to_string()));
+                Vec::new()
+            }
+        }
+    }
+
+    /// Put one message through the boundary and log what it decided.
+    fn judge(&self, inbound: InboundMessage<'_>) {
+        let decided = self.pass(inbound);
         self.record_decision(decided);
     }
 
     /// Put one message through the inbound boundary, [`transport::receive_via`].
     ///
-    /// **The clock is read here, after any wait, when the message is processed** —
-    /// never the event's timestamp, which is delivery's reading at receipt, in
-    /// nanoseconds. `op-transport` requires the window be judged against this
-    /// peer's own clock at processing time.
+    /// **The clock is read here, when the message is judged** — for a parked
+    /// message, at its review — never the event's timestamp, which is delivery's
+    /// reading at receipt, in nanoseconds. `op-transport` requires the window be
+    /// judged against this peer's own clock "read when the payload is judged".
     ///
     /// The lookup copies the channel's Stoa out of the book and releases it, and
     /// the op log is opened only for an op that passed: a payload refused on its
     /// channel or its bytes costs no database open, and is refused under its own
     /// name even when the log will not open.
-    fn pass(&self, message: &Arriving) -> Result<transport::Admitted, InboundRefusal> {
+    fn pass(&self, inbound: InboundMessage<'_>) -> Result<transport::Admitted, InboundRefusal> {
         let now_ms = (self.clock)();
-        let inbound = InboundMessage {
-            channel_id: &message.channel_id,
-            sender_id: &message.sender_id,
-            payload: &message.payload,
-            timestamp: message.timestamp,
-        };
         transport::receive_via(
             inbound,
             |channel_id| self.channels.stoa_of(channel_id),
@@ -1520,7 +1640,6 @@ impl Delivering {
         }
         self.wiring = Wiring::NoWorker;
         let channels = Arc::new(Channels::default());
-        let queue = Arc::new(InboundQueue::with_bound(INBOUND_BOUND));
 
         // `op-transport`: "The module's startup MUST count the channel of every
         // Stoa it asks for as being opened before it checks any message delivery
@@ -1531,18 +1650,25 @@ impl Delivering {
         // messages over from the first event.
         let opens = self.startup_opens(&stores, &channels);
 
+        // Review trigger 3: the first startup in this process, once it has
+        // counted every channel it asks for. Queued before the subscription and
+        // before any open can settle, so it is the first thing the processor
+        // runs, and its set of known channels is exactly startup's. A second
+        // `start` returned above, so a later startup begins no review.
+        channels.begin_startup_review();
+
         // `op-transport`, scenario "A peer that cannot subscribe still publishes":
         // a failed subscription is logged and startup carries on — the node, the
         // channels and the sends are still requested — because a peer that
-        // cannot receive can still publish.
+        // cannot receive can still publish. The processor is started either way:
+        // messages parked by the last run still have reviews due.
         match subscribe() {
-            Ok(events) => self.spawn_listener(events, Arc::clone(&channels), Arc::clone(&queue)),
+            Ok(events) => self.spawn_listener(events, Arc::clone(&channels)),
             Err(why) => record(&*self.journal, Note::NotSubscribed(&why)),
         }
         self.spawn(
             "dialectica inbound processor",
             Processor::new(
-                queue,
                 Arc::clone(&channels),
                 stores.clone(),
                 Arc::clone(&self.journal),
@@ -1565,7 +1691,8 @@ impl Delivering {
             // it started are running. The wiring stays `NoWorker`, so every
             // later request says the worker could not be started. `opens` is
             // dropped with this return, so every startup open is given up — none
-            // will ever be asked of delivery — and no message waits on one.
+            // will ever be asked of delivery — and its parked messages are
+            // refused by the review that begins.
             return true;
         }
         let outbox = Outbox { actions, channels };
@@ -1618,9 +1745,9 @@ impl Delivering {
 
     /// Queue what `action` makes, when there is a worker to take it.
     ///
-    /// `action` is only called then, so no open is marked pending for a request
-    /// that is logged and dropped; and one the worker refuses is handed back
-    /// inside the send's error and dropped, which settles it.
+    /// `action` is only called then, so no channel is counted as being opened
+    /// for a request that is logged and dropped; and one the worker refuses is
+    /// handed back inside the send's error and dropped, which settles it.
     fn request(&self, action: impl FnOnce(&Arc<Channels>) -> Action, what: impl Fn() -> String) {
         match &self.wiring {
             // `op-transport`, scenario "A publish before delivery is wired is not
@@ -1639,22 +1766,24 @@ impl Delivering {
         }
     }
 
-    fn spawn_listener<I>(&self, events: I, channels: Arc<Channels>, queue: Arc<InboundQueue>)
+    /// Start the listener. Its end is logged, and closes nothing: what is
+    /// already waiting is still taken, and the processor stays for the reviews
+    /// still due ([`Processor::run`]).
+    fn spawn_listener<I>(&self, events: I, channels: Arc<Channels>)
     where
         I: Iterator<Item = Option<Arriving>> + Send + 'static,
     {
         let journal = Arc::clone(&self.journal);
         self.spawn("dialectica inbound listener", events, move |events| {
-            if let Err(payload) = catch_unwind(AssertUnwindSafe(|| {
-                listen(events, &channels, &queue, &*journal)
-            })) {
+            if let Err(payload) =
+                catch_unwind(AssertUnwindSafe(|| listen(events, &channels, &*journal)))
+            {
                 record(
                     &*journal,
                     Note::Panicked("the inbound listener", &panic_detail(&*payload)),
                 );
             }
             record(&*journal, Note::ListenerEnded);
-            queue.close();
         });
     }
 

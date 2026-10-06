@@ -69,8 +69,8 @@ pub struct ParkBounds {
 /// `design.md` Decision 4 has the reasoning. In short:
 ///
 /// - **256 messages per channel**, the waiting payloads' own bound
-///   ([`crate::delivery::INBOUND_BOUND`]): an open that settles held reviews at
-///   most what one full queue could have handed it.
+///   ([`crate::delivery::INBOUND_BOUND`]): one channel may park as many
+///   messages as could wait to be taken at once.
 /// - **8 MiB per channel**: a review reads one channel's parked messages into
 ///   memory at once, so this is what a review holds. 54 payloads at the 150 KiB
 ///   limit; far more than 256 posts of ordinary size, so for ordinary traffic
