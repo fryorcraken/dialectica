@@ -6,6 +6,12 @@
 //! channel id, a send answers with a request id counting its payload. A fake
 //! answering the same thing for every call could not tell "sent on this
 //! channel" from "sent on some channel".
+//!
+//! **Parking's tests are in the `parking` module below** (`tests/parking.rs`),
+//! and lean on the helpers defined here: [`Peer`], [`Recorder`], [`Gate`],
+//! [`Processor::decide`] and [`Processor::run_reviews`]. The parking contract's
+//! tests that stay in this file, because they were written for the wait parking
+//! replaced and read as well here, are named in that file's header.
 
 use super::*;
 use crate::authoring::Authorship;
@@ -529,6 +535,9 @@ fn eventually(what: &str, mut done: impl FnMut() -> bool) {
         std::thread::sleep(Duration::from_millis(10));
     }
 }
+
+// The parking contract's tests, which use the helpers above.
+mod parking;
 
 // ─── The node ─────────────────────────────────────────────────────────────
 
@@ -2581,8 +2590,8 @@ fn the_arriving_payloads_channel_loses_a_tie_for_the_most_waiting() {
 #[test]
 fn traffic_on_a_channel_this_peer_is_not_opening_takes_no_place_in_the_queue() {
     // `op-transport`, scenario "Traffic on a channel this peer is not opening
-    // takes no place in the queue" — the security review's probe, with the
-    // opposite expectation. The boundary is held up deciding one payload; more
+    // takes no place in the queue" — the security review's probe. The boundary
+    // is held up deciding one payload; more
     // messages than the bound then arrive on another application's channel, and
     // a valid op on an open one. Red while every message took a place: the
     // foreign ones filled the queue, the valid op was discarded, and nothing was
@@ -2685,8 +2694,9 @@ fn a_refusal_made_on_hand_over_is_logged_by_kind_without_text_the_sender_chose()
 /// held at its log line until the returned gate is released. Returns the open
 /// Stoa once the processor is held, so whatever the test hands over next waits.
 ///
-/// Nothing waits on an open any more, so an unanswered open cannot hold the
-/// boundary up; the processor's own log line can.
+/// An unanswered open does not hold the boundary up, because a message on it is
+/// parked and the boundary goes on, so the boundary is held at the processor's
+/// own log line instead.
 fn hold_the_boundary_up(
     peer: &mut Peer,
     events: &mpsc::Sender<Option<Arriving>>,
@@ -2694,11 +2704,22 @@ fn hold_the_boundary_up(
     let open = genesis("Agora");
     peer.join(&open);
     peer.delivering.drain();
-    let gate = peer.journal.hold_on("refused (undecodable)");
     let open = open.address().unwrap();
+    let gate = hold_the_boundary_up_on(peer, events, &open);
+    (open, gate)
+}
+
+/// Hold the boundary up deciding one payload on `open`'s channel, which is
+/// already open: [`hold_the_boundary_up`] without the join.
+fn hold_the_boundary_up_on(
+    peer: &Peer,
+    events: &mpsc::Sender<Option<Arriving>>,
+    open: &Address,
+) -> Arc<Gate> {
+    let gate = peer.journal.hold_on("refused (undecodable)");
     events
         .send(Some(arriving(
-            ChannelIdentity::of(&open).channel_id(),
+            ChannelIdentity::of(open).channel_id(),
             b"junk that holds the boundary up".to_vec(),
             1,
         )))
@@ -2706,7 +2727,7 @@ fn hold_the_boundary_up(
     eventually("the boundary to be held up", || {
         !peer.journal.with("refused (undecodable)").is_empty()
     });
-    (open, gate)
+    gate
 }
 
 #[test]
@@ -2881,11 +2902,9 @@ fn handed_over(asked: &std::sync::atomic::AtomicUsize, n: usize) {
 #[test]
 fn a_message_on_a_channel_whose_open_waits_behind_another_is_judged_once_that_open_settles() {
     // `op-transport`, scenario "A message on a channel whose open waits behind
-    // another is judged once that open settles" — the spec's answer to the
-    // question this test used to leave open, with the opposite expectation to
-    // the one it first pinned. The second Stoa's open is queued
-    // behind the first's, which delivery has not answered, when a message on
-    // the second channel is handed over. Red while an open counted as being
+    // another is judged once that open settles". The second Stoa's open is
+    // queued behind the first's, which delivery has not answered, when a message
+    // on the second channel is handed over. Red while an open counted as being
     // opened only once the worker asked delivery: the message was refused as an
     // unknown channel on hand-over, and never stored.
     let mut peer = Peer::new("handover-open-queued");
@@ -3359,5 +3378,3 @@ fn an_appended_twice_arrival_is_reported_already_present() {
         .with(&format!("inbound op {} already held", op.op.id().to_hex()));
     assert_eq!(held.len(), 1, "{:?}", peer.journal.lines());
 }
-
-mod parking;

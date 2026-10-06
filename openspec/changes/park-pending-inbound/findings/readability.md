@@ -236,7 +236,7 @@ a preference, safe to reject.
 
 ## Tests (`delivery/tests/parking.rs`, `delivery/tests.rs`, `parked.rs` tests)
 
-- [ ] **`tester`** — `delivery/tests/parking.rs:391-396`, `586-606`, `962-973`,
+- [x] **`tester`** — `delivery/tests/parking.rs:391-396`, `586-606`, `962-973`,
       and `delivery/tests.rs:2723-2743` — **shape.**
       "Agora open, Lyceum's open asked of delivery and held at a gate" is set up
       three times (`nothing_but_the_three_events_reviews_a_parked_message`,
@@ -248,8 +248,23 @@ a preference, safe to reject.
       `eventually`). A change to what "unanswered open" means is a four-place
       edit; `one_open_one_unanswered` should take the events constructor (or
       return `asked` too) and the other three call it.
+      **Outcome (tester): fixed.** `one_open_one_unanswered(peer, answer)` now
+      starts the peer with a counted event feed and returns an `Unanswered`
+      struct with named fields (`events`, `asked`, `gate`, `open`, `stuck`), not a
+      tuple; `answer` is delivery's reply to the second creation, `None` for
+      created. It is called by `nothing_but_the_three_events_reviews_a_parked_message`,
+      the four wiring tests and `handed_over_while_opening_then_settled`, so the
+      setup is written once. The junk payload held at its log line is written
+      once too: `hold_the_boundary_up` in `tests.rs` now joins and calls
+      `hold_the_boundary_up_on(peer, events, &open)`, which
+      `handed_over_while_opening_then_settled` calls directly. One behaviour
+      difference, in the stronger direction: `nothing_but_…` now waits for the
+      second open to reach delivery before it sends, as the others did. The
+      suite is green, and the mutation of the worker's declined arm (settling
+      it as held) failed `a_message_taken_after_its_open_was_declined_is_refused_not_parked`,
+      which runs through both helpers, as predicted.
 
-- [ ] **`tester`** — `delivery/tests/parking.rs:853-856` — **style (naming of
+- [x] **`tester`** — `delivery/tests/parking.rs:853-856` — **style (naming of
       sections).** The last section is headed "Added by the tester", an author
       and not a topic, and its tests belong under headings the file already has:
       `a_full_queue_records_the_discard…` and `over_a_total_bound_…` under
@@ -257,16 +272,27 @@ a preference, safe to reject.
       `a_message_parked_just_before_its_open_settles_…` under Reviews. A reader
       looking for "where is the bound tested" reads two sections. The provenance
       belongs in the commit, not the file.
+      **Outcome (tester): fixed.** The heading is gone. The tests you name are
+      under Bounds (`a_full_queue_records_…`, `over_a_total_bound_…`) and Reviews
+      (`a_parked_op_the_op_log_cannot_take_…`), and
+      `a_message_parked_just_before_its_open_settles_…` is with the seams, which
+      is the other half of the same requirement as the two `Channels::take`
+      tests beside it. So are the park-logging, taken-after-settle and
+      not-readable tests, under Parking. The file's sections are listed in its
+      header.
 
-- [ ] **`tester`** — `delivery/tests.rs:3396` — **findability.**
+- [x] **`tester`** — `delivery/tests.rs:3396` — **findability.**
       `mod parking;` is the last line of a 3,396-line file, and the file's
       header says nothing of it. A reader of `tests.rs` meets `Peer::processor`,
       `Processor::decide` and `Processor::run_reviews` (the helpers parking
       tests lean on, lines 427-474) with no hint that 1,206 lines of their use
       are in a sibling. Declare it beside the other helpers and say in the
       header that parking's tests are there.
+      **Outcome (tester): fixed.** `mod parking;` is declared straight after the
+      helpers, before the first test, and `tests.rs`'s header says parking's
+      tests are there and which helpers they lean on.
 
-- [ ] **`tester`** — `delivery/tests.rs:1628`, `2062`, `2131`, `2156`, `2188`,
+- [x] **`tester`** — `delivery/tests.rs:1628`, `2062`, `2131`, `2156`, `2188`,
       `2915`, `2963` — **findability (suggestion).**
       The header of `parking.rs` says it holds "what each requirement of
       `op-transport`'s parking contract looks like from a message", yet six
@@ -279,8 +305,17 @@ a preference, safe to reject.
       scenario "Messages parked … decided once" is in one file and its mirror
       "refused, not parked" in the other. Moving them is churn in a 3,400-line
       file; if not moved, name them in the `parking.rs` header.
+      **Outcome (tester): fixed, by your second option.** Not moved: the move is
+      churn in a 3,400-line file and each test reads as well where it is.
+      `parking.rs`'s header now names them by requirement and by test: the three
+      that end in `refused_and_not_parked`, the repeated-open pair, the
+      asked-twice test, the open-waits-behind-another test, the restarted-peer
+      test, and `taking_a_message_from_delivery_does_not_wait_on_the_boundary`,
+      which the finding did not list and which is the same contract. The line
+      numbers in the finding were stale after the review's own edits; I named
+      them from the tree.
 
-- [ ] **`tester`** — `delivery/tests.rs:593`, `2721-2722`, `2916-2919` —
+- [x] **`tester`** — `delivery/tests.rs:593`, `2721-2722`, `2916-2919` —
       **defect (stale comments, low).** Three comments narrate a version of the
       code or the test that no longer exists, in grammar that does not parse:
       line 593 "The wait this replaced had a limit set wrongly in `start` pass
@@ -290,13 +325,29 @@ a preference, safe to reject.
       expectation to the one it first pinned." State what the fixture does now
       and keep history in the commit; the first is a "why" worth keeping if it
       is made a sentence.
+      **Outcome (tester): fixed for two of the three; the third no longer
+      applies as read.** `hold_the_boundary_up`'s doc (was 2721) now says an
+      unanswered open does not hold the boundary up because its message is
+      parked, so the boundary is held at the processor's own log line instead.
+      The comment in `a_message_on_a_channel_whose_open_waits_behind_another_…`
+      (was 2916) states what the fixture does and what it is red against, with
+      the history left to the commit. I also took the same fix to a comment you
+      did not list, in `traffic_on_a_channel_this_peer_is_not_opening_…` ("with
+      the opposite expectation"). Line 593: the sentence "The wait this replaced
+      had a limit set wrongly in `start` pass every test" is not in `tests.rs`
+      now. It is in the doc on `Processor::bounds` in `delivery.rs`, where the
+      `dev-writer` has corrected it ("passed every test") — implementation code,
+      not mine, and it parses.
 
-- [ ] **`tester`** — `parked.rs:533-540` — **style (low).**
+- [x] **`tester`** — `parked.rs:533-540` — **style (low).**
       Test helper `payloads(store, channel)` calls `take_channel`, so it
       **removes** what it returns. Its name reads as a read. In
       `a_review_takes_a_channels_messages_in_hand_over_order_and_leaves_none` it
       is used twice in a row on purpose; elsewhere a second `payloads` on the
       same channel would silently return empty. Name it `take_payloads`.
+      **Outcome (tester): fixed.** Renamed `take_payloads` at every call, with a
+      doc line saying it removes what it returns and that a second call on a
+      channel returns nothing.
 
 ## What is clean
 

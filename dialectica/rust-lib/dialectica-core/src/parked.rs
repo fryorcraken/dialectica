@@ -523,7 +523,9 @@ mod tests {
         }
     }
 
-    fn payloads(store: &mut ParkedStore, channel: &str) -> Vec<Vec<u8>> {
+    /// Take (and so remove) a channel's parked payloads, in hand-over order. A
+    /// second call on the same channel returns nothing.
+    fn take_payloads(store: &mut ParkedStore, channel: &str) -> Vec<Vec<u8>> {
         store
             .take_channel(channel)
             .unwrap()
@@ -534,6 +536,10 @@ mod tests {
 
     #[test]
     fn the_layout_version_and_file_name_are_pinned() {
+        // NO SPEC: the version and the file name are `park-pending-inbound`'s
+        // design, Decision 2; the spec says only that parked messages are kept in
+        // storage that outlives the process. Known answers: do not update them to
+        // match the code.
         assert_eq!(PARKED_LAYOUT_VERSION, 1);
         assert_eq!(
             parked_path_in(Path::new("/a/dir")),
@@ -543,8 +549,14 @@ mod tests {
 
     #[test]
     fn the_park_bounds_are_pinned() {
+        // NO SPEC: the four values are `park-pending-inbound`'s design, Decision
+        // 4. The spec says "The values are not contracted here" and contracts
+        // only their ordering, which `the_park_bounds_are_ordered_as_required`
+        // holds against a literal 150 KiB.
+        //
         // Known answers, hardcoded: `cargo mutants` does not mutate a `const`.
-        // Change these only with `park-pending-inbound`'s design, Decision 4.
+        // Change these only with `park-pending-inbound`'s design, Decision 4;
+        // never to make this pass.
         assert_eq!(
             PARK_BOUNDS,
             ParkBounds {
@@ -574,9 +586,9 @@ mod tests {
         for (channel, payload) in [("a", b"1"), ("b", b"x"), ("a", b"2"), ("a", b"3")] {
             assert!(store.park(channel, payload, &PARK_BOUNDS).unwrap().is_parked());
         }
-        assert_eq!(payloads(&mut store, "a"), [b"1", b"2", b"3"]);
+        assert_eq!(take_payloads(&mut store, "a"), [b"1", b"2", b"3"]);
         assert_eq!(store.count_on("a").unwrap(), 0);
-        assert!(payloads(&mut store, "a").is_empty(), "taken twice");
+        assert!(take_payloads(&mut store, "a").is_empty(), "taken twice");
         assert_eq!(store.channels().unwrap(), ["b"]);
     }
 
@@ -589,7 +601,7 @@ mod tests {
             .park("a", b"kept", &PARK_BOUNDS)
             .unwrap();
         let mut again = ParkedStore::open(&path).unwrap();
-        assert_eq!(payloads(&mut again, "a"), [b"kept"]);
+        assert_eq!(take_payloads(&mut again, "a"), [b"kept"]);
     }
 
     #[test]
@@ -626,7 +638,7 @@ mod tests {
             store.park("a", b"one more", &SMALL).unwrap(),
             ParkOutcome::Discarded
         );
-        assert_eq!(payloads(&mut store, "a"), [[0], [1], [2]]);
+        assert_eq!(take_payloads(&mut store, "a"), [[0], [1], [2]]);
     }
 
     #[test]
@@ -651,9 +663,9 @@ mod tests {
             store.park("c", b"c1", &SMALL).unwrap(),
             ParkOutcome::Parked { evicted: 1 }
         );
-        assert_eq!(payloads(&mut store, "a"), [b"a1", b"a2"]);
-        assert_eq!(payloads(&mut store, "b"), [b"b1", b"b2"]);
-        assert_eq!(payloads(&mut store, "c"), [b"c1"]);
+        assert_eq!(take_payloads(&mut store, "a"), [b"a1", b"a2"]);
+        assert_eq!(take_payloads(&mut store, "b"), [b"b1", b"b2"]);
+        assert_eq!(take_payloads(&mut store, "c"), [b"c1"]);
     }
 
     #[test]
@@ -670,8 +682,8 @@ mod tests {
             store.park("a", b"a3", &SMALL).unwrap(),
             ParkOutcome::Discarded
         );
-        assert_eq!(payloads(&mut store, "a"), [b"a1", b"a2"]);
-        assert_eq!(payloads(&mut store, "b"), [b"b1", b"b2", b"b3"]);
+        assert_eq!(take_payloads(&mut store, "a"), [b"a1", b"a2"]);
+        assert_eq!(take_payloads(&mut store, "b"), [b"b1", b"b2", b"b3"]);
     }
 
     #[test]
@@ -689,8 +701,8 @@ mod tests {
         store.park("b", b"b2", &bounds).unwrap();
         store.park("a", b"a2", &bounds).unwrap(); // a's newest is the latest
         assert!(store.park("c", b"c1", &bounds).unwrap().is_parked());
-        assert_eq!(payloads(&mut store, "a"), [b"a1"]);
-        assert_eq!(payloads(&mut store, "b"), [b"b1", b"b2"]);
+        assert_eq!(take_payloads(&mut store, "a"), [b"a1"]);
+        assert_eq!(take_payloads(&mut store, "b"), [b"b1", b"b2"]);
     }
 
     #[test]
@@ -702,8 +714,48 @@ mod tests {
         store.park("b", &[4; 50], &SMALL).unwrap(); // 450 of 500
         // `c` holds the fewest messages but 100 more bytes put the total over.
         assert!(store.park("c", &[5; 100], &SMALL).unwrap().is_parked());
-        assert_eq!(payloads(&mut store, "a"), [vec![1; 150]]);
+        assert_eq!(take_payloads(&mut store, "a"), [vec![1; 150]]);
         assert_eq!(store.count_on("b").unwrap(), 2);
+    }
+
+    #[test]
+    fn over_both_total_bounds_at_once_the_count_bound_is_restored_first() {
+        // `op-transport`, scenario "Over both total bounds at once, the count
+        // bound is restored first". Held: `a` three 10-byte messages (the most
+        // messages), `b` two 150-byte messages (the most bytes): five messages,
+        // the count total, and 330 of 500 bytes. `c` brings 200 bytes: within its
+        // own channel's bounds, one message against `a`'s three, 200 bytes
+        // against `b`'s 300 — and 530 bytes in all, 30 over. 30 is more than
+        // `a`'s newest (10) and no more than `b`'s newest (150).
+        //
+        // Count first: `a`'s newest goes for the count (6 > 5), the bytes are
+        // then 520, 20 over, and `b`'s newest goes for those. Two discards.
+        // Bytes first, which this fails on: `b`'s newest goes for the 30 bytes,
+        // the count is then 4 + 1 = 5, within its bound, and `a` loses nothing.
+        let mut store = ParkedStore::in_memory().unwrap();
+        for (channel, tag, bytes) in [
+            ("a", 1, 10),
+            ("a", 2, 10),
+            ("a", 3, 10),
+            ("b", 4, 150),
+            ("b", 5, 150),
+        ] {
+            assert!(store
+                .park(channel, &vec![tag; bytes], &SMALL)
+                .unwrap()
+                .is_parked());
+        }
+        assert_eq!(
+            store.park("c", &[6; 200], &SMALL).unwrap(),
+            ParkOutcome::Parked { evicted: 2 }
+        );
+        assert_eq!(
+            take_payloads(&mut store, "a"),
+            [vec![1; 10], vec![2; 10]],
+            "`a`'s newest was not chosen for the count total"
+        );
+        assert_eq!(take_payloads(&mut store, "b"), [vec![4; 150]]);
+        assert_eq!(take_payloads(&mut store, "c"), [vec![6; 200]]);
     }
 
     #[test]
@@ -721,11 +773,16 @@ mod tests {
         ));
         store.conn.execute_batch("PRAGMA query_only = 0").unwrap();
         // The failed take removed nothing; the failed park added nothing.
-        assert_eq!(payloads(&mut store, "a"), [b"before"]);
+        assert_eq!(take_payloads(&mut store, "a"), [b"before"]);
     }
 
     #[test]
     fn a_store_from_a_future_layout_is_refused() {
+        // NO SPEC: the layout version is `park-pending-inbound`'s design, Decision
+        // 2. The spec's only word on a store this build cannot use is the one it
+        // has for any store that "cannot be written" or "cannot be read": a
+        // storage failure at the park or the review. This pins the mechanism that
+        // makes an unknown layout one of those.
         let dir = TempDir::new("future");
         let path = parked_path_in(&dir.0);
         drop(ParkedStore::open(&path).unwrap());
@@ -744,6 +801,10 @@ mod tests {
 
     #[test]
     fn a_mislabelled_file_is_refused_at_open() {
+        // NO SPEC: as `a_store_from_a_future_layout_is_refused`, this is the layout
+        // version's mechanism (`park-pending-inbound`'s design, Decision 2): a
+        // file that stamps this build's version and lacks its columns is a
+        // store that "cannot be written" or "cannot be read".
         let dir = TempDir::new("mislabelled");
         let path = parked_path_in(&dir.0);
         Connection::open(&path)
@@ -874,6 +935,6 @@ mod tests {
                 String::from_utf8_lossy(marker)
             );
         }
-        assert_eq!(payloads(&mut store, "b"), [b"stays parked"]);
+        assert_eq!(take_payloads(&mut store, "b"), [b"stays parked"]);
     }
 }
