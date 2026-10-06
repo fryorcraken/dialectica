@@ -695,11 +695,12 @@ TestCase {
     }
 
     // The walk of a group does not reach text beside it. A Text added between
-    // the two groups, or after them, is rendered with the reply composer in the
-    // requirement's sense and sits in neither subtree, so the group walks pass
-    // over it. This walks every text on the screen outside the thread's rows,
-    // for each of the three states, so the guard is on the screen and not on two
-    // containers.
+    // the two groups, or after them, sits in neither subtree, so the group walks
+    // pass over it, whether or not it is "with the reply composer" as the spec
+    // binds. This walks every text on the screen outside the thread's rows, for
+    // each of the three states, so the guard is on the screen and not on two
+    // containers. That is wider than the requirement on purpose (Decision 3 of
+    // the design.md named above): the header and the notices are in it too.
     function test_no_text_beside_the_thread_rows_makes_an_edit_or_version_claim() {
         var states = [
             { name: "an open gate", canPost: true, anchor: "REPLYING AS", publish: false },
@@ -793,10 +794,13 @@ TestCase {
     // gate, core's message on a refused publish, and the draft are rendered in
     // the same places and are not its. The fixtures elsewhere supply strings
     // that avoid the matcher, so they cannot show this. These strings are the
-    // ones that would trip it: both are real core wordings (the keystore's
-    // "keystore format version {v} is newer than this build understands" and the
-    // identity record's layout-version refusal), and a draft that talks about
-    // editing, as a person's draft may.
+    // ones that would trip it. The reason is core's real keystore wording
+    // ("keystore format version {v} is newer than this build understands"),
+    // which reaches a shut gate and, inside a refused publish's message, the
+    // composer. The refusal is a hypothetical paraphrase of the identity
+    // record's layout-version error, which no thread-screen path carries in this
+    // release; it stands for any core message that says "version". The draft
+    // talks about editing, as a person's draft may.
     function test_text_core_supplies_and_the_draft_are_outside_the_requirement() {
         var reason = "keystore format version 9 is newer than this build understands; upgrade dialectica"
         var refusal = "the identity record declares layout version 2, which this build cannot read"
