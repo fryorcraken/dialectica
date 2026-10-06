@@ -30,9 +30,19 @@ the answered boxes in `findings/*.md` read as claims, and PR #196's body
       paragraph's "Rule 11's stop hands its commit to rule 1's round" now
       agrees with it. `findings/rereview-design.md` box 1 is the same defect.
 
-- [ ] **`dev-writer`** — PR #196 body, the `CLAUDE.md` bullet under "What changes" — the reason for "Shell rules for every session" is cited as "(owner's decision, `findings/architecture.md` box 1)". After the squash, no commit on `main` will contain that file.
+- [x] **`dev-writer`** — PR #196 body, the `CLAUDE.md` bullet under "What changes" — the reason for "Shell rules for every session" is cited as "(owner's decision, `findings/architecture.md` box 1)". After the squash, no commit on `main` will contain that file.
       **Scenario:** the `closer` deletes `findings/` before the archive commit (the stage row "findings all ticked, `findings/` deleted"), and the squash writes the PR body into `main`'s history. The commit message then cites a file that never existed on `main`. A reader following it finds nothing, while the decision is recorded in a file that survives: `design.md`, "Six shell rules are listed in `CLAUDE.md`, outside the block", which quotes the owner. Point the body there.
       **Measured:** `gh pr view 196` shows "owner's decision, `findings/architecture.md` box 1". `git grep -n -F "findings/"` over `design.md`, `proposal.md`, `tasks.md`, `CLAUDE.md`, the overlay and `README.md` finds only rule 12's text and the closer's stage row. So the PR body is the only durable text that cites a findings file. Severity: low.
+      **Fixed** with `gh pr edit 196 --body-file`, recorded in the commit
+      "Point PR #196's body at design.md, not findings/". The bullet now
+      reads: the owner decided it, and `design.md`, "Six shell rules are
+      listed in `CLAUDE.md`, outside the block", records why. Re-read with
+      `gh pr view 196 --json body`: it contains no `findings/` path and no
+      `/home/` path, and keeps `Closes #195`, the agent-spec-flow#1 URL and
+      the generated-with line. The same edit brought the body's other facts
+      in line with this pass (the `/nix/store` rule as written, the release
+      constraint and unpinned clone, post-merge owner steps, the struck
+      `tester` row, the widened 4.2 search).
 
 - [x] **`dev-writer`** — `openspec/changes/adopt-specflow-plugin/design.md:349-351` — the sentence "`/specflow:init` merges a `permissions.allow` block … and the marketplace entry into the tracked `settings.json`" is false for the setup this repo's README prescribes.
       **Scenario:** README's step 2 registers a cloned directory (`claude plugin marketplace add ~/src/agent-spec-flow`), so the marketplace source is `directory`. For that source, `init` writes the entry to `.claude/settings.local.json`, not to `settings.json`, "since a local path is machine-local". Only a `github` source, or no registered entry at all, goes into the tracked file. The section's conclusion still holds, because the allowlist does land in tracked `settings.json` and that is the decision's point. But the marketplace half tells the owner that running `init` here would also commit a marketplace entry, which it would not. Fix: say "and, for a `github` source, the marketplace entry", or drop the marketplace half.
