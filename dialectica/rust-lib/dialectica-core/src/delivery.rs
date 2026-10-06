@@ -64,11 +64,11 @@ use crate::identity::Address;
 use crate::log::{Appended, OpLog, OpLogError, SqliteOpLog};
 use crate::membership::{membership_path_in, MembershipError, MembershipStore};
 use crate::op::OpId;
-use crate::parked::{
-    parked_path_in, shed, Load, ParkBounds, ParkError, Parked, ParkedStore, Parking,
-    PARK_BOUNDS,
-};
+#[cfg(test)]
+use crate::parked::ParkBounds;
+use crate::parked::{parked_path_in, ParkError, ParkOutcome, Parked, ParkedStore, PARK_BOUNDS};
 use crate::sender::{sender_path_in, SenderError, SenderStore};
+use crate::shedding::{choose, Victim};
 use crate::transport::{
     self, ChannelIdentity, InboundMessage, InboundRefusal, OpenChannels, PublishError,
 };
@@ -157,7 +157,8 @@ const _: () = assert!(DELIVERY_CALLBACK_TIMEOUT.as_millis() < CALL_TIMEOUT.as_mi
 /// - **`mode: "Edge"`**: a light node. It does not relay other peers' traffic;
 ///   it publishes and receives through the preset's service nodes. `Core` would
 ///   make every dialectica peer a relay, contributing bandwidth and not depending
-///   on the fleet. `design.md` records the choice and what would reverse it.
+///   on the fleet. `delivery-wiring`'s design records the choice and what would
+///   reverse it.
 pub fn node_config() -> String {
     serde_json::json!({
         "entryLayer": "channels",
@@ -223,9 +224,9 @@ pub enum ChannelAnswer {
 /// left the Stoa's channel shut for as long as delivery ran — messages refused as
 /// an unknown channel, sends never made.
 ///
-/// Recognised by [`ALREADY_EXISTS`] in delivery's reason. design.md Decision 14
-/// says why the wording and not a `channelExists` confirmation, and what a change
-/// to that wording would cost.
+/// Recognised by [`ALREADY_EXISTS`] in delivery's reason. `delivery-wiring`'s
+/// design, Decision 14, says why the wording and not a `channelExists`
+/// confirmation, and what a change to that wording would cost.
 pub fn channel_answer(reply: &Result<serde_json::Value, String>) -> ChannelAnswer {
     match declined(reply) {
         None => ChannelAnswer::Created,
@@ -494,6 +495,7 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 ///
 /// Which threads open which file is what makes each safe: `delivery-wiring`'s
 /// design, Decision 13.
+///
 /// A path and not open handles: a worker or processor opens what it needs per
 /// action, for the reason the adapter opens per call — a handle held for the
 /// module's lifetime would have to answer what happens when it goes stale.
@@ -587,11 +589,23 @@ struct ChannelBook {
 
 /// What the boundary does with a payload it has taken: [`ChannelBook::on_take`]'s
 /// answer.
+///
+/// # The one reading carries the Stoa
+///
+/// `op-transport`: "The state is read once for each payload, and the payload is
+/// parked or judged on that one reading." So `Judge` carries the Stoa the
+/// channel was open for at that reading — `None` when it was not open — and the
+/// boundary judges against that, not against a second lookup made after the
+/// lock is released. A settle landing between the take and the judgement would
+/// otherwise have the two readings disagree: taken as unknown, then stored.
+/// `a_payload_taken_on_an_unknown_channel_is_refused_though_its_channel_opens_before_it_is_judged`
+/// is red with the lookup made at judgement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Taken {
-    /// Put it through the boundary now. On a channel neither open nor being
-    /// opened, the boundary refuses it as an unknown channel.
-    Judge,
+    /// Put it through the boundary now, against this Stoa. With `None` — a
+    /// channel neither open nor being opened — the boundary refuses it as an
+    /// unknown channel.
+    Judge(Option<Address>),
     /// Its channel is being opened and is not open: park it, judging nothing.
     Park,
 }
@@ -630,10 +644,10 @@ impl ChannelBook {
     /// as an unknown channel. Parked is the one state in which judging now would
     /// refuse a message the open's answer may yet admit.
     fn on_take(&self, channel_id: &str) -> Taken {
-        if !self.open.is_open(channel_id) && self.opening.contains_key(channel_id) {
-            Taken::Park
-        } else {
-            Taken::Judge
+        match self.open.stoa_of(channel_id) {
+            Some(stoa) => Taken::Judge(Some(*stoa)),
+            None if self.opening.contains_key(channel_id) => Taken::Park,
+            None => Taken::Judge(None),
         }
     }
 
@@ -743,9 +757,10 @@ struct Shared {
     /// Discards since the module started, from the waiting payloads and from
     /// the parked messages alike: `op-transport` keeps one running count.
     discarded: u64,
-    /// Set only by tests, so a processor run on the test's thread ends once
-    /// what is queued is done. The running wiring never closes it: a review can
-    /// still be due after delivery's events end.
+    /// Tests only, so a processor run on the test's thread ends once what is
+    /// queued is done. Not in the running wiring's build at all: a review can
+    /// still be due after delivery's events end, so nothing there may close it.
+    #[cfg(test)]
     closed: bool,
 }
 
@@ -783,6 +798,7 @@ impl Channels {
                 waiting: InboundQueue::with_bound(bound),
                 reviews: VecDeque::new(),
                 discarded: 0,
+                #[cfg(test)]
                 closed: false,
             }),
             ready: Condvar::new(),
@@ -857,7 +873,7 @@ impl Channels {
     /// A waiting review first; otherwise the oldest waiting payload, with its
     /// channel's state read once, now ([`ChannelBook::on_take`]); otherwise
     /// block until there is one. `None` only once a test has closed it and
-    /// nothing is left.
+    /// nothing is left; the running wiring's build has no way to close it.
     fn take(&self) -> Option<Next> {
         let mut shared = lock(&self.shared);
         loop {
@@ -868,6 +884,7 @@ impl Channels {
                 let taken = shared.book.on_take(&message.channel_id);
                 return Some(Next::Payload(message, taken));
             }
+            #[cfg(test)]
             if shared.closed {
                 return None;
             }
@@ -883,7 +900,8 @@ impl Channels {
     }
 
     /// The Stoa a channel is open for now, copied out so the lock is released
-    /// before anything is judged.
+    /// before anything is judged. A review's lookup; a payload is judged on the
+    /// reading it was taken under ([`Taken::Judge`]).
     fn stoa_of(&self, channel_id: &str) -> Option<Address> {
         lock(&self.shared).book.open.stoa_of(channel_id).copied()
     }
@@ -905,7 +923,7 @@ impl Channels {
 }
 
 /// An open asked for and not yet settled. Dropping it settles the open — as held
-/// only if [`Opening::settle`] said so — so no path between the request and
+/// only if [`Opening::finish`] said so — so no path between the request and
 /// delivery's answer, a panic, a refused send to the worker or a worker that
 /// never takes it included, can leave the channel being opened, or the messages
 /// parked on it unreviewed.
@@ -917,7 +935,7 @@ struct Opening {
 
 impl Opening {
     /// Delivery reported that it holds the channel: created it, or already had it.
-    /// Tests only; the worker says so with [`Opening::settle`].
+    /// Tests only; the worker says so with [`Opening::finish`].
     #[cfg(test)]
     fn held(&mut self) {
         self.held = true;
@@ -925,11 +943,14 @@ impl Opening {
 
     /// Settle the open now, as held or not, rather than whenever this is dropped.
     ///
-    /// The worker settles before it logs the outcome, so a line saying the open
-    /// was answered or given up is never read while the channel still counts as
-    /// being opened.
-    fn settle(mut self, held: bool) {
+    /// The worker finishes an open before it logs the outcome, so a line saying
+    /// the open was answered or given up is never read while the channel still
+    /// counts as being opened.
+    fn finish(mut self, held: bool) {
         self.held = held;
+        // `self` is dropped here, and the drop is the settle: [`Drop`] below
+        // hands `held` to [`Channels::settle`]. One path settles, whether the
+        // worker finishes the open or the guard is merely dropped.
     }
 }
 
@@ -952,7 +973,7 @@ enum Action {
     Send(OpId),
     /// A test's barrier: answered once everything queued before it is done.
     #[cfg(test)]
-    Settle(mpsc::Sender<()>),
+    Drain(mpsc::Sender<()>),
 }
 
 struct Worker<D: Delivery> {
@@ -980,7 +1001,7 @@ impl<D: Delivery> Worker<D> {
             Action::Open(opening) => self.open(opening),
             Action::Send(id) => self.send(&id),
             #[cfg(test)]
-            Action::Settle(done) => {
+            Action::Drain(done) => {
                 let _ = done.send(());
             }
         }
@@ -1020,7 +1041,7 @@ impl<D: Delivery> Worker<D> {
         let sender = match self.stores.senders().and_then(|mut s| s.sender_for(stoa)) {
             Ok(sender) => sender,
             Err(why) => {
-                opening.settle(false);
+                opening.finish(false);
                 record(&*self.journal, Note::SenderNotRetained(stoa, &why));
                 return;
             }
@@ -1032,15 +1053,15 @@ impl<D: Delivery> Worker<D> {
         );
         match channel_answer(&reply) {
             ChannelAnswer::Created => {
-                opening.settle(true);
+                opening.finish(true);
                 record(&*self.journal, Note::ChannelOpened(stoa));
             }
             ChannelAnswer::AlreadyHeld => {
-                opening.settle(true);
+                opening.finish(true);
                 record(&*self.journal, Note::ChannelAlreadyHeld(stoa));
             }
             ChannelAnswer::Declined(why) => {
-                opening.settle(false);
+                opening.finish(false);
                 record(&*self.journal, Note::ChannelDeclined(stoa, &why))
             }
         }
@@ -1168,15 +1189,16 @@ enum Offered {
 ///
 /// # A full queue discards the newest payload of the channel holding the most
 ///
-/// Counting the arrival with its own channel ([`crate::parked::shed`], the rule
-/// the parked messages' total bounds use too). This narrows #30's question —
-/// which payload a full queue loses — to the channel causing the pressure: a
+/// Counting the arrival with its own channel ([`crate::shedding::choose`], the
+/// rule the parked messages' total bounds use too). This narrows #30's question
+/// — which payload a full queue loses — to the channel causing the pressure: a
 /// flood on one Stoa's channel loses that channel's own newest payloads, and a
 /// quiet Stoa's message arriving behind the flood is kept. Within the flooding
-/// channel it is still the newest that goes, for the reason the old rule
-/// discarded the arrival: a backlog burst arrives roughly oldest first, so the
-/// newest payloads are leaves, and losing them keeps every thread whole. When
-/// one channel holds everything waiting, this is the old rule exactly.
+/// channel it is still the newest that goes, as under the old rule, which
+/// discarded the arrival. That losing the newest loses least is a heuristic on
+/// SDS's catch-up order, which nothing here measures, and nothing depends on it
+/// for correctness (`park-pending-inbound`'s design, Decision 5). When one
+/// channel holds everything waiting, this is the old rule exactly.
 ///
 /// # Offering never waits on the boundary
 ///
@@ -1201,26 +1223,18 @@ impl InboundQueue {
             self.messages.push_back(message);
             return Offered::Waiting;
         }
-        // Each channel's waiting count and newest place, the arrival counted
-        // with its own channel as the newest of all.
-        let mut loads: HashMap<&str, Load> = HashMap::new();
-        for (place, waiting) in (0u64..).zip(&self.messages) {
-            let load = loads.entry(waiting.channel_id.as_str()).or_default();
-            load.measure = load.measure.saturating_add(1);
-            load.newest = place;
-        }
-        let own = loads.entry(message.channel_id.as_str()).or_default();
-        own.measure = own.measure.saturating_add(1);
-        own.newest = u64::MAX;
-        let victim = shed(loads).filter(|c| *c != message.channel_id).map(str::to_string);
-        // `None`: the arrival's channel holds the most, and the arrival is its
-        // newest. Discarded, and every waiting payload kept.
-        let Some(victim) = victim else {
-            return Offered::Discarded;
+        let waiting = self.messages.iter().map(|m| (m.channel_id.as_str(), 1));
+        let at = match choose(waiting, (message.channel_id.as_str(), 1)) {
+            // The arrival's channel holds the most, and the arrival is its
+            // newest: discarded, and every waiting payload kept.
+            Victim::Arrival => return Offered::Discarded,
+            // The queue is in arrival order, so the last waiting payload on the
+            // channel chosen is that channel's newest.
+            Victim::NewestOf(victim) => self.messages.iter().rposition(|m| m.channel_id == victim),
         };
-        // `shed` names only a channel holding something, so `rposition` finds
+        // `choose` names only a channel holding something, so `rposition` finds
         // it; were it not to, the arrival is the one dropped, and the bound holds.
-        if let Some(at) = self.messages.iter().rposition(|m| m.channel_id == victim) {
+        if let Some(at) = at {
             self.messages.remove(at);
             self.messages.push_back(message);
         }
@@ -1325,7 +1339,7 @@ fn hand_over(message: Arriving, channels: &Channels, journal: &dyn Journal) {
 /// and is neither counted towards the bound nor as a discard. The node is shared,
 /// so another application's channel traffic arrives here, and any peer may send
 /// on any identifier it picks; queued, that traffic filled the queue and forced
-/// final discards of every Stoa's ops (design Decision 10).
+/// final discards of every Stoa's ops (`delivery-wiring`'s design, Decision 10).
 /// `traffic_on_a_channel_this_peer_is_not_opening_takes_no_place_in_the_queue`
 /// is red without it.
 ///
@@ -1360,20 +1374,16 @@ struct Processor {
     stores: Stores,
     journal: Arc<dyn Journal>,
     clock: fn() -> u64,
-    /// The bounds parking holds the parked messages to: [`PARK_BOUNDS`] in the
-    /// running wiring, smaller in a test of what happens at a bound.
-    bounds: ParkBounds,
+    /// The bounds a test parks by: [`PARK_BOUNDS`] unless the test shrinks them
+    /// to reach a bound. **Absent from the running wiring's build**, where
+    /// [`Processor::bounds`] is the constant itself.
+    #[cfg(test)]
+    bounds: crate::parked::ParkBounds,
 }
 
 impl Processor {
-    /// The processor the running wiring runs, parking by [`PARK_BOUNDS`].
-    ///
-    /// **The one place a processor is built**, [`Delivering::start`] and the
-    /// tests' fixtures alike, so the bounds a test reads here are the ones the
-    /// running module parks by — the lesson of the wait this replaces, whose
-    /// limit set wrongly in `start` passed every test (`delivery-wiring`'s
-    /// spec-test re-review, round 3). A test of a bound shrinks
-    /// [`Processor::bounds`] on what this returns.
+    /// The one place a processor is built, [`Delivering::start`] and the tests'
+    /// fixtures alike.
     fn new(
         channels: Arc<Channels>,
         stores: Stores,
@@ -1385,8 +1395,26 @@ impl Processor {
             stores,
             journal,
             clock,
+            #[cfg(test)]
             bounds: PARK_BOUNDS,
         }
+    }
+
+    /// The bounds parking holds the parked messages to.
+    ///
+    /// **[`PARK_BOUNDS`] by construction in the running wiring**: outside a test
+    /// build there is no field a constructor or `start` could set otherwise.
+    /// That is the lesson of the wait this replaced, whose limit set wrongly in
+    /// `start` passed every test (`delivery-wiring`'s spec-test re-review, round
+    /// 3). A test build reads the field, so a test can shrink it.
+    #[cfg(not(test))]
+    fn bounds(&self) -> &crate::parked::ParkBounds {
+        &PARK_BOUNDS
+    }
+
+    #[cfg(test)]
+    fn bounds(&self) -> &crate::parked::ParkBounds {
+        &self.bounds
     }
 
     /// Take and act on each thing in turn, for the life of the module.
@@ -1407,8 +1435,11 @@ impl Processor {
             Next::Review(review) => self.contained("a review of parked messages", || {
                 self.review(review)
             }),
-            Next::Payload(message, Taken::Judge) => {
-                self.contained("an inbound message", || self.judge(message.inbound()))
+            // Judged against the Stoa read when it was taken: the one reading.
+            Next::Payload(message, Taken::Judge(stoa)) => {
+                self.contained("an inbound message", || {
+                    self.judge(message.inbound(), |_| stoa)
+                })
             }
             Next::Payload(message, Taken::Park) => {
                 self.contained("parking an inbound message", || self.park(&message))
@@ -1430,58 +1461,66 @@ impl Processor {
     /// cannot be written is a storage failure, and the payload is not held for
     /// another attempt.
     fn park(&self, message: &Arriving) {
-        let parked = self.stores.parked().and_then(|mut store| {
-            store.park(&message.channel_id, &message.payload, &self.bounds)
+        let outcome = self.stores.parked().and_then(|mut store| {
+            store.park(&message.channel_id, &message.payload, self.bounds())
         });
-        let Parking { parked, evicted } = match parked {
-            Ok(parking) => parking,
+        // Each message the park discarded — those evicted for it, or the
+        // payload itself — counted and logged alike.
+        let (discards, parked) = match outcome {
+            Ok(ParkOutcome::Parked { evicted }) => (evicted, true),
+            Ok(ParkOutcome::Discarded) => (1, false),
             Err(e) => return record(&*self.journal, Note::NotParked(&e.to_string())),
         };
-        for _ in 0..evicted {
+        for _ in 0..discards {
             let total = self.channels.count_discard();
             record(&*self.journal, Note::ParkDiscarded { total });
         }
         if parked {
             record(&*self.journal, Note::Parked);
-        } else {
-            let total = self.channels.count_discard();
-            record(&*self.journal, Note::ParkDiscarded { total });
         }
     }
 
-    /// Decide every message the review's event left parked.
-    ///
-    /// `op-transport`, "Parked messages are reviewed on three events and no
-    /// others". Each channel's messages are taken out of the store and decided
-    /// in the order they were handed over; each is decided under its own
-    /// `catch_unwind`, so one that panics does not cost the rest.
+    /// Run the review its event began: `op-transport`, "Parked messages are
+    /// reviewed on three events and no others", one function per event.
     fn review(&self, review: Review) {
         match review {
-            Review::Held(channel_id) => {
-                for parked in self.take_parked(&channel_id) {
-                    self.contained("an inbound message", || {
-                        self.judge(parked_inbound(&parked))
-                    });
-                }
-            }
+            Review::Held(channel_id) => self.decide_parked(&channel_id),
             Review::Unopened(channel_id) => self.refuse_parked(&channel_id),
-            Review::Startup(known) => {
-                let channels = self.stores.parked().and_then(|store| store.channels());
-                let channels = match channels {
-                    Ok(channels) => channels,
-                    Err(e) => {
-                        return record(&*self.journal, Note::ReviewUnreadable(&e.to_string()))
-                    }
-                };
-                for channel_id in channels.iter().filter(|c| !known.contains(*c)) {
-                    self.refuse_parked(channel_id);
-                }
-            }
+            Review::Startup(known) => self.refuse_unknown_at_startup(&known),
         }
     }
 
-    /// Refuse every message parked on a channel as arriving on an unknown
-    /// channel, logged as the boundary logs that refusal.
+    /// Event 1, delivery holds the channel: judge each message parked on it, in
+    /// the order they were handed over, as a message taken on an open channel is
+    /// judged — against the channels open now, not when it was parked. Each is
+    /// judged under its own `catch_unwind`, so one that panics does not cost the
+    /// rest.
+    fn decide_parked(&self, channel_id: &str) {
+        for parked in self.take_parked(channel_id) {
+            self.contained("an inbound message", || {
+                self.judge(parked_inbound(&parked), |channel_id| {
+                    self.channels.stoa_of(channel_id)
+                })
+            });
+        }
+    }
+
+    /// Event 3, the module's first startup: refuse what is parked on every
+    /// channel not in `known` — the channels startup counted as being opened —
+    /// and leave the rest for their channel's next review.
+    fn refuse_unknown_at_startup(&self, known: &HashSet<String>) {
+        let channels = match self.stores.parked().and_then(|store| store.channels()) {
+            Ok(channels) => channels,
+            Err(e) => return record(&*self.journal, Note::ReviewUnreadable(&e.to_string())),
+        };
+        for channel_id in channels.iter().filter(|c| !known.contains(*c)) {
+            self.refuse_parked(channel_id);
+        }
+    }
+
+    /// Event 2, and event 3 for each channel it refuses: refuse every message
+    /// parked on a channel as arriving on an unknown channel, logged as the
+    /// boundary logs that refusal.
     fn refuse_parked(&self, channel_id: &str) {
         for _ in self.take_parked(channel_id) {
             let refusal = InboundRefusal::UnknownChannel;
@@ -1507,8 +1546,8 @@ impl Processor {
     }
 
     /// Put one message through the boundary and log what it decided.
-    fn judge(&self, inbound: InboundMessage<'_>) {
-        let decided = self.pass(inbound);
+    fn judge(&self, inbound: InboundMessage<'_>, stoa_of: impl FnOnce(&str) -> Option<Address>) {
+        let decided = self.pass(inbound, stoa_of);
         self.record_decision(decided);
     }
 
@@ -1519,15 +1558,25 @@ impl Processor {
     /// reading at receipt, in nanoseconds. `op-transport` requires the window be
     /// judged against this peer's own clock "read when the payload is judged".
     ///
-    /// The lookup copies the channel's Stoa out of the book and releases it, and
-    /// the op log is opened only for an op that passed: a payload refused on its
+    /// **`stoa_of` says which reading of the channel book the message is judged
+    /// on**, under the message's own channel identifier: for a payload, the one
+    /// [`Channels::take`] made as it took it ([`Taken::Judge`]); for a parked
+    /// message, a lookup now, at its review, because a review judges "against
+    /// the channels open when it is judged". Either copies the Stoa out, so no
+    /// lock is held while the message is judged.
+    ///
+    /// The op log is opened only for an op that passed: a payload refused on its
     /// channel or its bytes costs no database open, and is refused under its own
     /// name even when the log will not open.
-    fn pass(&self, inbound: InboundMessage<'_>) -> Result<transport::Admitted, InboundRefusal> {
+    fn pass(
+        &self,
+        inbound: InboundMessage<'_>,
+        stoa_of: impl FnOnce(&str) -> Option<Address>,
+    ) -> Result<transport::Admitted, InboundRefusal> {
         let now_ms = (self.clock)();
         transport::receive_via(
             inbound,
-            |channel_id| self.channels.stoa_of(channel_id),
+            stoa_of,
             now_ms,
             |judged| {
                 // `op-transport`, scenario "A message the op log cannot take is
@@ -1601,12 +1650,18 @@ impl Delivering {
 
     /// Wire delivery, once per process.
     ///
-    /// In order: count the channel of every Stoa the membership record holds as
-    /// being opened, subscribe to `channelMessageReceived` (so nothing a channel
-    /// receives can precede the listener), start the processor and the worker,
-    /// ask for the node, then ask for each of those channels. The node is first
-    /// in the worker's queue, so its creation is requested before any channel
-    /// operation.
+    /// In order:
+    ///
+    /// 1. count the channel of every Stoa the membership record holds as being
+    ///    opened;
+    /// 2. queue the startup review (review event 3), whose set of known channels
+    ///    is exactly those — after step 1, and before anything can settle;
+    /// 3. subscribe to `channelMessageReceived`, so nothing a channel receives
+    ///    can precede the listener;
+    /// 4. start the processor, whose first take is that review, and the worker;
+    /// 5. ask for the node, then for each of the channels counted in step 1. The
+    ///    node is first in the worker's queue, so its creation is requested
+    ///    before any channel operation.
     ///
     /// **A second call does nothing and returns `false`**, so node creation and
     /// start are requested at most once per process however often startup runs.
@@ -1666,16 +1721,7 @@ impl Delivering {
             Ok(events) => self.spawn_listener(events, Arc::clone(&channels)),
             Err(why) => record(&*self.journal, Note::NotSubscribed(&why)),
         }
-        self.spawn(
-            "dialectica inbound processor",
-            Processor::new(
-                Arc::clone(&channels),
-                stores.clone(),
-                Arc::clone(&self.journal),
-                clock,
-            ),
-            Processor::run,
-        );
+        self.spawn_processor(Arc::clone(&channels), stores.clone(), clock);
 
         let (actions, pending) = mpsc::channel();
         let worker = Worker {
@@ -1787,6 +1833,13 @@ impl Delivering {
         });
     }
 
+    /// Start the processor, built the one way a processor is built
+    /// ([`Processor::new`]), for the life of the module ([`Processor::run`]).
+    fn spawn_processor(&self, channels: Arc<Channels>, stores: Stores, clock: fn() -> u64) {
+        let processor = Processor::new(channels, stores, Arc::clone(&self.journal), clock);
+        self.spawn("dialectica inbound processor", processor, Processor::run);
+    }
+
     /// Start a named thread, logging rather than panicking when the OS refuses.
     /// `std::thread::spawn` panics on that refusal; `Builder` reports it.
     fn spawn<T: Send + 'static>(
@@ -1808,14 +1861,15 @@ impl Delivering {
     }
 
     /// A test's barrier: returns once the worker has finished everything queued
-    /// before it.
+    /// before it. Named apart from the settles of an open, which are the
+    /// production meaning of the word here.
     #[cfg(test)]
-    fn settle(&self) {
+    fn drain(&self) {
         let (done, wait) = mpsc::channel();
         if let Wiring::Running(outbox) = &self.wiring {
-            let _ = outbox.actions.send(Action::Settle(done));
+            let _ = outbox.actions.send(Action::Drain(done));
             wait.recv_timeout(Duration::from_secs(30))
-                .expect("the worker settles");
+                .expect("the worker drains");
         }
     }
 }

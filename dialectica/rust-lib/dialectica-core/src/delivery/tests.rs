@@ -569,49 +569,16 @@ fn this_peers_wait_on_a_creation_outlasts_deliverys_own() {
 }
 
 #[test]
-fn the_processor_the_running_wiring_builds_parks_by_the_pinned_bounds() {
-    // `parked::tests::the_park_bounds_are_pinned` pins the constant; this reads
-    // the bounds off a processor built the one way a processor is built, and the
-    // next test holds that `start` builds it that way and changes nothing after.
+fn a_processor_parks_by_the_pinned_bounds_until_a_test_shrinks_them() {
+    // `parked::tests::the_park_bounds_are_pinned` pins the constant. Outside a
+    // test build `Processor::bounds` IS that constant — there is no field — so
+    // the running wiring cannot park by anything else. This holds the test
+    // build's starting point, which every test that shrinks a bound starts from.
     let peer = Peer::new("processor-bounds");
     assert_eq!(
-        peer.processor(Arc::new(Channels::default())).bounds,
+        *peer.processor(Arc::new(Channels::default())).bounds(),
         crate::parked::PARK_BOUNDS
     );
-}
-
-#[test]
-fn the_running_wiring_builds_its_processor_with_the_one_constructor_and_never_changes_its_bounds()
-{
-    // `Delivering::start` spawns a processor it builds itself, on a thread that
-    // holds it for the life of the module, so no test can read that one's bounds.
-    // Read as text instead, comments stripped and whitespace removed: the field
-    // has exactly two mentions with a colon after it, its declaration and the
-    // constructor's `PARK_BOUNDS`, so no second struct literal and no struct
-    // update can give a processor others; nothing assigns it after the processor
-    // is built; and `start` reaches a processor through `Processor::new`, once.
-    // The wait this replaced had a limit set wrongly in `start` pass every test
-    // that built a processor the test's way.
-    //
-    // The counts are hardcoded. A change that adds a legitimate second place
-    // that builds a processor is a reason to read what bounds it gives, not to
-    // raise a count.
-    let code: String = without_comments(include_str!("../delivery.rs"))
-        .split_whitespace()
-        .collect();
-    for (text, count) in [
-        ("bounds:PARK_BOUNDS,", 1),
-        ("bounds:ParkBounds,", 1),
-        ("bounds:", 2),
-        ("bounds=", 0),
-        ("Processor::new(", 1),
-    ] {
-        assert_eq!(
-            code.matches(text).count(),
-            count,
-            "delivery.rs should contain `{text}` exactly {count} time(s)"
-        );
-    }
 }
 
 #[test]
@@ -620,7 +587,7 @@ fn node_creation_is_requested_once_however_often_startup_runs() {
     peer.join(&genesis("Agora"));
     assert!(peer.start());
     assert!(!peer.start(), "a second startup must report it did nothing");
-    peer.delivering.settle();
+    peer.delivering.drain();
 
     assert_eq!(peer.fake.count(&Call::CreateNode(node_config())), 1);
     assert_eq!(peer.fake.count(&Call::StartNode), 1);
@@ -641,7 +608,7 @@ fn a_failed_subscription_leaves_sending_wired() {
             Err::<std::iter::Empty<Option<Arriving>>, _>("provider unavailable".to_string())
         });
     peer.post(&g.address().unwrap(), "still sent");
-    peer.delivering.settle();
+    peer.delivering.drain();
 
     // The spec asks the log to record the *consequence* — "this peer will not
     // receive ops from other peers" — and not only the failure, so a line that
@@ -683,7 +650,7 @@ fn a_publish_before_delivery_is_wired_is_logged_and_not_sent_later() {
         peer.journal.lines()
     );
     peer.start();
-    peer.delivering.settle();
+    peer.delivering.drain();
     assert!(peer.fake.sends().is_empty());
     assert_eq!(peer.fake.creates().len(), 1);
 }
@@ -735,7 +702,7 @@ fn node_creation_precedes_every_channel_operation() {
     peer.join(&genesis("Agora"));
     peer.join(&genesis("Lyceum"));
     peer.start();
-    peer.delivering.settle();
+    peer.delivering.drain();
 
     let calls = peer.fake.calls();
     assert_eq!(calls[0], Call::CreateNode(node_config()), "{calls:?}");
@@ -755,7 +722,7 @@ fn a_declined_node_creation_does_not_stop_the_module() {
     peer.join(&lyceum);
     let posted = peer.post(&agora.address().unwrap(), "held before start");
     peer.start();
-    peer.delivering.settle();
+    peer.delivering.drain();
 
     assert_eq!(
         peer.journal.with("Context already initialized").len(),
@@ -1025,7 +992,7 @@ fn joining_requests_the_stoas_channel_after_the_membership_is_recorded() {
     // And the channel asked for is the one derived from that Stoa's address.
     let mut peer = peer;
     peer.start();
-    peer.delivering.settle();
+    peer.delivering.drain();
     let id = ChannelIdentity::of(&stoa);
     let creates = peer.fake.creates();
     assert!(creates
@@ -1039,7 +1006,7 @@ fn a_join_requests_its_channel_through_the_worker() {
     peer.start();
     let g = genesis("Agora");
     peer.join(&g);
-    peer.delivering.settle();
+    peer.delivering.drain();
 
     let id = ChannelIdentity::of(&g.address().unwrap());
     let creates = peer.fake.creates();
@@ -1062,7 +1029,7 @@ fn creating_a_stoa_requests_its_channel() {
     );
     let v: Value = serde_json::from_str(&reply).unwrap();
     let stoa = Address::from_hex(v["stoa"].as_str().unwrap()).unwrap();
-    peer.delivering.settle();
+    peer.delivering.drain();
 
     let id = ChannelIdentity::of(&stoa);
     assert_eq!(
@@ -1108,7 +1075,7 @@ fn a_channel_delivery_declines_does_not_fail_the_join() {
     });
     let events = peer.start_listening();
     let reply = peer.join(&g);
-    peer.delivering.settle();
+    peer.delivering.drain();
 
     // The reply is the one a join gets whether or not the channel opened.
     let unaffected = crate::wire::join_stoa(
@@ -1163,7 +1130,7 @@ fn a_channel_delivery_reports_already_existing_is_open() {
         .script(|s| s.create_replies.push_back(the_already_exists_answer(&stoa)));
     let events = peer.start_listening();
     peer.join(&g);
-    peer.delivering.settle();
+    peer.delivering.drain();
 
     let their = their_op(stoa, "on a channel delivery already held", 0);
     events
@@ -1183,7 +1150,7 @@ fn a_channel_delivery_reports_already_existing_is_open() {
     );
 
     peer.post(&stoa, "sent on the channel delivery already held");
-    peer.delivering.settle();
+    peer.delivering.drain();
     let sends = peer.fake.sends();
     assert_eq!(sends.len(), 1, "{:?}", peer.journal.lines());
     assert_eq!(sends[0].0, ChannelIdentity::of(&stoa).channel_id());
@@ -1207,9 +1174,9 @@ fn a_creation_delivery_did_not_complete_in_time_opens_on_the_next_request() {
     });
     let events = peer.start_listening();
     peer.join(&g);
-    peer.delivering.settle();
+    peer.delivering.drain();
     peer.join(&g);
-    peer.delivering.settle();
+    peer.delivering.drain();
     assert_eq!(peer.fake.creates().len(), 2);
 
     let their = their_op(stoa, "delivered on the channel delivery holds", 0);
@@ -1244,7 +1211,7 @@ fn a_module_restarted_while_delivery_kept_running_has_its_channels_open() {
         .fake
         .script(|s| s.create_replies.push_back(the_already_exists_answer(&stoa)));
     let events = peer.start_listening();
-    peer.delivering.settle();
+    peer.delivering.drain();
 
     let their = their_op(stoa, "after the restart", 0);
     events
@@ -1336,7 +1303,7 @@ fn what_delivery_says_of_a_channel_decides_whether_the_channel_opens_and_a_post_
             .script(|s| s.create_replies.push_back(the_observed_decline(reason)));
         let events = peer.start_listening();
         peer.join(&g);
-        peer.delivering.settle();
+        peer.delivering.drain();
 
         let their = their_op(stoa, "after delivery's answer", 0);
         events
@@ -1350,7 +1317,7 @@ fn what_delivery_says_of_a_channel_decides_whether_the_channel_opens_and_a_post_
             !peer.journal.with("inbound").is_empty()
         });
         peer.post(&stoa, "after delivery's answer");
-        peer.delivering.settle();
+        peer.delivering.drain();
 
         let lines = peer.journal.lines();
         assert_eq!(
@@ -1399,7 +1366,7 @@ fn an_unresponsive_delivery_does_not_delay_a_join() {
 
     // And the request was not lost by not waiting: released, it is answered.
     gate.release();
-    peer.delivering.settle();
+    peer.delivering.drain();
     assert_eq!(peer.fake.answered_creates(), 1);
 }
 
@@ -1410,7 +1377,7 @@ fn a_repeated_join_requests_the_channel_again() {
     let g = genesis("Agora");
     peer.join(&g);
     peer.join(&g);
-    peer.delivering.settle();
+    peer.delivering.drain();
     assert_eq!(peer.fake.creates().len(), 2);
 }
 
@@ -1437,7 +1404,7 @@ fn a_restarted_peer_requests_every_stoas_channel_and_no_other() {
     peer.post(&stranger, "an op naming a Stoa this peer is not in");
 
     peer.start();
-    peer.delivering.settle();
+    peer.delivering.drain();
 
     let mut asked: Vec<String> = peer.fake.creates().into_iter().map(|c| c.0).collect();
     asked.sort();
@@ -1503,7 +1470,7 @@ fn a_peer_in_more_stoas_than_a_page_requests_every_channel_at_startup() {
         crate::wire::join_stoa(&join_request(&g), &mut store, &mut |_| {});
     }
     peer.start();
-    peer.delivering.settle();
+    peer.delivering.drain();
 
     let mut asked: Vec<String> = peer.fake.creates().into_iter().map(|c| c.0).collect();
     asked.sort();
@@ -1517,7 +1484,7 @@ fn an_unreadable_membership_record_opens_nothing_and_stops_nothing() {
     let mut peer = Peer::new("membership-broken");
     peer.dir.break_file(&membership_path_in(&peer.dir.0));
     peer.start();
-    peer.delivering.settle();
+    peer.delivering.drain();
 
     assert!(peer.fake.creates().is_empty());
     assert_eq!(
@@ -1652,7 +1619,7 @@ fn an_op_published_on_an_open_channel_is_sent_as_its_stored_wire_form() {
     let stoa = g.address().unwrap();
     peer.join(&g);
     let id = peer.post(&stoa, "hello");
-    peer.delivering.settle();
+    peer.delivering.drain();
 
     let sends = peer.fake.sends();
     assert_eq!(sends.len(), 1, "{:?}", peer.fake.calls());
@@ -1671,7 +1638,7 @@ fn an_op_the_peer_already_holds_published_again_is_sent_again() {
     // The handler reaches the sink for a publish reporting `wasNew:false` exactly
     // as for a new one; this is that second handoff.
     peer.delivering.published(&id);
-    peer.delivering.settle();
+    peer.delivering.drain();
 
     let sends = peer.fake.sends();
     assert_eq!(sends.len(), 2);
@@ -1684,7 +1651,7 @@ fn a_publish_into_a_stoa_with_no_open_channel_sends_nothing_and_opens_nothing() 
     peer.start();
     let stoa = genesis("Not joined").address().unwrap();
     let id = peer.post(&stoa, "into the void");
-    peer.delivering.settle();
+    peer.delivering.drain();
 
     assert!(peer.fake.sends().is_empty());
     assert!(peer.fake.creates().is_empty());
@@ -1706,7 +1673,7 @@ fn a_send_delivery_declines_leaves_the_op_published() {
     let before = peer.dir.op_log().len().unwrap();
     let id = peer.post(&g.address().unwrap(), "declined");
     let bytes_at_publish = stored(&peer, &id).unwrap().op.to_bytes().unwrap();
-    peer.delivering.settle();
+    peer.delivering.drain();
 
     assert_eq!(peer.dir.op_log().len().unwrap(), before + 1);
     assert_eq!(
@@ -1730,7 +1697,7 @@ fn an_unresponsive_delivery_does_not_delay_the_publish_reply() {
     peer.start();
     let g = genesis("Agora");
     peer.join(&g);
-    peer.delivering.settle();
+    peer.delivering.drain();
 
     let id = peer.post(&g.address().unwrap(), "not waited on");
 
@@ -1743,7 +1710,7 @@ fn an_unresponsive_delivery_does_not_delay_the_publish_reply() {
 
     // And the send was not lost by not waiting: released, it is answered.
     gate.release();
-    peer.delivering.settle();
+    peer.delivering.drain();
     assert_eq!(peer.fake.answered_sends(), 1);
     assert_eq!(peer.fake.sends().len(), 1);
 }
@@ -1767,7 +1734,7 @@ fn sends_follow_the_order_of_their_publishes() {
         &mut |id| delivering.published(id),
     );
     let child = op_id_of(&reply);
-    peer.delivering.settle();
+    peer.delivering.drain();
 
     let sent: Vec<OpId> = peer
         .fake
@@ -1785,7 +1752,7 @@ fn a_publish_after_a_join_is_sent_on_the_channel_the_join_opened() {
     let g = genesis("Agora");
     peer.join(&g);
     peer.post(&g.address().unwrap(), "after the join");
-    peer.delivering.settle();
+    peer.delivering.drain();
 
     let calls = peer.fake.calls();
     let created_at = calls
@@ -1842,7 +1809,7 @@ fn sends_made_while_an_open_is_unanswered_wait_for_it_and_keep_their_order() {
     );
 
     gate.release();
-    peer.delivering.settle();
+    peer.delivering.drain();
 
     let calls = peer.fake.calls();
     let answered_open = calls
@@ -2195,13 +2162,13 @@ fn a_declined_repeat_open_leaves_the_channel_open_for_the_next_message() {
     let stoa = g.address().unwrap();
     let events = peer.start_listening();
     peer.join(&g);
-    peer.delivering.settle();
+    peer.delivering.drain();
     let _ = peer.fake.script(|s| {
         s.create_replies
             .push_back(the_observed_decline("no reliable channel manager"))
     });
     peer.join(&g);
-    peer.delivering.settle();
+    peer.delivering.drain();
     assert_eq!(peer.fake.creates().len(), 2, "the repeat was not asked for");
     assert_eq!(
         peer.journal.with("no reliable channel manager").len(),
@@ -2460,7 +2427,7 @@ fn a_received_op_reaches_the_log_through_the_running_listener() {
     let stoa = g.address().unwrap();
     peer.join(&g);
     let events = peer.start_listening();
-    peer.delivering.settle(); // the channel is open once the worker settles
+    peer.delivering.drain(); // the channel is open once the worker settles
 
     let op = their_op(stoa, "over the wire", 0);
     events
@@ -2726,7 +2693,7 @@ fn hold_the_boundary_up(
 ) -> (Address, Arc<Gate>) {
     let open = genesis("Agora");
     peer.join(&open);
-    peer.delivering.settle();
+    peer.delivering.drain();
     let gate = peer.journal.hold_on("refused (undecodable)");
     let open = open.address().unwrap();
     events
@@ -3087,7 +3054,7 @@ fn a_panicking_delivery_call_is_contained_and_the_next_action_runs() {
     peer.fake = peer.fake.script(|s| s.panic_on_create_node = true);
     peer.join(&genesis("Agora"));
     peer.start();
-    peer.delivering.settle();
+    peer.delivering.drain();
 
     assert_eq!(peer.journal.with("panicked").len(), 1);
     assert_eq!(peer.fake.creates().len(), 1, "the open after the panic ran");
@@ -3117,7 +3084,7 @@ fn a_panic_reading_one_event_does_not_end_reception() {
                 .into_iter()
                 .map(|event| event.unwrap_or_else(|| panic!("reading this event panicked"))))
         });
-    peer.delivering.settle(); // the channel is open
+    peer.delivering.drain(); // the channel is open
 
     events.send(None).unwrap();
     let op = their_op(stoa, "after the panic", 0);
@@ -3268,7 +3235,7 @@ fn a_declined_node_creation_is_read_in_every_shape_delivery_says_no() {
         let _ = peer.fake.script(|s| s.create_node = reply.clone());
         peer.join(&genesis("Agora"));
         peer.start();
-        peer.delivering.settle();
+        peer.delivering.drain();
 
         assert_eq!(
             peer.fake.count(&Call::StartNode),

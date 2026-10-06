@@ -35,8 +35,8 @@
 //! Outside `#[cfg(test)]` there is no `unwrap`, `expect` or indexing; every
 //! `rusqlite` failure becomes a [`ParkError`].
 
+use crate::shedding::{choose, Victim};
 use rusqlite::{Connection, TransactionBehavior};
-use std::collections::HashMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
@@ -66,7 +66,7 @@ pub struct ParkBounds {
 
 /// The bounds the running module parks by.
 ///
-/// `design.md` Decision 4 has the reasoning. In short:
+/// `park-pending-inbound`'s design, Decision 4, has the reasoning. In short:
 ///
 /// - **256 messages per channel**, the waiting payloads' own bound
 ///   ([`crate::delivery::INBOUND_BOUND`]): one channel may park as many
@@ -102,12 +102,18 @@ pub struct Parked {
 }
 
 /// What parking one payload did.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Parking {
-    /// Whether the payload itself is parked. `false` is a discard of the payload.
-    pub parked: bool,
-    /// How many messages that were already parked were discarded to make room.
-    pub evicted: usize,
+///
+/// Two variants and not a flag beside a count: a payload that is discarded
+/// costs no message already parked (`op-transport`: "If the payload being parked
+/// is chosen … every message already parked MUST be kept"), so "discarded, and
+/// something evicted for it" has no value to be.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ParkOutcome {
+    /// The payload is parked, and this many messages that were already parked
+    /// were discarded to make room for it.
+    Parked { evicted: usize },
+    /// The payload is discarded, and every message already parked is kept.
+    Discarded,
 }
 
 /// Why the parked messages could not be used.
@@ -164,7 +170,19 @@ impl ParkedStore {
     }
 
     fn from_connection(conn: Connection) -> Result<Self, ParkError> {
-        let found = Self::create_schema(&conn)?;
+        // What a review has decided leaves neither its bytes nor its size in the
+        // file. `secure_delete` overwrites freed content rather than leaving it in
+        // a page's free space; it is per connection, so it is set on every open.
+        // `auto_vacuum = FULL` returns freed pages to the file system at each
+        // commit, so the file shrinks back. SQLite fixes `auto_vacuum` when the
+        // first table is created, and ignores it inside a transaction, so it is
+        // set here, before `ensure_schema`'s; on a file that already has the
+        // table it changes nothing. Without them the file kept a flood's size,
+        // and its freed pages the attacker's bytes, after every review had
+        // decided them.
+        conn.execute_batch("PRAGMA secure_delete = ON; PRAGMA auto_vacuum = FULL;")
+            .map_err(storage)?;
+        let found = Self::ensure_schema(&conn)?;
         if found != PARKED_LAYOUT_VERSION {
             return Err(ParkError::UnknownLayoutVersion {
                 found,
@@ -192,15 +210,15 @@ impl ParkedStore {
         })
     }
 
-    /// Create the schema if the file has none, returning the layout version the
-    /// file then stamps.
+    /// Make sure the file has a schema — creating it if the file has none — and
+    /// return the layout version the file stamps, for the caller to check.
     ///
     /// **The op log's shape, `BEGIN IMMEDIATE` and the version read under the
     /// write lock**, though only the processor thread opens this file: it costs
     /// nothing, and the day a second thread opens it is not a day anyone will
     /// think to come back here (`sender.rs`'s `create_schema` names the race).
     /// `PRAGMA user_version` is last, the commit point of the layout claim.
-    fn create_schema(conn: &Connection) -> Result<i32, ParkError> {
+    fn ensure_schema(conn: &Connection) -> Result<i32, ParkError> {
         conn.execute_batch("BEGIN IMMEDIATE;").map_err(storage)?;
         let found: i32 = match conn.query_row("PRAGMA user_version", [], |row| row.get(0)) {
             Ok(found) => found,
@@ -249,28 +267,29 @@ impl ParkedStore {
         channel_id: &str,
         payload: &[u8],
         bounds: &ParkBounds,
-    ) -> Result<Parking, ParkError> {
+    ) -> Result<ParkOutcome, ParkError> {
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage)?;
         let rows = held_rows(&tx)?;
-        let plan = plan_park(&rows, channel_id, payload.len(), bounds);
-        for seq in &plan.evict {
+        let evict = match plan_park(&rows, channel_id, payload.len(), bounds) {
+            // Nothing to write: the transaction rolls back on drop.
+            Plan::Discard => return Ok(ParkOutcome::Discarded),
+            Plan::Park { evict } => evict,
+        };
+        for seq in &evict {
             tx.execute("DELETE FROM parked WHERE seq = ?1", [seq])
                 .map_err(storage)?;
         }
-        if plan.park {
-            tx.execute(
-                "INSERT INTO parked (channel, payload) VALUES (?1, ?2)",
-                rusqlite::params![channel_id, payload],
-            )
-            .map_err(storage)?;
-        }
+        tx.execute(
+            "INSERT INTO parked (channel, payload) VALUES (?1, ?2)",
+            rusqlite::params![channel_id, payload],
+        )
+        .map_err(storage)?;
         tx.commit().map_err(storage)?;
-        Ok(Parking {
-            parked: plan.park,
-            evicted: plan.evict.len(),
+        Ok(ParkOutcome::Parked {
+            evicted: evict.len(),
         })
     }
 
@@ -287,22 +306,21 @@ impl ParkedStore {
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage)?;
-        let taken = {
-            let mut select = tx
-                .prepare("SELECT payload FROM parked WHERE channel = ?1 ORDER BY seq")
-                .map_err(storage)?;
-            let rows = select
-                .query_map([channel_id], |row| row.get::<_, Vec<u8>>(0))
-                .map_err(storage)?;
-            let mut taken = Vec::new();
-            for payload in rows {
-                taken.push(Parked {
-                    channel_id: channel_id.to_string(),
-                    payload: payload.map_err(storage)?,
-                });
-            }
-            taken
-        };
+        let payloads: Vec<Vec<u8>> = tx
+            .prepare("SELECT payload FROM parked WHERE channel = ?1 ORDER BY seq")
+            .and_then(|mut select| {
+                select
+                    .query_map([channel_id], |row| row.get(0))?
+                    .collect()
+            })
+            .map_err(storage)?;
+        let taken = payloads
+            .into_iter()
+            .map(|payload| Parked {
+                channel_id: channel_id.to_string(),
+                payload,
+            })
+            .collect();
         tx.execute("DELETE FROM parked WHERE channel = ?1", [channel_id])
             .map_err(storage)?;
         tx.commit().map_err(storage)?;
@@ -361,12 +379,13 @@ fn held_rows(conn: &Connection) -> Result<Vec<Row>, ParkError> {
     rows.collect::<Result<_, _>>().map_err(storage)
 }
 
-/// What parking one payload will do: park it or not, and which held rows to
-/// discard first.
+/// What parking one payload will do.
 #[derive(Debug, PartialEq, Eq)]
-struct Plan {
-    park: bool,
-    evict: Vec<i64>,
+enum Plan {
+    /// Park it, discarding these held rows (by `seq`) first.
+    Park { evict: Vec<i64> },
+    /// Discard it, and keep every held row.
+    Discard,
 }
 
 /// The discard rule of `op-transport`'s "Parked messages are bounded per channel
@@ -374,11 +393,15 @@ struct Plan {
 ///
 /// 1. **Its own channel first.** A payload that would put its own channel over
 ///    its count or byte bound is discarded, and nothing held is.
-/// 2. **Then the total count, then the total bytes.** While parking would put the
-///    parked messages over a total, the channel [`shed`] picks — counting the
-///    payload with its own channel — gives up its newest message. When that is
-///    the payload's own channel, its newest is the payload itself: the payload is
-///    discarded and nothing more is.
+/// 2. **Then the total count, then the total bytes.** While parking would put
+///    the parked messages over a total, [`choose`] picks a message — counting
+///    the payload with its own channel, and leaving out every message already
+///    chosen — until the bound would hold: messages for the count bound first,
+///    then for the byte bound.
+/// 3. **If the payload itself is chosen, for either bound, it is discarded and
+///    every held row is kept**, a row chosen before it included. Only a plan
+///    that parks the payload evicts anything: a payload that is lost anyway
+///    costs no message already parked.
 ///
 /// `rows` is in hand-over order. The payload is newer than every row.
 fn plan_park(rows: &[Row], channel: &str, bytes: usize, bounds: &ParkBounds) -> Plan {
@@ -387,107 +410,71 @@ fn plan_park(rows: &[Row], channel: &str, bytes: usize, bounds: &ParkBounds) -> 
     if own.len().saturating_add(1) > bounds.per_channel_count
         || own_bytes.saturating_add(bytes) > bounds.per_channel_bytes
     {
-        return Plan {
-            park: false,
-            evict: Vec::new(),
-        };
+        return Plan::Discard;
     }
 
+    let totals = [
+        Total {
+            measure: |_| 1,
+            arriving: 1,
+            bound: bounds.total_count as u64,
+        },
+        Total {
+            measure: |r| r.bytes as u64,
+            arriving: bytes as u64,
+            bound: bounds.total_bytes as u64,
+        },
+    ];
     let mut kept: Vec<&Row> = rows.iter().collect();
     let mut evict = Vec::new();
-    // The count bound, then the byte bound, each with its own measure.
-    let measures: [(fn(&Row) -> u64, u64, usize); 2] = [
-        (|_| 1, 1, bounds.total_count),
-        (
-            |r| r.bytes as u64,
-            bytes as u64,
-            bounds.total_bytes,
-        ),
-    ];
-    for (measure, arriving, bound) in measures {
+    for total in &totals {
+        if !total.make_room(&mut kept, &mut evict, channel) {
+            return Plan::Discard;
+        }
+    }
+    Plan::Park { evict }
+}
+
+/// One total bound, as shedding sees it.
+struct Total {
+    /// What the bound counts of one held row: 1, or its payload bytes.
+    measure: fn(&Row) -> u64,
+    /// What it counts of the payload being parked.
+    arriving: u64,
+    bound: u64,
+}
+
+impl Total {
+    /// Choose held rows for this bound until parking the payload would keep it,
+    /// moving each from `kept` to `evict`, in hand-over order.
+    ///
+    /// `false` when the payload itself is chosen: the caller then discards it and
+    /// evicts nothing, whatever `evict` holds by then.
+    fn make_room(&self, kept: &mut Vec<&Row>, evict: &mut Vec<i64>, channel: &str) -> bool {
         loop {
-            let held: u64 = kept.iter().map(|r| measure(r)).sum();
-            if held.saturating_add(arriving) <= bound as u64 {
-                break;
+            let held = kept
+                .iter()
+                .map(|r| (self.measure)(r))
+                .fold(0, u64::saturating_add);
+            if held.saturating_add(self.arriving) <= self.bound {
+                return true;
             }
-            let loads = channel_loads(&kept, measure, channel, arriving);
-            match shed(loads.iter().map(|(c, l)| (c.as_str(), *l))) {
-                Some(victim) if victim != channel => {
-                    let newest = kept
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, r)| r.channel == victim)
-                        .max_by_key(|(_, r)| r.seq)
-                        .map(|(at, r)| (at, r.seq));
-                    match newest {
-                        Some((at, seq)) => {
-                            kept.remove(at);
-                            evict.push(seq);
-                        }
-                        // Unreachable: `shed` names only a channel with a load.
-                        None => return Plan { park: false, evict },
-                    }
-                }
-                // The payload's own channel, or nothing to shed at all.
-                _ => return Plan { park: false, evict },
+            let held_rows = kept.iter().map(|r| (r.channel.as_str(), (self.measure)(r)));
+            let at = match choose(held_rows, (channel, self.arriving)) {
+                Victim::Arrival => return false,
+                // `kept` is in hand-over order, so its last row on the channel
+                // chosen is that channel's newest.
+                Victim::NewestOf(victim) => kept.iter().rposition(|r| r.channel == victim),
+            };
+            match at {
+                Some(at) => evict.push(kept.remove(at).seq),
+                // Unreachable: `choose` names only a channel holding a row.
+                // Discarding the payload is the answer that keeps the bound and
+                // loses nothing already parked.
+                None => return false,
             }
         }
     }
-    Plan { park: true, evict }
-}
-
-/// Each channel's load under `measure`, with the arriving payload counted on its
-/// own channel as the newest of all.
-fn channel_loads(
-    kept: &[&Row],
-    measure: fn(&Row) -> u64,
-    arriving_channel: &str,
-    arriving: u64,
-) -> Vec<(String, Load)> {
-    let mut loads: HashMap<&str, Load> = HashMap::new();
-    for row in kept {
-        let load = loads.entry(row.channel.as_str()).or_default();
-        load.measure = load.measure.saturating_add(measure(row));
-        load.newest = load.newest.max(u64::try_from(row.seq).unwrap_or(0));
-    }
-    let own = loads.entry(arriving_channel).or_default();
-    own.measure = own.measure.saturating_add(arriving);
-    own.newest = u64::MAX;
-    loads.into_iter().map(|(c, l)| (c.to_string(), l)).collect()
-}
-
-/// How much a channel holds, under whatever a bound counts, and when its newest
-/// message was handed over.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct Load {
-    pub measure: u64,
-    pub newest: u64,
-}
-
-/// Which channel gives up its newest message when a total bound is over: the
-/// channel holding the most, and among several holding the most, the one whose
-/// newest message was handed over latest.
-///
-/// **The arriving message is counted with its own channel, as that channel's
-/// newest — the newest of all.** So "the arriving payload's own channel is chosen
-/// if it is among those holding the most", which `op-transport` states for both
-/// the waiting payloads and the parked messages, is this same tie-break and not
-/// a second rule: the arrival's channel always has the latest newest. And when
-/// the channel chosen is the arrival's, its newest — the one given up — is the
-/// arrival.
-///
-/// One function for both bounds, because the spec gives them one rule: "This is
-/// the rule 'Parked messages are bounded per channel and in total' applies to its
-/// total bounds", in the waiting payloads' requirement.
-pub(crate) fn shed<'a>(loads: impl IntoIterator<Item = (&'a str, Load)>) -> Option<&'a str> {
-    loads
-        .into_iter()
-        .max_by(|(_, a), (_, b)| {
-            a.measure
-                .cmp(&b.measure)
-                .then_with(|| a.newest.cmp(&b.newest))
-        })
-        .map(|(channel, _)| channel)
 }
 
 /// This store's file name inside a host-supplied directory, beside
@@ -530,6 +517,12 @@ mod tests {
         }
     }
 
+    impl ParkOutcome {
+        fn is_parked(&self) -> bool {
+            matches!(self, ParkOutcome::Parked { .. })
+        }
+    }
+
     fn payloads(store: &mut ParkedStore, channel: &str) -> Vec<Vec<u8>> {
         store
             .take_channel(channel)
@@ -551,7 +544,7 @@ mod tests {
     #[test]
     fn the_park_bounds_are_pinned() {
         // Known answers, hardcoded: `cargo mutants` does not mutate a `const`.
-        // Change these only with design.md's Decision on the bounds.
+        // Change these only with `park-pending-inbound`'s design, Decision 4.
         assert_eq!(
             PARK_BOUNDS,
             ParkBounds {
@@ -579,7 +572,7 @@ mod tests {
     fn a_review_takes_a_channels_messages_in_hand_over_order_and_leaves_none() {
         let mut store = ParkedStore::in_memory().unwrap();
         for (channel, payload) in [("a", b"1"), ("b", b"x"), ("a", b"2"), ("a", b"3")] {
-            assert!(store.park(channel, payload, &PARK_BOUNDS).unwrap().parked);
+            assert!(store.park(channel, payload, &PARK_BOUNDS).unwrap().is_parked());
         }
         assert_eq!(payloads(&mut store, "a"), [b"1", b"2", b"3"]);
         assert_eq!(store.count_on("a").unwrap(), 0);
@@ -627,14 +620,11 @@ mod tests {
     fn a_channel_at_its_count_bound_discards_the_arrival_and_keeps_what_it_parked() {
         let mut store = ParkedStore::in_memory().unwrap();
         for n in 0..3u8 {
-            assert!(store.park("a", &[n], &SMALL).unwrap().parked);
+            assert!(store.park("a", &[n], &SMALL).unwrap().is_parked());
         }
         assert_eq!(
             store.park("a", b"one more", &SMALL).unwrap(),
-            Parking {
-                parked: false,
-                evicted: 0
-            }
+            ParkOutcome::Discarded
         );
         assert_eq!(payloads(&mut store, "a"), [[0], [1], [2]]);
     }
@@ -644,8 +634,8 @@ mod tests {
         let mut store = ParkedStore::in_memory().unwrap();
         store.park("a", &[0; 200], &SMALL).unwrap();
         // 200 + 101 > 300, though 101 fits on its own and the count is under 3.
-        assert!(!store.park("a", &[1; 101], &SMALL).unwrap().parked);
-        assert!(store.park("a", &[1; 100], &SMALL).unwrap().parked);
+        assert!(!store.park("a", &[1; 101], &SMALL).unwrap().is_parked());
+        assert!(store.park("a", &[1; 100], &SMALL).unwrap().is_parked());
         assert_eq!(store.count_on("a").unwrap(), 2);
     }
 
@@ -659,10 +649,7 @@ mod tests {
         store.park("b", b"b2", &SMALL).unwrap(); // the total, 5
         assert_eq!(
             store.park("c", b"c1", &SMALL).unwrap(),
-            Parking {
-                parked: true,
-                evicted: 1
-            }
+            ParkOutcome::Parked { evicted: 1 }
         );
         assert_eq!(payloads(&mut store, "a"), [b"a1", b"a2"]);
         assert_eq!(payloads(&mut store, "b"), [b"b1", b"b2"]);
@@ -681,10 +668,7 @@ mod tests {
         // Counting the arrival, `a` holds 3 and `b` holds 3.
         assert_eq!(
             store.park("a", b"a3", &SMALL).unwrap(),
-            Parking {
-                parked: false,
-                evicted: 0
-            }
+            ParkOutcome::Discarded
         );
         assert_eq!(payloads(&mut store, "a"), [b"a1", b"a2"]);
         assert_eq!(payloads(&mut store, "b"), [b"b1", b"b2", b"b3"]);
@@ -704,7 +688,7 @@ mod tests {
         store.park("b", b"b1", &bounds).unwrap();
         store.park("b", b"b2", &bounds).unwrap();
         store.park("a", b"a2", &bounds).unwrap(); // a's newest is the latest
-        assert!(store.park("c", b"c1", &bounds).unwrap().parked);
+        assert!(store.park("c", b"c1", &bounds).unwrap().is_parked());
         assert_eq!(payloads(&mut store, "a"), [b"a1"]);
         assert_eq!(payloads(&mut store, "b"), [b"b1", b"b2"]);
     }
@@ -717,7 +701,7 @@ mod tests {
         store.park("b", &[3; 100], &SMALL).unwrap();
         store.park("b", &[4; 50], &SMALL).unwrap(); // 450 of 500
         // `c` holds the fewest messages but 100 more bytes put the total over.
-        assert!(store.park("c", &[5; 100], &SMALL).unwrap().parked);
+        assert!(store.park("c", &[5; 100], &SMALL).unwrap().is_parked());
         assert_eq!(payloads(&mut store, "a"), [vec![1; 150]]);
         assert_eq!(store.count_on("b").unwrap(), 2);
     }
@@ -804,18 +788,92 @@ mod tests {
     }
 
     #[test]
-    fn shed_picks_the_most_then_the_latest_newest() {
-        let load = |measure, newest| Load { measure, newest };
+    fn a_payload_discarded_for_the_byte_total_evicts_nothing_the_count_total_chose() {
+        // `op-transport`, "Parked messages are bounded per channel and in total":
+        // "If the payload being parked is chosen, for either total bound, that
+        // payload MUST be discarded and every message already parked MUST be
+        // kept, a message chosen before it included."
+        //
+        // Held: `a` 1 B; `b` 150 B twice; `d` 99 B twice — five messages, the
+        // count total, and 499 B. `c` brings 300 B, within its own channel's
+        // bounds. The count total chooses `d`'s newest (tied with `b` at two,
+        // `d`'s newest is the later). The byte total then finds `c` tied with `b`
+        // at 300 B, and the arrival is the newest of all: `c` is chosen. Red
+        // while the count total's choice is applied anyway: `d` loses a message
+        // for an arrival that is not parked.
+        let mut store = ParkedStore::in_memory().unwrap();
+        for (channel, bytes) in [("a", 1), ("b", 150), ("b", 150), ("d", 99), ("d", 99)] {
+            assert!(store.park(channel, &vec![0; bytes], &SMALL).unwrap().is_parked());
+        }
         assert_eq!(
-            shed([("a", load(3, 1)), ("b", load(2, 9))]),
-            Some("a"),
-            "the most wins over the latest"
+            store.park("c", &[1; 300], &SMALL).unwrap(),
+            ParkOutcome::Discarded
         );
+        for (channel, count) in [("a", 1), ("b", 2), ("c", 0), ("d", 2)] {
+            assert_eq!(store.count_on(channel).unwrap(), count, "on `{channel}`");
+        }
+    }
+
+    #[test]
+    fn a_count_eviction_is_not_kept_for_a_payload_the_byte_total_then_discards() {
+        // The correctness review's case, as a plan over held rows: three 30-byte
+        // messages on `a`, a 90-byte payload for `b`, totals of three messages and
+        // 100 bytes. The count total chooses `a`'s newest; the byte total then
+        // finds `b`, at 90 bytes, holding more than `a` at 60.
+        let bounds = ParkBounds {
+            per_channel_count: 5,
+            per_channel_bytes: 100,
+            total_count: 3,
+            total_bytes: 100,
+        };
+        let rows: Vec<Row> = (1..=3)
+            .map(|seq| Row {
+                seq,
+                channel: "a".to_string(),
+                bytes: 30,
+            })
+            .collect();
+        assert_eq!(plan_park(&rows, "b", 90, &bounds), Plan::Discard);
+        // And when the byte total holds after the count total's choice, that
+        // choice is applied: 60 + 40 is within 100.
         assert_eq!(
-            shed([("a", load(3, 1)), ("b", load(3, 9))]),
-            Some("b"),
-            "among the most, the latest newest"
+            plan_park(&rows, "b", 40, &bounds),
+            Plan::Park { evict: vec![3] }
         );
-        assert_eq!(shed(std::iter::empty()), None);
+    }
+
+    #[test]
+    fn a_review_leaves_neither_the_size_nor_the_bytes_of_what_it_took_in_the_file() {
+        // NO SPEC: the spec says what is parked and when it stops being parked,
+        // not what the file keeps afterwards. This holds `auto_vacuum = FULL`
+        // (the file shrinks back) and `secure_delete` (a freed row's bytes are
+        // overwritten, in a page still holding another channel's row), so a
+        // flood's bytes do not outlive the reviews that decided them.
+        let dir = TempDir::new("shrinks");
+        let path = parked_path_in(&dir.0);
+        let mut store = ParkedStore::open(&path).unwrap();
+        let small = b"zzyzx-small-parked";
+        let large_marker = b"zzyzx-large-parked";
+        let large: Vec<u8> = large_marker.iter().copied().cycle().take(1024).collect();
+        store.park("a", small, &PARK_BOUNDS).unwrap();
+        store.park("b", b"stays parked", &PARK_BOUNDS).unwrap();
+        for _ in 0..200 {
+            store.park("a", &large, &PARK_BOUNDS).unwrap();
+        }
+        let full = std::fs::metadata(&path).unwrap().len();
+
+        assert_eq!(store.take_channel("a").unwrap().len(), 201);
+
+        let after = std::fs::metadata(&path).unwrap().len();
+        assert!(after * 10 < full, "{full} bytes before, {after} after");
+        let bytes = std::fs::read(&path).unwrap();
+        for marker in [&small[..], &large_marker[..]] {
+            assert!(
+                !bytes.windows(marker.len()).any(|w| w == marker),
+                "{} is still in the file",
+                String::from_utf8_lossy(marker)
+            );
+        }
+        assert_eq!(payloads(&mut store, "b"), [b"stays parked"]);
     }
 }

@@ -52,9 +52,11 @@ fn only_a_channel_being_opened_and_not_open_parks_what_is_taken_on_it() {
     book.request(&open); // asked again, unanswered
     book.request(&opening);
 
-    assert_eq!(book.on_take(open.channel_id()), Taken::Judge);
+    // Judged against the Stoa read at the take, and against none on a channel
+    // neither open nor being opened.
+    assert_eq!(book.on_take(open.channel_id()), Taken::Judge(Some(*open.stoa())));
     assert_eq!(book.on_take(opening.channel_id()), Taken::Park);
-    assert_eq!(book.on_take(unknown.channel_id()), Taken::Judge);
+    assert_eq!(book.on_take(unknown.channel_id()), Taken::Judge(None));
 }
 
 #[test]
@@ -96,7 +98,10 @@ fn a_settle_begins_a_review_only_when_held_or_when_the_last_request_leaves_it_un
     book.settle(&channel, true);
     book.request(&channel);
     assert_eq!(book.settle(&channel, false), None);
-    assert_eq!(book.on_take(channel.channel_id()), Taken::Judge);
+    assert_eq!(
+        book.on_take(channel.channel_id()),
+        Taken::Judge(Some(*channel.stoa()))
+    );
 }
 
 #[test]
@@ -160,9 +165,50 @@ fn a_review_is_taken_before_a_payload_that_was_waiting_when_its_event_came() {
     );
     let second = channels.take().unwrap();
     assert!(
-        matches!(&second, Next::Payload(m, Taken::Judge) if *m == message),
+        matches!(&second, Next::Payload(m, Taken::Judge(Some(s))) if *m == message && *s == stoa),
         "{second:?}"
     );
+}
+
+#[test]
+fn a_payload_taken_on_an_unknown_channel_is_refused_though_its_channel_opens_before_it_is_judged(
+) {
+    // `op-transport`, "A message on a channel being opened is parked, and nothing
+    // waits on an open": "The state is read once for each payload, and the
+    // payload is parked or judged on that one reading." Handed over while its
+    // channel was being opened, taken once the open was declined — neither open
+    // nor being opened, so refused as an unknown channel — and then, between the
+    // take and the judgement, a fresh join of the same Stoa is answered held.
+    // Red while the judgement looks the channel up a second time: it finds the
+    // channel open and stores the op.
+    let peer = Peer::new("one-reading");
+    let stoa = genesis("Agora").address().unwrap();
+    let (channels, opening) = opening_for(&stoa);
+    let op = their_op(stoa, "taken as unknown", 0);
+    assert_eq!(channels.hand_over(on_its_channel(&op)), HandedOver::Waiting);
+    drop(opening); // declined
+    channels.close(); // a take that finds nothing fails rather than blocks
+
+    let declined = channels.take().unwrap();
+    assert!(
+        matches!(&declined, Next::Review(Review::Unopened(_))),
+        "{declined:?}"
+    );
+    let taken = channels.take().unwrap();
+    assert!(
+        matches!(&taken, Next::Payload(_, Taken::Judge(None))),
+        "{taken:?}"
+    );
+    held(channels.opening(&ChannelIdentity::of(&stoa))); // joined again, held
+    peer.processor(Arc::clone(&channels)).act(taken);
+
+    assert_eq!(
+        peer.journal.with("refused (unknown-channel)").len(),
+        1,
+        "{:?}",
+        peer.journal.lines()
+    );
+    assert!(stored(&peer, &op.op.id()).is_none());
 }
 
 // ─── Parking ──────────────────────────────────────────────────────────────
@@ -389,7 +435,7 @@ fn nothing_but_the_three_events_reviews_a_parked_message() {
     let stuck = genesis("Lyceum");
     let (events, asked) = peer.start_counted(vec![]);
     peer.join(&open);
-    peer.delivering.settle(); // Agora is open
+    peer.delivering.drain(); // Agora is open
     let gate = Gate::closed();
     let _ = peer.fake.script(|s| s.create_gate = Some(gate.clone()));
     peer.join(&stuck);
@@ -589,7 +635,7 @@ fn one_open_one_unanswered(
     let events = peer.start_listening();
     let open = genesis("Agora");
     peer.join(&open);
-    peer.delivering.settle();
+    peer.delivering.drain();
     let gate = Gate::closed();
     let _ = peer.fake.script(|s| s.create_gate = Some(gate.clone()));
     let stuck = genesis("Lyceum");
@@ -649,6 +695,32 @@ fn messages_parked_on_an_unanswered_open_are_stored_once_delivery_reports_the_ch
             stored(&peer, &op.op.id()).is_some()
         });
     }
+    assert_eq!(peer.parked_on(&stuck), 0);
+}
+
+#[test]
+fn a_review_due_after_deliverys_events_end_is_still_run() {
+    // `park-pending-inbound`'s design, Decision 10: the processor runs for the
+    // life of the module, and the listener's end closes nothing. A message is
+    // parked, delivery's events end, and only then is the open answered: its
+    // review must still run. Red while the listener's end stops the processor
+    // once the payloads waiting are taken — the review is never taken.
+    let mut peer = Peer::new("wiring-review-after-events-end");
+    let (events, gate, _, stuck) = one_open_one_unanswered(&mut peer);
+    let op = their_op(stuck, "parked before the events end", 0);
+    events.send(Some(on_its_channel(&op))).unwrap();
+    eventually("the message to be parked", || {
+        peer.journal.with("parked until").len() == 1
+    });
+
+    drop(events);
+    eventually("the listener to end", || {
+        !peer.journal.with("inbound listener has ended").is_empty()
+    });
+    gate.release();
+    eventually("the parked op to be stored by its review", || {
+        stored(&peer, &op.op.id()).is_some()
+    });
     assert_eq!(peer.parked_on(&stuck), 0);
 }
 
@@ -962,7 +1034,7 @@ fn handed_over_while_opening_then_settled(
     let (events, asked) = peer.start_counted(vec![]);
     let open = genesis("Agora");
     peer.join(&open);
-    peer.delivering.settle();
+    peer.delivering.drain();
     let create = Gate::closed();
     let _ = peer.fake.script(|s| {
         s.create_gate = Some(create.clone());
