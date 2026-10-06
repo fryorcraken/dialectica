@@ -268,8 +268,8 @@ pub struct FeedPage {
 /// Clamp a caller-supplied page size into something this peer will build.
 ///
 /// Separate from [`list_threads`] because it is a guard and CLAUDE.md keeps a
-/// guard as its own job — "so 'is it called everywhere?' stays a question with
-/// an answer". There is one caller today; the point is that there is one place
+/// guard as its own job — "so 'is it called everywhere?' has an answer". There
+/// is one caller today; the point is that there is one place
 /// to look.
 ///
 /// Zero clamps **up** to the default rather than down to an empty page: a caller

@@ -116,8 +116,8 @@ impl Membership {
     /// deleting `genesis_for`'s left **550 of 550** passing.
     ///
     /// The project's rule for that shape is CLAUDE.md's: *"prefer reshaping state
-    /// so an invariant holds by construction over adding a branch that checks
-    /// it."* So the pair is now a type that cannot be built wrong. `join` takes a
+    /// so an invariant holds by construction over a branch that checks it."* So
+    /// the pair is now a type that cannot be built wrong. `join` takes a
     /// `Membership` and has no guard, because there is no longer an unverified pair
     /// for it to receive — and a caller reaching for one has to come through here,
     /// which is the one place the refusal is tested.

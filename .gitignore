@@ -44,18 +44,24 @@ dialectica/logos-rust-sdk-src
 # commands, settings.local.json, worktrees. Hand-written, not produced by any
 # tool — `lgs init` appends `.scaffold` and nothing else.
 #
-# The role agents are the exception: they are part of the process rather than
-# one machine's settings, so they belong in the repo.
+# The specflow overlay, `.claude/specflow/PROJECT.md`, is the exception: it is
+# part of the process rather than one machine's settings, and every agent
+# worktree must have it, so it belongs in the repo. `.claude/agents/` stays
+# re-admitted although it is empty today: specflow's own `.gitignore` rules
+# keep it for project agents, and an agent added there would otherwise be
+# silently left out of every worktree.
 #
 # `settings.json` is re-admitted for the same reason, and it is not a
 # preference file: it carries `worktree.baseRef = "head"`, which is what makes
 # `isolation: "worktree"` fork an agent from the runner's HEAD instead of
-# `origin/main`. Ignored, it reached no clone and no fresh checkout, and
-# **nothing failed when it was absent** — agents were silently cut from the
-# wrong base, which is the failure shape this repo keeps re-learning. Machine-
-# local settings — the permission allowlist and the absolute home paths under
-# `additionalDirectories` — belong in `settings.local.json`, which stays
-# ignored.
+# `origin/main`, and `enabledPlugins`, which turns specflow on. Ignored, it
+# reached no clone and no fresh checkout, and **nothing failed when it was
+# absent** — agents were silently cut from the wrong base, which is the failure
+# shape this repo keeps re-learning. Machine-local settings — the permission
+# allowlist and the absolute home paths under `additionalDirectories` — belong
+# in `settings.local.json`, which stays ignored. The plugin's marketplace is in
+# neither file: README.md's `claude plugin marketplace add` registers it at
+# user scope, in Claude Code's own configuration.
 #
 # `.claude/*` rather than `.claude/` because git will not re-include a file
 # whose parent DIRECTORY is excluded — with a `.claude/` rule the negation below
@@ -63,6 +69,7 @@ dialectica/logos-rust-sdk-src
 .claude/*
 !.claude/agents/
 !.claude/settings.json
+!.claude/specflow/
 .cursor/
 AGENTS.md
 

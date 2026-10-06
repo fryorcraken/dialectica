@@ -111,8 +111,8 @@ Not done here and deliberately not started.
 **No requirement below is covered today. Nothing in this change is code**, so
 this is a plan for the implementing change, not a coverage claim. The right-hand
 column says what would make each scenario fail — a scenario with no answer there
-is one that should not have been written (agents README: "never write a scenario
-that cannot be tested").
+is one that should not have been written (the specflow `flow` skill: "never
+write a scenario that cannot be tested").
 
 | Requirement | Testable by | Fails if |
 |---|---|---|

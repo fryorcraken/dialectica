@@ -85,6 +85,46 @@ The `-p` flags are load-bearing. Nearly every test lives in `dialectica-core`,
 the pure inner crate; without them cargo tests only the outer package and
 reports `ok` having run almost nothing.
 
+## Working with the agent flow
+
+Changes go through a spec-driven agent flow that runs on the **specflow**
+Claude Code plugin, `specflow@agent-spec-flow`, which `.claude/settings.json`
+enables. Until `agent-spec-flow` has a release, this repository does not name
+its marketplace, so Claude Code cannot find it on its own. Once, before
+starting a session here, three steps. `~/src/agent-spec-flow` below is only an
+example; use the same directory in the first two.
+
+1. Clone the plugin's repository into a directory of your choice:
+
+   ```
+   git clone https://github.com/fryorcraken/agent-spec-flow ~/src/agent-spec-flow
+   ```
+
+2. Register that clone as a marketplace, giving the directory you cloned into:
+
+   ```
+   claude plugin marketplace add ~/src/agent-spec-flow
+   ```
+
+3. Install the plugin for this project, from the root of a checkout whose
+   `.claude/settings.json` already enables it (any checkout of `main` that
+   has this section):
+
+   ```
+   claude plugin install specflow@agent-spec-flow --scope project
+   ```
+
+   Registering the marketplace makes the plugin installable, not installed.
+   `--scope project` records it in `.claude/settings.json`, so in such a
+   checkout `git diff .claude/settings.json` should show nothing afterwards.
+   From a checkout without the entry it would add it to that tracked file.
+
+The first two steps write nothing in this repository and can run any time. A
+session started after the third lists the `specflow:*` agents and skills.
+
+These steps go away once `agent-spec-flow` has a release and its marketplace
+entry moves into `.claude/settings.json` as a pinned `github` source.
+
 ## Where it lives
 
 Developed on [Radicle](https://radicle.xyz) at
