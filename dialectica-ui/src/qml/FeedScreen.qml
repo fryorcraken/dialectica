@@ -279,6 +279,21 @@ ScreenFrame {
 
     Component.onCompleted: screen.reload()
 
+    // A visit to this screen has begun: `Main.qml` calls this when it renders
+    // the feed in place of another main-area screen. What belonged to the
+    // previous visit is withdrawn — today that is the composer's publish
+    // outcome, which `composer-view` confines to the visit that produced it.
+    //
+    // **Not `onVisibleChanged`, and not `onStoaAddressChanged`.** Neither is a
+    // visit: `visible` also changes when anything above this screen is hidden,
+    // and the address changes whenever the navigator re-points it, which is a
+    // fact about how `Main.qml` happens to route rather than about what the user
+    // did. The navigator is the one layer that knows a different screen was
+    // rendered. (`feed-confirmation-per-visit` design.md, Decision 1.)
+    function beginVisit() {
+        composer.clearOutcome()
+    }
+
     // **A different Stoa is a different read.** This screen is mounted once and
     // re-pointed at whichever Stoa the navigator chose, so without this the
     // first Stoa opened would be the only one ever read: `reload()` ran at

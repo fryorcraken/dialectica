@@ -83,6 +83,16 @@ ColumnLayout {
     property string outcome: ""
     property string outcomeDetail: ""
 
+    // Back to "nothing submitted", which renders no outcome. The outcome
+    // belongs to the visit in which its publish was made (`composer-view`), and
+    // this component cannot see a visit, so its screen calls this when one
+    // begins. The draft is not touched: what becomes of it is a separate
+    // question, which `composer-view` leaves open.
+    function clearOutcome() {
+        root.outcome = ""
+        root.outcomeDetail = ""
+    }
+
     // ---- what the draft costs and what is hiding in it ------------------
 
     readonly property int draftBytes: root.utf8Length(root.draft)
@@ -437,6 +447,12 @@ ColumnLayout {
     // ---- what happened --------------------------------------------------
 
     DPublishOutcome {
+        // Named from `kind` for the reason the draft field is: the feed and
+        // the thread each mount one composer, so "postOutcomeMessage" and
+        // "replyOutcomeMessage" each name exactly one element. Not
+        // "…PublishOutcome": `check_qml_names.py` reads that string as a bare
+        // reference to this type's undecorated name.
+        objectName: root.kind + "OutcomeMessage"
         outcome: root.outcome
         detail: root.outcomeDetail
         subject: root.kind

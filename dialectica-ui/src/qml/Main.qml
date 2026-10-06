@@ -108,6 +108,24 @@ Item {
       : root.previewing !== null ? "join"
       : "list"
 
+    // **A visit begins when this changes, and only then.** `composer-view`
+    // defines a visit as the span from a screen being rendered in place of a
+    // different main-area screen until another is rendered in its place — which
+    // is exactly a change of `screenShown`, so the navigator tells the screen
+    // rather than each screen guessing from its own `visible` or its inputs.
+    //
+    // A transition passes through intermediate values (`openThread` empties
+    // `chosen` before it sets `reading`, so this reads "list" for an instant).
+    // That is harmless here: beginning a visit only withdraws what the last
+    // one left, so a screen passed through and left again loses nothing a user
+    // could have seen.
+    onScreenShownChanged: {
+        if (root.screenShown === "feed")
+            feed.beginVisit()
+        else if (root.screenShown === "thread")
+            thread.beginVisit()
+    }
+
     // ---- what the end-to-end suite reads ---------------------------------
     //
     // A sitometres `state:` expression is evaluated against this root, so what
