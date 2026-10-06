@@ -20,7 +20,7 @@ later."
 - The caption, and every other string the screen authors with the reply
   composer or in its place behind a shut posting gate, says nothing about
   whether a reply can be edited, re-published in a later version, or read in
-  an earlier one: neither that it can nor that it cannot (Decision 4).
+  an earlier one: neither that it can nor that it cannot (Decisions 4 and 5).
 - The caption keeps stating what a reply is, that it is signed.
 - A QML component test that fails if such a statement is reintroduced, worded
   differently or not.
@@ -48,6 +48,10 @@ the editing it promises. The owner decided on 2026-09-29, in the issue:
 > should not say a reply can be edited later. Editing (#99, `revisePost`) is
 > not in 0.0.1, so don't build it here.
 
+That is all the owner decided: the edit promise goes, and nothing is built.
+The rest of the spec is the `spec-writer`'s, unconfirmed by the owner;
+Decision 5 lists it.
+
 No editing exists for the sentence to describe.
 `git grep -n -i "revise" -- dialectica/rust-lib/src/lib.rs dialectica-ui/src/qml/Core.qml openspec/specs/content-authoring`
 returns nothing, so there is no revise method on the module surface, none on
@@ -69,8 +73,13 @@ post is edited. That is about how core resolves revisions it receives
   does", and the remaining half does exactly that: a reply is a signed op.
   `thread-view`'s *The open reply composer states that a reply is signed*
   contracts it, before a publish and after one, on the statement rather than
-  the string, so removing the caption, or rewording it to something that no
-  longer says a reply is signed, breaks a requirement.
+  the string.
+
+  **What that costs:** the other reading of "drop the text" now needs a spec
+  change, not a deletion. Removing the caption, or rewording it so it no
+  longer says a reply is signed, breaks a requirement. That is the price of
+  turning the issue's "describes what a reply is" into a contract. The owner
+  may overrule it by dropping that requirement (Decision 5).
 
 ### 2. The reasoning this replaces was wrong on its own terms
 
@@ -129,12 +138,14 @@ write.
 That holds for authored text only. The walk also collects text the screen
 renders but does not author, which the requirement does not bind: core's
 probe reason behind a shut gate, core's message on a refused publish, and the
-user's draft. Core's reasons can say "version" truthfully. The probe answers
-an unreadable or malformed keystore as a reason rather than an error (the
-probe handler's doc in `wire.rs`), and core's own error texts include the
-keystore's "keystore format version {v} is newer than this build understands"
-(`keystore.rs`) and the identity store's "the identity record declares layout
-version {found} ..." (`identity_store.rs`). The matcher flags both.
+user's draft. Core's text can say "version" truthfully. The keystore's
+"keystore format version {v} is newer than this build understands; upgrade
+dialectica" (`keystore.rs`) reaches both places. It is the probe's reason,
+verbatim, when the keystore will not open (`wire.rs`,
+`get_capabilities_from_stores`). It is also embedded in a refused publish's
+message, because the publish path refuses a keystore that will not open with
+`Refusal::NoIdentity`, "no identity is available to sign with: {why}; ..."
+(`lib.rs`, `publishing`; `authoring.rs`). The matcher flags it.
 
 The suite excludes them, by exact string. A walk takes the strings the test
 itself fed the screen as core's reply or as the draft, and collects them
@@ -142,9 +153,13 @@ without flagging them. The exemption is the test's own input, so text the
 screen authors is never exempt by accident, and a fixture that drives a real
 core reason does not fail for a reason the requirement does not hold.
 `test_text_core_supplies_and_the_draft_are_outside_the_requirement` drives the
-two keystore and identity-store wordings above as a shut gate's reason and a
-refused publish's message, with a draft that says "edit" and "newer version".
-It asserts the walk collects each string, that the matcher does flag each (so
+keystore wording above, verbatim, as a shut gate's reason, and a draft that
+says "edit" and "newer version". Its refusal is hypothetical: a paraphrase of
+the identity store's layout-version error (`identity_store.rs`), which no
+thread-screen path carries, because neither the probe nor the publish path
+opens the identity record in this release. It stands for any core message
+that says "version", the keystore wording inside `NoIdentity`'s among them.
+The test asserts the walk collects each string, that the matcher does flag each (so
 what spares it is the scope, not a blind matcher), and that the exempted walk
 is clean, for the group. For the screen beside the rows it asserts the same of
 the two or three supplied strings themselves (reached, flagged, exempted), and
@@ -180,8 +195,8 @@ signed-statement tests and no claim test.
 The claim walks cover the composer's group and the shut gate, and a third walk
 covers the screen outside the thread's rows (`textsBesideTheRows`). The third
 exists because a walk scoped to two containers leaves a statement beside them
-unguarded: a Text added as a sibling of the two groups is rendered with the
-composer in the requirement's sense and is in neither subtree. Measured: such a
+unguarded: a Text added between or after the two groups is in neither
+subtree. Measured: such a
 Text, "Replies can be edited later.", turns only the beside-the-rows test red,
 with all the group tests and the core-supplied-text test green. It
 leaves the thread's rows out, because the fixture's root post is revised, so
@@ -198,12 +213,24 @@ reaching them.
 
 What the beside-the-rows walk does not reach is text a popup or an attached
 tooltip carries, and a claim added inside a row's delegate: the rows are the
-posts, not the text around the composer. What it does reach, and the
-requirement does not bind, is the header's peer-supplied Stoa title and the
+posts, not the text around the composer.
+
+**What it does reach is wider than the requirement, deliberately.** The spec
+binds text with the composer, and in its place behind a shut gate. This walk
+fails on an edit or version word anywhere in the content column outside the
+rows: the header, the failed-read state, the no-replies and more-replies
+notices, and whatever is added there later. Both it and the group walks also
+reach the copy `DComposer` and `DPublishOutcome` build from `kind`, which the
+post composer shares, so a word added there for posts fails these tests too.
+That constrains the next author of any copy on this screen and of those two
+components. It is wide because a walk of "the composer's place" has to name
+that place, and a statement put just outside whatever it names passes. To
+narrow it to the requirement, skip the column's children before the
+composer's double rule as well as the rows. Two things the column holds are
+not the screen's text: the header's peer-supplied Stoa title and the
 failed-read state's core message. The fixtures leave the first empty and
-never render the second (the screen reads fine), so neither can trip the
-matcher today; a fixture that sets either passes it as supplied text, which
-the walk does not flag.
+never render the second, so neither can trip the matcher today; a fixture
+that sets either passes it as supplied text.
 
 **Alternatives considered:**
 
@@ -241,10 +268,14 @@ the walk does not flag.
   four flag tests, the scope test, the hidden-claim test and the
   core-supplied-text test go red (seven), and the three scenario tests, the
   beside-the-rows test and the leaves-alone test stay green.
-  Measured with the `edit` stem removed from the pattern: the edit-family test
-  goes red on "It can be edited later.", the denial test on "A reply cannot be
-  edited." and "There is no way to edit a reply yet.", and the scope test
-  (which needs the matcher to flag `edited`) and the hidden-claim test too.
+  With the `edit` stem removed from the pattern: the edit-family test goes red
+  on "It can be edited later.", the denial test on "A reply cannot be
+  edited.", "There is no way to edit a reply yet.", "Replies are uneditable."
+  and "Replies are noneditable.", and the scope test (which needs the matcher
+  to flag `edited`) and the hidden-claim test too. Measured before the two
+  prefixed rows were added, when the denial test went red on the first two;
+  the prefixed rows are read off the regex, which matches them only through
+  `edit`.
   Measured against the matcher before the stems from "fix" to "withdraw" and
   the "newer one" clause: the edit-family test went red on six paraphrases
   (including the spec-test review's "You can fix typos later and replace
@@ -295,8 +326,10 @@ the walk does not flag.
   is not signed.", "An unsigned reply." and the composer's other strings are
   refused. A text counts when it says `signed` and `reply` or `replies` and has
   no negator (`not`, `never`, `no`, `cannot`, `n't`) within two words before
-  `signed`. Measured: without its negation clause that test goes red on the
-  three negations, and nothing else. The first version of the clause (a closed
+  `signed`. Without its negation clause that test goes red on the seven
+  negation rows and nothing else (measured on the first three; the four added
+  since are read off the regex, each naming a reply and saying `signed`). The
+  first version of the clause (a closed
   list of negator forms) accepted "A reply cannot be signed.", "Your reply is
   not cryptographically signed." and "Replies are not always signed.", and with
   no subject check accepted "Signed in as alice." and "Your draft is signed off
@@ -364,9 +397,16 @@ statement that a reply is signed describes what a reply is. A statement
 about editing describes what the app does, and is exactly as perishable
 whichever way it points.
 
-The owner's decision was also to drop the text: "The reply confirmation
-should not say a reply can be edited later." It was not a request to replace
-the text with its negation.
+The owner's words ("should not say a reply can be edited later") say nothing
+about a denial. Forbidding one is the `spec-writer`'s call (Decision 5), not
+the owner's ruling.
+
+**What it costs:** the screen can never answer a user who looks for an edit
+control. "Replies cannot be edited in this version", the copy the spec-test
+review pictured an owner wanting, is forbidden, so the user gets no answer at
+all. That is the price of the staleness argument. The owner may overrule it;
+the spec then needs a scenario permitting a denial, and the test needs the
+denial-aware matcher rejected below.
 
 **Alternatives considered:**
 
@@ -375,15 +415,39 @@ the text with its negation.
   denial-aware matcher, a second hand-maintained list in which a wrong
   exemption passes the claim it was meant to catch (Decision 3).
 
-**What breaks without it:** the denial rows in the matcher's table. They are
-what pins the rule, and the component suite flags both directions because it
-reads words. The rule is what makes that matcher fit the contract rather than
-exceed it: without it, a test flagging "A reply cannot be edited" would be
-failing on text the spec allows, and
-`test_the_matcher_flags_a_denial_as_well_as_a_promise` would pin the
-over-reach. Measured: with the `edit` stem removed from the pattern, that test
-goes red on "A reply cannot be edited." and "There is no way to edit a reply
-yet.".
+**What breaks without it:** the word matcher stops fitting the contract.
+`test_the_matcher_flags_a_denial_as_well_as_a_promise` would then pin a
+refusal of text the spec allows.
+
+### 5. What the spec adds to the owner's decision, and whose call each part is
+
+The owner decided that the edit promise goes and that nothing is built. Four
+further rules are the `spec-writer`'s calls. The owner has confirmed none of
+them, and a spec change can trim any of them:
+
+- **The shut gate is covered**, from the spec's first draft, where no reason
+  was written down. The one that holds: the shut group is what the user sees
+  in the composer's slot, and the two groups are one
+  expression against its complement. A rule on the open branch alone would let
+  the next author put the same promise on the other branch, to the same
+  reader, with every test green. The alternative was to cover the open
+  composer only, as the owner's words ("the reply confirmation") alone would.
+  Covering the gate costs nothing today: it never carried the claim, so its
+  test cannot fail on the old tree (Decision 3).
+- **Reading an earlier version is covered.** This was added before review,
+  after this document's first draft had recorded the bundle's "earlier
+  versions stay readable" as uncontracted. The bundle's caption carried that
+  clause beside the edit promise, the issue's evidence names it as dropped for
+  promising an absent facility, and nothing on the module surface reads a
+  prior version. The alternative was to leave it out, as the owner's words alone
+  would. The bundle's clause restored verbatim would then pass every test,
+  guarded by a code comment only.
+- **A denial is forbidden as well as a promise.** This answered the
+  spec-test review, which found the tests refusing a denial the spec then
+  permitted. Its reason and its cost are in Decision 4.
+- **The open composer must state that a reply is signed.** This answered the
+  same review, which routed the tests' `NO SPEC:` on the kept caption. Its
+  reason and its cost are in Decision 1.
 
 ## Risks / Trade-offs
 
@@ -413,16 +477,12 @@ yet.".
   the requirement says it does not bear on; the rest is outside what a walk of
   `children` reaches, and widening it is a decision for the day such text
   exists.
-- [The bundle's own clause, "earlier versions stay readable", promises reading
-  a prior version, not editing or publishing one] → The requirement forbids
-  it as well, because nothing reads a prior version, so it would promise an
-  absent facility exactly as the edit claim did. The matcher flags it, and the
-  matcher test pins that string.
-- [A future sentence the spec permits in this group, using one of those words,
-  fails the test; "the draft can be edited before publishing" is about the
-  draft, not a published reply] → That is the right moment to read the
-  requirement, which the comment above the tests names, and narrow the pattern
-  or the scope deliberately. A denial ("A reply cannot be edited") is not such
+- [A future sentence the spec permits, using one of those words, fails the
+  test. "The draft can be edited before publishing" is about the draft, not a
+  published reply, and the walk is wider than the requirement anyway: the
+  whole column and the shared composer's strings (Decision 3)] → That is the
+  right moment to read the requirement, which the comment above the tests
+  names, and to narrow the pattern or the scope deliberately. A denial ("A reply cannot be edited") is not such
   a sentence: the spec forbids it too (Decision 4), so the matcher flagging it
   is the contract, not over-reach.
 - [The test sees what `qmltestrunner` renders, not what Basecamp renders] →

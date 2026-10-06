@@ -76,7 +76,7 @@ walk does is read off the regex or the structure, and says so.
       reviewer's four tests that stay green are the three scenario tests and
       the beside-the-rows test.
 
-- [ ] **`dev-writer`** — `openspec/changes/reply-caption-no-edit/design.md:232-235` — the same count is stale in Decision 3's guards: "the three scenario tests" stay green under `return false`
+- [x] **`dev-writer`** — `openspec/changes/reply-caption-no-edit/design.md:232-235` — the same count is stale in Decision 3's guards: "the three scenario tests" stay green under `return false`
       **Scenario:** the sentence lists the red tests (four flag tests, scope, hidden-claim, core-supplied-text) and says "all three scenario tests stay green". The beside-the-rows test is a fourth that stays green and is not named, so the measurement as recorded reads as if it had gone red or did not exist. It is a recorded measurement, so it should say which tests stayed green.
       **Severity:** low, a stale number in a document the closer will carry into the archive.
       **Measured:** not mutated; same read as the entry above.
@@ -86,6 +86,30 @@ walk does is read off the regex or the structure, and says so.
       sentence in `design.md` to name the tests that stay green: the three
       scenario tests and the beside-the-rows test (and the leaves-alone test).
       The dev-writer should confirm and tick.
+
+      **Outcome (dev-writer): confirmed against the tree, by reading**, in
+      "Record whose call each rule beyond the owner's decision is, and what
+      Decisions 1 and 4 cost (#177)". Decision 3's guard now names seven red
+      tests and five green: the three scenario tests, the beside-the-rows test
+      and the leaves-alone test. Each test was read against a matcher that
+      returns false. Red: the four flag tests and the leaves-alone test all
+      call `unflagged` or `mentionsAmong`, but only the four flag tests expect
+      flagged strings, so they get their whole tables back. The scope test
+      needs `edited` flagged on the whole screen. The hidden-claim test
+      expects `["Replies can be edited later."]` flagged. The
+      core-supplied-text test needs core's reason flagged. Green: the
+      leaves-alone test and the four claim-walk tests assert only
+      `compare(<flagged>, [])`, and their anchors never call the matcher. I
+      could not execute it: a temporary `return false` edit to the test file
+      was denied by the auto-mode classifier, the same refusal the design
+      re-reviewer recorded. I did not work around it, and `git status --short`
+      came back empty afterwards. Checking the guards also turned up two other
+      red sets that had gone stale when the tester added rows. They are
+      corrected in design.md and labelled read, not measured. With the `edit`
+      stem removed, the denial test now also goes red on "Replies are
+      uneditable." and "Replies are noneditable.". Without its negation
+      clause, the signed matcher test goes red on seven negation rows, not
+      three.
 
 - [x] **`tester`** — `dialectica-ui/tests/tst_thread_reply.qml:572-594` — the "leaves alone" table is described as the composer group's own copy, but holds core's text and the shut gate's copy
       **Scenario:** the comment says the table lists "the strings this group legitimately renders", and the fix round's outcome (correctness findings, first entry) says the keystore row is absent "because that table lists what the group's own copy renders and the reason is not the group's copy". The table holds `"no keystore"`, which is the fixture's core reason and is rendered by the shut gate, and two shut-gate strings (`"You cannot reply in this Stoa yet."`, `"There is no disabled composer here. ..."`). A reader following the scope comment (466-470) expects core text to be exempted by `suppliedText` and not listed as copy; the row proves nothing the exemption does not, and the recorded outcome is wrong about the tree.

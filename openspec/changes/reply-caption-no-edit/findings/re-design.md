@@ -27,7 +27,7 @@ The issue: its two options were "drop the sentence to what is true today" or
 build editing; the owner's comment picks the first, and the code honours it. The
 findings below are gaps in the recorded reasoning, none a code defect.
 
-- [ ] **`dev-writer`** — `design.md` Decision 4 (and Decision 1) — whose call the
+- [x] **`dev-writer`** — `design.md` Decision 4 (and Decision 1) — whose call the
       scope growth was is not recorded (gap). The owner's decision is "drop the
       text; build no editing", about a promise that a reply can be edited. The
       spec now also forbids a *denial*, forbids any statement about reading an
@@ -50,7 +50,25 @@ findings below are gaps in the recorded reasoning, none a code defect.
       the owner's "drop the text". None attributes the denial ban, the signed
       requirement or the version and shut-gate reach to anyone.
 
-- [ ] **`dev-writer`** — `design.md` Decisions 1 and 4 — what they cost is not
+      **Outcome (dev-writer): fixed** in "Record whose call each rule beyond
+      the owner's decision is, and what Decisions 1 and 4 cost (#177)". New
+      Decision 5 lists the four rules as the `spec-writer`'s calls, none
+      confirmed by the owner, each trimmable by a spec change. Decision 1 now
+      says that is all the owner decided and points there. Decision 4's "It
+      was not a request to replace the text with its negation" is replaced:
+      the owner's words say nothing about a denial, and forbidding one is the
+      spec-writer's call. One correction to this entry, from the spec's
+      history (`git log -- openspec/changes/reply-caption-no-edit/specs/thread-view/spec.md`,
+      three commits): not all four came from the spec-test review. The
+      shut-gate reach was in the spec's first draft. The earlier-version ban
+      was the spec-writer's second pass, before any review, after design.md's
+      first draft called the bundle's clause uncontracted. Only the denial ban
+      and the signed requirement answered the review. Decision 5 records it
+      that way. The record does not show the spec wrong. It shows four rules
+      the owner has not confirmed, and ruling on them is the owner's. Prose
+      only, so no test.
+
+- [x] **`dev-writer`** — `design.md` Decisions 1 and 4 — what they cost is not
       recorded (gap). Decision 4 names one alternative (permit an honest denial)
       and its staleness argument, but not what the rule forecloses: the screen can
       never tell a user who looks for an edit control that editing is not
@@ -64,7 +82,17 @@ findings below are gaps in the recorded reasoning, none a code defect.
       the second the price of making the issue's "describes what a reply is" a
       contract.
 
-- [ ] **`dev-writer`** — `design.md` Goals and Risks, third bullet — the
+      **Outcome (dev-writer): fixed**, same commit. Decision 1's
+      remove-the-caption alternative ends with "What that costs": that reading
+      now needs a spec change, not a deletion, as the price of making "describes
+      what a reply is" a contract, and the owner may drop the requirement.
+      Decision 4 has "What it costs": the screen can never answer a user
+      looking for an edit control, and "Replies cannot be edited in this
+      version" is forbidden. That is the price of the staleness argument. The
+      owner may overrule it, and the spec then needs a permitted-denial
+      scenario and the test needs a denial-aware matcher.
+
+- [x] **`dev-writer`** — `design.md` Goals and Risks, third bullet — the
       version-reading ban and the shut-gate coverage have no Decision (gap). Both
       go beyond the issue, which names only "can be edited later". The version
       ban's reason lives in `proposal.md` (the bundle's caption carried it) and in
@@ -76,7 +104,21 @@ findings below are gaps in the recorded reasoning, none a code defect.
       4, naming the reason and the alternative (leave both out, as the owner's
       words alone would).
 
-- [ ] **`dev-writer`** — `design.md` Decision 3 and Risks, second bullet — the
+      **Outcome (dev-writer): fixed**, same commit, as two bullets of the new
+      Decision 5, each with its reason and the leave-it-out alternative. The
+      version ban: the bundle carried the clause beside the edit promise, the
+      issue's evidence names it as dropped for promising an absent facility,
+      and nothing reads a prior version. Left out, the bundle's clause
+      restored verbatim would pass every test. The shut gate: no reason was
+      written down when the first draft added it, and the bullet says so. The
+      reason it gives is mine. The shut group fills the composer's slot, and
+      the two groups are one expression against its complement, so a rule on
+      one branch lets the promise move to the other with every test green.
+      Covering the gate costs nothing today. The Risks third bullet is
+      removed: its reason is now in Decision 5, and the pin on the bundle's
+      clause is in Decision 3's guards. Goals cite Decisions 4 and 5.
+
+- [x] **`dev-writer`** — `design.md` Decision 3 and Risks, second bullet — the
       guard is wider than the requirement it enforces, and that is not said (gap).
       The spec binds text "the thread screen authors and renders **with the reply
       composer**" and, behind a shut gate, "in the composer's place". The
@@ -91,6 +133,27 @@ findings below are gaps in the recorded reasoning, none a code defect.
       deliberately stricter than the spec, who it constrains (the next author of
       any copy on this screen, and of the shared composer's strings) and how to
       narrow it, or narrow the walk to the composer's place.
+
+      **Outcome (dev-writer): fixed by recording it**, same commit. The walk
+      is not narrowed, because that is a test edit and the brief forbids one.
+      Decision 3 has a new paragraph, "What it does reach is wider than the
+      requirement, deliberately". It names what the column walk binds that
+      the spec does not: the header, the failed-read state, the no-replies and
+      more-replies notices, and later additions. It also says both walks reach
+      `DComposer`'s and `DPublishOutcome`'s `kind`-built copy, which the post
+      composer shares. It names who that constrains, why the walk is wide, and
+      how to narrow it: skip the column's children before the composer's
+      double rule as well as the rows. "Rendered with the composer in the
+      requirement's sense" is gone from design.md. The Risks bullet on future
+      permitted sentences no longer speaks only of "this group". Established
+      by reading, not by mutation: `textsBesideTheRows` skips only the
+      Repeater and its delegates, and the column's other children are
+      `DThreadScreen.qml`'s header `RowLayout` (:311), failed-read `Rectangle`
+      (:372), two notices (:625, :639), double rule (:653) and the two groups
+      (:668, :753). Not mine to fix: the test comment at
+      `tst_thread_reply.qml:697-699` still says a sibling Text "is rendered
+      with the reply composer in the requirement's sense". It is the tester's
+      file, so this is reported to the runner.
 
 - [x] **`dev-writer`** — `dialectica-ui/tests/tst_thread_reply.qml:472` — a
       pointer into the change's own folder, the shape Decision 2 argues against
@@ -114,7 +177,7 @@ findings below are gaps in the recorded reasoning, none a code defect.
       once archived. Took the entry although it names the dev-writer, as the
       brief directs: it is an edit to a test-file comment.
 
-- [ ] **`dev-writer`** — `design.md` Decision 3, paragraph beginning "The suite
+- [x] **`dev-writer`** — `design.md` Decision 3, paragraph beginning "The suite
       excludes them" — a quoted fixture is not the quoted wording (suggestion).
       The entry says the test "drives the two keystore and identity-store wordings
       above". The keystore fixture matches core's text up to the first clause.
@@ -129,3 +192,23 @@ findings below are gaps in the recorded reasoning, none a code defect.
       and that the probe returns a keystore failure as a reason. I did not trace
       either to a `publish_reply` refusal, and the entry cites no path from one to
       the other. Cite the path, or say the refusal fixture is hypothetical.
+
+      **Outcome (dev-writer): fixed, both halves**, same commit, from tracing
+      the paths. The keystore wording reaches both places. It is the probe's
+      reason verbatim (`wire.rs`, `get_capabilities_from_stores`:
+      `open_keystore().map_err(|e| e.to_string())`). It is also embedded in a
+      refused publish: the adapter's `publishing` (`lib.rs:853-855`) answers a
+      keystore that will not open with `core::no_identity(&e.to_string())`,
+      which is `Refusal::NoIdentity`'s "no identity is available to sign with:
+      {why}; ..." (`authoring.rs:150-153`). Decision 3 now cites that path.
+      The identity-store wording reaches no thread-screen path. Neither
+      `publishing` nor `get_capabilities` opens the identity record (the
+      comments at `lib.rs:865-870` and `:980-981` say so), and the adapter's
+      only opener of it is called from `keep_identity` (`lib.rs:1135`).
+      Decision 3 now says the test drives the keystore wording verbatim as the
+      shut gate's reason, and that its refusal is a hypothetical paraphrase of
+      the identity store's error that stands for any core message saying
+      "version". Not mine to fix: the test comment at
+      `tst_thread_reply.qml:796-798` says "both are real core wordings", the
+      same overclaim. It is the tester's file, so this is reported to the
+      runner.
