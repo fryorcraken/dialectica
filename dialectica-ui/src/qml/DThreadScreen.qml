@@ -722,11 +722,18 @@ ScreenFrame {
             onPublished: screen.reload()
         }
 
-        // What a reply IS. The bundle's own caveat ends "earlier versions stay
-        // readable", which promises the facility the control above is inert for
-        // — so the promise is dropped and what remains is true.
+        // What a reply IS, and nothing about what can be done to one afterwards.
+        //
+        // **No editing or version claim belongs here.** Nothing on this screen
+        // edits a reply, no method on the module surface publishes a revision,
+        // and none reads a prior version. So "it can be edited later" and
+        // "earlier versions stay readable" would each promise something absent.
+        // The bundle's caveat carried the second; this caption carried the
+        // first until `thread-view` forbade it. The reply-caption-no-edit
+        // change's design.md says why the first survived the cut.
         Text {
-            text: "A reply is a signed record. It can be edited later."
+            objectName: "replyCaption"
+            text: "A reply is a signed record."
             font: DTheme.note
             color: DTheme.inkSoft
             wrapMode: Text.WordWrap

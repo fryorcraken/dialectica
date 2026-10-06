@@ -425,6 +425,184 @@ TestCase {
         screen.destroy()
     }
 
+    // ---- no edit claim beside the reply composer -------------------------
+    //
+    // `thread-view`'s "The text around the reply composer does not promise that
+    // a reply can be edited". The screen offers no way to edit a reply, and no
+    // method on the module surface publishes a revision. So any text promising
+    // either one is false.
+    //
+    // The spec forbids a CLAIM, not one sentence. These tests therefore match
+    // a pattern rather than looking for the removed string, so a reworded
+    // promise ("Replies may be revised") fails as well. They walk only the
+    // composer's group and the shut gate: the fixture's root is revised, so
+    // the thread's rows render `edited` and "read the earlier versions". Both
+    // are reports of what an author did, which the requirement says it does
+    // not bear on, and a whole-screen walk would fail on them.
+    //
+    // design.md Decision 3 covers the alternatives, and what breaks without
+    // each guard below.
+
+    // True where `text` claims a reply can be edited, or that a later version
+    // of it can be published.
+    function claimsEditing(text) {
+        return /\b(edit|revis|amend|rewrit|chang)\w*|\b(later|new|newer|another|next) versions?\b/i
+            .test(text)
+    }
+
+    // The matcher, pinned both ways. A `claimsEditing` that always answered
+    // false would make all three scenario tests below pass on any tree. This
+    // is the test that fails then.
+    function test_the_edit_claim_matcher_flags_edit_claims_and_nothing_else() {
+        var claims = [
+            "A reply is a signed record. It can be edited later.",
+            "Replies may be revised.",
+            "You can amend this reply after publishing it.",
+            "You can change it later.",
+            "A later version of this reply can be published.",
+            "Publish a new version at any time.",
+            "Newer versions of a reply can be published."
+        ]
+        for (var i = 0; i < claims.length; i++)
+            verify(claimsEditing(claims[i]),
+                   "the matcher must flag an edit claim: \"" + claims[i] + "\"")
+
+        // The strings this group legitimately renders, as the fixture drives
+        // it. If a sentence like these were flagged, these tests would be
+        // reporting copy and not a claim.
+        var truthful = [
+            "A reply is a signed record.",
+            "REPLYING AS",
+            "Publish the reply",
+            "You cannot reply in this Stoa yet.",
+            "no keystore",
+            "There is no disabled composer here. A box you could type into and not send would lose what you wrote."
+        ]
+        for (var j = 0; j < truthful.length; j++)
+            verify(!claimsEditing(truthful[j]),
+                   "the matcher must not flag a sentence making no edit claim: \""
+                   + truthful[j] + "\"")
+    }
+
+    function editClaimsUnder(item) {
+        var texts = []
+        collectTexts(item, texts)
+        var flagged = []
+        for (var i = 0; i < texts.length; i++)
+            if (claimsEditing(texts[i]))
+                flagged.push(texts[i])
+        return { texts: texts, flagged: flagged }
+    }
+
+    function test_the_open_composers_text_makes_no_edit_claim() {
+        var calls = []
+        var screen = makeScreen(calls, true)
+
+        var open = findChild(screen, "replyComposerOpen")
+        verify(open !== null && open.visible, "an open gate renders the composer group")
+
+        // Non-vacuity: the caption beside the composer is in the walk's reach.
+        // A walk that reached the wrong item, or nothing, would collect no
+        // text and report no claim.
+        var caption = findChild(open, "replyCaption")
+        verify(caption !== null && caption.visible,
+               "the caption is inside the composer group the walk covers")
+
+        var found = editClaimsUnder(open)
+        verify(found.texts.indexOf(caption.text) !== -1,
+               "and the walk collected it")
+        compare(found.flagged.length, 0,
+                "no text rendered with the reply composer may claim a reply can be "
+                + "edited or re-published as a later version; flagged: "
+                + JSON.stringify(found.flagged))
+        screen.destroy()
+    }
+
+    // The caption stays on screen across a publish, so the check is repeated
+    // after one, with the re-read returning the published reply.
+    function test_no_edit_claim_appears_after_a_reply_is_published() {
+        var calls = []
+        var published = false
+        Core.bridge = {
+            callModule: function (module, method, args) {
+                calls.push({ method: method, args: JSON.parse(args[0]) })
+                if (method === "get_capabilities")
+                    return '{"canPost":true,"reason":""}'
+                if (method === "read_thread") {
+                    var items = [rootItem()]
+                    if (published)
+                        items.push({
+                            thread: "root1", id: "newreply", currentVersion: "newreply",
+                            parent: "root1", author: "bb".repeat(32), isRevised: false,
+                            moderation: { state: "unmoderated" }, position: "1",
+                            body: { text: "Bye!", removed: 0, marked: 0 }
+                        })
+                    return JSON.stringify({ items: items, page: 0, hasMore: false })
+                }
+                if (method === "publish_reply") {
+                    published = true
+                    return '{"opId":"newreply","wasNew":true}'
+                }
+                return '{"error":"no fake reply for ' + method + '"}'
+            }
+        }
+        var screen = threadComponent.createObject(null, {
+            stoaAddress: "ab".repeat(32), stoaGenesis: "00ff", threadId: "root1"
+        })
+
+        var composer = findChild(screen, "replyComposer")
+        composer.draft = "Bye!"
+        composer.submit()
+
+        compare(screen.items.length, 2,
+                "the thread was read again and holds the published reply")
+
+        var open = findChild(screen, "replyComposerOpen")
+        verify(open !== null && open.visible, "the composer group is still rendered")
+        var caption = findChild(open, "replyCaption")
+        verify(caption !== null && caption.visible,
+               "the caption is still beside the composer after the publish")
+
+        var found = editClaimsUnder(open)
+        verify(found.texts.indexOf(caption.text) !== -1, "and the walk collected it")
+        compare(found.flagged.length, 0,
+                "after a publish, no text rendered with the reply composer may "
+                + "claim the reply can be edited; flagged: "
+                + JSON.stringify(found.flagged))
+        screen.destroy()
+    }
+
+    function test_the_shut_gates_text_makes_no_edit_claim() {
+        var calls = []
+        var screen = makeScreen(calls, false)
+
+        var shut = findChild(screen, "replyGateShut")
+        verify(shut !== null && shut.visible, "a shut gate renders in the composer's place")
+
+        // Non-vacuity, as above: the gate's own heading is in the walk.
+        var found = editClaimsUnder(shut)
+        verify(found.texts.indexOf("You cannot reply in this Stoa yet.") !== -1,
+               "the walk reached the shut gate's text")
+        compare(found.flagged.length, 0,
+                "no text rendered in place of the reply composer may claim a reply "
+                + "can be edited; flagged: " + JSON.stringify(found.flagged))
+        screen.destroy()
+    }
+
+    // NO SPEC: the spec forbids an edit claim but does not say whether the
+    // caption stays. This change keeps its true half, that a reply is a signed
+    // record (design.md Decision 1), so removing the caption entirely is a
+    // visible choice rather than a silent one.
+    function test_the_caption_beside_the_composer_is_kept() {
+        var calls = []
+        var screen = makeScreen(calls, true)
+
+        var caption = findChild(screen, "replyCaption")
+        verify(caption !== null && caption.visible, "the caption is rendered")
+        verify(caption.text.length > 0, "and says something")
+        screen.destroy()
+    }
+
     // ---- no score is rendered ---------------------------------------------
 
     function test_no_vote_score_is_rendered_for_any_item() {
