@@ -138,13 +138,10 @@ exactly the reports the requirement says it does not bear on.
   group is the backstop. This is the hand-maintained-list shape, and it is
   accepted here because the alternative, pinning exact strings, fails on every
   unrelated copy change.
-- [The bundle's own clause, "earlier versions stay readable", is not matched
-  on its own] → It promises reading a prior version, not editing or
-  publishing one, so the new requirement does not forbid it and the pattern
-  does not flag it. It stays out of the caption because nothing reads a prior
-  version, and the rewritten code comment says so. That is a fact about the
-  module surface, not a contracted rule, and it is recorded here so that
-  nobody reads the test's silence as permission.
+- [The bundle's own clause, "earlier versions stay readable", promises reading
+  a prior version, not editing or publishing one] → The requirement forbids
+  it as well, because nothing reads a prior version, so it would promise an
+  absent facility exactly as the edit claim did.
 - [A future, true sentence in this group that uses one of those words, such as
   "the draft can be edited before publishing", fails the test] → That is the
   right moment to read the requirement, which the comment above the tests

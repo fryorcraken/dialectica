@@ -11,6 +11,9 @@ the promise rather than build editing, which is not in 0.0.1.
 - The text rendered beside the thread screen's reply composer no longer states
   that a reply can be edited. What remains describes what a reply is and claims
   nothing the screen does not do.
+- Nor may that text state that a reply's earlier versions can be read. The
+  bundle's caption carried that promise beside the edit one, and nothing on the
+  module surface reads a prior version either.
 - No editing is built. Publishing a revision of a reply or a post from the
   interface stays out of scope, and nothing is added to the module surface.
 
@@ -23,8 +26,8 @@ None.
 ### Modified Capabilities
 
 - `thread-view`: adds a requirement that no text the thread screen supplies
-  around the reply affordance states that a reply can be edited, with editing a
-  reply recorded as out of scope.
+  around the reply affordance states that a reply can be edited or that its
+  earlier versions can be read, with editing a reply recorded as out of scope.
 
 ## Impact
 
