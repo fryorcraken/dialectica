@@ -1300,3 +1300,76 @@ message's wait" agrees with scenario 2's difference. Issue #176 was not re-read;
 the range touches three THENs and adds nothing to the scope it states.
 
 - [x] **re-review round 7 `3d34f15e..ae44f364`: no findings** — read the spec diff of the three reworded THENs, the whole requirement and its consequence paragraph, the three tests and `waits_in_the_book`, and my round-6 box against `git grep` for the old wording; clean
+
+## Re-review round 8 `ae44f364..43844f2b`
+
+Reviewed at `588a1a3e`. Read: the `op-transport` requirements "Channel identity is
+derived from the Stoa address alone" and "Channel identity is a pure function of
+the Stoa address" with their scenarios, both change-folder spec deltas searched for
+anything on the topic's shape (nothing), the `delivery/tests.rs` hunk, the
+`transport.rs` `mod tests` hunks and the test-only `delivery_topic_rule` module.
+Mutations ran against the tests only; the implementation was read no further than
+the `TOPIC_PREFIX` line. Baseline `cargo test -p dialectica-core --lib`: 1315
+passed.
+
+**The transcription is faithful.** I read `NsContentTopic.parse` at
+`logos-messaging/logos-delivery/logos_delivery/waku/waku_core/topics/content_topic.nim:60-123`
+(the sibling checkout, not the pinned revision) against `delivery_topic_rule::parse`.
+The slash check, the four- and five-part split, the numeric generation, each
+`missingPart` and all three messages match verbatim. The one divergence is Nim's
+`parseInt` also taking `_` separators where Rust's `i64::parse` does not; it cannot
+matter for a topic whose first part is `dialectica`.
+
+**The regression test fails for the reason it names, and not by agreeing with the
+implementation.** Mutation 1: `TOPIC_PREFIX` reverted to `"/dialectica/1/s/"` with
+the fake's refusal also disabled (its argument replaced by a fixed valid topic).
+Command: `cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p dialectica-core --lib --quiet`.
+Result: exactly three failures, all in `transport::tests`. The regression test
+panicked with `delivery refuses /dialectica/1/s/8032…/proto: invalid format:
+generation should be a numeric value`, which is delivery's live message. The pin and
+`the_derivation_is_a_pure_function_of_the_address` failed on the changed affix. The
+parser's verdict does not depend on what the derivation produced, so the test cannot
+agree with a wrong topic.
+
+**The fake's refusal bites, and hides no scenario.** Mutation 2: only `TOPIC_PREFIX`
+reverted, fake intact, run as `... --lib --quiet delivery::`. Result: 27 of 108
+`delivery::` tests failed, each with the live message in its log, including the
+declined-creation tests, so a test that scripts a decline does not pass on the fake's
+refusal in place of its own. The refusal runs ahead of any scripted reply, but every
+topic any `delivery::` test feeds the fake comes from `ChannelIdentity` (the only
+caller of `channel_create` is the adapter), so with a valid topic it never fires and
+no scripted scenario is shadowed. Task 14.2's "every `delivery::` test that opens a
+channel and relies on it went red" is measured true. Disabling the refusal alone
+survives every test, which is not a defect here: the adapter-passes-the-topic tests
+(`tests.rs` 983 and 998) and the transport tests already hold the topic.
+
+**The pin is as independent as it was.** The address hex is still from
+`sha256sum`; the `s-` affix and four-part shape were never derivable from anything
+outside the derivation, in the old form or the new. What is new is that the shape is
+now grounded outside the implementation, by delivery's parser, which is what the
+regression test checks. I record this rather than box it.
+
+- [ ] **`spec-writer`** — `openspec/specs/op-transport/spec.md`, requirement "The
+      content topic and the channel identifier SHALL each begin with the literal prefix
+      `/dialectica/1/`", and its scenario "Both names keep the prefix autosharding
+      reads"; the change deltas say nothing on the topic's shape either.
+      **Gap:** no requirement or scenario says the content topic must be one the
+      transport accepts: four `/`-separated parts, `dialectica` read as application
+      and `1` as version. The owner's live check proved the gap is real. The refused
+      topic `/dialectica/1/s/<hex>/proto` satisfied every topic scenario, since it
+      begins with the literal, which is why the spec's own scenarios were green over
+      a derivation no node could use. Round 8 added behaviour that no scenario
+      describes: the `s-<hex>` shape, the regression test
+      `the_content_topic_is_one_delivery_parses_with_dialectica_as_application`
+      and the pinned expectation `/dialectica/1/s-6b1f…/proto`. The test cites
+      design Decision 17, not a requirement, so a future derivation that keeps the
+      prefix and breaks parseability is guarded only by a test with nothing behind it.
+      **Measured:** with `TOPIC_PREFIX` back at `/dialectica/1/s/`, `cargo test -p
+      dialectica-core --lib` fails three `transport::tests` and, with the fake
+      intact, twenty-seven `delivery::` tests; the spec's prefix scenario is not
+      among the failures.
+      **Severity:** medium. Capture a requirement that the topic parses under the
+      transport's content-topic rules with `dialectica` as application and `1` as
+      version, with a scenario that checks it against the parser's rule rather than
+      the implementation's output; or record why the behaviour is deliberately left
+      to design. Then a changed topic fails a scenario rather than only a test.
