@@ -7,7 +7,7 @@ plugin-version dependency, and the `.gitignore`/`settings.json` wiring. Reviewed
 at `20643177` against `origin/main`. The plugin was read at its checkout HEAD
 `be56964` and at its installed cache (`~/.claude/plugins/cache/agent-spec-flow/specflow/0.1.0`).
 
-- [ ] **`dev-writer`** — `CLAUDE.md:450-507`, `.claude/specflow/PROJECT.md:18-23,40-41,99-116` — rules that must reach every session now live only in the overlay
+- [x] **`dev-writer`** — `CLAUDE.md:450-507`, `.claude/specflow/PROJECT.md:18-23,40-41,99-116` — rules that must reach every session now live only in the overlay
       **Scenario:** `CLAUDE.md` on `origin/main` held these inline, in the section it called "the most important section in this file": read YAML/JSON with `yq`/`jq` and never Python; run QML specs through `run-qml-tests.sh` and never `qmltestrunner`; no `QT_QPA_PLATFORM=`/`VAR=value` prefix (with the wrapper named); never `readlink`/`ls` a `/nix/store` path; stage the SDK before `cargo test`; `nix build ./dialectica#lgx` because the root has no flake. After this change each is in the overlay alone. The overlay's own header (`PROJECT.md:4`) addresses "every specflow agent", and the plugin preloads it only into specflow agents (`flow` skill) and `/specflow:pm`. Any other reader of this repo gets only one row in the block's table pointing at the overlay: an ad-hoc owner session, an `Explore`/`general-purpose` subagent, a plugin agent such as `agent-skills:code-reviewer`, or a session fixing dependabot PR #145. For example, such a session asked to check a workflow YAML reaches for `python3 -c 'import yaml…'` and costs the owner a click, which is the exact case the `yq`/`jq` rule was written for. The block contradicts the placement itself (`CLAUDE.md:443-445`): "A rule that must reach every session and agent belongs in `CLAUDE.md`, outside this block". Severity: medium. Either keep a short project section in `CLAUDE.md` outside the block holding the six Bash-cost rules (the overlay can point to it), or record in `design.md` why one table-row hop is enough for non-specflow sessions.
       **Measured:** `grep -n -E "yq|run-qml-tests|/nix/store|logos-rust-sdk-src|dialectica#lgx|QT_QPA_PLATFORM" CLAUDE.md` matches only `--jq` in the generic block, the `path:./dialectica#lgx` flake-ref note and the `check_bindings` account. None of the six rules is there. The same pattern matches 11 lines of `PROJECT.md`.
       **Open — needs the owner's decision.** Issue #195 decides where four of
@@ -28,6 +28,20 @@ at `20643177` against `origin/main`. The plugin was read at its checkout HEAD
       keeps the full text. The alternative is a `design.md` line accepting
       the table-row hop for non-specflow sessions. Decision needed: add that
       section, or accept the hop.
+      **Fixed** in the commit "List the six shell rules in CLAUDE.md, outside
+      the specflow block". The owner decided: "put them outside the block".
+      `CLAUDE.md` gains "Shell rules for every session", between "Security
+      posture" and `<!-- specflow:begin v0.1.0 -->`. It has one line per rule,
+      each naming the overlay section that holds the reason (`## Hazards`,
+      `## Test layers`, `## Build`), and copies no reason. The SDK line points
+      at `README.md`, "Building", for the command. The overlay is unchanged:
+      nothing in it says these rules live only there. `design.md` records the
+      decision under "Six shell rules are listed in `CLAUDE.md`, outside the
+      block". The block is untouched. `grep -b -n -F "<!-- specflow:"` gives
+      begin/end at bytes 24944/34412 in `CLAUDE.md` and 1796/11264 in the
+      plugin's `skills/sync/SKILL.md`, a 9468-byte span in both. `cmp -i
+      24944:1796 -n 9489 CLAUDE.md <plugin>/skills/sync/SKILL.md` (span plus
+      the 21-byte end marker) exits 0 with no output.
 
 - [x] **`dev-writer`** — `openspec/changes/adopt-specflow-plugin/design.md:160-166` — the plugin-version dependency is not recorded, and the issue's premise about it is false
       **Scenario:** #195 says "A directory marketplace is read live from its folder, so there is no version pin yet", and `design.md` says nothing about versions. In fact Claude Code runs a copy, not the checkout. `~/.claude/plugins/installed_plugins.json` gives `installPath …/cache/agent-spec-flow/specflow/0.1.0` with `gitCommitSha 77fce4d`, while the checkout's HEAD is `be56964`. Both call themselves `0.1.0`. `/specflow:run`'s only version check compares the `CLAUDE.md` stamp with the literal `v0.1.0` (`skills/run/SKILL.md` preflight 3), so it cannot tell the two contents apart. If the plugin is reinstalled, the flow silently changes to whatever is in the working tree, uncommitted files included. If it is not reinstalled, a fix committed upstream never arrives. The "byte for byte" `cmp` of the block (`design.md:145-151`) ran against the checkout, not against the copy that runs. It holds today only because `skills/sync/SKILL.md` happens to be identical in both. Severity: medium. Record the plugin commit the overlay and block were reconciled against, and the fact that the flow runs from a version-keyed cache, so drift without a version bump is invisible. That is the self-invalidating form of present state that the block's "Keeping documents true" asks for.

@@ -274,6 +274,19 @@ neither marker is present. Checked with `cmp` from each file's begin marker to
 the end of the block: no differing byte. A block written by hand would be
 replaced by the next sync anyway, and differences would show only then.
 
+### Six shell rules are listed in `CLAUDE.md`, outside the block
+
+The `yq`/`jq`, `run-qml-tests.sh`, no-`VAR=`-prefix, no-`/nix/store`-read,
+stage-the-SDK and `nix build ./dialectica#lgx` rules each get one line in a
+`CLAUDE.md` section above the block, pointing at the overlay section that holds
+the reason. The owner decided this ("put them outside the block") over
+accepting a table-row hop. `CLAUDE.md` is injected into every session and
+agent, including ad-hoc sessions, `Explore` and plugin agents. The overlay is
+preloaded only into specflow agents, so a rule kept only there would not reach
+the sessions most likely to break it. The block's own rule puts such rules
+there. The reasons stay only in the overlay, so the two cannot disagree on a
+reason.
+
 ### `.gitignore` keeps `!.claude/agents/`
 
 The directory is empty after this change. The line stays because the plugin's

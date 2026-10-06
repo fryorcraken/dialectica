@@ -401,6 +401,25 @@ peer-supplied content. Two standing rules:
   close, and it is a correctness requirement rather than a hardening
   nice-to-have.
 
+## Shell rules for every session
+
+These bind every session and agent in this repository, not only specflow ones.
+The reason for each is in the overlay,
+[`.claude/specflow/PROJECT.md`](.claude/specflow/PROJECT.md), under the section
+named; read it there rather than restating it here.
+
+- **Read YAML with `yq` and JSON with `jq`, never Python.** `## Hazards`.
+- **Run QML specs through `sh dialectica-ui/tests/run-qml-tests.sh [<spec>]`,
+  never a bare `qmltestrunner`.** `## Hazards`.
+- **Never a `VAR=value` or `env VAR=` prefix**, `QT_QPA_PLATFORM=offscreen`
+  included; use the wrapper that sets the environment. `## Hazards`.
+- **Never `readlink` or `ls` a `/nix/store` path** to find a build artefact;
+  use the documented paths under `.scaffold/basecamp/`. `## Hazards`.
+- **In a fresh worktree, stage the SDK before `cargo test`**, with the command
+  in `README.md`, "Building". `## Test layers`.
+- **Build scaffold-gated code with `nix build ./dialectica#lgx`**; the
+  repository root has no flake, so `.#lgx` fails there. `## Build`.
+
 <!-- specflow:begin v0.1.0 -->
 ## specflow
 
