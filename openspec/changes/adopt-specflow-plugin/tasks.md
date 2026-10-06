@@ -119,16 +119,24 @@ repository root.
       agent and `settings.json` are admitted, and the machine-local file is
       not. Leave out `-v`, which also prints the pattern that admits
       `settings.json`.
-- [ ] 3.3 Owner: follow `README.md`'s "Working with the agent flow": clone
-      `https://github.com/fryorcraken/agent-spec-flow`, run
-      `claude plugin marketplace add` on that clone, then
-      `claude plugin install specflow@agent-spec-flow --scope project` from
-      the repository root. It changes the owner's Claude Code configuration,
-      which a dispatched agent does not touch.
-- [ ] 3.4 Owner, after the merge: a session started in this repository lists
-      the `specflow:*` agents and skills (the issue's fourth Check). It is the
+- [ ] 3.3 Owner, after the merge: follow `README.md`'s "Working with the
+      agent flow". The clone of `https://github.com/fryorcraken/agent-spec-flow`
+      and `claude plugin marketplace add` on it can run any time.
+      `claude plugin install specflow@agent-spec-flow --scope project` runs
+      after the merge, from the root of a checkout of `main` that has it:
+      there `git diff .claude/settings.json` shows nothing afterwards. Run
+      before the merge from the root checkout, it would write
+      `enabledPlugins` into that checkout's tracked `settings.json`. It
+      changes the owner's Claude Code configuration, which a dispatched agent
+      does not touch.
+- [ ] 3.4 Owner, after 3.3: a session started in this repository lists the
+      `specflow:*` agents and skills (the issue's fourth Check). It is the
       only check that shows `enabledPlugins` and 3.3 worked; every other check
       passes on a tree where the plugin never loads.
+
+      Both rows are post-merge and nothing gates them: neither `closer` reads
+      this section, and the archive freezes them unticked. `design.md`, "The
+      marketplace entry is not in this change", says why that is accepted.
 
 ### 4. Deletions and references
 

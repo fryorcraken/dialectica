@@ -19,7 +19,7 @@ stage under `## Extra stages`."** That sentence decides most of what follows.
 dialectica-specific rule is lost silently; `CLAUDE.md`'s block is exactly what
 `/specflow:sync` would write, so a later sync replaces it in place.
 
-**Non-Goals:** changing the plugin, or publishing the marketplace entry.
+**Non-Goals:** changing the plugin, or tracking its marketplace entry.
 Lessons about specflow go to the owner first (the block's own rule), and the
 owner files them on `agent-spec-flow`.
 
@@ -333,8 +333,12 @@ worktree, the failure shape the `settings.json` comment above it records.
 
 ### The marketplace entry is not in this change
 
-While the plugin is unpublished its marketplace is a local clone, so the
-entry is machine-local and `settings.json` gets only `enabledPlugins`. Each
+The constraint is the plugin's, not visibility. `agent-spec-flow` is a public
+repository (`gh api repos/fryorcraken/agent-spec-flow` reports
+`"private": false`), but its `DECISIONS.md` decision 20 holds the rest back:
+"No release tag, and dialectica stays on its local marketplace, until a full
+piece has run on the plugin." So the marketplace is a local clone, the entry
+is machine-local, and `settings.json` gets only `enabledPlugins`. Each
 contributor clones `https://github.com/fryorcraken/agent-spec-flow` into a
 directory of their choice, registers that clone with `claude plugin
 marketplace add <the directory cloned into>`, and installs the plugin with
@@ -342,7 +346,26 @@ marketplace add <the directory cloned into>`, and installs the plugin with
 steps `README.md`'s "Working with the agent flow" documents with one example
 directory, never a contributor's real path. The `add` default scope is `user`
 (`claude plugin marketplace add --help`), so it reaches every worktree rather
-than one checkout.
+than one checkout, and it is written to Claude Code's own user configuration,
+not to any file in this repository.
+
+The clone is of the default branch, with no pinned checkout. What else was
+considered:
+
+- **A tracked `github` marketplace source in `settings.json`, pinned to a
+  commit.** It would name a source and revision in the tree, which the Risks
+  entry below says is missing. Ruled out by decision 20: dialectica stays on
+  the local marketplace until a full piece has run on the plugin, and this
+  piece is not that piece, because it ran on the in-repo flow.
+- **A README clone checked out at the reconciled revision, `77fce4d`.** It
+  would make what a contributor installs the revision the overlay was
+  reconciled against. Ruled out by the owner, who decided to leave the
+  README unpinned until `agent-spec-flow` has a release. The cost of waiting
+  is in the Risks entry below.
+- **The default branch, as chosen.** Its cost is that a contributor installs
+  whatever the plugin's `main` holds that day. "What runs is an installed
+  copy" below gives the revision reconciled and the command that says when
+  the overlay needs re-checking.
 
 The install is its own step. Registering a marketplace makes a plugin
 installable, not installed: the plugin's own `README.md` lists `marketplace
@@ -350,16 +373,26 @@ add` and `install` separately, and its v0.1.0 test installed explicitly
 (`DECISIONS.md`, "Step 2"). Whether a tracked `enabledPlugins` alone makes
 Claude Code install it was not verified here, so the README asks for the
 install rather than relying on it. `--scope project` is the scope that writes
-`enabledPlugins` into `.claude/settings.json`, which already carries the entry,
-so `git diff .claude/settings.json` should show nothing afterwards; `user`,
-the default, would turn the
-plugin on in every project on the machine. The issue's fourth check, a
-session after the merge listing `specflow:*`, is what shows the steps worked,
-and `tasks.md` gives it an owner row.
+`enabledPlugins` into `.claude/settings.json`; `user`, the default, would turn
+the plugin on in every project on the machine. So the install is run after the
+merge, from a checkout of `main` that has it: there `settings.json` already
+carries the entry and `git diff .claude/settings.json` shows nothing. Run from
+a checkout without this change, such as the owner's root checkout on `main`
+before the merge, it writes the entry into that tracked file. The clone and
+`marketplace add` touch no file here and can run any time. The issue's fourth
+check, a session after the merge listing `specflow:*`, is what shows the steps
+worked, and `tasks.md` gives it an owner row.
+
+Both owner rows are post-merge, and nothing gates them: neither `closer` reads
+`## Implementation`, the archive freezes them unticked, and `Closes #195`
+closes the issue whose fourth Check they are. That is accepted because the
+failure they look for cannot stay silent. Without the plugin, a session has no
+`/specflow:run` and no `specflow:*` agent, and the in-repo flow is deleted, so
+the next piece cannot start until the plugin loads.
 
 The owner runs these; a dispatched agent does not change the owner's Claude
-Code configuration. The README note goes when the plugin is published and the
-entry moves into `settings.json` as a pinned `github` source.
+Code configuration. The README note goes when `agent-spec-flow` has a release
+and the entry moves into `settings.json` as a pinned `github` source.
 
 ### What runs is an installed copy, keyed by version
 
@@ -377,17 +410,32 @@ The overlay and the block were reconciled against `agent-spec-flow` commit
 `77fce4d`, the v0.1.0 extraction. Up to `756e76a` the plugin changed only
 `skills/init/SKILL.md` (`be56964`), `DECISIONS.md`, `LESSONS.md` and its
 `README.md` (`git -C <clone> log --stat 77fce4d..756e76a`), so every agent
-and every other skill is as reconciled. Re-check the overlay against the
-plugin when `git -C <clone> diff --stat 77fce4d -- agents skills` lists
-anything beyond `skills/init/SKILL.md`.
+and every other skill is as reconciled. `README.md` installs the default
+branch, not `77fce4d`, so what a contributor runs can move past it.
+
+To re-check the overlay against a newer plugin, update the clone to the
+revision about to be installed and run
+`git -C <clone> diff --stat 77fce4d -- agents skills`. It lists every agent
+and skill file changed since the reconciliation; at `756e76a` it lists only
+`skills/init/SKILL.md`, whose change this repository does not use ("`settings.json`
+carries no allowlist" below). Read each other file it lists against the
+overlay's sections and against "#174's flow rules" above. If it lists
+`skills/sync/SKILL.md`, run `/specflow:sync` and repeat `tasks.md` 2.3's
+`cmp` against the new revision. Pinning that revision in `README.md` waits for
+`agent-spec-flow`'s release.
 
 ### `settings.json` carries no allowlist, unlike what `/specflow:init` writes
 
 `/specflow:init` merges a `permissions.allow` block (`git`, `gh pr`/`run`/
-`issue`/`api`, `gh repo view`, `openspec`, `grep`, `pwd`) and the marketplace
-entry into the tracked `settings.json` (plugin `skills/init/SKILL.md` § 1,
-`DECISIONS.md` 15). This repo keeps its allowlist machine-local, in the
-untracked `settings.local.json`, and `.gitignore`'s comment above the
+`issue`/`api`, `gh repo view`, `openspec`, `grep`, `pwd`) into the tracked
+`settings.json` (plugin `skills/init/SKILL.md` § 1, `DECISIONS.md` 15). Where
+the marketplace entry goes depends on how the marketplace was registered:
+for a `github` source, or none registered, `init` writes it into
+`settings.json` too; for a `directory` source, which is what `README.md`'s
+clone-and-`marketplace add` produces, it writes it to
+`.claude/settings.local.json` instead, "since a local path is machine-local"
+(§ 1, "The marketplace source"). This repo keeps its allowlist machine-local,
+in the untracked `settings.local.json`, and `.gitignore`'s comment above the
 `.claude/*` rules says so. This change follows the repo, not `init`.
 
 So `/specflow:init` is not this repo's route for refreshing the flow:
@@ -455,9 +503,11 @@ Dialectica-specific sentences in deleted text with no home in the overlay:
   it names commands (`gh api …/protection`) rather than lists where it can,
   and names the step whose output a claim comes from.
 - [A session cannot see the plugin until the marketplace is registered and the
-  plugin installed] → `README.md` carries both commands, and the issue's
+  plugin installed] → `README.md` carries the three steps, and the issue's
   fourth check (a fresh session lists the `specflow:*` agents) is an owner row
-  in `tasks.md`, run after merge.
+  in `tasks.md`, run after the merge. Nothing gates that row; "The
+  marketplace entry is not in this change" says why its failure cannot stay
+  silent.
 - [The flow's instructions move outside this repo's review] → The rules that
   give agents push, rebase, archive and merge authority used to live here,
   under `main`'s signed-commit, PR-only protection. They now live in
@@ -467,11 +517,31 @@ Dialectica-specific sentences in deleted text with no home in the overlay:
   that name to whatever marketplace it registered and runs whatever version it
   installed. What moved is instruction trust only: the plugin ships no hooks,
   no `.mcp.json`, no `bin/` and no plugin `settings.json`, so enabling it runs
-  no code and grants no permission. It is low today because the plugin is the
-  owner's: its commits are signed by the owner and its repository sits in the
-  owner's GitHub namespace. "What runs is an installed copy" above records the
-  revision this change was reconciled against. The follow-up that moves the
-  entry into `settings.json` should pin an immutable revision, a commit,
-  rather than only the release tag the issue names, because a tag can be
-  moved; and the plugin's own `init` falls back to a `github` source with no
-  ref at all.
+  no code and grants no permission.
+
+  The destination has no protection of its own. For `agent-spec-flow`,
+  `gh api repos/fryorcraken/agent-spec-flow/branches/main/protection` returns
+  404 "Branch not protected", and both
+  `gh api repos/fryorcraken/agent-spec-flow/rulesets` and
+  `gh api repos/fryorcraken/agent-spec-flow/rules/branches/main` return `[]`.
+  So its `main` requires no signature and no pull request, and does not
+  refuse a force-push. And `README.md` clones that moving default branch and
+  installs whatever it holds, with no pinned checkout and no verification
+  step. A credential for the owner's GitHub account, without the signing
+  key, could therefore rewrite the `closer` that every later install runs,
+  where rewriting dialectica's `closer.md` needed a signed commit to a
+  protected `main`. That the plugin's existing commits are signed is the
+  author's own practice, not something GitHub enforces, so it binds nothing
+  a newcomer clones tomorrow; it is not a mitigation. The risk is still rated
+  low because the repository sits in the owner's own namespace: changing it
+  takes the owner's GitHub credential, not a third party's.
+
+  The overlay and block were reconciled against `77fce4d`; "What runs is an
+  installed copy" above gives the command that re-checks them against a
+  newer plugin. Pinning is deferred until `agent-spec-flow` has a release (the
+  owner's decision): the follow-up then moves the entry into `settings.json`
+  as a `github` source, or pins the README's clone, and should pin an
+  immutable revision, a commit, rather than only a release tag, because a
+  tag can be moved; the plugin's own `init` falls back to a `github` source
+  with no ref at all. Turning on protection for `agent-spec-flow`'s `main` is
+  the owner's action, outside this change.

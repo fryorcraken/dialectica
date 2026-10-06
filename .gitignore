@@ -58,9 +58,10 @@ dialectica/logos-rust-sdk-src
 # reached no clone and no fresh checkout, and **nothing failed when it was
 # absent** — agents were silently cut from the wrong base, which is the failure
 # shape this repo keeps re-learning. Machine-local settings — the permission
-# allowlist, the absolute home paths under `additionalDirectories`, and a
-# marketplace entry pointing at a local checkout — belong in
-# `settings.local.json`, which stays ignored.
+# allowlist and the absolute home paths under `additionalDirectories` — belong
+# in `settings.local.json`, which stays ignored. The plugin's marketplace is in
+# neither file: README.md's `claude plugin marketplace add` registers it at
+# user scope, in Claude Code's own configuration.
 #
 # `.claude/*` rather than `.claude/` because git will not re-include a file
 # whose parent DIRECTORY is excluded — with a `.claude/` rule the negation below

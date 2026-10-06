@@ -6,13 +6,41 @@ Dimension: **architecture only**, over `20643177..3b32d6f8` excluding
 at `77fce4d`. The first round's four architecture boxes were read as claims and
 checked; see "First-round claims" below.
 
-- [ ] **`dev-writer`** — `README.md:96-99`, `openspec/changes/adopt-specflow-plugin/design.md:327-346` — the install route clones an unpinned plugin, and the only record of the reconciled revision is in a file the merge archives
+- [x] **`dev-writer`** — `README.md:96-99`, `openspec/changes/adopt-specflow-plugin/design.md:327-346` — the install route clones an unpinned plugin, and the only record of the reconciled revision is in a file the merge archives
       **Scenario:** `README.md`'s step 1 is `git clone https://github.com/fryorcraken/agent-spec-flow …` with no checkout, so a contributor installs whatever the plugin's `main` is that day. The revision the overlay and block were reconciled against (`77fce4d`) and the trigger for re-checking the overlay (`git -C <clone> diff --stat 77fce4d -- agents skills`) appear only in this change's `design.md` and `tasks.md` 2.3. The `closer` moves both to `openspec/changes/archive/<date>-adopt-specflow-plugin/` before merging, and nothing a maintainer reads when installing or updating points there: not README, not the overlay, not `CLAUDE.md`. Once `agent-spec-flow#1` ships v0.2.0, which changes the roster (re-review row) and the `closer`, a fresh clone installs it. `/specflow:run` preflight 3 (`skills/run/SKILL.md:25-29`) only warns that the stamp is not `v0.1.0` and continues, and `/specflow:sync` rewrites only the block. The overlay, still carrying the `## closer` rule-5 copy, is never re-checked. #1's acceptance list says that copy goes "once dialectica pins 0.2.0", but this tree has no pin, so that event has no form. Meanwhile two machines can run different flows from one tracked tree. Severity: medium. The fix closes the first round's box 2 at the place a maintainer actually uses. Pin the clone in README (`git -C <dir> checkout 77fce4d`, or the `specflow--v0.1.0` tag once one exists), and say beside it that moving the pin means re-checking the overlay against the plugin and running `/specflow:sync`. Or put that one self-invalidating line in the overlay or in `CLAUDE.md` outside the block.
       **Measured:** `git grep -n -E "77fce4d|756e76a" -- . ":!openspec/changes/adopt-specflow-plugin/"` prints nothing. `git -C <plugin clone> tag --list` prints nothing (decision 20 holds the tag). `git -C <plugin clone> diff --stat 77fce4d -- agents skills` lists only `skills/init/SKILL.md`, so today's HEAD is harmless. The defect is that nothing will notice when HEAD stops being harmless.
+      **Deferred** to `agent-spec-flow`'s release, by the owner's decision for
+      this pass: the README keeps cloning the default branch with no pinned
+      checkout until the plugin has a release, and the record lives in
+      `design.md`, not in README, the overlay or `CLAUDE.md`. So this box's
+      core point, that nothing a maintainer reads at install time points at
+      the reconciled revision, stands until then, and is accepted rather
+      than fixed. What the commit "Record the plugin repository's real trust
+      state, and the marketplace constraint" changes in `design.md`: "What
+      runs is an installed copy" says the README installs the default
+      branch, not `77fce4d`, and gives the re-check procedure in full (update
+      the clone, `git -C <clone> diff --stat 77fce4d -- agents skills`, read
+      each listed file against the overlay and #174's rules, `/specflow:sync`
+      and 2.3's `cmp` if `skills/sync/SKILL.md` is listed), and that pinning
+      waits for the release. The marketplace decision records the README pin
+      at `77fce4d` as a considered alternative, ruled out by the owner. The
+      Risks entry carries the cost. Re-run: the re-check command at
+      `756e76a` lists only `skills/init/SKILL.md`.
 
-- [ ] **`dev-writer`** — `.gitignore:60-63` — the comment still sends the marketplace entry to `settings.local.json`, which the new install route no longer uses
+- [x] **`dev-writer`** — `.gitignore:60-63` — the comment still sends the marketplace entry to `settings.local.json`, which the new install route no longer uses
       **Scenario:** this range replaced the `settings.local.json` route with `claude plugin marketplace add` at its default `user` scope (`design.md` "The marketplace entry is not in this change", README steps 2–3). The first-round fix note for box 3 says "no `settings.local.json` is involved". `.gitignore`'s comment, written before the review round, still lists "a marketplace entry pointing at a local checkout" among the settings that "belong in `settings.local.json`". So the tracked files now give two routes for one piece of configuration. A reader of `.gitignore`, which is where this repo explains what is and is not tracked under `.claude/`, adds the entry by hand to a file the README route never reads. The README route is the one this change was corrected to. Severity: low. Drop the marketplace clause from the comment, or say the entry lives in Claude Code's user-scope marketplace list while the plugin is unpublished.
       **Measured:** `git grep -n -F "settings.local.json" -- . ":!openspec/changes/archive/" ":!openspec/changes/adopt-specflow-plugin/findings/"` hits `.gitignore:44,63` and `design.md:353,391`. Neither `design.md` hit is about the marketplace. `git diff origin/main...20643177 -- .gitignore` shows the marketplace clause was added by this piece.
+      **Fixed** in the commit "Record the plugin repository's real trust
+      state, and the marketplace constraint". The marketplace clause is
+      dropped from the list of `settings.local.json` contents, and the
+      comment now says the marketplace is in neither file: README's
+      `claude plugin marketplace add` registers it at user scope, in Claude
+      Code's own configuration. Re-run:
+      `git grep -n -F "settings.local.json" -- . ":!openspec/changes/archive/" ":!openspec/changes/adopt-specflow-plugin/findings/"`
+      now hits `.gitignore` twice, neither placing the marketplace there;
+      `design.md` three times, where the one marketplace hit describes
+      `/specflow:init`'s `directory`-source behaviour, not a route this repo
+      uses; and 3.2's new check in `tasks.md`.
 
 - [x] **`dev-writer`** — `openspec/changes/adopt-specflow-plugin/tasks.md:12` — the `tester` row is neither ticked nor struck, so either `closer` stops at Step 1
       **Scenario:** the owner skipped the `tester` step for this piece, but the row still reads `- [ ] tests — \`tester\``. It has no strike and no reason, unlike the spec row two lines above. Plugin `agents/closer.md:60-61` and `origin/main:.claude/agents/closer.md:116` both require "every row ticked or struck through with a reason, except your own three". Once the runner ticks the re-review row, this row is the only thing standing between the block and the `closer`. Each closer forbids ticking a row on another agent's behalf, so a `closer` dispatched now stops and reports, a round-trip the owner has already decided. Nothing in `design.md` or `proposal.md` records the skip either (`git grep -n -i tester -- openspec/changes/adopt-specflow-plugin` shows no skip). The defect predates this range. These commits exposed it by ticking every review row. Severity: medium, because it blocks the close. Strike the row in the stage-block spec's form, `- [ ] ~~tests — \`tester\`~~ — <reason>`, as the spec row already is.
@@ -25,9 +53,29 @@ checked; see "First-round claims" below.
       `grep -n -E "^- \[ \] [^~]" openspec/changes/adopt-specflow-plugin/tasks.md`
       now lists, in the block, only the re-review row and the closer's three.
 
-- [ ] **`dev-writer`** — `openspec/changes/adopt-specflow-plugin/tasks.md:82-91`, PR #196's "Owner steps" — both owner rows are post-merge steps, kept in a file the `closer` archives before the merge, and nothing gates either
+- [x] **`dev-writer`** — `openspec/changes/adopt-specflow-plugin/tasks.md:82-91`, PR #196's "Owner steps" — both owner rows are post-merge steps, kept in a file the `closer` archives before the merge, and nothing gates either
       **Scenario:** (a) 3.3 sits unticked as pre-merge implementation work and says to run the install "from the repository root". The root checkout is on `main` at `6a7e02b9` (`git worktree list`), whose `.claude/settings.json` has no `enabledPlugins` (`git show origin/main:.claude/settings.json`). Run before the merge, `--scope project` writes that key into a tracked file on the owner's `main` checkout. README's "`git diff .claude/settings.json` should show nothing" is then false for the one person told to run it, and the dirty file can block the post-merge pull. (b) 3.4 is defined as "after the merge", but the `closer` archives `tasks.md` before merging (stage-block spec: the archive row precedes the merge row). The row is therefore frozen unticked in `archive/` and can never be ticked in a live file. `Closes #195` also closes the issue whose fourth Check it is. Neither `closer` reads `## Implementation`. `openspec archive` warns on incomplete tasks, and the plugin's `flow` skill calls that warning "expected" (`skills/flow/SKILL.md:165-166`). So nothing will notice if the plugin never loads, and that is the one failure 3.4 says only it can show. Severity: low to medium. Make both steps explicitly post-merge, and give them a home that outlives the archive: a follow-up issue, or `Part of #195` with the issue left open for its fourth Check. Otherwise drop the rows and rely on README's closing sentence.
       **Measured:** `git worktree list` shows `/home/fryorcraken/src/rad/dialectica 6a7e02b9 [main]`. `git show origin/main:.claude/settings.json` has only `worktree.baseRef`. `gh pr view 196 --json body` ends `Closes #195`.
+      **Fixed** in the commit "Record the plugin repository's real trust
+      state, and the marketplace constraint", for (a) and the wording of
+      (b); the gate (b) asks for is argued against rather than added. (a)
+      3.3 is now "Owner, after the merge": the clone and `marketplace add`
+      can run any time, and the install runs after the merge from the root
+      of a checkout of `main` that has it, where `git diff
+      .claude/settings.json` shows nothing; run before the merge from the
+      root checkout it would write `enabledPlugins` into a tracked file, and
+      the row says so. README's step 3 says the same ("from the root of a
+      checkout whose `.claude/settings.json` already enables it"), and says
+      the first two steps write nothing here. 3.4 is "Owner, after 3.3". The
+      PR body's owner steps are corrected to match. (b) Both rows now say
+      they are post-merge, that nothing gates them and that the archive
+      freezes them unticked. No follow-up issue was filed and `Closes #195`
+      stays, as briefed. `design.md`, "The marketplace entry is not in this
+      change", records why that is accepted: the failure 3.4 looks for
+      cannot stay silent, because without the plugin a session has no
+      `/specflow:run` and no `specflow:*` agent, and the in-repo flow is
+      deleted, so the next piece cannot start until the plugin loads. The
+      Risks entry points there.
 
 - [x] **`dev-writer`** — `.claude/specflow/PROJECT.md:31-35` (and `design.md`'s "`run-qml-tests.sh` with one spec is the unprompted shape") — a tracked file declares commands free that are free only through the owner's untracked allowlist
       **Scenario:** the block's free row is "an **allow-listed** command — `git …`, `openspec …`, the project's own" (`CLAUDE.md:488`). The overlay names `nix build …`, `lgs …` and `sh dialectica-ui/tests/run-qml-tests.sh <spec>` as that row's commands, and says the script "is the exception here" to the block's `sh <relative-path>` pricing. Whether any of them is allow-listed is decided by `permissions.allow`. This repo deliberately keeps that untracked (`design.md` "`settings.json` carries no allowlist"; `.gitignore:60-61`). The tracked `settings.json` has none, and README's contributor route does not ask for one, although the plugin's own README step 2 does. On any machine but the owner's, every agent that follows the overlay pays a click per QML spec, told the call was free. That is also an overlay line restating the block's pricing for this project, which its own header says it does not do. `design.md` drops "`blockReadsOutsideWorkingDirectories` is on" as "a fact about this machine's settings" in the same change, then keeps this one. Severity: low; it costs clicks, not correctness. Either say in README's "Working with the agent flow" which commands to allow-list, or reword the overlay to name them as the project's own commands that the allowlist should hold, without asserting they are free.

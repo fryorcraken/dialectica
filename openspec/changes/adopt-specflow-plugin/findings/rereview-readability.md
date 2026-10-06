@@ -112,20 +112,32 @@ Dimension: readability only. Scope: `20643177..HEAD`, excluding `findings/`
       something the plugin already does", and classifies all seven,
       rule 9 included, in three bullets.
 
-- [ ] **`dev-writer`** — `openspec/changes/adopt-specflow-plugin/design.md:433-435`
+- [x] **`dev-writer`** — `openspec/changes/adopt-specflow-plugin/design.md:433-435`
       — *"What moved is instruction trust only: … It is low today because the
       plugin is the owner's"*. The nearest antecedent of "It" is "instruction
       trust", and "instruction trust is low" says the opposite of what is
       meant, which is that the risk is low. Name the subject ("The risk is
       low…").
       Severity: low.
+      **Fixed** in the commit "Record the plugin repository's real trust
+      state, and the marketplace constraint", which rewrote the sentence
+      while correcting its claim (`findings/rereview-security.md` box 1): it
+      now reads "The risk is still rated low because the repository sits in
+      the owner's own namespace", with the subject named.
 
-- [ ] **`dev-writer`** — `README.md:122` — *"This step goes away once the plugin
+- [x] **`dev-writer`** — `README.md:122` — *"This step goes away once the plugin
       is published…"* closes a section that introduced itself as *"three
       steps"* (`:93`) and numbered them. "This step" makes a newcomer ask which
       one: only step 2 obviously goes away, yet the sentence refers to all
       three. Say "These steps go away…".
       Severity: low.
+      **Fixed** in the commit "Record the plugin repository's real trust
+      state, and the marketplace constraint": "These steps go away once
+      `agent-spec-flow` has a release…", which also replaces "published"
+      (`findings/rereview-design.md` box 3). The same commit moves the
+      "`~/src/agent-spec-flow` is only an example" sentence above step 1,
+      this file's unboxed observation, so it is read before the steps that
+      use the directory.
 
 ## Clean, in prose
 

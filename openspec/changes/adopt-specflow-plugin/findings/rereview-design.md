@@ -67,9 +67,25 @@ repos/fryorcraken/agent-spec-flow`.
       path") and records both corrections. The PR body's "no `/nix/store`
       reads" is corrected in the same pass.
 
-- [ ] **`dev-writer`** — `design.md:299-308`, `design.md:323-325` and the Risks entry at `design.md:424-440` — the marketplace decision gives "unpublished" as its forcing constraint, which no longer holds as stated, and records no alternative to a local clone of a moving branch
+- [x] **`dev-writer`** — `design.md:299-308`, `design.md:323-325` and the Risks entry at `design.md:424-440` — the marketplace decision gives "unpublished" as its forcing constraint, which no longer holds as stated, and records no alternative to a local clone of a moving branch
       **Scenario:** `gh api repos/fryorcraken/agent-spec-flow` reports `"private":false`, created 2026-10-06, and the README itself clones it from `https://github.com/fryorcraken/agent-spec-flow`. So "While the plugin is unpublished its marketplace is a local clone" leaves out the constraint that actually applies. The plugin's `DECISIONS.md` decision 20 (`6023db6`) says: "No release tag, and dialectica stays on its local marketplace, until a full piece has run on the plugin". design.md does not cite it. Two alternatives are now available and neither is recorded with what rules it out. (a) A tracked `github` marketplace source pinned to a commit. This would close the Risks entry's "names `specflow@agent-spec-flow` with no source or revision", and that entry already asks for a pinned commit as the follow-up. (b) A README clone checked out at the reconciled `77fce4d`. Today the README clones the default branch, which is `756e76a` now and could be anything later. A contributor therefore installs a revision design.md's "What runs is an installed copy" never reconciled. The re-check command at `design.md:344-345` is the only guard, and the README does not mention it.
       **Measured:** `gh api repos/fryorcraken/agent-spec-flow` (`private:false`, `default_branch: main`); plugin `DECISIONS.md:37`; `README.md` "Working with the agent flow", step 1 (no checkout). Record decision 20 as the constraint, and add (a) and (b) to the alternatives with what rules each out.
+      **Fixed** in the commit "Record the plugin repository's real trust
+      state, and the marketplace constraint". The marketplace decision now
+      opens "The constraint is the plugin's, not visibility", cites
+      `"private": false` and quotes decision 20 (`DECISIONS.md:37` in the
+      clone at `756e76a`). It lists three options with what rules each out:
+      (a) a tracked `github` source pinned to a commit, ruled out by decision
+      20, since this piece ran on the in-repo flow and so is not the full
+      piece it waits for; (b) a README clone at `77fce4d`, ruled out by the
+      owner, who decided the README stays unpinned until the release; (c)
+      the default branch, chosen, with its cost and a pointer to the
+      re-check procedure, which README does not carry (also by the owner's
+      decision; `findings/rereview-architecture.md` box 1). "Unpublished"
+      is gone from `design.md`, `proposal.md` and README:
+      `git grep -n -i -E "unpublished|is published" -- <those three>` prints
+      only README's unrelated "Logos module catalogue is published from
+      GitHub Releases".
 
 - [ ] **`dev-writer`** — `design.md:214-221` — the decision to leave the overlay's `## Lessons` at `None.` after the regression was accepted and filed upstream is not recorded, and a round-one outcome misstates which branch the owner took
       **Scenario:** the block's rule (`CLAUDE.md:469-471`) pairs two steps for a specflow gap the owner agrees to: record it under the overlay's `## Lessons`, and file it on `agent-spec-flow`. The plugin's `run` skill says the same (`skills/run/SKILL.md:239-244`). This change did the second (agent-spec-flow#1) but not the first: `PROJECT.md:139-141` still reads `None.`. `findings/architecture.md` box 4 asked for a `## Lessons` entry "if they accept the regression". Its outcome says the owner "took the box's second branch, filing upstream", that `## Lessons` was asked "only on the accept branch", and that "the plugin runner reads nothing that names the regression". design.md:216 records that the owner **accepted**. So the accept branch is the one taken, and its second half is neither done nor ruled out in design.md. The owner's "the overlay does not carry the rules" is not this question: a `## Lessons` line that points at the issue carries no rule. The issue named `PROJECT.md` among the `.claude/` changes the owner asked for, so "the owner's file" does not settle it either. This box does not ask for the entry. It asks that design.md say whether `## Lessons` points at agent-spec-flow#1, and if not, why, and what the plugin runner reads instead that names the regression.

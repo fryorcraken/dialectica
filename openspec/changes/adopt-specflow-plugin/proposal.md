@@ -27,10 +27,11 @@ request for exactly the `.claude/` changes below.
 - **`.claude/settings.json`**: add `enabledPlugins` for
   `specflow@agent-spec-flow`. `worktree.baseRef: "head"` stays.
 - **`.gitignore`**: re-admit `.claude/specflow/`.
-- The marketplace entry is machine-local while the plugin is unpublished, so
-  it is not in this change: `README.md` documents the three steps each
-  contributor runs once, cloning `agent-spec-flow`, running `claude plugin
-  marketplace add` on the clone, and installing the plugin for the project.
+- The marketplace entry is machine-local until `agent-spec-flow` has a
+  release (its `DECISIONS.md` decision 20), so it is not in this change:
+  `README.md` documents the three steps each contributor runs once, cloning
+  `agent-spec-flow`, running `claude plugin marketplace add` on the clone,
+  and, after this change merges, installing the plugin for the project.
 
 **Not a no-op for the flow.** The issue says the change is behaviour-neutral
 for the flow. That held at `6a7e02b9`; since then `5ec12953` (#174) changed

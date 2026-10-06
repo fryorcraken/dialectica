@@ -34,9 +34,17 @@ the answered boxes in `findings/*.md` read as claims, and PR #196's body
       **Scenario:** the `closer` deletes `findings/` before the archive commit (the stage row "findings all ticked, `findings/` deleted"), and the squash writes the PR body into `main`'s history. The commit message then cites a file that never existed on `main`. A reader following it finds nothing, while the decision is recorded in a file that survives: `design.md`, "Six shell rules are listed in `CLAUDE.md`, outside the block", which quotes the owner. Point the body there.
       **Measured:** `gh pr view 196` shows "owner's decision, `findings/architecture.md` box 1". `git grep -n -F "findings/"` over `design.md`, `proposal.md`, `tasks.md`, `CLAUDE.md`, the overlay and `README.md` finds only rule 12's text and the closer's stage row. So the PR body is the only durable text that cites a findings file. Severity: low.
 
-- [ ] **`dev-writer`** — `openspec/changes/adopt-specflow-plugin/design.md:349-351` — the sentence "`/specflow:init` merges a `permissions.allow` block … and the marketplace entry into the tracked `settings.json`" is false for the setup this repo's README prescribes.
+- [x] **`dev-writer`** — `openspec/changes/adopt-specflow-plugin/design.md:349-351` — the sentence "`/specflow:init` merges a `permissions.allow` block … and the marketplace entry into the tracked `settings.json`" is false for the setup this repo's README prescribes.
       **Scenario:** README's step 2 registers a cloned directory (`claude plugin marketplace add ~/src/agent-spec-flow`), so the marketplace source is `directory`. For that source, `init` writes the entry to `.claude/settings.local.json`, not to `settings.json`, "since a local path is machine-local". Only a `github` source, or no registered entry at all, goes into the tracked file. The section's conclusion still holds, because the allowlist does land in tracked `settings.json` and that is the decision's point. But the marketplace half tells the owner that running `init` here would also commit a marketplace entry, which it would not. Fix: say "and, for a `github` source, the marketplace entry", or drop the marketplace half.
       **Measured:** plugin `skills/init/SKILL.md:65-73` at `756e76a` (unchanged since `77fce4d` apart from `be56964`'s 4 lines): `"source": "directory"` → "written to `.claude/settings.local.json` instead". Severity: low.
+      **Fixed** in the commit "Record the plugin repository's real trust
+      state, and the marketplace constraint". Read plugin
+      `skills/init/SKILL.md` § 1 at `756e76a` (lines 65-73). The section now
+      says `init` merges the allowlist into tracked `settings.json`, and that
+      the marketplace entry goes there only for a `github` source or none
+      registered; for the `directory` source README's route produces, it
+      goes to `.claude/settings.local.json`, quoting "since a local path is
+      machine-local". The section's conclusion is unchanged.
 
 ## Claims checked and true
 

@@ -89,8 +89,10 @@ reports `ok` having run almost nothing.
 
 Changes go through a spec-driven agent flow that runs on the **specflow**
 Claude Code plugin, `specflow@agent-spec-flow`, which `.claude/settings.json`
-enables. Until `agent-spec-flow` is published, Claude Code cannot find it on its
-own. Once, before starting a session here, three steps:
+enables. Until `agent-spec-flow` has a release, this repository does not name
+its marketplace, so Claude Code cannot find it on its own. Once, before
+starting a session here, three steps. `~/src/agent-spec-flow` below is only an
+example; use the same directory in the first two.
 
 1. Clone the plugin's repository into a directory of your choice:
 
@@ -104,23 +106,24 @@ own. Once, before starting a session here, three steps:
    claude plugin marketplace add ~/src/agent-spec-flow
    ```
 
-3. Install the plugin for this project, from the repository root:
+3. Install the plugin for this project, from the root of a checkout whose
+   `.claude/settings.json` already enables it (any checkout of `main` that
+   has this section):
 
    ```
    claude plugin install specflow@agent-spec-flow --scope project
    ```
 
    Registering the marketplace makes the plugin installable, not installed.
-   `--scope project` records it in `.claude/settings.json`, which already
-   enables it, so `git diff .claude/settings.json` should show nothing
-   afterwards.
+   `--scope project` records it in `.claude/settings.json`, so in such a
+   checkout `git diff .claude/settings.json` should show nothing afterwards.
+   From a checkout without the entry it would add it to that tracked file.
 
-`~/src/agent-spec-flow` is only an example; use the same directory in the
-first two steps. A session started afterwards lists the `specflow:*` agents
-and skills.
+The first two steps write nothing in this repository and can run any time. A
+session started after the third lists the `specflow:*` agents and skills.
 
-This step goes away once the plugin is published and its marketplace entry
-moves into `.claude/settings.json` as a pinned `github` source.
+These steps go away once `agent-spec-flow` has a release and its marketplace
+entry moves into `.claude/settings.json` as a pinned `github` source.
 
 ## Where it lives
 
