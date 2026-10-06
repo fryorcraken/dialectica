@@ -110,8 +110,9 @@ What was considered instead:
   that is the two-sources problem this change exists to end, and the plugin's
   `closer` would still be the one dispatched as `specflow:closer`.
 - **Carry them upstream, in the plugin.** Chosen. The loss is tracked by an
-  issue on the flow repo, `agent-spec-flow`, which is where a rule about the
-  runner, the stage roster or the `closer` belongs. The reasoning for all five
+  issue on the flow repo, `agent-spec-flow`:
+  <https://github.com/fryorcraken/agent-spec-flow/issues/1>. That repo is
+  where a rule about the runner, the stage roster or the `closer` belongs. The reasoning for all five
   items is not lost: it is in
   `openspec/changes/archive/2026-09-27-171-workflow-rules/design.md` and
   `proposal.md`, archived with the change that made them. What is lost is the
@@ -161,12 +162,15 @@ worktree, the failure shape the `settings.json` comment above it records.
 
 ### The marketplace entry is not in this change
 
-While the plugin is unpublished its marketplace is a local checkout, so the
+While the plugin is unpublished its marketplace is a local clone, so the
 entry is machine-local and `settings.json` gets only `enabledPlugins`. Each
-contributor registers the marketplace with `claude plugin marketplace add
-<checkout path>`, the command `README.md`'s "Working with the agent flow"
-documents; its default scope is `user` (`claude plugin marketplace add
---help`), so it reaches every worktree rather than one checkout. The owner
+contributor clones `https://github.com/fryorcraken/agent-spec-flow` into a
+directory of their choice and registers that clone with `claude plugin
+marketplace add <the directory cloned into>`, the two steps `README.md`'s
+"Working with the agent flow" documents with one example directory, never a
+contributor's real path. The `add` default scope is `user` (`claude plugin
+marketplace add --help`), so it reaches every worktree rather than one
+checkout. The owner
 runs it; a dispatched agent does not change the owner's Claude Code
 configuration. The README note goes when the plugin is published and the entry
 moves into `settings.json` as a pinned `github` source.
@@ -196,8 +200,9 @@ Dialectica-specific sentences in deleted text with no home in the overlay:
 
 - [The flow regresses on #174's five rules until the plugin carries them] →
   item 5 is in the overlay; items 1 to 4 are tracked by an issue on the flow
-  repo, `agent-spec-flow`, and are absent from the active flow until the plugin
-  carries them.
+  repo, `agent-spec-flow`
+  (<https://github.com/fryorcraken/agent-spec-flow/issues/1>), and are absent
+  from the active flow until the plugin carries them.
 - [The overlay draws on `ci.yml` and branch protection, both of which move] →
   it names commands (`gh api …/protection`) rather than lists where it can,
   and names the step whose output a claim comes from.

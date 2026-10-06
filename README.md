@@ -90,15 +90,22 @@ reports `ok` having run almost nothing.
 Changes go through a spec-driven agent flow that runs on the **specflow**
 Claude Code plugin, `specflow@agent-spec-flow`, which `.claude/settings.json`
 enables. Until `agent-spec-flow` is published, Claude Code cannot find it on its
-own: add its marketplace from a local checkout once, before starting a session
-here:
+own. Once, before starting a session here:
 
-```
-claude plugin marketplace add /home/fryorcraken/src/fryorcraken/agent-spec-flow
-```
+1. Clone the plugin's repository into a directory of your choice:
 
-That path is where the checkout sits on the maintainer's machine; substitute
-the path to your own `agent-spec-flow` checkout.
+   ```
+   git clone https://github.com/fryorcraken/agent-spec-flow ~/src/agent-spec-flow
+   ```
+
+2. Register that clone as a marketplace, giving the directory you cloned into:
+
+   ```
+   claude plugin marketplace add ~/src/agent-spec-flow
+   ```
+
+`~/src/agent-spec-flow` is only an example; use the same directory in both
+steps.
 
 This step goes away once the plugin is published and its marketplace entry
 moves into `.claude/settings.json` as a pinned `github` source.
