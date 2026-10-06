@@ -1401,3 +1401,62 @@ regression test checks. I record this rather than box it.
       the requirement forbids the generation-bearing form outright, so no
       generation is ever offered to it. `proposal.md` names the MODIFIED
       block and gains a *What Changes* line for the topic's shape.
+
+## Re-review round 9 `43844f2b..87596ac4`
+
+Reviewed at `286a2314` (range tip `87596ac4`; the tip adds only findings). Read: the
+range's diff of `specs/op-transport/spec.md` and `proposal.md`; the live requirement
+"A Stoa's ops travel on one reliable channel per Stoa" in
+`openspec/specs/op-transport/spec.md` (lines 31-70) against the MODIFIED block;
+the `mod tests` hunks of `transport.rs` and the one-line `delivery/tests.rs` hunk;
+`delivery_topic_rule::parse` and the regression test in full; my round-8 box. The
+implementation was not read. **No mutation was run:** the one I tried
+(`TOPIC_SUFFIX` to `"/proto/x"`, to turn the five-part refusal red) was denied by the
+permission classifier, so I did not pursue it. Baseline only:
+`cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p dialectica-core --lib --quiet transport::`
+read from its own output, 84 passed, 0 failed.
+
+**Round-8 box answered as its outcome says.** The delta carries a MODIFIED
+requirement with the live text: the five live paragraphs (lines 33, 35, 37, 39, 41 of
+the live spec) and all five live scenarios appear in the block word for word and in
+the same order, with nothing dropped; the additions are the three paragraphs
+after the prefix paragraph (the topic SHALL be a name the network's rule accepts and
+read as `dialectica`/`1`, in the four-part form and not the generation-bearing one;
+the rule binds the content topic alone; what is checkable is the topic against the
+rule, not a live node) and the new scenario. `proposal.md`'s two additions say what
+the block says and do not diverge from it. Its "no test is owed" reading held and
+the tests now cite the scenario: the derived-topic test names it in a comment and
+names the refusal half (`the_topic_a_live_node_refused_is_refused_with_its_message`).
+
+**The new scenario maps to tests that can fail for the reason it names.** (1)
+"accepts it in the four-part form, with no generation" and "reads `dialectica` and
+`1`": `the_content_topic_is_one_delivery_parses_with_dialectica_as_application` runs
+the transcribed rule over four Stoas and asserts `generation == None`,
+`application == "dialectica"`, `version == "1"`. The rule is the transcription, not
+the derivation, so the test cannot agree with a wrong topic; a five-part or
+generation-bearing derivation fails at the `unwrap_or_else` or the `None` assertion,
+and a changed application or version fails the last two. It now goes through
+`subscribable`, the stricter step, which does not change the outcome for a topic
+with no generation. (2) "refuses a name that begins with `/dialectica/1/` and has
+five parts": the refusal is asserted against a literal taken from the live run, with
+delivery's own message, through both `parse` and `subscribable`. (3) "applies that
+rule as written independently of the derivation": the refused name is a hardcoded
+literal, and the transcription's revision is now pinned to `flake.lock` by
+`the_transcribed_revision_is_the_one_delivery_is_locked_at`, which asserts the
+lock has at least one logos-delivery node, so it cannot pass by matching nothing.
+The generation-above-zero test and `subscribable` map to no scenario, which is
+right: the requirement forbids the generation-bearing form outright, so they are
+design-level pins of the fake, not behaviour the spec has to carry.
+
+**Self-consistency and scope.** The new paragraphs agree with the live prefix
+paragraph and with "Channel identity is a pure function of the Stoa address" (no
+topic shape named there; `git grep` for `/proto`, `s-<hex>` and `four-part` finds
+the shape only in this delta). "Any other number of parts is refused" holds for the
+rule as transcribed (five parts fail on a non-numeric first part; every other count
+fails the structure check). The claim is only exercised at five parts; that is the
+form the live run refused, and I record it rather than box it. No `NO SPEC:`
+marker is new in the range's test files. Issue #176 was not re-read: the range
+changes the content topic's shape inside the reliable channel the issue asks for and
+adds no scope.
+
+- [x] **re-review round 9 `43844f2b..87596ac4`: no findings** — read the MODIFIED op-transport block against the live requirement and its five scenarios (verbatim, additions only), the new scenario against the derived-topic test, the five-part refusal test and the lock-pin test, and my round-8 box; clean
