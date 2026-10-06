@@ -1,0 +1,69 @@
+# Findings — review: architecture
+
+Dimension: **architecture only**. That means where each rule and fact now lives
+(plugin, overlay, `CLAUDE.md`), whether the overlay maps onto the plugin's actual
+agents, whether the stage block is the shape the plugin expects, the
+plugin-version dependency, and the `.gitignore`/`settings.json` wiring. Reviewed
+at `20643177` against `origin/main`. The plugin was read at its checkout HEAD
+`be56964` and at its installed cache (`~/.claude/plugins/cache/agent-spec-flow/specflow/0.1.0`).
+
+- [ ] **`dev-writer`** — `CLAUDE.md:450-507`, `.claude/specflow/PROJECT.md:18-23,40-41,99-116` — rules that must reach every session now live only in the overlay
+      **Scenario:** `CLAUDE.md` on `origin/main` held these inline, in the section it called "the most important section in this file": read YAML/JSON with `yq`/`jq` and never Python; run QML specs through `run-qml-tests.sh` and never `qmltestrunner`; no `QT_QPA_PLATFORM=`/`VAR=value` prefix (with the wrapper named); never `readlink`/`ls` a `/nix/store` path; stage the SDK before `cargo test`; `nix build ./dialectica#lgx` because the root has no flake. After this change each is in the overlay alone. The overlay's own header (`PROJECT.md:4`) addresses "every specflow agent", and the plugin preloads it only into specflow agents (`flow` skill) and `/specflow:pm`. Any other reader of this repo gets only one row in the block's table pointing at the overlay: an ad-hoc owner session, an `Explore`/`general-purpose` subagent, a plugin agent such as `agent-skills:code-reviewer`, or a session fixing dependabot PR #145. For example, such a session asked to check a workflow YAML reaches for `python3 -c 'import yaml…'` and costs the owner a click, which is the exact case the `yq`/`jq` rule was written for. The block contradicts the placement itself (`CLAUDE.md:443-445`): "A rule that must reach every session and agent belongs in `CLAUDE.md`, outside this block". Severity: medium. Either keep a short project section in `CLAUDE.md` outside the block holding the six Bash-cost rules (the overlay can point to it), or record in `design.md` why one table-row hop is enough for non-specflow sessions.
+      **Measured:** `grep -n -E "yq|run-qml-tests|/nix/store|logos-rust-sdk-src|dialectica#lgx|QT_QPA_PLATFORM" CLAUDE.md` matches only `--jq` in the generic block, the `path:./dialectica#lgx` flake-ref note and the `check_bindings` account. None of the six rules is there. The same pattern matches 11 lines of `PROJECT.md`.
+
+- [ ] **`dev-writer`** — `openspec/changes/adopt-specflow-plugin/design.md:160-166` — the plugin-version dependency is not recorded, and the issue's premise about it is false
+      **Scenario:** #195 says "A directory marketplace is read live from its folder, so there is no version pin yet", and `design.md` says nothing about versions. In fact Claude Code runs a copy, not the checkout. `~/.claude/plugins/installed_plugins.json` gives `installPath …/cache/agent-spec-flow/specflow/0.1.0` with `gitCommitSha 77fce4d`, while the checkout's HEAD is `be56964`. Both call themselves `0.1.0`. `/specflow:run`'s only version check compares the `CLAUDE.md` stamp with the literal `v0.1.0` (`skills/run/SKILL.md` preflight 3), so it cannot tell the two contents apart. If the plugin is reinstalled, the flow silently changes to whatever is in the working tree, uncommitted files included. If it is not reinstalled, a fix committed upstream never arrives. The "byte for byte" `cmp` of the block (`design.md:145-151`) ran against the checkout, not against the copy that runs. It holds today only because `skills/sync/SKILL.md` happens to be identical in both. Severity: medium. Record the plugin commit the overlay and block were reconciled against, and the fact that the flow runs from a version-keyed cache, so drift without a version bump is invisible. That is the self-invalidating form of present state that the block's "Keeping documents true" asks for.
+      **Measured:** `diff -rq ~/.claude/plugins/cache/agent-spec-flow/specflow/0.1.0 ~/src/fryorcraken/agent-spec-flow` lists `skills/init/SKILL.md` (checkout +3 lines), `DECISIONS.md` and `LESSONS.md` as differing, and does not list `skills/sync/SKILL.md`. `grep -rn -i -E "live|pin|be56964|77fce4d|cache" openspec/changes/adopt-specflow-plugin/` finds no version or pin statement.
+
+- [ ] **`dev-writer`** — `openspec/changes/adopt-specflow-plugin/tasks.md:56-58` (and the PR body's "Owner step") — the owner step adds a marketplace entry that is already registered, in a file no worktree has, and does not name the plugin install
+      **Scenario:** task 3.3 tells the owner to add `extraKnownMarketplaces.agent-spec-flow` (directory source) to the main checkout's `.claude/settings.local.json`. Three problems. (a) That marketplace is already registered user-wide in `~/.claude/plugins/known_marketplaces.json`, same path, so on this machine the step changes nothing. (b) `settings.local.json` is untracked, so no worktree has it. A session started directly in a piece worktree, which is the plugin's own "a second piece gets a second session in its own worktree", would not see an entry that lived only there. (c) The plugin is installed only at `scope: local` for `projectPath …/agent-spec-flow/tmp/sandbox`. Nothing in the change or the PR says to install `specflow@agent-spec-flow` for this project, or at user scope. I have not verified whether tracked `enabledPlugins` alone makes Claude Code install it. The issue's fourth check, a fresh session listing `specflow:*`, is the only thing that will show it, and it runs after merge. Severity: low to medium. If the owner step is wrong, the first `/specflow:run` fails preflight with no plugin present, or runs a stale cache. Name the actual missing step (install for this project, or confirm `enabledPlugins` triggers it), and correct `design.md:197-199`, which names the marketplace entry as the gap.
+      **Measured:** `find …/piece-195-specflow-adoption/.claude -maxdepth 1` lists `settings.json` and `specflow`, with no `settings.local.json`. My own worktree is the same. `installed_plugins.json` has a single `specflow@agent-spec-flow` entry, `"scope": "local"`, sandbox `projectPath`.
+
+- [ ] **`dev-writer`** — `openspec/changes/adopt-specflow-plugin/tasks.md:3-22`, `design.md:189-193` — the owner's decision on #174 items 1–4 has no checkbox, so nothing stops the merge before it is made
+      **Scenario:** `design.md` drops four live flow rules from the active flow. The re-review round, `NO SPEC:` routed to the `spec-writer`, the `closer` merging `main` with no force and no conflict resolution, and runner fast-forwards are all replaced by the plugin's rebase plus `--force-with-lease` and conflict-resolving `closer`. The PR body says "Owner decision needed before the next `/specflow:run`". But that decision appears only in prose. Both the in-repo `closer` (Step 1) and the plugin's `closer` gate on `findings/` boxes and stage-block rows only, and task 3.3's unticked box is in `## Implementation`, which neither reads. So the PR can merge green with the question unanswered. After the merge the next `/specflow:run` is the plugin runner, which reads only the overlay, and the overlay records nothing about the regression (`## Lessons` reads `None.`). The first piece then runs a `closer` that force-pushes and resolves conflicts, which this repo's archived decision `2026-09-27-171-workflow-rules` forbade, and no file the runner reads says so. Severity: high for the flow, nil for dialectica's code. This box is the gate: tick it only once the owner's answer is recorded. If they accept the regression, that is a `design.md` line plus the overlay's `## Lessons` with the upstream issue link, per the block's own lessons rule (`CLAUDE.md:446-448`). If they file it upstream first, it is the issue link.
+      **Measured:** `grep -n "Lessons" -A 2 .claude/specflow/PROJECT.md` shows `None.` under `## Lessons`. `grep -rn -E "re-review|--admin|fast-forward" ~/src/fryorcraken/agent-spec-flow/skills ~/src/fryorcraken/agent-spec-flow/agents` matches nothing for `re-review` or `fast-forward`, which matches `design.md:73-76`.
+
+## Checked and clean
+
+**`.gitignore` / `settings.json` wiring.** `git ls-files .claude` lists exactly
+`.claude/settings.json` and `.claude/specflow/PROJECT.md`. This worktree, cut by
+`isolation: "worktree"`, has both. `git check-ignore -v --no-index` ignores
+`settings.local.json` (`.gitignore:68`) and leaves the overlay and
+`settings.json` tracked. The order `.claude/*` then negations is the one git
+honours. `enabledPlugins` sits beside `worktree.baseRef: "head"`, which is unchanged.
+Keeping `!.claude/agents/` with the directory empty is harmless, and it matches
+`skills/init/SKILL.md` § 2.
+
+**The overlay maps onto the plugin's real readers.** It has all eight required
+headings from `openspec/specs/project-overlay/spec.md`, and no line reads exactly
+`TODO`. Each role section names a role that reads it. `spec-writer`, `dev-writer`,
+`tester`, `code-reviewer`, `spec-test-reviewer` and `closer` all preload
+`specflow:flow`, whose "A `## <your role>` section … adds project rules for your
+role" covers them. `code-reviewer.md:20`, `dev-writer.md:65` and
+`tester.md:59` also cite their sections explicitly, and `skills/pm/SKILL.md:20`
+reads `## pm`. No section names an agent the plugin lacks. `## closer`'s
+`--admin`/`BLOCKED` rule adds to `agents/closer.md` Step 6 and does not
+contradict it. `## Extra stages: None.` is right, since the re-review row cannot
+enter there (`design.md:100-102`).
+
+**Stage block shape.** This change's block has the plugin roster's twelve rows
+(`openspec/specs/stage-block/spec.md`), with identical text, plus the in-repo
+runner's re-review row. That row is correct for a piece the in-repo runner
+closes. The archive will freeze it at thirteen rows, and nothing in the plugin
+reads an archived block. **Changes in flight:** `openspec list` shows only
+`relevance-votes` besides this one. `grep -c "^## Stages"` on its `tasks.md`
+prints `0`. It last changed in `f59061d8` (#106), and no `piece/` branch or open
+PR carries it. So no in-flight block can be misread by the plugin's runner, and a
+blockless change reads as "untracked" under both flows alike. The issue's check
+about `ui-remaining-screens` is moot: that change is archived
+(`2026-09-28-ui-remaining-screens`).
+
+**References to deleted files.** `git grep` for the deleted paths outside
+`openspec/changes/archive/` finds only this change's own folder. The CI comments
+that cite `CLAUDE.md` (`ci.yml:164,180,262`, `ui-tests.yml:254`) cite "Module
+contract traps" and the `lgs` rewrite note, and both are kept.
+
+**Not boxed, a style preference:** the overlay's `## dev-writer` and
+`## code-reviewer` restate `CLAUDE.md`'s "Security posture", which every session
+already has injected. That makes two copies of one rule. It is harmless while
+they agree, but pointing at the section would be the one-copy form.
