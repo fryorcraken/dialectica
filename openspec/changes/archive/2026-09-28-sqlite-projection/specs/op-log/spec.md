@@ -2,11 +2,15 @@
 
 ### Requirement: The log records what arrived, and decides nothing about it
 
-The log SHALL store every op appended to it, together with the transport metadata recorded on its arrival. It SHALL NOT verify a signature, check an authorisation, or reject an op on the basis of its content when appending.
+The log SHALL store every op appended to it, together with the transport metadata recorded on its arrival. It SHALL NOT verify a signature, check an authorisation, or reject an op on the basis of its content when appending, except for the one refusal below.
 
 Verification is the reader's job.
 
-An implementation that persists SHALL apply this identically. Persistence SHALL NOT become an occasion to filter: a store that refused to write an op it could not verify would make a forgery indistinguishable from an op that never arrived, which is the same defect whether the store is in memory or on disk.
+**A log that keeps ops as their encoding MUST refuse to append an op the `op-format` capability's encoding refuses to encode** — in this build, a metadata op whose title is blank. A log keeps ops as their encoding when it stores each op's encoded bytes and decodes them on read, as a peer's persistent log does. Such a log MUST store nothing for the refused op, MUST report the refusal distinguishably from a storage failure, and MUST leave every op it already held readable exactly as before. This refusal is the op format's and not a judgement of the op's authenticity or authority: it applies to no op that encoding admits, whatever its signature or author.
+
+A log that keeps ops as values, and so decodes nothing on read, is not under that refusal, and MUST store such an op as it stores any other.
+
+An implementation that persists SHALL apply this identically, and the refusal above is the only one it makes. Persistence SHALL NOT become an occasion to filter by signature or authority: a store that refused to write an op it could not verify would make a forgery indistinguishable from an op that never arrived, which is the same defect whether the store is in memory or on disk.
 
 #### Scenario: An op with an invalid signature is stored
 
@@ -33,6 +37,20 @@ An implementation that persists SHALL apply this identically. Persistence SHALL 
 - **THEN** the op read back is byte-identical to the one appended
 - **AND** its signature still verifies
 - **AND** its recorded arrival metadata is unchanged
+
+#### Scenario: An op with no encoding is refused by a log that keeps encodings, and nothing is written
+
+- **WHEN** a log that keeps ops as their encoding, holding one op of a Stoa, is appended a metadata op for that Stoa, authentically signed, whose title is the empty string
+- **THEN** the append reports a refusal
+- **AND** the refusal is distinguishable from a storage failure
+- **AND** the log holds exactly the one op it held before
+- **AND** a read restricted to that Stoa succeeds and returns that one op
+
+#### Scenario: A log that keeps ops as values stores an op with no encoding
+
+- **WHEN** a log that keeps ops as values is appended a metadata op, authentically signed, whose title is the empty string
+- **THEN** the append succeeds
+- **AND** the op is readable from the log, with its title unchanged
 
 ### Requirement: An op is stored once, identified by its op id
 
@@ -103,13 +121,13 @@ An implementation whose storage can fail SHALL report that failure as a distinct
 
 ### Requirement: The log's contract holds for every implementation
 
-The behaviour every other requirement in this capability describes SHALL hold for each implementation of the log, whether it keeps ops in memory or persists them. No implementation SHALL be exempt from a requirement on the grounds of how it stores.
+The behaviour every other requirement in this capability describes SHALL hold for each implementation of the log, whether it keeps ops in memory or persists them. No implementation SHALL be exempt from a requirement on the grounds of how it stores, except where a requirement itself distinguishes a log that keeps ops as their encoding from one that keeps them as values.
 
-Where two implementations are given the same ops with the same recorded arrival metadata, every read defined here SHALL return the same sequence from each.
+Where two implementations are given the same ops with the same recorded arrival metadata, and neither refuses any of them, every read defined here SHALL return the same sequence from each.
 
 #### Scenario: Two implementations given the same ops read alike
 
-- **WHEN** the same ops with the same recorded arrival metadata are appended to an in-memory log and to a persistent log
+- **WHEN** the same ops with the same recorded arrival metadata, none of which either log refuses, are appended to an in-memory log and to a persistent log
 - **THEN** an unrestricted read returns the same sequence of ops from each
 - **AND** a read restricted to a Stoa returns the same sequence from each
 - **AND** a read restricted to a target returns the same sequence from each
@@ -175,9 +193,9 @@ An implementation that persists SHALL record, for each op, the values a later re
 
 It SHALL NOT store a score, a weight, a vote total, or any other value derived by combining ops. Such a value depends on facts that are not known when an op is stored — which identities are moderators is resolved on read from the Stoa's genesis record, and any per-reader weighting differs between two readers of the same store — so no single stored value could be correct for every read.
 
-The recorded decay point SHALL be taken from the transport's ordering metadata, and SHALL NOT be read from a local clock. A locally-read time differs between two peers that received the same op, which would make two peers holding identical ops rank them differently.
+The recorded decay point SHALL be the Lamport counter the op carries in its own signed bytes, and SHALL be recorded as absent for an op that carries none. It SHALL NOT be taken from the arrival metadata recorded against the op, SHALL NOT be read from a local clock, and SHALL NOT be taken from the op's wall-clock field. Recorded arrival metadata and a locally-read time each differ between two peers that received the same op, which would make two peers holding identical ops rank them differently; the wall-clock field is a value its author chooses.
 
-No ordering defined by this capability SHALL consult these values. Until a relevance change lands they carry no meaning, and the defined read order is unaffected by them.
+No read order defined by this capability SHALL consult these values, and the defined read order is unaffected by them.
 
 #### Scenario: An op's author is recorded in a form a later ranking can group by
 
@@ -191,14 +209,20 @@ No ordering defined by this capability SHALL consult these values. Until a relev
 - **THEN** no stored value counts, sums or weights them
 - **AND** every stored value is a property of a single op
 
-#### Scenario: The decay point does not come from a local clock
+#### Scenario: The decay point is the op's own counter
 
-- **WHEN** the same op with the same recorded arrival metadata is appended to two persistent logs at different moments
+- **WHEN** the same op is appended to two persistent logs at different moments, with differing recorded arrival metadata
 - **THEN** both record the same decay point
-- **AND** an op whose arrival carried no ordering metadata is distinguishable from one whose arrival placed it at the ordering's origin
+- **AND** that decay point is the counter the op carries
+
+#### Scenario: An op carrying no counter is recorded as having none
+
+- **WHEN** an op carrying no counter, an op whose counter is zero and an op whose counter is the maximum representable value are appended to a persistent log
+- **THEN** the op carrying no counter is recorded as having no decay point
+- **AND** each of the other two is recorded with its own counter, distinguishable from the first and from each other
 
 #### Scenario: Reserving for a ranking does not change what a read returns
 
-- **WHEN** an in-memory log and a persistent log are given the same ops
+- **WHEN** an in-memory log and a persistent log are given the same ops, none of which either refuses
 - **THEN** every read returns the same sequence from each
 - **AND** the persistent log's reserved values do not reorder it

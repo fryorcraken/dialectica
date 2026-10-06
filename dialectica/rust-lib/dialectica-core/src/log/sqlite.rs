@@ -1678,6 +1678,73 @@ mod tests {
         );
     }
 
+    // ─── The reserved author column ────────────────────────────────────────
+
+    /// Read the `author` column for one op, as it is actually stored.
+    ///
+    /// `Entry`'s decoded `op.author` comes from `op_bytes`, the full encoding —
+    /// so it cannot tell this column apart from a version that stored the wrong
+    /// bytes into it, or nothing at all. Reaching in directly, exactly as
+    /// `stored_score_epoch` does for its column, is the only way to test what
+    /// the reserved column itself holds.
+    fn stored_author(log: &SqliteOpLog, id: &OpId) -> Vec<u8> {
+        log.conn
+            .query_row(
+                "SELECT author FROM ops WHERE op_id = ?1",
+                rusqlite::params![id.as_bytes().as_slice()],
+                |row| row.get(0),
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn the_stored_author_is_the_signer_regardless_of_moderator_status() {
+        // op-log's ADDED "A persistent log stores the inputs a ranking is
+        // computed from, never a ranking": "the stored entry records which
+        // identity signed it, AND that record is independent of whether the
+        // signer is currently a moderator." The log holds no moderator set —
+        // that is resolved on read, from the Stoa's genesis record — so the
+        // column must hold whichever key signed, whether or not that key is
+        // the Stoa's own creator.
+        //
+        // This is the same trap `an_op_with_no_counter_and_one_at_the_maximal_counter…`'s
+        // comment warns about for `score_epoch`: "the column is reserved:
+        // 'nothing writes this and no read consults it' is a comment that
+        // excuses a column from every behavioural test" while the rows still
+        // go to every peer's disk. No test here read it back before this one.
+        let mut log = SqliteOpLog::in_memory().unwrap();
+        let creator = a_key(1); // `a_stoa`'s own fixture creator (see fixtures.rs).
+        let random_peer = a_key(9);
+
+        let from_creator = Op {
+            author: creator.public_key(),
+            ..a_post("from the Stoa's own creator")
+        }
+        .sign(&creator);
+        let from_random = Op {
+            author: random_peer.public_key(),
+            ..a_post("from a peer with no standing at all")
+        }
+        .sign(&random_peer);
+
+        log.append(from_creator.clone(), Arrival::unordered())
+            .unwrap();
+        log.append(from_random.clone(), Arrival::unordered())
+            .unwrap();
+
+        assert_eq!(
+            stored_author(&log, &from_creator.op.id()),
+            creator.public_key().to_bytes().to_vec(),
+            "the creator's own op must record the creator's key"
+        );
+        assert_eq!(
+            stored_author(&log, &from_random.op.id()),
+            random_peer.public_key().to_bytes().to_vec(),
+            "a random peer's op must record that peer's key, not the creator's — \
+             the log has no moderator set to consult and must not substitute one"
+        );
+    }
+
     // ─── The clock override ───────────────────────────────────────────────
 
     /// A log that reaches the SAME rows through the SAME reads, but inherits
@@ -2134,6 +2201,38 @@ mod tests {
         match SqliteOpLog::open(&as_dir) {
             Err(OpLogError::Storage(_)) => {}
             other => panic!("opening a directory must be a storage error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_read_against_storage_broken_after_open_is_a_failure_not_an_empty_result() {
+        // op-log's ADDED "Every read is defined over the ops the peer happens to
+        // hold": "An implementation whose storage can fail SHALL report that
+        // failure as a distinct outcome from an empty result, and SHALL NOT
+        // panic." The test above pins this for `open` — the only place a bad
+        // path is refused by `check_layout` before this file's other tests can
+        // reach a live connection. That refusal makes the SAME defect
+        // unreachable through a plain reopen: dropping the table and reopening
+        // hits `check_layout`'s own refusal first, which
+        // `a_store_stamped_with_our_version_but_missing_the_tables_is_refused_at_open`
+        // already pins. This test reaches for a READ instead, by breaking
+        // storage through the log's OWN already-open connection — bypassing
+        // `open`'s guard entirely, since nothing reopens here.
+        let mut log = SqliteOpLog::in_memory().unwrap();
+        log.append(signed(a_post("about to lose its table")), Arrival::unordered())
+            .unwrap();
+        assert_eq!(log.len().unwrap(), 1, "the fixture must be genuinely non-empty");
+
+        log.conn
+            .execute("DROP TABLE ops", [])
+            .expect("the sabotage itself must succeed");
+
+        match log.iter() {
+            Err(OpLogError::Storage(_)) => {}
+            other => panic!(
+                "a read over storage that became unusable must be a distinct \
+                 failure, not confused with an empty result, got {other:?}"
+            ),
         }
     }
 

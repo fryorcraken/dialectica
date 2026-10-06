@@ -133,6 +133,182 @@ TestCase {
         screen.destroy()
     }
 
+    // `thread-view`'s "The reply composer is wired to the publish call and
+    // names the parent it is under": "Where the view holds no op id for a
+    // post, no reply call SHALL be made for it". For THIS screen the op id
+    // the view holds for the root is `threadId` (the file header names it
+    // "The ROOT POST's op id"), guarded in `reload()` before any read is
+    // even attempted — so the concrete rendering of "an item carrying no op
+    // id" is `threadId === ""`, and the affordance must be unreachable then.
+    function test_no_reply_affordance_is_reachable_with_no_root_identifier() {
+        var calls = []
+        Core.bridge = recordingBridge(calls, true)
+        var screen = threadComponent.createObject(null, {
+            stoaAddress: "ab".repeat(32),
+            stoaGenesis: "00ff",
+            threadId: ""
+        })
+
+        var composer = findChild(screen, "replyComposer")
+        var open = findChild(screen, "replyComposerOpen")
+        verify(open === null || !open.visible,
+               "the open-gate composer group is not rendered for a root the "
+               + "view holds no id for")
+        if (composer !== null)
+            verify(!composer.visible, "and certainly not a typable one")
+
+        var publishCalls = 0
+        for (var i = 0; i < calls.length; i++)
+            if (calls[i].method === "publish_reply")
+                publishCalls += 1
+        compare(publishCalls, 0,
+                "no reply call was made for a post the view holds no identifier for")
+        screen.destroy()
+    }
+
+    // The regression this guards against: the composer's parent is
+    // `screen.threadId`, never derived from the read's own item shape — so a
+    // root item the read returns with no `id` field at all must not be able
+    // to influence what is sent as `parent`. A future change that switched
+    // the composer to read the item's own `id` instead, without guarding for
+    // its absence, would send `parent: undefined` for exactly this fixture,
+    // and every other test in this file gives the root item an `id`, so none
+    // of them would notice.
+    function test_a_root_items_own_missing_id_does_not_reach_the_reply_parent() {
+        var calls = []
+        Core.bridge = {
+            callModule: function (module, method, args) {
+                calls.push({ method: method, args: JSON.parse(args[0]) })
+                if (method === "get_capabilities")
+                    return '{"canPost":true,"reason":""}'
+                if (method === "read_thread") {
+                    var rootWithNoId = rootItem()
+                    delete rootWithNoId.id
+                    return JSON.stringify({ items: [rootWithNoId], page: 0, hasMore: false })
+                }
+                if (method === "publish_reply")
+                    return '{"opId":"newreply","wasNew":true}'
+                return '{"error":"no fake reply for ' + method + '"}'
+            }
+        }
+        var screen = threadComponent.createObject(null, {
+            stoaAddress: "ab".repeat(32),
+            stoaGenesis: "00ff",
+            threadId: "root1"
+        })
+
+        var composer = findChild(screen, "replyComposer")
+        verify(composer !== null,
+               "the gate is governed by threadId and capability, not the item's own id")
+        composer.draft = "x"
+        composer.submit()
+
+        var published = null
+        for (var i = 0; i < calls.length; i++)
+            if (calls[i].method === "publish_reply")
+                published = calls[i]
+
+        verify(published !== null)
+        compare(published.args.parent, "root1",
+                "the parent is the screen's threadId, never the read item's own id field")
+        verify(published.args.parent !== undefined,
+               "no request is sent omitting the field that would have named the parent")
+        screen.destroy()
+    }
+
+    // `thread-view`'s "Every core call the thread screen makes goes through the
+    // view's single call path": "The view SHALL NOT insert an item on the
+    // strength of a publish having succeeded" — `composer-view`'s "A published
+    // post is not shown until core has been read again", restated for this
+    // screen. `DThreadScreen`'s composer fires `onPublished: screen.reload()`,
+    // and the fixture's `read_thread` answers the SAME one item on every call —
+    // so a locally composed row is the only way the count below could move.
+    function test_no_item_is_added_by_a_publish() {
+        var calls = []
+        var screen = makeScreen(calls, true)
+
+        compare(screen.items.length, 1, "the fixture starts with the root alone")
+
+        var composer = findChild(screen, "replyComposer")
+        composer.draft = "a reply"
+        composer.submit()
+
+        var reads = 0
+        for (var i = 0; i < calls.length; i++)
+            if (calls[i].method === "read_thread")
+                reads += 1
+        verify(reads >= 2, "the publish must be followed by a re-read")
+
+        compare(screen.items.length, 1,
+                "the items rendered are exactly what the re-read returned; "
+                + "nothing composed by the view was inserted")
+        screen.destroy()
+    }
+
+    // ---- the sanitiser report is threaded through, not just renderable ---
+    //
+    // `thread-view`'s "Every string rendered from an item is rendered as the
+    // read supplied it" has no test in this file, `tst_thread_states.qml` or
+    // `tst_thread_nesting.qml` that gives an item a non-clean `body`.
+    // `tst_sanitised_text.qml` proves the SHARED COMPONENT renders a
+    // sanitiser report correctly — a component test, blind to whether THIS
+    // screen actually passes a thread item's `body` field through to it
+    // rather than, say, `body.text` alone. A wiring defect dropping
+    // `removed`/`marked` on the way from the item to the component would not
+    // be caught by either file alone.
+
+    // A recursive walk by QML type name, since `SanitisedText` carries no
+    // `objectName` in `DThreadScreen.qml` and adding one would be an
+    // implementation change to make for a test.
+    function findByTypeName(item, typeName) {
+        for (var i = 0; i < item.children.length; i++) {
+            var child = item.children[i]
+            if (child.toString().indexOf(typeName) !== -1)
+                return child
+            var found = findByTypeName(child, typeName)
+            if (found !== null)
+                return found
+        }
+        return null
+    }
+
+    function bodyTextOf(sanitisedInstance) {
+        for (var i = 0; i < sanitisedInstance.children.length; i++)
+            if (sanitisedInstance.children[i].textFormat !== undefined)
+                return sanitisedInstance.children[i].text
+        return null
+    }
+
+    function test_the_screen_threads_the_items_sanitiser_report_through_to_the_render() {
+        var calls = []
+        Core.bridge = {
+            callModule: function (module, method, args) {
+                calls.push({ method: method, args: JSON.parse(args[0]) })
+                if (method === "get_capabilities")
+                    return '{"canPost":true,"reason":""}'
+                if (method === "read_thread") {
+                    var item = rootItem()
+                    item.body = { text: "reaches the screen unaltered", removed: 2, marked: 3 }
+                    return JSON.stringify({ items: [item], page: 0, hasMore: false })
+                }
+                return '{"error":"no fake reply for ' + method + '"}'
+            }
+        }
+        var screen = threadComponent.createObject(null, {
+            stoaAddress: "ab".repeat(32), stoaGenesis: "00ff", threadId: "root1"
+        })
+
+        var sanitised = findByTypeName(screen, "SanitisedText")
+        verify(sanitised !== null, "the root row renders through SanitisedText")
+        compare(sanitised.removedCount, 2,
+                "the item's own removed count reaches the shared component")
+        compare(sanitised.markedCount, 3,
+                "the item's own marked count reaches the shared component")
+        compare(bodyTextOf(sanitised), "reaches the screen unaltered",
+                "and the body text travels through unaltered")
+        screen.destroy()
+    }
+
     // ---- the gate governs the reply box ----------------------------------
     //
     // `composer-view` requires NO text input where the probe says posting is not
@@ -196,6 +372,56 @@ TestCase {
                 handlers += 1
         compare(handlers, 0,
                 "it carries no MouseArea, so there is no route to a call at all")
+        screen.destroy()
+    }
+
+    // `thread-view`'s "A revised post is marked as revised…" scenario "The
+    // marker claims nothing about the earlier version", and "The
+    // earlier-versions affordance is inert…" scenario "No earlier version
+    // text is rendered": neither had an explicit test. There is currently no
+    // data channel for prior-version text to travel through at all (no
+    // method reads a superseded version), so a violation could only be a
+    // hardcoded string added to the view — these pin the exact set of
+    // strings rendered around the marker and the affordance, so such an
+    // addition is caught rather than silently passing the existing boolean-
+    // only assertions.
+    function collectTexts(item, out) {
+        if (typeof item.text === "string")
+            out.push(item.text)
+        for (var i = 0; i < item.children.length; i++)
+            collectTexts(item.children[i], out)
+    }
+
+    function test_the_marker_and_the_inert_row_state_nothing_about_earlier_content() {
+        var calls = []
+        var screen = makeScreen(calls, true)
+
+        // The marker itself: exactly the word "edited", never elaborated with
+        // what changed, when, or how many times. Counting exact matches
+        // (rather than asking whether ONE Text says "edited") is what catches
+        // a mutation like "edited (from rev3)" — that string no longer equals
+        // "edited" exactly, so the count below drops to zero.
+        var allTexts = []
+        collectTexts(screen, allTexts)
+        var editedCount = 0
+        for (var i = 0; i < allTexts.length; i++)
+            if (allTexts[i] === "edited")
+                editedCount += 1
+        compare(editedCount, 1,
+                "the revised marker is rendered as exactly the word \"edited\", "
+                + "one occurrence, for the one revised item in the fixture")
+
+        // The affordance row: exactly its own two static strings, nothing else
+        // — the row `earlierVersionsInert` sits in, scoped so the enumeration
+        // cannot be satisfied by content rendered elsewhere on the screen.
+        var inert = findChild(screen, "earlierVersionsInert")
+        verify(inert !== null)
+        var rowTexts = []
+        collectTexts(inert.parent, rowTexts)
+        compare(rowTexts.length, 2,
+                "the affordance renders only its own label and its badge")
+        verify(rowTexts.indexOf("read the earlier versions") !== -1)
+        verify(rowTexts.indexOf("NOT YET AVAILABLE") !== -1)
         screen.destroy()
     }
 

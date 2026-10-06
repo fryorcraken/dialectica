@@ -117,7 +117,7 @@ A record arriving from a peer is attacker-controlled. Rejection MUST happen at t
 
 A peer given a Stoa address and a candidate genesis record MUST be able to determine, without consulting any registry or third party, whether the record is the one that address names.
 
-This is what makes a pasted address self-authenticating, and it is a security boundary: §4.8 has Stoa addresses appearing inside posts, which is attacker-supplied content.
+This is what makes a pasted address self-authenticating, and it is a security boundary: a Stoa address can appear inside a post, which is attacker-supplied content, and `stoa-navigation-view`'s requirement "Joining shows what is being joined, and joins nothing until the user acts" names an address inside a post as one of the two routes to a preview.
 
 #### Scenario: A matching record verifies
 

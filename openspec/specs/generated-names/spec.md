@@ -89,12 +89,13 @@ What a reply owes is therefore the derivation's **input**, and that obligation
 belongs to each reply's own capability rather than to this one. This capability
 says only that a name is never the thing carried.
 
-**How a caller reaches the derivation is not settled here**, and no requirement
-of this capability obliges core to expose one. The gap is real rather than
-overlooked: the QML sandbox denies the view the network and the filesystem
-outside its plugin directory, so it holds none of the wordlists and cannot derive
-a name for itself — which leaves the derivation reachable by no caller until an
-entry point exists. Tracked as issue #81, and out of scope here.
+**How a caller reaches a name is this capability's requirement "Core exposes the
+derivation to a caller"**: a caller supplies a public key it already holds and
+receives that key's name. That is a request answered, not a reply carrying a
+name about somebody else's authorship, so it is not what this requirement
+forbids. It is also the view's only route to a name: the QML sandbox denies the
+view the network and the filesystem outside its plugin directory, so it holds
+none of the wordlists and cannot derive a name for itself.
 
 #### Scenario: No reply carries a display name
 
@@ -525,12 +526,12 @@ that signs, and by nothing derived from it — the name and the mark are both
 recognition aids computed from that key, and neither is the thing being
 identified.
 
-This is the sentence issue #80 changes rather than a restatement of the old one.
-Until this change an author was identified by an address derived from the key,
-and "the address is the identity" was the rule everywhere an author appeared.
-With the author address deleted, a requirement still pointing at it would point
-at a value no longer carried. **Stoa addresses are untouched**: a Stoa is still
-identified by its address, and nothing here reaches that.
+This sentence replaces an earlier rule rather than restating it. An author was
+once identified by an address derived from the key, and "the address is the
+identity" was the rule everywhere an author appeared. With the author address
+deleted, a requirement still pointing at it would point at a value no longer
+carried. **Stoa addresses are untouched**: a Stoa is still identified by its
+address, and nothing here reaches that.
 
 Collisions are rare rather than expected at the specified space, and that changes
 nothing here. The rule is not a response to the rate.

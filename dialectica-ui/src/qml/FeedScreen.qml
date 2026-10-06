@@ -543,7 +543,9 @@ ScreenFrame {
         // is offered anyway because the owner reversed ruling 3's screen half so
         // the screen could be SEEN — a screen no route reaches is a screen
         // nobody can look at, which is the whole of what the reversal asked for.
-        // `moderation-view` contracts the reachability for that reason.
+        // `view-navigation`'s "The moderation screen is reachable, and leaving
+        // it returns where the user was" contracts the reachability for that
+        // reason.
         //
         // **It is NOT gated on whether this peer may moderate**, and that is a
         // decision rather than an omission. Nothing answers the question:
