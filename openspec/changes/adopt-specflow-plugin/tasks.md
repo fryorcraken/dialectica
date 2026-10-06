@@ -9,7 +9,10 @@
       `schema:` in `.openspec.yaml`. Owner's decision for this run: no
       `spec-writer` step; the `dev-writer` wrote `proposal.md` and this block.
 - [x] design + code — `dev-writer`
-- [ ] tests — `tester`
+- [ ] ~~tests — `tester`~~ — **no code changes.** Every edit this change makes
+      under `dialectica/` and `dialectica-ui/` is a comment line, and the rest
+      is agent instructions and prose, so there is no behaviour for a test to
+      pin. Owner's decision for this run: the `tester` step is skipped.
 - [x] review: correctness — `code-reviewer`
 - [x] review: security — `code-reviewer`
 - [x] review: readability — `code-reviewer`
