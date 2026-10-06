@@ -569,7 +569,7 @@ impl Dialectica {
     /// The host's storage directory, or the error shape saying it has not arrived.
     ///
     /// **One place, because it is a guard.** CLAUDE.md: "A guard is a job. Keep it
-    /// separate, so 'is it called everywhere?' stays a question with an answer."
+    /// separate, so 'is it called everywhere?' has an answer."
     /// It was two inline copies with identical wording, and every handler that
     /// reaches storage needs it — so each new one was another copy to keep in
     /// step, and two of them disagreeing about one state is a user being told

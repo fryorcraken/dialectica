@@ -62,7 +62,7 @@ names, the removed section titles, and quoted `CLAUDE.md` sentences).
       **Measured:** `ci.yml:313-316` and `:1010-1013` run the other two pairs.
       **Severity:** low.
 
-- [ ] **`dev-writer`** — `dialectica-ui/tests/tst_render_probe.qml:14-15` —
+- [x] **`dev-writer`** — `dialectica-ui/tests/tst_render_probe.qml:14-15` —
       *"which CLAUDE.md records as indistinguishable from a plugin that failed
       to load"* cites a sentence this change removed with "Before anything else,
       make the failure visible" (`origin/main:CLAUDE.md:740`). The fact now lives
@@ -71,8 +71,13 @@ names, the removed section titles, and quoted `CLAUDE.md` sentences).
       **Measured:** `git grep -n -E "indistinguishable|never clicked" --
       CLAUDE.md` prints nothing.
       **Severity:** low.
+      **Fixed** in the commit "Repoint comments that cite text the specflow
+      adoption deleted": the comment now points at the overlay's `## Hazards`
+      ("Basecamp swallows QML errors"), and no longer attributes the blank-view
+      claim to a file. `sh dialectica-ui/tests/run-qml-tests.sh
+      dialectica-ui/tests/tst_render_probe.qml`: 11 passed, 0 failed.
 
-- [ ] **`dev-writer`** — `dialectica/rust-lib/Cargo.toml:36` — *"see `cargo
+- [x] **`dev-writer`** — `dialectica/rust-lib/Cargo.toml:36` — *"see `cargo
       test` handling in CLAUDE.md/CI"* points at the "stage the SDK yourself
       before `cargo test`" rule this change moved out of `CLAUDE.md`
       (`origin/main:CLAUDE.md:228`). It is now in the overlay's `## Test layers`,
@@ -81,8 +86,13 @@ names, the removed section titles, and quoted `CLAUDE.md` sentences).
       **Measured:** `git grep -n logos-rust-sdk-src -- CLAUDE.md` prints nothing;
       `README.md:75` holds the staging command.
       **Severity:** low.
+      **Fixed** in the commit "Repoint comments that cite text the specflow
+      adoption deleted": the comment now names `README.md`, "Building", as
+      where the staging command is. `cargo test --manifest-path
+      dialectica/rust-lib/Cargo.toml -p dialectica -p dialectica-core` after
+      the edit: 1187 + 30 + 3 passed, 0 failed.
 
-- [ ] **`dev-writer`** — five comments quote, in quotation marks and attributed
+- [x] **`dev-writer`** — five comments quote, in quotation marks and attributed
       to `CLAUDE.md`, wording the block replaced:
       `dialectica/rust-lib/dialectica-core/src/log/mod.rs:32-34`,
       `dialectica/rust-lib/dialectica-core/src/moderation.rs:208-209`,
@@ -99,6 +109,16 @@ names, the removed section titles, and quoted `CLAUDE.md` sentences).
       **Measured:** `git grep -n -E "stays a question|over adding a branch" --
       CLAUDE.md` prints nothing.
       **Severity:** low.
+      **Fixed** in the commit "Repoint comments that cite text the specflow
+      adoption deleted": all five now quote the block's wording ("has an
+      answer"; "over a branch that checks it"). `git grep -n -E "stays a
+      question|over adding a branch" -- dialectica dialectica-ui` still lists
+      five comments — `authoring.rs`, `wire.rs`, `Main.qml`, `FeedScreen.qml`,
+      `DThreadScreen.qml` — that use the phrase as their own prose, not as a
+      quotation of `CLAUDE.md`, so they were left. Doc comments only:
+      `cargo test` as above, 0 failed. `lib.rs`'s comment sits in the adapter,
+      which `cargo test` does not compile; `nix build ./dialectica#lgx` was
+      not run for a `///` edit.
 
 - [ ] **`dev-writer`** — `openspec/changes/adopt-specflow-plugin/design.md:46` —
       *"`gh api …/branches/main/protection` lists four required contexts"* is a

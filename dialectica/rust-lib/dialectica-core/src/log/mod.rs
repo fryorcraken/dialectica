@@ -30,8 +30,8 @@
 //!    under today's set may be authorised under the set that a not-yet-received
 //!    op establishes. Dropping it now forecloses that.
 //! 3. **Filtering on write is a guard with many call sites.** CLAUDE.md: "A
-//!    guard is a job. Keep it separate, so 'is it called everywhere?' stays a
-//!    question with an answer." There is one reader per question; there is one
+//!    guard is a job. Keep it separate, so 'is it called everywhere?' has an
+//!    answer." There is one reader per question; there is one
 //!    writer. Putting the guard on the reader is the shape where forgetting it
 //!    is visible.
 //!

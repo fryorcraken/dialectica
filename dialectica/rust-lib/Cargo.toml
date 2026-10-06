@@ -33,5 +33,6 @@ dialectica-core = { path = "dialectica-core" }
 serde_json = "1"
 # Supplied by the builder, staged beside this crate at the SAME rev its
 # generator came from — so generator and runtime cannot skew. This path does
-# not exist in a plain checkout; see `cargo test` handling in CLAUDE.md/CI.
+# not exist in a plain checkout; `README.md`, "Building", has the command that
+# stages it before `cargo test`.
 logos-rust-sdk = { path = "../logos-rust-sdk-src" }

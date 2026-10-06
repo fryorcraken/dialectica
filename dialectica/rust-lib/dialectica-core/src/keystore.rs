@@ -3101,9 +3101,10 @@ mod tests {
     // me.** Deleting `bytes.zeroize()` from `Keystore::generate` left all 184
     // tests green, and `tasks.md` claimed fourteen mutation verifications none
     // of which was this one — a coverage report claiming coverage it did not
-    // have, on the property this whole change exists to protect. Per the
-    // agents README that is worse than a missing test, because it stops anyone
-    // looking.
+    // have, on the property this whole change exists to protect. That is worse
+    // than a missing test, because it stops anyone looking; the specflow `flow`
+    // skill's rule is to say what a check cannot see rather than report it as
+    // passed.
 
     #[test]
     fn generate_wipes_the_plain_array_it_was_handed() {

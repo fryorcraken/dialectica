@@ -11,8 +11,9 @@ import "../src/qml"
 // where a type name collides with basecamp's. NEITHER can see a component whose
 // children never enter the scene graph: nothing warns, no binding is undefined,
 // no name collides, every gate stays green, and the symptom is a blank view —
-// which CLAUDE.md records as indistinguishable from a plugin that failed to
-// load.
+// which looks no different from a plugin that failed to load. The specflow
+// overlay's `## Hazards` ("Basecamp swallows QML errors", in
+// `.claude/specflow/PROJECT.md`) records that class of silent failure.
 //
 // The defect is on record in the sibling repo rather than hypothetical.
 // `radicle-ui`'s CommitView.qml declared a property named `data`, shadowing

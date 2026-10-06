@@ -206,7 +206,7 @@ impl Moderators {
     ///
     /// **All three checks, in one place, so there is one place to forget them
     /// rather than one per resolver.** CLAUDE.md: "A guard is a job. Keep it
-    /// separate, so 'is it called everywhere?' stays a question with an answer."
+    /// separate, so 'is it called everywhere?' has an answer."
     /// The next resolvers — §6.1's author-scoped suppression, §6.2's threshold
     /// certificate — call this rather than re-spelling the conjunction and
     /// dropping a term.

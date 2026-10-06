@@ -63,8 +63,12 @@ reading named on it.
 - [x] 4.1 Delete the nine `.claude/agents/*.md`, `docs/OPENSPEC-ARCHIVE.md` and
       `docs/PROJECT-MANAGEMENT.md`.
 - [x] 4.2 No reference to a deleted file outside `openspec/changes/archive/`.
-      Verify: `git grep -n -E "agents/README\.md|RUNNER\.md|OPENSPEC-ARCHIVE|PROJECT-MANAGEMENT" -- . ":!openspec/changes/archive/"`
-      prints only this change's own folder, which names them.
+      Verify, over all eleven deleted names and the "agents README" spelling,
+      case-insensitive:
+      `git grep -n -i -E "agents/README\.md|agents README|RUNNER\.md|OPENSPEC-ARCHIVE|PROJECT-MANAGEMENT|(closer|code-reviewer|design-reviewer|dev-writer|spec-test-reviewer|spec-writer|tester)\.md" -- . ":!openspec/changes/archive/" ":!openspec/changes/adopt-specflow-plugin/"`
+      prints nothing. This change's own folder is excluded because it names
+      them. Comments that quote `CLAUDE.md` wording the block replaced are a
+      different shape the search cannot see; they were repointed by reading.
 
 ### 5. Hand-off
 

@@ -9,13 +9,30 @@ contract from `/home/fryorcraken/src/fryorcraken/agent-spec-flow` (clean,
 HEAD `be56964`; `skills/sync/SKILL.md` unchanged since the v0.1.0 commit
 `77fce4d`).
 
-- [ ] **`dev-writer`** — `tasks.md:65` (4.2 Verify) and the issue's first Check — the reference search misses a deleted file cited by another spelling, and two such citations are live
+- [x] **`dev-writer`** — `tasks.md:65` (4.2 Verify) and the issue's first Check — the reference search misses a deleted file cited by another spelling, and two such citations are live
       **Scenario:** a citation of the deleted `.claude/agents/README.md` written as "agents README" survives the search, which only matches `agents/README\.md`, `RUNNER\.md`, `OPENSPEC-ARCHIVE` and `PROJECT-MANAGEMENT`. It also names 4 of the 11 deleted files: none of the seven role files (`closer.md`, `code-reviewer.md`, `design-reviewer.md`, `dev-writer.md`, `spec-test-reviewer.md`, `spec-writer.md`, `tester.md`) is searched for.
       **Measured:** `git grep -n -i -E "flow README|role file|agents README|RUNNER\b" -- . ":!openspec/changes/archive/" ":!openspec/changes/adopt-specflow-plugin/"` finds `dialectica/rust-lib/dialectica-core/src/keystore.rs:3105` ("Per the agents README that is worse than a missing test") and `openspec/changes/relevance-votes/tasks.md:114` ("agents README: \"never write a scenario that cannot be tested\""). The 4.2 Verify prints neither. The seven role-file names are clean today; the only hits for `\.claude/agents` are `.gitignore:49,69` (the kept re-admit) and `CLAUDE.md:444` (inside the plugin block). Repoint or remove the two citations; the rule each quotes now lives in the `specflow:flow` skill. Widen the Verify to all eleven names plus `agents README`, case-insensitive. Severity: medium. The issue's check exists to catch exactly this, and it passes over two hits.
+      **Fixed** in the commit "Repoint comments that cite text the specflow
+      adoption deleted". `keystore.rs` keeps its own claim and names the
+      `flow` skill's "say what a check cannot see" rule; `relevance-votes/tasks.md`
+      now cites the `flow` skill, which carries "Never write a scenario that
+      cannot be tested" verbatim (`skills/flow/SKILL.md:259` in the plugin).
+      That second edit is a one-phrase citation repoint in another change's
+      folder, so this piece now touches `relevance-votes` too; the edit changes
+      nothing about its stage-block state. 4.2's Verify is widened to the
+      eleven names plus `agents README`, case-insensitive, and prints nothing
+      on this commit. Your broader search (`flow README|role file|agents
+      README|RUNNER\b`, `-i`) now hits only the word "runner" in prose and
+      `qmltestrunner`, none of them a citation.
 
-- [ ] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/log/mod.rs:32-34` and `dialectica/rust-lib/dialectica-core/src/membership.rs:118-120` — comments quote, in quotation marks, `CLAUDE.md` wording that the block replaced and that no longer appears there
+- [x] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/log/mod.rs:32-34` and `dialectica/rust-lib/dialectica-core/src/membership.rs:118-120` — comments quote, in quotation marks, `CLAUDE.md` wording that the block replaced and that no longer appears there
       **Scenario:** a reader checks the quoted rule against `CLAUDE.md` and finds a different sentence. That is the citation-that-reads-like-evidence shape this repo has been bitten by. No check in the issue or `tasks.md` covers prose that quotes the deleted sections, as opposed to prose that names a deleted file.
       **Measured:** `log/mod.rs` quotes "Keep it separate, so 'is it called everywhere?' stays a question with an answer." The block (`CLAUDE.md:561-562`) reads "…has an answer." `membership.rs` quotes "…over adding a branch that checks it." The block (`CLAUDE.md:553`) reads "…over a branch that checks it." The block cannot be edited (it is `/specflow:sync`'s), so the comments are what changes. Drop the quotation marks or quote the new text. Every other `CLAUDE.md's "…"` citation outside `.claude/` still resolves: "a guard is a job", "pass what it needs", "do not let a function quietly acquire a second caller", "the fourth slightly-different copy of a guard", "make room for the change in front of", "what Bash costs", and "Module contract traps". Severity: low.
+      **Fixed** in the commit "Repoint comments that cite text the specflow
+      adoption deleted", together with the three further quotations
+      `findings/readability.md` names (`moderation.rs`, `lib.rs`, `feed.rs`):
+      each now quotes the block's current wording. See that file's box for the
+      test run.
 
 - [ ] **`dev-writer`** — `tasks.md` (no row) and the issue's second Check — "`openspec/changes/ui-remaining-screens/tasks.md` still has its `## Stages` block" names a path that no longer exists, and `tasks.md` drops the check without saying so
       **Scenario:** run literally, the check fails on a missing file whatever this change does. Read leniently, it passes vacuously. Either way it measures nothing about "any other change in flight keeps working".
