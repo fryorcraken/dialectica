@@ -521,3 +521,18 @@ the PR body, `CLAUDE.md`, `proposal.md` and `design.md`. The round-0 `closer` bo
 closer's.
 
 - [x] **re-review round 9 `43844f2b..87596ac4`: no findings** — read the round's design.md, proposal.md, tasks.md diffs, PR #190's body and the pin test's message; clean
+
+## Re-review round 10 `87596ac4..c0190bda`
+
+Checked against the tree: `scaffold.toml`'s `delivery_module` rev and the lock's
+`logos-delivery-module` node are both `b8b9ac2f…`, so the new test is green on the committed pins;
+the `include_str!` paths resolve to the repo root and `dialectica/flake.lock`, and are `cfg(test)`
+(CI's `cargo test` runs from a checkout). The `docs/SCAFFOLD.md` paragraph belongs there (it
+records a pin's coupling that `lgs` would strip from `scaffold.toml`), names a test path that
+exists (`transport::delivery_topic_rule::tests::`), and agrees with Decision 17, Risks, `tasks.md`
+16.2 and PR #190's body. The `composer-view` delta reproduces the live requirement block and all
+its scenarios, changing only the one false clause, and `proposal.md` now lists it. `Closes #176`
+is the only closing keyword; the round-0 `closer` box stays the closer's. Taste, not boxes:
+`CLAUDE.md`'s content-topic trap still names only the lock test.
+
+- [x] **re-review round 10 `87596ac4..c0190bda`: no findings** — read the round's transport.rs, docs/SCAFFOLD.md, design.md, proposal.md, composer-view delta, tasks.md diffs, the live pins and PR #190's body; clean
