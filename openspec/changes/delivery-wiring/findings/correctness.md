@@ -836,3 +836,76 @@ Checked and clean:
   tests.
 - `nix build ./dialectica#lgx` not run: `src/lib.rs` is untouched in this range,
   and the adapter takes the topic as `&str` from the unchanged accessor.
+
+## Re-review round 9 `43844f2b..87596ac4`
+
+Dimension: **correctness only**. Reviewed at `286a2314` (range code identical to
+`87596ac4`), against `logos-delivery` `bfdb5afd263c5ff634ef8c59b2fe1ebbbcd0f306`.
+
+- [ ] **`dev-writer`** — `transport.rs:1018` (`the_transcribed_revision_is_the_one_delivery_is_locked_at`),
+      `design.md:1103-1104` — the pin test watches the lock that does not decide
+      which delivery runs. The delivery a Basecamp actually loads is installed from
+      `scaffold.toml:28`, `[modules.delivery_module].flake =
+      "github:logos-co/logos-delivery-module/b8b9ac2f…#lgx"` (`docs/SCAFFOLD.md:79-85`:
+      `role = "dependency"` is what gets it installed). `dialectica/flake.lock`'s
+      `delivery_module` input is the one `flake.nix:44-47` takes so the client
+      generator can read its impl header — a build-time input, not what is
+      installed. The two agree today (both `b8b9ac2f`), but nothing ties them,
+      and `docs/SCAFFOLD.md:20` says the scaffold pins "are meant to be bumped" —
+      by `lgs basecamp modules`, a verb `CLAUDE.md` warns can rewrite values in
+      that file.
+      **Scenario:** `scaffold.toml:28` moves to a newer `logos-delivery-module`
+      whose lock takes a `logos-delivery` that tightens `NsContentTopic.parse` or
+      `getShard`; `dialectica/flake.lock` is untouched. Every test stays green, the
+      fake still agrees with `bfdb5afd`'s rule, and a live node refuses the topic —
+      the failure Decision 17 exists to close, through the one pin that matters at
+      runtime. Design `:1103-1104` files this as "a Basecamp whose delivery module
+      was built from another rev than this lock's, which is the live check's to
+      find", but the scaffold pin is a tracked file the test can read the same way
+      it reads the lock, so only a Basecamp built from *outside* the repo is
+      genuinely live-only.
+      **Fix,** either: the test also reads `include_str!("../../../../scaffold.toml")`
+      (repo root, from `transport.rs`; `cfg(test)` only, so the `lgx` build with
+      `src = ./.` never needs it, and `ci.yml:1325` runs from the checkout) and
+      asserts `[modules.delivery_module]`'s flake rev equals the `delivery_module`
+      node's `locked.rev` in `dialectica/flake.lock`; or, if not taken, design
+      `:1103-1104` names `scaffold.toml`'s pin as the bump this test cannot see,
+      so the gap is recorded rather than misfiled as unobservable. Low severity:
+      latent drift, nothing wrong today.
+      **Measured:** with `scaffold.toml:28`'s rev set to `0000…0000` and
+      `dialectica/flake.lock` unchanged, the full suite is green (1317 + 30 + 3);
+      reverted.
+
+Checked and clean:
+
+- **My round-8 box is answered as its outcome says.** `subscribable` is
+  `getShard(ContentTopic)` at `bfdb5afd`: `sharding.nim:45-51` parses
+  (`err($error)` passing the parse message through unchanged), then `:32-43`
+  takes `isNone()` or `0` and returns `err("Generation > 0 are not supported
+  yet")` for anything else. Nim's `generation` is `Opt[int]`, so `-1` reaches
+  the `else` arm, matching the Rust `Some(_)`, and `-0`/`+0` parse to `0` in both
+  languages. The path is as cited: `channel_lifecycle.nim:46-48`
+  `MessagingSubscribe.request(…).isOkOr: err("failed to subscribe to content
+  topic: " & error)`, and `subscription_manager.nim:157-163,247-249`
+  `getShardForContentTopic` → `wakuAutoSharding.get().getShard(topic)`. The
+  line citations (`sharding.nim:32-51`, `:20-30`, `content_topic.nim:16` for
+  `DefaultContentTopic`) are right at that rev.
+- **The pin test fails in the direction the dev-writer could not run.** With
+  `dialectica/flake.lock:1086` set to `0000…0000`, it fails on the `assert_eq!`
+  naming node `logos-delivery` and both revs; the other four `delivery_topic_rule`
+  tests stay green. Reverted. `include_str!("../../../flake.lock")` from
+  `dialectica/rust-lib/dialectica-core/src/` resolves to `dialectica/flake.lock`,
+  and the lock's only `logos-delivery` node (`:1076-1097`) is a `git` `url` that
+  the `ends_with("/logos-delivery")` arm matches.
+- **No production behaviour changed.** Every `transport.rs` hunk is a doc comment
+  or inside `#[cfg(test)] mod delivery_topic_rule` / `mod tests`; `delivery.rs`
+  is a doc comment; `delivery/tests.rs` is the fake; the two QML hunks are
+  comments. Full suite green at `286a2314`: 1317 + 30 + 3.
+- **The stricter-side `_` note is accurate in direction.** If Nim's
+  `rawParseInt` skips `_` (as recalled), `/0_/…` is accepted by delivery and
+  refused by the transcription, and `/1_0/…` is refused by both with different
+  messages; either way the fake is never more lenient than the node.
+
+Taste, no box: the failure message's re-read paths
+(`waku/waku_core/topics/…`, `channels/api/…`) drop the `logos_delivery/` prefix
+they carry in the tree.
