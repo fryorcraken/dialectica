@@ -110,8 +110,15 @@ and then reverts:
   `test_a_confirmation_is_gone_after_returning_from_a_thread`,
   `test_a_confirmation_is_gone_after_returning_from_moderation`,
   `test_a_failed_read_on_the_later_visit_carries_no_outcome`,
+  `test_a_retried_feed_read_on_the_later_visit_carries_no_outcome`,
   `test_an_already_published_or_refused_outcome_is_gone_on_the_next_visit` and
   `test_an_outcome_does_not_follow_the_user_into_another_stoa`.
+  The retried-read test makes its one absence assertion after the retry. It is
+  red here for the reason the failed-read test is: without the hook the outcome
+  is on screen throughout the later visit. The failed-read test is red during
+  the failure, and the retried-read test is red after the retry. What only the
+  retried-read test catches is an outcome hidden during the failure that comes
+  back on the retry.
 - Removing the `thread` branch reddens the reply composer's absence tests, in
   the same way:
   `test_a_replys_outcome_is_gone_on_the_next_visit_to_the_thread`,
@@ -207,13 +214,19 @@ the guard against over-correcting.
   also includes the feed's absence tests and
   `test_a_publish_on_the_later_visit_displays_its_own_outcome`, each red at the
   presence assertion it makes before leaving. So over-clearing does not pass
-  the absence tests: they cannot reach the assertion it would satisfy.
+  the absence tests: they cannot reach the assertion it would satisfy. The
+  last two in the set cover both composers in one table:
+  `test_a_later_publish_on_the_same_visit_replaces_the_earlier_outcome` and
+  `test_asking_for_hidden_content_to_be_excluded_again_keeps_the_outcome`. Each
+  is red at its first post case. No other test goes red.
 - **`replyComposer.clearOutcome()` as the first line of `DThreadScreen.reload()`**
   does the same to every reply test that publishes and then asserts the outcome
   displayed. That set includes
   `test_a_replys_outcome_stays_across_a_failed_re_read_of_the_thread` and
   `test_changing_what_the_thread_lists_within_the_visit_keeps_the_outcome`, as
-  well as the reply composer's absence tests at their presence assertions.
+  well as the reply composer's absence tests at their presence assertions. The
+  same two tables go red here too, each at its first reply case, after its post
+  cases have passed. No other test goes red.
 
 ## Risks / Trade-offs
 
