@@ -1077,3 +1077,37 @@ lock (`Pending::asked`). Removed as each wait ends, with the one processor judgi
 one"), an edit residue. The new section names "round 4" and "round 5" re-reviews,
 which read oddly once `findings/` is deleted; Decision 11 already cites "the
 security re-review" the same way, so nothing is lost.
+
+## Re-review round 8 `ae44f364..43844f2b`
+
+- [ ] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/transport.rs:942` —
+      a test comment cites the wrong line of delivery's source.
+      **Scenario:** the comment reads "`DefaultContentTopic` in the same file, line
+      15"; at `bfdb5afd263c5ff634ef8c59b2fe1ebbbcd0f306`,
+      `git grep -n "DefaultContentTopic\* ="` on
+      `logos_delivery/waku/waku_core/topics/content_topic.nim` answers line **16**
+      (line 15 is blank). Every other citation in the range holds at that rev:
+      `content_topic.nim:60-123` (`parse` starts at 60, its last `return err` is
+      123), `channel_lifecycle.nim:46-48` (the subscribe is lines 45-48),
+      `sharding.nim:20-30` (`getGenZeroShard`), `channel_api.nim:19-23`, and the
+      LIP-23 and relay-sharding line numbers. A reader following this one lands on
+      the wrong line of a file the comment is the only pointer into.
+      Low severity; prose only.
+
+Read: the whole range, `CLAUDE.md`'s new trap entry against that file's "Keeping
+this file true" rules (it holds no count a command could answer, names its own
+witnesses `transport::delivery_topic_rule` and `content_topic.nim` so a rename shows
+as stale, and records why rather than what landed), the `TOPIC_PREFIX`,
+`CHANNEL_PREFIX` and `delivery_topic_rule` docs, the fake's `channel_create`
+comment, Decision 17 and its table row and Risks bullets, and tasks 7.3 and 14.
+The test names Decision 17 cites all exist as `fn`s, `b8b9ac2f` is the rev the
+lockfiles carry, and `ChannelId` is `SdsChannelID` as the `CHANNEL_PREFIX` doc says.
+No stale `/dialectica/1/s/` form is left outside archived changes, findings, and the
+places that name it as the old value on purpose. Not re-run: the "every `delivery::`
+test went red" measurement.
+
+Not boxes (taste): `transport.rs:103-104` splices two thoughts with a colon ("was
+declined by every node: the test-only `delivery_topic_rule` below cites the
+parser."), and line 104 runs to about 95 columns where its neighbours wrap at 80.
+The "below" is some 750 lines away. An edit residue; the sentence reads better with
+the parser pointer as its own sentence.
