@@ -484,3 +484,57 @@ Judged and left without a box (taste).
 - [x] **re-review round 4 `7462ded8..58460b02`: no findings** — read the range's
       `delivery.rs` and `tests.rs` diffs, the new wait state at HEAD and the refactor
       commit `a6fa2dde` on its own (green); clean
+
+## Re-review round 8 `ae44f364..43844f2b`
+
+Read: `git diff ae44f364 43844f2b` (code, design.md Decision 17, CLAUDE.md entry),
+`delivery_topic_rule` and the fake's `channel_create` at HEAD, and delivery's
+`content_topic.nim` at `bfdb5afd` against the transcription. The transcription is
+faithful: the leading-slash check, the 4 / 5 split, the generation check before the
+empty-part checks in the five-part arm, the part names and the messages all match.
+
+**Placement and direction, judged sound.** `transport.rs` holds the topic derivation
+and `delivery` already depends on `transport`, so the two consumers of the rule (the
+derivation's own test, the fake) both reach down to it; putting it in `delivery/tests.rs`
+would make `transport`'s test depend on the adapter's test module, the inverted
+direction. The fake depending on the transcription is the right way round: the rule is
+what the fake models, and the fake is the thing that must not be more lenient than the
+model.
+
+**Taste, no box.** (1) The repo's own precedent for cross-module test support is a
+file of its own, `#[cfg(test)] pub(crate) mod fixtures;` in `log/mod.rs`; this round
+inlines about 140 lines, with a nested `mod tests`, into a production file that is
+already large, between the code and its `mod tests`. A `transport/` file or a
+`delivery_topic_rule.rs` would match the precedent and keep `transport.rs`'s
+production half readable. (2) The test comment in
+`delivery_s_own_default_topic_is_accepted` cites `DefaultContentTopic` at "line 15";
+at `bfdb5afd` it is line 16. (3) Nim's `parseInt` also skips `_` inside digits, which
+Rust's `i64::parse` does not, so the transcription is stricter on a generation like
+`1_0`; unreachable, since dialectica never emits a five-part topic.
+
+- [ ] **`dev-writer`** — `transport.rs:852-854`, `CLAUDE.md:535-537`, `design.md:1067-1070` —
+      the transcription's tie to delivery's pin is a sentence, not a check
+      **Scenario:** `logos-delivery-module` is bumped; `dialectica/flake.lock` now locks a
+      `logos-delivery` rev other than `bfdb5afd…`, delivery tightens `NsContentTopic.parse`
+      (say, a charset rule on `<topic-name>`) and `s-<hex>` stops parsing. Every gate stays
+      green: the doc comment still says `bfdb5afd`, the fake still agrees with the old
+      parser, and the only prompt to re-read `content_topic.nim` is a "should" in three
+      places (Decision 14, Decision 17, `CLAUDE.md`) that no command triggers. That is
+      the accept-everything fake's failure again, delayed by one pin, and the shape
+      `CLAUDE.md` names as a hand-maintained list that goes stale silently. The repo
+      already declines the same gap for the `.lidl` contract (`ci.yml:1782-1790`) and
+      says why it is dangerous, so this is a recorded gap, not a new one. The fix is
+      cheap here because the crate already reads files outside itself as text
+      (`include_str!("../../../src/lib.rs")` at `delivery/tests.rs:926`, and
+      `"../../src/lib.rs"` at `wire.rs:12499`): one test in `delivery_topic_rule` that reads
+      `../../../flake.lock` (`dialectica/flake.lock`, which locks `bfdb5afd…` at line
+      1086) and asserts the rev named in the module docs is the one locked, with a
+      failure message saying "re-read `content_topic.nim` and `channel_lifecycle.nim`,
+      then update the rev here". It is compiled only under `cfg(test)`, so the nix
+      `lgx` build is untouched, and `ci.yml:1325` runs `cargo test` from the checkout
+      where the path resolves. A bump then fails a test instead of relying on whoever
+      makes it having read the design. The Decision 14 wording pin
+      (`ALREADY_EXISTS`, `delivery.rs:196-202`) has the same dependency and can share
+      the test. Low severity: a latent drift, no defect today. **Measured:** not run;
+      `git grep -n -F flake.lock -- dialectica/rust-lib` finds the lock named only in
+      doc comments, no test reads it.
