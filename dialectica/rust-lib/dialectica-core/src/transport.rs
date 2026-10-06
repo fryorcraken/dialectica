@@ -1014,28 +1014,41 @@ pub(crate) mod delivery_topic_rule {
             }
         }
 
-        #[test]
-        fn the_transcribed_revision_is_the_one_delivery_is_locked_at() {
-            // `dialectica/flake.lock`, read as text the way `delivery/tests.rs`
-            // reads the adapter's source. Compiled only under `cfg(test)`, so the
-            // `lgx` build never needs the path; `cargo test` runs from a checkout
-            // where it resolves, and nix's `src = ./.` holds the lock too.
+        /// Every node of `dialectica/flake.lock` that locks the GitHub repository
+        /// `repo`, by node name, with the revision it is locked at.
+        ///
+        /// The lock is read as text, the way `delivery/tests.rs` reads the
+        /// adapter's source. Compiled only under `cfg(test)`, so the `lgx` build
+        /// never needs the path; `cargo test` runs from a checkout where it
+        /// resolves, and nix's `src = ./.` holds the lock too. A node is matched
+        /// by what it locks rather than by its input name, which the lock is free
+        /// to suffix (`_2`) and a flake to rename.
+        fn lock_nodes_of(repo: &str) -> Vec<(String, Option<String>)> {
             let lock: serde_json::Value = serde_json::from_str(include_str!("../../../flake.lock"))
                 .expect("dialectica/flake.lock is JSON");
             let nodes = lock["nodes"]
                 .as_object()
                 .expect("a flake lock has a `nodes` table");
-            let locked: Vec<(&String, Option<&str>)> = nodes
+            let suffix = format!("/{repo}");
+            nodes
                 .iter()
                 .filter(|(_, node)| {
                     let at = &node["locked"];
-                    at["repo"] == "logos-delivery"
-                        || at["url"].as_str().is_some_and(|url| {
-                            url.trim_end_matches(".git").ends_with("/logos-delivery")
-                        })
+                    at["repo"] == repo
+                        || at["url"]
+                            .as_str()
+                            .is_some_and(|url| url.trim_end_matches(".git").ends_with(&suffix))
                 })
-                .map(|(name, node)| (name, node["locked"]["rev"].as_str()))
-                .collect();
+                .map(|(name, node)| {
+                    let rev = node["locked"]["rev"].as_str().map(str::to_string);
+                    (name.clone(), rev)
+                })
+                .collect()
+        }
+
+        #[test]
+        fn the_transcribed_revision_is_the_one_delivery_is_locked_at() {
+            let locked = lock_nodes_of("logos-delivery");
             // Without this, renaming the input would make the loop below check
             // nothing and pass.
             assert!(
@@ -1045,7 +1058,7 @@ pub(crate) mod delivery_topic_rule {
             );
             for (name, rev) in locked {
                 assert_eq!(
-                    rev,
+                    rev.as_deref(),
                     Some(DELIVERY_REV),
                     "dialectica/flake.lock node `{name}` locks logos-delivery at \
                      {rev:?}, not the {DELIVERY_REV} this crate's transcriptions were \
