@@ -21,8 +21,10 @@ for.
   with no bound on how many targets hold one, and is back in the field when
   that target's composer is rendered again. It is not kept beyond that, and it
   reaches core only as the body of a publish.
-- A draft whose composer is not rendered (a shut posting gate, a failed read)
-  stays held and is displayed nowhere until the composer is rendered again.
+- A draft whose composer is not rendered, as behind a shut posting gate, stays
+  held and is displayed nowhere until the composer is rendered again. A failed
+  read is not said to stop a screen rendering its composer; while one has
+  failed, a draft is displayed nowhere but in a rendered composer's field.
 - A restored draft is not announced.
 - The clearing of a draft by a newly stored publish is confined to the target
   that publish named.

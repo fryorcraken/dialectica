@@ -272,11 +272,14 @@ field on any later visit to that target.
 
 ### Requirement: A draft whose composer is not rendered stays held and is displayed nowhere
 
-While no composer for a draft's target is rendered, whether because the posting
-probe reports posting is not possible for its Stoa or because a read failed, the
-view MUST keep the draft held and MUST NOT display its text anywhere. Once a
-composer for that target is rendered again while the view stays open, its field
-MUST hold the draft.
+While no composer for a draft's target is rendered, as when the posting probe
+reports posting is not possible for its Stoa, the view MUST keep the draft held
+and MUST NOT display its text anywhere. Once one is rendered again while the
+view stays open, its field MUST hold the draft.
+
+Whether a failed read stops a screen rendering its composer is not decided
+here. While one has failed, a draft's text MUST NOT be displayed anywhere but in
+the field of a composer rendered for its target.
 
 #### Scenario: A draft behind a shut gate is not displayed
 
@@ -310,7 +313,19 @@ MUST hold the draft.
 - **WHEN** text is entered in a Stoa's post composer and not submitted, the user
   leaves and opens the same Stoa while the feed read answers with the error
   shape, and the user retries the read on that visit and it succeeds
-- **THEN** the post composer is rendered
+- **THEN** while the feed is in its failed state, the text entered is displayed
+  nowhere other than in the field of a rendered post composer
+- **AND** once the retried read has succeeded, the post composer is rendered
+- **AND** its field holds the text entered
+
+#### Scenario: A reply draft is back when a failed thread read recovers
+
+- **WHEN** text is entered in a thread's reply composer and not submitted, the
+  user leaves and opens the same thread while the thread read answers with the
+  error shape, and the user retries the read on that visit and it succeeds
+- **THEN** while the thread screen is in its failed state, the text entered is
+  displayed nowhere other than in the field of a rendered reply composer
+- **AND** once the retried read has succeeded, the reply composer is rendered
 - **AND** its field holds the text entered
 
 ### Requirement: An unsubmitted draft is held by the view alone and ends with it
