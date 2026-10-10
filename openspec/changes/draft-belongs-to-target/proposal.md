@@ -13,7 +13,8 @@ for.
 
 - A draft is defined as belonging to its **target**: the Stoa address for a
   post, the Stoa address together with the parent op for a reply. A composer
-  holds only the draft entered for the target it would publish to.
+  holds only the draft entered for the target it would publish to, and two
+  targets that differ in kind, Stoa address or parent never share one.
 - A separate safety rule: the view never submits text to a Stoa or parent other
   than the one it was entered for, judged on the publish call that goes out.
 - An unsubmitted draft is kept per target for as long as the view stays open,
