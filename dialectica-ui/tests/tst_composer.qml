@@ -435,6 +435,29 @@ TestCase {
         c.destroy()
     }
 
+    // `applyReply` takes the key of the target the publish named, and `submit()`
+    // always passes it. Called without one, it must not report "stored" and
+    // leave the stored text in the field, one press from a second signed op:
+    // the target is then the one the composer points at. No screen calls it
+    // this way; this pins the function's own shape (the change's `design.md`,
+    // Decision 4).
+    function test_a_stored_reply_applied_without_a_key_clears_the_draft_shown() {
+        var c = makeComposer({})
+        c.draft = "something worth publishing"
+        c.applyReply({ ok: true, value: { opId: "aa", wasNew: true } })
+
+        compare(c.outcome, "stored")
+        compare(c.draft, "", "a store never leaves its text in the field")
+        compare(c.submittable, false)
+
+        // And not only the field: the entry held for the target is gone too.
+        var address = c.stoaAddress
+        c.stoaAddress = "cd".repeat(32)
+        c.stoaAddress = address
+        compare(c.draft, "", "nor brings it back when the target is shown again")
+        c.destroy()
+    }
+
     function test_a_retained_draft_is_submittable_again_unchanged() {
         // The other side: a retained draft is not merely present but usable, and
         // the retry sends the identical bytes. A draft retained in a composer

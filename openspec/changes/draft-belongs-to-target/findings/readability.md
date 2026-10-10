@@ -6,7 +6,7 @@ and the changed tests in `dialectica-ui/tests/tst_publish_outcome_visits.qml`.
 Every entry below is a defect of the reader's experience, not of behaviour; the
 last two are low and stylistic, and say so.
 
-- [ ] **`dev-writer`** — `DComposer.qml:110-112` — the comment says "Without it
+- [x] **`dev-writer`** — `DComposer.qml:110-112` — the comment says "Without it
       every cross-target test in `tst_draft_targets.qml` is red", which is false
       and is the sentence a maintainer will trust when deciding what the handler
       is for.
@@ -24,7 +24,15 @@ last two are low and stylistic, and say so.
       handler. **Measured:** 18 failed, 21 passed (including the init and cleanup
       cases), handler removed.
 
-- [ ] **`dev-writer`** — `design.md:123-124` — "sixteen tests in
+      **Fixed** (`dev-writer`), in the commit that ticks this box. Measured
+      again on my tree with the handler's body emptied: `tst_draft_targets.qml`
+      reports 21 passed, 18 failed, and the four tests named above are among
+      the green ones. The comment now says which tests go red (those that move
+      to another target and read or submit what its field holds) and that a
+      test which enters text again, or returns to the only target it wrote in,
+      does not. It carries no count, since the tester adds to that file next.
+
+- [x] **`dev-writer`** — `design.md:123-124` — "sixteen tests in
       `tst_draft_targets.qml` go red, the cross-target ones of every requirement"
       is stale and overstates in the same breath.
       **Scenario:** same mutation as above gives 18, not 16 (the two tests added
@@ -34,7 +42,17 @@ last two are low and stylistic, and say so.
       run against the tree in front of you.
       **Severity:** low. **Measured:** 18 failures on this tip.
 
-- [ ] **`dev-writer`** — `DComposer.qml:332, 356, 390` — the new local in
+      **Fixed** (`dev-writer`), in the commit that ticks this box. Measured on
+      my tree, handler body emptied: 18 of the 37 test functions in
+      `tst_draft_targets.qml` fail, and one more in
+      `tst_publish_outcome_visits.qml`, which the old sentence did not mention.
+      Decision 3 now describes the red tests by what they do, names the four
+      cross-target tests that stay green and why, and tells the reader to run
+      the two files for a count in place of printing one that the next added
+      test makes stale. `tasks.md` 2.2 carried the same "cross-target tests"
+      wording and now points at Decision 3.
+
+- [x] **`dev-writer`** — `DComposer.qml:332, 356, 390` — the new local in
       `submit()` and the new parameter of `applyReply()` are both named
       `published`, which is also the name of this component's signal.
       **Scenario:** lines 390-391 read `root.clearDraftOf(published)` followed
@@ -48,7 +66,11 @@ last two are low and stylistic, and say so.
       `publishedKey` or `namedKey`, removes it.
       **Severity:** low-medium; a naming defect, not a behaviour one.
 
-- [ ] **`dev-writer`** — `DComposer.qml:90-93` — `heldDraft()` returns
+      **Fixed** (`dev-writer`), in the commit that ticks this box: both are
+      `publishedKey`. The architecture review raised the same name; one rename
+      answers both.
+
+- [x] **`dev-writer`** — `DComposer.qml:90-93` — `heldDraft()` returns
       `typeof held === "string" ? held : ""`, and nothing in the file says why a
       map this component fills only with strings needs the check.
       **Scenario:** a reader asks "why would it not be a string?" and cannot
@@ -59,6 +81,13 @@ last two are low and stylistic, and say so.
       removing, and the file does not tell the reader which.
       **Severity:** low; stylistic, an absent "why" comment where a reader would
       ask.
+
+      **Fixed** (`dev-writer`), in the commit that ticks this box: it is
+      neither of the two. The check is what turns the `undefined` of a target
+      with nothing held into the "" a string field can be assigned, which is
+      the common case and not a defence against an inherited name. A two-line
+      comment on `heldDraft` says so, and `design.md` Decision 2 no longer
+      presents it as a guard.
 
 - [ ] **`tester`** — `tst_draft_targets.qml:622` and `:987` — the string literals
       carry raw invisible characters (U+202E, U+202C, U+200B, U+200D, U+FEFF),

@@ -4,7 +4,7 @@ Dimension: architecture only. All three entries are low severity and are
 shape or naming preferences, not defects: nothing below produces a wrong
 publish.
 
-- [ ] **`dev-writer`** — `dialectica-ui/src/qml/DComposer.qml:332,356,390-391` —
+- [x] **`dev-writer`** — `dialectica-ui/src/qml/DComposer.qml:332,356,390-391` —
       the new `published` local and `applyReply` parameter share a name with the
       component's own `published()` signal (line 151), and the two meanings sit on
       adjacent lines: `root.clearDraftOf(published)` then `root.published()`.
@@ -16,7 +16,12 @@ publish.
       Rename to what it holds (for example `publishedKey`). **Stylistic**, low;
       no behaviour changes.
 
-- [ ] **`dev-writer`** — `dialectica-ui/src/qml/DComposer.qml:88-102` —
+      **Fixed** (`dev-writer`), in the commit that ticks this box: the local in
+      `submit()` and the parameter of `applyReply` are both `publishedKey`. No
+      behaviour changes, so no test fails without it; `tst_composer.qml` and
+      the whole suite pass after the rename.
+
+- [x] **`dev-writer`** — `dialectica-ui/src/qml/DComposer.qml:88-102` —
       `heldDrafts` is declared `property var` but is deliberately mutated in place
       so that it never notifies; the only protection against someone binding to
       it is a comment (and `design.md` Risks: "A future binding over it would
@@ -29,7 +34,21 @@ publish.
       really notifies, or keep the map out of the property system. **Design
       preference**, low; the current form is documented and works as stated.
 
-- [ ] **`dev-writer`** — `dialectica-ui/src/qml/DComposer.qml:75-80` —
+      **Rejected** (`dev-writer`). Three reasons. Copy-on-write copies every
+      key on each keystroke, and the owner settled that the map has no cap, so
+      the per-keystroke cost would grow with a number nothing bounds, to serve
+      a binding that does not exist. The scenario's own example, marking a Stoa
+      that has a draft, is an indicator that a draft was kept, which the
+      delta's "A restored draft is not announced" forbids, so the nearest
+      reader of such a binding is one the spec rules out. And the second
+      option, state outside the property system, means moving the map into an
+      imported script: a second file, and a second lifetime to get right, for
+      one variable. I did not try it. A change that does need to read the map
+      reactively should add a signal or a counter then, with its reader in
+      view. The argument is recorded in `design.md`, Risks, beside the entry
+      this finding quotes, in the commit that ticks this box.
+
+- [x] **`dev-writer`** — `dialectica-ui/src/qml/DComposer.qml:75-80` —
       `targetKeyOf(kind, stoaAddress, parent)` is a public function of the
       component with exactly one caller, the `targetKey` binding on the next line,
       which passes the component's own three properties. No screen and no test
@@ -40,6 +59,12 @@ publish.
       else calls this?" about. Inline the `JSON.stringify` into the binding, or
       rename the parameter to `replyParent` if the function is kept for a
       future caller. **Stylistic**, low.
+
+      **Fixed** (`dev-writer`), in the commit that ticks this box: the function
+      is gone and `targetKey` is the `JSON.stringify` binding itself, so the
+      shadowing parameter went with it. `git grep targetKeyOf` over
+      `dialectica-ui`, `design.md` and `tasks.md` now returns nothing. The key
+      is unchanged, and the whole suite passes.
 
 ## Clean
 
