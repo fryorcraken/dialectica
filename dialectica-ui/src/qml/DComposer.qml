@@ -40,7 +40,8 @@ ColumnLayout {
     // instead of dropped somewhere the caller cannot see.
     readonly property string replyParent: root.kind === "reply" ? root.parentOp : ""
 
-    // The draft, and **the field is the single place it lives**.
+    // The draft for the target this composer would publish to, and **the field
+    // is the single place that one lives on screen**.
     //
     // An alias rather than a separate property with a two-way binding: `text:
     // root.draft` plus `onTextChanged: root.draft = text` looks symmetric and is
@@ -48,16 +49,89 @@ ColumnLayout {
     // programmatic write to `draft` updates nothing on screen. That failure is
     // silent and looks exactly like the clear-on-success not working.
     //
-    // Nothing in this component ever rewrites this text, which is the whole of
-    // "the composer never alters what the user typed": no trim, no normalise, no
-    // strip anywhere on the path from here to `Core.publishPost`. An op is
-    // signed over its bytes, so a composer that altered a draft would publish,
-    // permanently and under the user's signature, something they did not write.
-    // The one write is `clearDraft()`, which sets it to empty after a store.
+    // Nothing in this component ever alters what the user typed: no trim, no
+    // normalise, no strip anywhere on the path from here to `Core.publishPost`.
+    // An op is signed over its bytes, so a composer that altered a draft would
+    // publish, permanently and under the user's signature, something they did
+    // not write. The field is written in two places only, and neither edits
+    // text: `showDraftOfTarget()` puts back, whole, what was entered for the
+    // target now pointed at, and `clearDraftOf()` empties it after a store.
     property alias draft: field.text
 
-    function clearDraft() {
-        field.text = ""
+    // ---- a draft belongs to its target -----------------------------------
+    //
+    // **One composer serves every target of its kind.** The feed mounts one and
+    // re-points it at whichever Stoa is open; the thread screen does the same
+    // for whichever thread. So the field outlives the target it was typed for,
+    // and until this section existed its text simply stayed: a post written for
+    // one Stoa was in the field, and one press from being published, in the
+    // next Stoa opened (`composer-view`, "A draft belongs to the target it was
+    // entered for"; the change's `design.md` has the alternatives).
+    //
+    // The target is what `submit()` sends, and nothing coarser: which method,
+    // which Stoa and which parent. `JSON.stringify` of the three is the key
+    // because it cannot map two targets onto one string, whatever characters a
+    // peer-supplied op id holds; joining them with a separator could.
+    function targetKeyOf(kind, stoaAddress, parent) {
+        return JSON.stringify([kind, stoaAddress, parent])
+    }
+
+    readonly property string targetKey:
+        root.targetKeyOf(root.kind, root.stoaAddress, root.replyParent)
+
+    // Every unsubmitted draft this composer has been given, by target key.
+    //
+    // **In this component's memory and nowhere else**, so it ends with the view
+    // and reaches core only as the body of a publish. No bound on how many it
+    // holds. It is mutated in place, which QML does not notice, and that is
+    // deliberate: nothing binds to it. The field is what a binding reads.
+    property var heldDrafts: ({})
+
+    function heldDraft(key) {
+        var held = root.heldDrafts[key]
+        return typeof held === "string" ? held : ""
+    }
+
+    // An emptied draft is dropped and not kept as "": the two would read back
+    // the same, and dropping keeps the map to what is actually unsubmitted.
+    function holdDraft(key, text) {
+        if (text === "")
+            delete root.heldDrafts[key]
+        else
+            root.heldDrafts[key] = text
+    }
+
+    // The composer was pointed at a different target: the field takes what is
+    // held for that one, which is nothing unless text was entered for it.
+    //
+    // **This handler is the whole of what keeps one target's text out of
+    // another's publish.** `submit()` sends the field's text to the target
+    // current when it runs, so the field must never hold another target's text
+    // once the target has changed, and this runs on the change itself, before
+    // anything else can act. Without it every cross-target test in
+    // `tst_draft_targets.qml` is red.
+    //
+    // A transition passes through targets nobody is shown: `Main.qml` empties a
+    // screen's address before it sets the next one. Each is handled like any
+    // other, which costs a lookup and writes nothing.
+    //
+    // Assigning `text` also resets the field's undo history, so undo in one
+    // target's field cannot bring back another's text.
+    onTargetKeyChanged: root.showDraftOfTarget()
+
+    function showDraftOfTarget() {
+        field.text = root.heldDraft(root.targetKey)
+    }
+
+    // Clears the draft of the target a publish NAMED, which is the one held
+    // under `key`. Not "whatever the field holds": those are the same target
+    // only while nothing re-points the composer between a submit and its
+    // answer, and that holds today because the call into core is synchronous,
+    // which is not this component's to rely on.
+    function clearDraftOf(key) {
+        root.holdDraft(key, "")
+        if (key === root.targetKey)
+            field.text = ""
     }
 
     // ---- the byte cap ---------------------------------------------------
@@ -86,8 +160,8 @@ ColumnLayout {
     // Back to "nothing submitted", which renders no outcome. The outcome
     // belongs to the visit in which its publish was made (`composer-view`), and
     // this component cannot see a visit, so its screen calls this when one
-    // begins. The draft is not touched: what becomes of it is a separate
-    // question, which `composer-view` leaves open.
+    // begins. The draft is not touched: it belongs to its target and not to a
+    // visit, and the section above is what keeps it.
     function clearOutcome() {
         root.outcome = ""
         root.outcomeDetail = ""
@@ -253,6 +327,10 @@ ColumnLayout {
 
         root.publishing = true
 
+        // The target this publish names, taken before the call so the answer
+        // is applied to it whatever the composer points at by then.
+        var published = root.targetKey
+
         var reply = root.kind === "reply"
             ? Core.publishReply(root.stoaAddress, root.replyParent, root.draft)
             : Core.publishPost(root.stoaAddress, root.draft)
@@ -265,14 +343,17 @@ ColumnLayout {
         // each — which is the shape that survives a sixth being added.
         root.publishing = false
 
-        root.applyReply(reply)
+        root.applyReply(reply, published)
     }
 
     // The reply, turned into an outcome. Separate from `submit()` because it is
     // a separate job — deciding what a reply MEANS is not deciding what to send
     // — and because it is the half worth testing against shapes a real core
     // would not produce.
-    function applyReply(reply) {
+    //
+    // `published` is the key of the target the publish named, which is the
+    // draft a store clears.
+    function applyReply(reply, published) {
         // Every failure to reach core, every non-JSON reply and core's own error
         // shape arrive here as `ok: false`, because they all go through the one
         // `call()` path. That is the whole reason to have one.
@@ -306,7 +387,7 @@ ColumnLayout {
             // rule in full. Leaving it would have said a decision was unmade
             // when it is made, contracted and argued, which is how the next
             // reader concludes they are free to change it.
-            root.clearDraft()
+            root.clearDraftOf(published)
             root.published()
             return
         }
@@ -366,6 +447,11 @@ ColumnLayout {
             // into it, and normalising is the one thing this component must not
             // do to a draft.
             textFormat: TextEdit.PlainText
+
+            // Every edit is held for the target the composer points at, as it
+            // is made, so what comes back is the text as last edited and there
+            // is no moment of leaving at which it has to be saved.
+            onTextChanged: root.holdDraft(root.targetKey, field.text)
         }
     }
 
