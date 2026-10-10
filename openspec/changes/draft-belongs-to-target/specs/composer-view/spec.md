@@ -55,6 +55,22 @@ empty.
 - **THEN** the feed's post composer is rendered
 - **AND** its field is empty
 
+### Requirement: Two targets that differ never share a draft
+
+Two targets are the same target only where both are for a post or both for a
+reply, they name the same Stoa address and, for a reply, they name the same
+parent op. The view MUST NOT hold one draft for two targets that differ in any
+of these, whatever characters the Stoa address or the parent op contain.
+
+#### Scenario: Targets whose address and parent read alike when joined do not share a draft
+
+- **WHEN** text is entered in a reply composer pointed at Stoa address `a:b`
+  and parent op `c`, the composer is pointed at Stoa address `a` and parent op
+  `b:c`, and it is then pointed at the first address and parent again, and the
+  same is done with any other single character, or none, in place of `:`
+- **THEN** while pointed at the second address and parent, the field is empty
+- **AND** once pointed at the first again, the field holds the text entered
+
 ### Requirement: Text is submitted only to the target it was entered for
 
 The view MUST NOT make a publish call whose Stoa address or parent op differs
@@ -139,6 +155,13 @@ account of how many other targets hold one.
   opens a thread from the feed, and the user returns to the feed
 - **THEN** the post composer's field holds the text entered
 
+#### Scenario: A post draft is back after the moderation screen was visited
+
+- **WHEN** text is entered in a Stoa's post composer and not submitted, the user
+  opens the moderation screen from the feed, and the user leaves it back to the
+  feed
+- **THEN** the post composer's field holds the text entered
+
 #### Scenario: A reply draft is back when the same thread is reopened
 
 - **WHEN** text is entered in a thread's reply composer and not submitted, the
@@ -177,6 +200,13 @@ account of how many other targets hold one.
   of three Stoas and in the reply composers of two threads, and each of the
   five is then opened again
 - **THEN** each composer holds the text entered for its own target
+
+#### Scenario: Drafts for six hundred targets are all held at once
+
+- **WHEN** a post composer is pointed at six hundred Stoa addresses in turn and
+  a different text is entered for each without submitting, and the composer is
+  then pointed at each of the six hundred again
+- **THEN** for each address the field holds the text entered for it
 
 #### Scenario: A draft kept by a refusal is back without the refusal
 
@@ -226,6 +256,19 @@ field on any later visit to that target.
   user opens a different thread and publishes a reply there that reports the op
   was newly stored, and the user opens the first thread again
 - **THEN** the first thread's reply composer holds the text entered there
+
+#### Scenario: A publish that reports after its composer was pointed elsewhere clears the target it named
+
+- **WHEN** a post composer holds an unsubmitted draft for each of two Stoas, the
+  draft for the first is submitted, the composer is pointed at the second Stoa
+  before the publish reports, and the publish then reports the op was newly
+  stored
+- **THEN** the publish call made names the first Stoa's address and carries the
+  text entered for the first Stoa
+- **AND** the field, pointed at the second Stoa, holds the text entered for the
+  second Stoa
+- **AND** once the composer is pointed at the first Stoa again, its field is
+  empty
 
 ### Requirement: A draft whose composer is not rendered stays held and is displayed nowhere
 

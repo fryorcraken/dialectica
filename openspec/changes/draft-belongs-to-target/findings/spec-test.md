@@ -41,7 +41,7 @@ only at the lines mutated.
       it for an unlisted separator. Sweep every code unit 0 to 127, or build the
       colliding pair from the characters of the two parts instead of from a list.
 
-- [ ] **`spec-writer`** — `specs/composer-view/spec.md`, requirements *A publish
+- [x] **`spec-writer`** — `specs/composer-view/spec.md`, requirements *A publish
       clears only the draft of the target it named* and *An unsubmitted draft is
       kept for its target while the view stays open*. Tests pin behaviour the
       scenarios do not describe, and none carries a `NO SPEC:` marker:
@@ -61,6 +61,33 @@ only at the lines mutated.
       and for (b) a line saying that clause is pinned at the composer layer
       because the view layer cannot observe it, or say they are deliberately
       unscenario'd.
+
+      **Outcome (`spec-writer`): fixed**, in the delta
+      `specs/composer-view/spec.md`. Each of the four tests now has a scenario,
+      so none needs a `NO SPEC:` marker.
+      (a) Scenario *A post draft is back after the moderation screen was
+      visited*, under *An unsubmitted draft is kept for its target while the
+      view stays open*.
+      (b) Scenario *A publish that reports after its composer was pointed
+      elsewhere clears the target it named*, under *A publish clears only the
+      draft of the target it named*. It is worded on a composer being pointed
+      at a target, the only place the behaviour can be observed. The spec does
+      not say why no screen reaches it (the core call is synchronous); that is
+      reasoning, and belongs in `design.md` if it is not there already.
+      (c) Scenario *Drafts for six hundred targets are all held at once*, under
+      the same retention requirement. For the separator sweep, a new
+      requirement, *Two targets that differ never share a draft*, states when
+      two targets are the same target, with the scenario *Targets whose address
+      and parent read alike when joined do not share a draft*. It is its own
+      requirement because `openspec validate --strict` warns on a requirement
+      text over 500 characters. That scenario says
+      "any other single character, or none", so the hand-written list of eleven
+      separators falls short of it; the `tester` finding above this one is the
+      entry that closes that.
+      For the `tester`: the four tests can cite their scenarios by name, and the
+      section heading "Requirements stated in the spec's own words, past its
+      scenarios" in `tst_draft_targets.qml` no longer describes them. No
+      assertion needs to change on account of this entry.
 
 Clean, checked by reading and, where stated, by mutation:
 
