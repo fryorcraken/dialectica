@@ -161,6 +161,26 @@ TestCase {
         })
     }
 
+    // Everything displayed, not only the texts: each displayed node's kind,
+    // name, text, colour and border colour, in tree order. A marker that is a
+    // dot or a tint rather than words shows up here and not in `textsShown`.
+    //
+    // The object's kind is read off its `String()` form with the address and the
+    // per-instance counter removed, since those differ between two views that
+    // display exactly the same thing.
+    function displayedFingerprint(view) {
+        return spec.visibleNodes(view, function (node) {
+            return true
+        }).map(function (node) {
+            var kind = String(node).replace(/\(0x[0-9a-f]+(, "[^"]*")?\)/, "").replace(/_QML(TYPE)?_\d+/, "")
+            var text = typeof node.text === "string" ? node.text : ""
+            var color = node.color !== undefined ? String(node.color) : ""
+            var border = node.border !== undefined
+                ? String(node.border.color) + "/" + node.border.width : ""
+            return [kind, node.objectName, text, color, border].join("|")
+        })
+    }
+
     function textsShownContaining(view, phrase) {
         return spec.textsShown(view).filter(function (text) {
             return text.indexOf(phrase) >= 0
@@ -939,17 +959,23 @@ TestCase {
             spec.goTo(restored.view, spec.stoaA, c.root)
             compare(spec.field(restored.view, c.kind).text, "the same words")
             var whenRestored = spec.textsShown(restored.view)
+            var shapeWhenRestored = spec.displayedFingerprint(restored.view)
             restored.view.destroy()
 
             var fresh = spec.started()
             spec.goTo(fresh.view, spec.stoaA, c.root)
             spec.enter(fresh.view, c.kind, "the same words")
             var whenTyped = spec.textsShown(fresh.view)
+            var shapeWhenTyped = spec.displayedFingerprint(fresh.view)
             fresh.view.destroy()
 
             verify(whenTyped.indexOf("the same words") >= 0,
                    c.kind + ": the comparison includes the field")
             compare(whenRestored, whenTyped, c.kind)
+            // A marker that is not words: a dot, a tint, a border.
+            verify(shapeWhenTyped.length > 20,
+                   c.kind + ": the fingerprint covers the screen and not a stub")
+            compare(shapeWhenRestored, shapeWhenTyped, c.kind + ": nothing else differs either")
         }
     }
 
@@ -997,6 +1023,77 @@ TestCase {
         compare(spec.visibleNamed(s.view, "postSubmitButton").length, 0,
                 "and the submit affordance is unavailable")
         compare(spec.publishes(s.bridge).length, 0)
+        s.view.destroy()
+    }
+
+    // =====================================================================
+    // Requirements stated in the spec's own words, past its scenarios
+    // =====================================================================
+
+    // Requirement: "A reply's target is identified by its parent", and the
+    // parent is peer-supplied text. Two targets whose address and parent run
+    // together into the same string under some separator are still two
+    // targets, so neither's draft may be the other's.
+    //
+    // On a composer directly: a Stoa address is 64 hex characters in this view,
+    // so no pair like this can be reached through `Main.qml`, and the key must
+    // not depend on that. Each row is a pair that a joined key would map onto
+    // one string, for the separator in question.
+    function test_two_targets_whose_parts_run_together_alike_do_not_share_a_draft() {
+        var separators = [":", "|", ",", "/", "-", "\"", "[", "]", " ", "\u0000", ""]
+        for (var i = 0; i < separators.length; i++) {
+            var sep = separators[i]
+            var composer = composerComponent.createObject(null, { kind: "reply" })
+            composer.stoaAddress = "a" + sep + "b"
+            composer.parentOp = "c"
+            composer.draft = "for the first"
+
+            composer.stoaAddress = "a"
+            composer.parentOp = "b" + sep + "c"
+            compare(composer.draft, "",
+                    "separator " + JSON.stringify(sep) + ": the second target is empty")
+
+            composer.stoaAddress = "a" + sep + "b"
+            composer.parentOp = "c"
+            compare(composer.draft, "for the first",
+                    "separator " + JSON.stringify(sep) + ": and the first is still its own")
+            composer.destroy()
+        }
+    }
+
+    // Requirement: "The view MUST NOT discard a held draft on account of how
+    // many other targets hold one." The scenario names five targets; a bound
+    // somewhere above five would pass it, so this holds hundreds.
+    function test_no_held_draft_is_discarded_on_account_of_how_many_others_are_held() {
+        var composer = composerComponent.createObject(null, { kind: "post" })
+        var count = 600
+        for (var i = 0; i < count; i++) {
+            composer.stoaAddress = "stoa-" + i
+            composer.draft = "draft number " + i
+        }
+        for (var j = 0; j < count; j++) {
+            composer.stoaAddress = "stoa-" + j
+            if (composer.draft !== "draft number " + j)
+                fail("the draft for target " + j + " was lost; the field holds '"
+                     + composer.draft + "'")
+        }
+        composer.destroy()
+    }
+
+    // Requirement: "for as long as the view stays open, whichever screens are
+    // rendered meanwhile." The moderation screen is a main-area screen like the
+    // others; leaving the feed for it and coming back is not the end of a draft.
+    function test_a_post_draft_is_back_after_the_moderation_screen_was_visited() {
+        var s = spec.started()
+        spec.goTo(s.view, spec.stoaA)
+        spec.enter(s.view, "post", "half-written")
+
+        spec.visibleNamed(s.view, "feed")[0].moderationRequested()
+        compare(s.view.screenShown, "moderation")
+        spec.visibleNamed(s.view, "moderationBackButton")[0].clicked()
+        compare(s.view.screenShown, "feed")
+
+        compare(spec.field(s.view, "post").text, "half-written")
         s.view.destroy()
     }
 }
