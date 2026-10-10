@@ -2,10 +2,12 @@
 
 Dimension covered: correctness only.
 
-- [ ] **`dev-writer`** — `dialectica-ui/src/qml/DComposer.qml:356,390` — `applyReply(reply, published)` silently stops clearing the draft when `published` is omitted
+- [x] **`dev-writer`** — `dialectica-ui/src/qml/DComposer.qml:356,390` — `applyReply(reply, published)` silently stops clearing the draft when `published` is omitted
       **Scenario:** `applyReply({ok: true, value: {opId: "x", wasNew: true}})` (the pre-change one-argument call shape; `applyReply` is a public, non-underscored function and the only thing keeping a store and a cleared draft together) sets `outcome = "stored"` and emits `published()`, then calls `clearDraftOf(undefined)`. That deletes `heldDrafts["undefined"]` and skips `field.text = ""`, because `undefined === root.targetKey` is false. The text stays in the field and in `heldDrafts`, so the user sees "stored" with the same text still offered for a second Publish. An op is permanent and a second publish is a second signed op, so this failure mode is not cosmetic.
       **Severity:** low. Nothing in the tree calls `applyReply` other than `submit()`, which passes the key, so no current path reaches it. This is a hardening gap in a changed signature, not a live defect. A default of `root.targetKey` for the second parameter, or a refusal on a non-string key, would remove it. Whichever is chosen belongs with a test, because nothing exercises the one-argument form (`git grep` finds `applyReply` named only in comments under `dialectica-ui/tests/`).
       **Measured:** the one-argument call was reasoned from the code, not run. The two-argument path was run and is green.
+
+      **Fixed** (`dev-writer`), in the commit that ticks this box: the key parameter defaults to `root.targetKey`, which is what the one-argument form meant before this change. The refusal was not taken because it would report "refused" for an op that was stored. The test is `test_a_stored_reply_applied_without_a_key_clears_the_draft_shown` in `tst_composer.qml`. I ran the scenario first, against the unchanged composer: it failed at "a store never leaves its text in the field", with the text still in the field, so the reasoning in this entry holds when run. It passes with the default. `design.md` Decision 4 records the choice.
 
 ## Areas checked and found clean
 

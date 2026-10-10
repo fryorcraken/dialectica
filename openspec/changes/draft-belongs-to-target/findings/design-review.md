@@ -24,7 +24,7 @@ one test red". Checking either means editing source, which I do not do.
 `tst_draft_targets.qml` holds 37 `test_` functions, so sixteen of them being the
 cross-target ones is plausible.
 
-- [ ] **`dev-writer`** — `design.md` Decision 2 describes a guard with no
+- [x] **`dev-writer`** — `design.md` Decision 2 describes a guard with no
       mutation evidence (a suggestion). The key is the thing that stops two
       targets sharing a draft, and the entry names three separate choices that
       each prevent a distinct failure: the parent rather than the thread, the
@@ -37,7 +37,18 @@ cross-target ones is plausible.
       with `":"`. If one of them turns nothing red, say so, because that makes it
       a decision pinned only by a later test.
 
-- [ ] **`dev-writer`** — `design.md` omits the issue's "Left out on purpose"
+      **Fixed** (`dev-writer`), in the commit that ticks this box. Each edit
+      was made and run on my tree, then reverted with `git checkout --`:
+      dropping `stoaAddress` fails 14 of the 37 test functions in
+      `tst_draft_targets.qml`; joining with `":"` fails exactly one,
+      `test_two_targets_whose_parts_run_together_alike_do_not_share_a_draft`;
+      and keying on `parentOp` in place of `replyParent` fails **nothing**,
+      with the whole suite exiting 0. Decision 2 now says all three, including
+      that the `replyParent` choice is held by the spec's definition of a
+      post's target and by no test, and what test would pin it. I did not add
+      that test: the suite is the `tester`'s, and it is named in my report.
+
+- [x] **`dev-writer`** — `design.md` omits the issue's "Left out on purpose"
       reasoning (a gap). The issue's Decisions comment records two things this
       change acted on: a draft is not tied to an identity because 0.0.1 ships one
       identity per user, and the outcome rule is unchanged, so a restored draft
@@ -51,7 +62,13 @@ cross-target ones is plausible.
       the same signed-op disclosure the change exists to prevent. Record it in
       Decisions or Risks, with that cost and the condition that reopens it.
 
-- [ ] **`dev-writer`** — `design.md` Decision 5 is thin (a suggestion). It names
+      **Fixed** (`dev-writer`), in the commit that ticks this box: `design.md`
+      has a Decision 6, "The key carries no identity, and the outcome is left
+      where it was". It gives the identity point with its cost and the
+      condition that reopens it, and the outcome point with the alternative it
+      rules out.
+
+- [x] **`dev-writer`** — `design.md` Decision 5 is thin (a suggestion). It names
       the chosen behaviour (drop an emptied draft) and one reason (the map holds
       only unsubmitted text). It names no alternative beyond "held as `""`" and
       says what that would cost only by implication. It does not say the choice
@@ -59,3 +76,10 @@ cross-target ones is plausible.
       field, so no test can tell them apart, and the "no cap" decision is the only
       thing the drop bears on. One sentence saying nothing observable depends on
       it would stop a later reader treating it as a guard.
+
+      **Fixed** (`dev-writer`), in the commit that ticks this box. Measured and
+      not only reasoned: with `holdDraft` storing unconditionally the whole
+      suite exits 0. Decision 5 now says it is not a guard, that no test can
+      tell the two apart, and what holding "" would cost: an entry for each
+      target arrived at from one that has a draft, since the re-fill that
+      empties the field is itself a change of its text.

@@ -72,12 +72,8 @@ ColumnLayout {
     // which Stoa and which parent. `JSON.stringify` of the three is the key
     // because it cannot map two targets onto one string, whatever characters a
     // peer-supplied op id holds; joining them with a separator could.
-    function targetKeyOf(kind, stoaAddress, parent) {
-        return JSON.stringify([kind, stoaAddress, parent])
-    }
-
     readonly property string targetKey:
-        root.targetKeyOf(root.kind, root.stoaAddress, root.replyParent)
+        JSON.stringify([root.kind, root.stoaAddress, root.replyParent])
 
     // Every unsubmitted draft this composer has been given, by target key.
     //
@@ -87,6 +83,8 @@ ColumnLayout {
     // deliberate: nothing binds to it. The field is what a binding reads.
     property var heldDrafts: ({})
 
+    // "" for a target nothing is held for. The lookup answers `undefined`
+    // there, which the field, a string, cannot be assigned.
     function heldDraft(key) {
         var held = root.heldDrafts[key]
         return typeof held === "string" ? held : ""
@@ -108,8 +106,11 @@ ColumnLayout {
     // another's publish.** `submit()` sends the field's text to the target
     // current when it runs, so the field must never hold another target's text
     // once the target has changed, and this runs on the change itself, before
-    // anything else can act. Without it every cross-target test in
-    // `tst_draft_targets.qml` is red.
+    // anything else can act. Without it, the tests in `tst_draft_targets.qml`
+    // that move to another target and then read or submit what its field holds
+    // are red. Not every test that crosses targets is: one that enters text
+    // again after the move, or comes back to the only target it wrote in, finds
+    // the right text in a field nobody re-filled.
     //
     // A transition passes through targets nobody is shown: `Main.qml` empties a
     // screen's address before it sets the next one. Each is handled like any
@@ -329,7 +330,7 @@ ColumnLayout {
 
         // The target this publish names, taken before the call so the answer
         // is applied to it whatever the composer points at by then.
-        var published = root.targetKey
+        var publishedKey = root.targetKey
 
         var reply = root.kind === "reply"
             ? Core.publishReply(root.stoaAddress, root.replyParent, root.draft)
@@ -343,7 +344,7 @@ ColumnLayout {
         // each — which is the shape that survives a sixth being added.
         root.publishing = false
 
-        root.applyReply(reply, published)
+        root.applyReply(reply, publishedKey)
     }
 
     // The reply, turned into an outcome. Separate from `submit()` because it is
@@ -351,9 +352,12 @@ ColumnLayout {
     // — and because it is the half worth testing against shapes a real core
     // would not produce.
     //
-    // `published` is the key of the target the publish named, which is the
-    // draft a store clears.
-    function applyReply(reply, published) {
+    // `publishedKey` is the key of the target the publish named, which is the
+    // draft a store clears. A caller that names none means the target the
+    // composer points at: without that default, a stored reply applied with no
+    // key would report "stored" and leave its text in the field, one press from
+    // a second signed op.
+    function applyReply(reply, publishedKey = root.targetKey) {
         // Every failure to reach core, every non-JSON reply and core's own error
         // shape arrive here as `ok: false`, because they all go through the one
         // `call()` path. That is the whole reason to have one.
@@ -387,7 +391,7 @@ ColumnLayout {
             // rule in full. Leaving it would have said a decision was unmade
             // when it is made, contracted and argued, which is how the next
             // reader concludes they are free to change it.
-            root.clearDraftOf(published)
+            root.clearDraftOf(publishedKey)
             root.published()
             return
         }

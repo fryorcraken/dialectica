@@ -107,8 +107,28 @@ which parent.
 - **JSON, not a joined string.** `stoa + ":" + parent` maps `("a:b", "c")` and
   `("a", "b:c")` onto one key, and the parent is peer-supplied text.
   `JSON.stringify` of an array is injective. Every key begins with `[`, so no
-  key can be a name `Object.prototype` defines, and `heldDraft` returns only a
-  `string` regardless.
+  key can be a name `Object.prototype` defines. `heldDraft`'s `typeof` check
+  is not a guard against one: it is what turns the `undefined` of a target
+  with nothing held into the "" the field can be assigned.
+
+**What breaks without each**, measured by making the edit and running the
+suite. The three are not equally pinned:
+
+- Dropping the Stoa from the key turns many tests in `tst_draft_targets.qml`
+  red, since a post composer's key is then one string for every Stoa. The one
+  that isolates the choice for a reply is
+  `test_two_parents_with_one_op_id_in_different_stoas_do_not_share_a_draft`,
+  where the Stoa is the only part that differs.
+- Joining with `":"` turns exactly one test red,
+  `test_two_targets_whose_parts_run_together_alike_do_not_share_a_draft`. That
+  test sweeps a hand-written list of separators, so a join on a character
+  outside the list passes it; the spec's scenario says any single character.
+- Keying on `parentOp` in place of `replyParent` turns **nothing** red: the
+  whole suite exits 0. No screen gives a post composer a parent, so the two
+  agree wherever `Main.qml` is driven. The choice is held by the spec's
+  definition of a post's target (the Stoa address alone) and by no test. What
+  would pin it is a post composer whose `parentOp` changes while it holds a
+  draft: keyed on `parentOp`, the field empties.
 
 A composer with no target (an empty address) gets a key like any other. It is
 what the transitions in Context pass through, and it needs no branch: showing
@@ -120,9 +140,20 @@ its held draft is a lookup that finds nothing.
 entered for the target it names is `onTargetKeyChanged`, which runs
 synchronously inside the property change, before any event can reach a control.
 
-**What breaks without it:** with the handler's body emptied, sixteen tests in
-`tst_draft_targets.qml` go red, the cross-target ones of every requirement.
-Measured by making that edit and running the file.
+**What breaks without it:** with the handler's body emptied, the tests in
+`tst_draft_targets.qml` that move to another target and then read or submit
+what its field holds go red, about half the file, along with
+`test_a_draft_typed_in_one_stoa_is_neither_held_nor_published_in_another` in
+`tst_publish_outcome_visits.qml`. Measured by making that edit and running both
+files; run them again for a count, which moves with every test added.
+
+Not every test that crosses targets is among them. One that enters text again
+after the move, or returns to the only target it wrote in, finds the right text
+in a field nobody re-filled:
+`test_a_post_written_in_the_second_stoa_is_published_there_with_its_own_text`
+and `test_a_draft_returned_to_is_published_to_its_own_stoa` stay green, as do
+their two reply counterparts. Those four pin what a publish names, and would
+not notice this handler going missing.
 
 Considered: have `submit()` take the body from `heldDrafts` under the key built
 from the very address and parent it sends, so the rule would hold from
@@ -145,8 +176,25 @@ passes it to `clearDraftOf(key)`. That drops the held entry and empties the
 field only when the composer still points at that target.
 
 This is a guard for the day the call stops being synchronous, the same
-reasoning `publishing` already carries in that file. Today nothing can re-point
-a composer between a submit and its answer.
+reasoning `publishing` already carries in that file.
+
+**Why no screen can re-point a composer between a submit and its answer
+today.** `Core.call` reaches the host through `bridge.callModule`, which
+returns the answer as its value, and QML's JavaScript runs on one thread. So
+`submit()` runs from its first line to its last inside the one handler turn
+that the press started. Re-pointing a composer is a change to its screen's
+`stoaAddress` or `threadId`, which the composer's `stoaAddress` and `parentOp`
+are bound to and which follow the navigator's state in `Main.qml`. That state
+is changed by other handlers, and none is delivered while this one is running.
+The spec's scenario for this case is therefore worded on a composer being
+pointed at a target, and its test drives `DComposer` directly: there is no
+route to it through `Main.qml`.
+
+Two limits on that argument. It assumes `callModule` does not run an event loop
+while it waits for the module; under `qmltestrunner` the bridge is a fake that
+cannot, and nothing measured in this change says what Basecamp's does. And it
+rests on the transport's shape, which this component neither chose nor
+controls. Both are reasons to write the guard and not reasons to skip it.
 
 **What breaks without it:** replacing `clearDraftOf`'s body with
 `field.text = ""` turns exactly one test red,
@@ -154,11 +202,53 @@ a composer between a submit and its answer.
 Measured the same way. That test re-points the composer from inside the fake's
 `callModule`, which is the only place it can be done.
 
+`applyReply`'s key parameter defaults to the composer's current `targetKey`.
+No caller omits it, since `submit()` is the only one. The default exists
+because the function is callable from outside, QML having no private members,
+and a stored reply applied with no key would otherwise clear nothing: the
+outcome would read "stored" with the stored text still in the field, one press
+from a second signed op. Refusing a call without a key was the other option; it
+would report a refusal for an op that was stored. Without the default,
+`test_a_stored_reply_applied_without_a_key_clears_the_draft_shown` in
+`tst_composer.qml` is red, watched failing before the default was added.
+
 ### 5. An emptied draft is dropped from the map, not held as ""
 
 Both read back as an empty field. Dropping keeps `heldDrafts` to the targets
 that have unsubmitted text, so "no cap" does not also mean an entry for every
-target ever visited.
+target ever visited: the re-fill that empties the field on arriving at a target
+with no draft is itself a change of the field's text, so holding "" would add
+an entry for each target arrived at from one that has a draft, the ones a
+transition passes through among them.
+
+**This is not a guard, and nothing observable depends on it.** Holding "" in
+place of dropping leaves the whole suite green, measured by making
+`holdDraft` store unconditionally. No test can tell the two apart, because a
+missing entry and an entry of "" both put "" in the field. The choice bears
+only on how large the map grows.
+
+### 6. The key carries no identity, and the outcome is left where it was
+
+Both are from the issue's "Left out on purpose".
+
+**A draft is not tied to an identity**, because 0.0.1 ships one identity per
+user, so there is nothing to tell apart. The cost of that is deferred and not
+absent. Once a view can hold a second identity, a draft typed under one is in
+the field under the other, and publishing it signs it with a key its author did
+not choose for it. That is the disclosure this change exists to prevent, moved
+from the Stoa to the author. **What reopens it:** any change that lets the
+identity a publish signs with differ between two moments of one view's life.
+The key then needs an identity component, and the spec's definition of a target
+needs one first.
+
+**The outcome rule is unchanged.** A publish outcome belongs to a visit and a
+draft to a target, so a draft kept by a refusal or by an already-published
+answer comes back on a later visit without the message that explained why it
+was kept. `clearOutcome()` and `beginVisit()` are untouched, and the draft is
+re-filled by the change of target and not by anything a visit does. The
+alternative, restoring the outcome with the draft, would display a publish
+outcome on a visit in which no publish was made, which the outcome requirement
+forbids.
 
 ## Risks / Trade-offs
 
@@ -167,7 +257,13 @@ target ever visited.
   one to come back in full.
 - [`heldDrafts` is mutated in place, which QML does not notice] → Deliberate:
   nothing binds to it. A future binding over it would silently never update.
-  The property's comment says so.
+  The property's comment says so. Replacing the object on every write, so that
+  the property does notify, was raised in review and not taken: it copies every
+  key on each keystroke, against a map the owner chose not to cap, for a
+  binding that does not exist. The nearest use for one, marking a target that
+  holds a draft, is an indicator that a draft was kept, which "A restored draft
+  is not announced" forbids. A change that needs to read the map reactively
+  should give it a signal or a counter then, with the reader in front of it.
 - [`heldDrafts` and `targetKey` are readable from outside] → QML has no private
   members. No screen reads either, and no test asserts through them.
 - [The component layer stands in for the host] → Every test drives `Main.qml`

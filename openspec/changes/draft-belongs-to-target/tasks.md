@@ -34,13 +34,13 @@ Every QML command below is run from the repository root. "The spec" is
 
 ## 2. A draft belongs to its target
 
-- [x] 2.1 In `DComposer.qml`, add `targetKeyOf`, the `targetKey` binding and
+- [x] 2.1 In `DComposer.qml`, add the `targetKey` binding and
       `heldDrafts` with `heldDraft` / `holdDraft` (design.md, Decisions 1, 2
       and 5). Verified with 2.2.
 - [x] 2.2 Re-fill the field on a change of `targetKey`, and hold every edit
       under the current key from the field's `onTextChanged` (Decision 3).
       Verified by the spec and `tst_publish_outcome_visits.qml` passing, and by
-      emptying the handler and watching the cross-target tests go red.
+      emptying the handler and watching the tests Decision 3 describes go red.
 - [x] 2.3 Clear the draft under the key the publish named: `submit()` reads the
       key before the call and `applyReply` passes it to `clearDraftOf`
       (Decision 4). Verified by
@@ -49,6 +49,11 @@ Every QML command below is run from the repository root. "The spec" is
 - [x] 2.4 Bring `DComposer.qml`'s comments on `draft` and `clearOutcome` in
       line: the field is no longer the only place a draft lives, and the
       draft's fate is no longer open. Verified by reading the file.
+- [x] 2.5 Default `applyReply`'s key to the composer's current `targetKey`, so
+      a stored reply applied with no key still clears a draft (Decision 4).
+      Verified by
+      `test_a_stored_reply_applied_without_a_key_clears_the_draft_shown` in
+      `tst_composer.qml`, watched failing before the default was added.
 
 ## 3. Requirements that hold without new code
 
