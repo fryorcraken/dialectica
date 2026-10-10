@@ -138,7 +138,7 @@ the struck rows.
 
 ### 9. Doc links are fixed with reference definitions, so the moved lines stay byte-identical
 
-Five links in the moved docs pointed at items that stay in `delivery.rs`:
+Six links in the moved docs pointed at items that stay in `delivery.rs`:
 `channel_answer`, `Opening` and `Action::Open` from `ChannelBook`'s doc,
 `Processor::review` from `Review`'s, `refused_on_hand_over` from
 `INBOUND_BOUND`'s, and `Channels` from `InboundQueue`'s (twice, one

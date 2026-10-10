@@ -1,6 +1,6 @@
 # Findings — readability (code-reviewer)
 
-- [ ] **`dev-writer`** — `openspec/changes/split-delivery-book/design.md`, Decision 9 — "Five links" is six
+- [x] **`dev-writer`** — `openspec/changes/split-delivery-book/design.md`, Decision 9 — "Five links" is six
       **What is wrong:** the decision opens "Five links in the moved docs pointed
       at items that stay in `delivery.rs`" and then names `channel_answer`,
       `Opening`, `Action::Open`, `Processor::review`, `refused_on_hand_over` and
@@ -12,8 +12,15 @@
       **Severity:** low; a prose count, a genuine inaccuracy, not a style choice.
       **Measured:** `git grep -n -F "]: super::"` over `book.rs` and `queue.rs`
       gives six lines.
+      **Fixed** in the commit that ticks this box: Decision 9 now opens "Six
+      links". Measured fresh, not taken from the count above:
+      `git grep -n -F "]: super::"` over `book.rs` and `queue.rs` prints six
+      lines (`book.rs` 43, 44, 45 and 84; `queue.rs` 28 and 62), one per target
+      the decision names. Prose only, so no test fails without it. `tasks.md`
+      2.3 and 3.4 and the PR body's item 3 name the targets without a total and
+      were already right; neither changed.
 
-- [ ] **`dev-writer`** — `delivery.rs:963` — the heading `// ─── Inbound: the bounded queue ───` now heads no queue
+- [x] **`dev-writer`** — `delivery.rs:963` — the heading `// ─── Inbound: the bounded queue ───` now heads no queue
       **What is wrong:** the queue left, and the heading now sits over `Arriving`
       and `parked_inbound`, so a reader scanning for the queue in this file lands
       under a heading that promises it and finds the event type instead.
@@ -24,6 +31,13 @@
       recorded in `design.md` Risks and in the PR body, and rewording it is not on
       the owner's closed list of residue, so the fix is the owner's to allow;
       rejecting it with that argument is a fair outcome.
+      **Rejected.** `proposal.md`, owner decision 1, closes the list of
+      non-moved lines at four kinds: `mod` and `use` lines, `pub(super)` on
+      moved items, doc-link path fixes, and a module header per new file. A
+      reworded section comment in `delivery.rs` is none of them, and the list
+      is the owner's to widen, not this piece's. The heading stays as it is;
+      the observation is kept in `design.md`, Risks, and in the PR body, so it
+      outlives this file.
 
 Clean, in prose:
 
