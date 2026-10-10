@@ -2,10 +2,12 @@ import QtQuick
 import QtTest
 import "../src/qml"
 
-// `composer-view`: what an unsubmitted draft belongs to. Seven requirements,
-// each with its own section below:
+// `composer-view`: what an unsubmitted draft belongs to. Eight requirements,
+// the one marked held by the last section below and the rest each with a
+// section of their own:
 //
 //   - A draft belongs to the target it was entered for
+//   - Two targets that differ never share a draft (the last section)
 //   - Text is submitted only to the target it was entered for
 //   - An unsubmitted draft is kept for its target while the view stays open
 //   - A publish clears only the draft of the target it named
@@ -619,7 +621,17 @@ TestCase {
         // Leading and trailing whitespace, CJK, an astral code point, a bidi
         // override and its pop, a zero-width space and joiner, a BOM, a tab and
         // newlines.
+        //
+        // **Spelled as escapes, not typed**: the invisible ones cannot be seen
+        // in an editor or a diff, and a formatter or a paste that stripped them
+        // would leave a test that passes over a plainer string. The length is
+        // pinned below for the same reason: 29 code units, counted by hand
+        // from the pieces on this line.
         var typed = "  \t中文 🏛 ‮abc‬ x​y‍z﻿\n\nend \n "
+        compare(typed.length, 29, "the text under test is the one described above")
+        verify(typed.indexOf("‮") >= 0 && typed.indexOf("‬") >= 0
+               && typed.indexOf("​") >= 0 && typed.indexOf("‍") >= 0
+               && typed.indexOf("﻿") >= 0, "and it holds each invisible character")
         var cases = [
             { kind: "post", root: undefined, elsewhere: spec.stoaB },
             { kind: "reply", root: spec.rootX, elsewhere: spec.stoaB }
@@ -758,6 +770,8 @@ TestCase {
         s.view.destroy()
     }
 
+    // Scenario: A publish that reports after its composer was pointed elsewhere
+    // clears the target it named.
     // Requirement: "the draft cleared MUST be the one held for the target that
     // publish named, and a draft held for any other target MUST be left as it
     // was."
@@ -861,8 +875,21 @@ TestCase {
         s.view.destroy()
     }
 
-    // Scenario: A draft is back when a failed read recovers.
+    // Scenario: A draft is back when a failed read recovers. And the clause of
+    // the requirement it sits under, for the failed state itself: the draft is
+    // displayed nowhere but in the field of a composer that is rendered.
+    //
+    // **Whether a composer is rendered while a read has failed is the screen's
+    // own business and is not asserted.** The thread screen stops rendering
+    // its reply composer; the feed's post composer is gated on the posting
+    // probe alone and stays rendered through a failed list read. The
+    // requirement binds the text, not the composer: so what is counted is
+    // every displayed node carrying the draft, which must be exactly the
+    // fields rendered, none where there is no field. A banner, a label or a
+    // second copy anywhere else adds a node and fails this; so does a
+    // composer that is not rendered but whose text still is.
     function test_a_draft_is_back_when_a_failed_read_recovers() {
+        var draft = "written before the read failed"
         var cases = [
             { kind: "post", root: undefined, flag: "threadsFail" },
             { kind: "reply", root: spec.rootX, flag: "readThreadFail" }
@@ -871,7 +898,7 @@ TestCase {
             var c = cases[i]
             var s = spec.started()
             spec.goTo(s.view, spec.stoaA, c.root)
-            spec.enter(s.view, c.kind, "written before the read failed")
+            spec.enter(s.view, c.kind, draft)
 
             spec.leaveToTheList(s.view)
             s.bridge[c.flag] = true
@@ -883,11 +910,15 @@ TestCase {
                 compare(s.view.threadReadState, "failed", "the thread read failed")
             }
 
+            var rendered = spec.visibleNamed(s.view, c.kind + "DraftField").length
+            compare(spec.textsShownContaining(s.view, draft).length, rendered,
+                    c.kind + ": while the read is failed, the draft is displayed in "
+                    + "the " + rendered + " composer field(s) rendered and nowhere else")
+
             s.bridge[c.flag] = false
             spec.pressButtonReading(s.view, "Try reading again")
 
-            compare(spec.field(s.view, c.kind).text, "written before the read failed",
-                    c.kind)
+            compare(spec.field(s.view, c.kind).text, draft, c.kind)
             s.view.destroy()
         }
     }
@@ -984,6 +1015,8 @@ TestCase {
     function test_a_restored_draft_carries_the_same_warning_as_when_it_was_typed() {
         var s = spec.started()
         spec.goTo(s.view, spec.stoaA)
+        // A right-to-left override and a zero-width space: the two the
+        // warning counts, spelled as escapes because neither can be seen.
         spec.enter(s.view, "post", "safe‮text​more")
         verify(spec.textsShownContaining(s.view, "contains 2 invisible character(s)").length > 0,
                "the warning names how many were found when the text was typed")
@@ -1027,43 +1060,119 @@ TestCase {
     }
 
     // =====================================================================
-    // Requirements stated in the spec's own words, past its scenarios
+    // Scenarios that need a composer driven directly, or a screen the others
+    // do not visit; the requirement text each rests on is quoted. A test below
+    // that quotes only a requirement, and no scenario, pins what the
+    // requirement says and the scenario beside it does not.
     // =====================================================================
 
-    // Requirement: "A reply's target is identified by its parent", and the
-    // parent is peer-supplied text. Two targets whose address and parent run
-    // together into the same string under some separator are still two
-    // targets, so neither's draft may be the other's.
+    // Requirement: *Two targets that differ never share a draft*, whatever
+    // characters the Stoa address or the parent op contain.
+    // Scenario: Targets whose address and parent read alike when joined do not
+    // share a draft.
     //
     // On a composer directly: a Stoa address is 64 hex characters in this view,
     // so no pair like this can be reached through `Main.qml`, and the key must
-    // not depend on that. Each row is a pair that a joined key would map onto
-    // one string, for the separator in question.
+    // not depend on that.
+    //
+    // **The separator is every UTF-16 code unit, 0 to 0xFFFF, and none.** The
+    // scenario says "any other single character, or none", and a hand-written
+    // list of them holds only for the ones its author thought of: a key joined
+    // with a character outside the list passed an earlier version of this
+    // test. A key joining the parts with any one character `s` maps
+    // `("a" + s + "b", "c")` and `("a", "b" + s + "c")` onto one string, so the
+    // sweep reaches whichever `s` a mutant picks. The pair is built from `s`
+    // and not from a table of known-colliding rows, so it needs no maintenance.
+    //
+    // One composer serves the sweep: each pair differs from every other pair
+    // in `s`, and a composer per code unit would only be slower.
     function test_two_targets_whose_parts_run_together_alike_do_not_share_a_draft() {
-        var separators = [":", "|", ",", "/", "-", "\"", "[", "]", " ", "\u0000", ""]
-        for (var i = 0; i < separators.length; i++) {
-            var sep = separators[i]
-            var composer = composerComponent.createObject(null, { kind: "reply" })
+        var composer = composerComponent.createObject(null, { kind: "reply" })
+        for (var unit = -1; unit <= 0xFFFF; unit++) {
+            var sep = unit < 0 ? "" : String.fromCharCode(unit)
+            var which = unit < 0 ? "no separator" : "separator U+" + unit.toString(16)
+            var first = "for the first, " + which
+
             composer.stoaAddress = "a" + sep + "b"
             composer.parentOp = "c"
-            composer.draft = "for the first"
+            composer.draft = first
 
             composer.stoaAddress = "a"
             composer.parentOp = "b" + sep + "c"
-            compare(composer.draft, "",
-                    "separator " + JSON.stringify(sep) + ": the second target is empty")
+            if (composer.draft !== "")
+                fail(which + ": the second target holds '" + composer.draft + "'")
 
             composer.stoaAddress = "a" + sep + "b"
             composer.parentOp = "c"
-            compare(composer.draft, "for the first",
-                    "separator " + JSON.stringify(sep) + ": and the first is still its own")
-            composer.destroy()
+            if (composer.draft !== first)
+                fail(which + ": the first target no longer holds its own, but '"
+                     + composer.draft + "'")
         }
+        composer.destroy()
     }
 
+    // Requirement: *Two targets that differ never share a draft*: "Two targets
+    // are the same target only where both are for a post or both for a reply".
+    // A reply to the empty parent and a post name the same Stoa address and the
+    // same parent text, and are still two targets.
+    function test_a_post_and_a_reply_to_the_empty_parent_do_not_share_a_draft() {
+        var composer = composerComponent.createObject(null, {
+            kind: "post", stoaAddress: spec.stoaA, parentOp: "" })
+        composer.draft = "meant as a post"
+
+        composer.kind = "reply"
+        compare(composer.draft, "", "the same address and parent, as a reply")
+        composer.draft = "meant as a reply"
+
+        composer.kind = "post"
+        compare(composer.draft, "meant as a post", "and the post is still its own")
+        composer.kind = "reply"
+        compare(composer.draft, "meant as a reply", "and so is the reply")
+        composer.destroy()
+    }
+
+    // Requirement: *A draft belongs to the target it was entered for*: a post's
+    // target is "the Stoa address", and nothing else. A post composer holds no
+    // reply parent for a publish to name, so a `parentOp` it is handed (no
+    // screen hands one today) neither moves its draft nor reaches the publish.
+    //
+    // `design.md`, Decision 2: keying a post on `parentOp` in place of
+    // `replyParent` is invisible wherever `Main.qml` is driven, since no screen
+    // gives a post composer a parent. This is the test that pins it.
+    function test_a_posts_draft_does_not_move_with_a_parent_it_is_never_sent() {
+        var composer = composerComponent.createObject(null, {
+            kind: "post", stoaAddress: spec.stoaA })
+        composer.draft = "a post for A"
+
+        composer.parentOp = "some-op"
+        compare(composer.draft, "a post for A", "a parent given to a post moves nothing")
+        composer.parentOp = "another-op"
+        compare(composer.draft, "a post for A", "nor does a different one")
+        composer.draft = "edited under another parent"
+        composer.parentOp = ""
+        compare(composer.draft, "edited under another parent",
+                "and an edit made under one is the draft under any other")
+
+        var sent = []
+        Core.bridge = {
+            callModule: function (module, method, args) {
+                sent.push({ method: method, args: JSON.parse(String(args[0])) })
+                return '{"opId":"newpost","wasNew":true}'
+            }
+        }
+        composer.parentOp = "a third"
+        composer.submit()
+        compare(sent.length, 1)
+        compare(sent[0].method, "publish_post")
+        compare(sent[0].args.body, "edited under another parent")
+        verify(sent[0].args.parent === undefined, "the publish names no parent")
+        composer.destroy()
+    }
+
+    // Scenario: Drafts for six hundred targets are all held at once.
     // Requirement: "The view MUST NOT discard a held draft on account of how
-    // many other targets hold one." The scenario names five targets; a bound
-    // somewhere above five would pass it, so this holds hundreds.
+    // many other targets hold one." The several-targets scenario names five; a
+    // bound somewhere above five would pass it, so this holds hundreds.
     function test_no_held_draft_is_discarded_on_account_of_how_many_others_are_held() {
         var composer = composerComponent.createObject(null, { kind: "post" })
         var count = 600
@@ -1080,6 +1189,7 @@ TestCase {
         composer.destroy()
     }
 
+    // Scenario: A post draft is back after the moderation screen was visited.
     // Requirement: "for as long as the view stays open, whichever screens are
     // rendered meanwhile." The moderation screen is a main-area screen like the
     // others; leaving the feed for it and coming back is not the end of a draft.

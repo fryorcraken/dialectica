@@ -89,7 +89,7 @@ last two are low and stylistic, and say so.
       comment on `heldDraft` says so, and `design.md` Decision 2 no longer
       presents it as a guard.
 
-- [ ] **`tester`** — `tst_draft_targets.qml:622` and `:987` — the string literals
+- [x] **`tester`** — `tst_draft_targets.qml:622` and `:987` — the string literals
       carry raw invisible characters (U+202E, U+202C, U+200B, U+200D, U+FEFF),
       not escapes.
       **Scenario:** line 987 types a literal that reads `"safetextmore"` on
@@ -105,7 +105,20 @@ last two are low and stylistic, and say so.
       **Severity:** medium for a test whose value rests on characters nobody can
       see; stylistic otherwise.
 
-- [ ] **`tester`** — `tst_composer.qml:347` — the comment still says "A reviewer
+      **Fixed** (`tester`), in `tst_draft_targets.qml`. Both literals are
+      backslash-u escapes now (`‮`, `‬`, `​`, `‍`,
+      `﻿`); the positions were read off the old literals with
+      `git grep -P` before the swap, not guessed. The every-character test
+      also pins what a strip would remove: `typed.length` is 29 (counted by
+      hand from the pieces, not read off the string), and each of the five
+      invisible characters is asserted present, so a formatter that drops them
+      now fails the test where it used to leave it passing over a plainer
+      string. The warning test needs no new assertion: it already asserts
+      "contains 2 invisible character(s)", which only the two escapes produce.
+      `tst_composer.qml:214, 252, 317-319` were not touched; the finding names
+      them as the source of the pattern, not as a defect to fix here.
+
+- [x] **`tester`** — `tst_composer.qml:347` — the comment still says "A reviewer
       deleted `clearDraft()` from the stored arm", and `clearDraft` no longer
       exists: this change renamed it to `clearDraftOf`.
       **Scenario:** `git grep -n "clearDraft\b"` outside the archive returns only
@@ -113,7 +126,14 @@ last two are low and stylistic, and say so.
       line is outside the diff but this change is what orphaned it.
       **Severity:** low; stale reference.
 
-- [ ] **`tester`** — `tst_publish_outcome_visits.qml:812-820` — "This test used
+      **Fixed** (`tester`). The comment now says the reviewer deleted "the
+      draft-clearing call (then `clearDraft()`, now `clearDraftOf()`)". It is
+      still an account of what a reviewer once did, so it keeps the history
+      and says the name is dead. `git grep -n -F "clearDraft()"` over
+      `dialectica-ui` still returns that one line, now flagged as the old
+      name, so a reader who follows it finds the explanation and not a gap.
+
+- [x] **`tester`** — `tst_publish_outcome_visits.qml:812-820` — "This test used
       to assert the opposite of its first two halves, as a pin of what the view
       did while the spec was silent" narrates the previous state of the test.
       **Scenario:** the sentence is true on the day it is written and a changelog
@@ -122,6 +142,12 @@ last two are low and stylistic, and say so.
       are what a reader needs.
       **Severity:** low; stylistic, and in line with this file's habit of
       narrating, so a preference rather than a defect.
+
+      **Fixed** (`tester`). The sentence about what the test "used to assert"
+      is gone; the comment now says what is true of the test today (the feed
+      mounts one composer for every Stoa, so the test goes through the feed's
+      controls, as the text could follow the user into B). The scenario names
+      above it are unchanged.
 
 ## Clean areas
 

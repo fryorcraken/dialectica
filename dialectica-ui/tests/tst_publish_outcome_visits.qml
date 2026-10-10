@@ -812,9 +812,9 @@ TestCase {
     // "Text typed in one Stoa is not published to another" and "A draft
     // returned to is published to its own Stoa".
     //
-    // This test used to assert the opposite of its first two halves, as a pin
-    // of what the view did while the spec was silent: one composer served every
-    // Stoa, so the text followed the user into B and was published there.
+    // The feed mounts one composer that serves every Stoa, which is why this
+    // goes through the feed's own controls: the text could follow the user into
+    // B, and be published there.
     function test_a_draft_typed_in_one_stoa_is_neither_held_nor_published_in_another() {
         var s = spec.openedOnStoaA()
         spec.visibleNamed(s.view, "postDraftField")[0].text = "meant for A"

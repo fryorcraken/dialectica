@@ -5,7 +5,7 @@ Scope: the delta `specs/composer-view/spec.md` read with the live
 and the diff of `tst_publish_outcome_visits.qml`. The implementation was read
 only at the lines mutated.
 
-- [ ] **`tester`** — `tst_draft_targets.qml`, requirement *A draft whose composer
+- [x] **`tester`** — `tst_draft_targets.qml`, requirement *A draft whose composer
       is not rendered stays held and is displayed nowhere*, the clause "whether
       because the posting probe reports posting is not possible for its Stoa or
       because a read failed". The shut-gate tests assert that no draft field is
@@ -23,7 +23,35 @@ only at the lines mutated.
       and only one is pinned. Severity: low to medium. Add the shut-gate test's
       two assertions to the failed state, for the post and the reply case.
 
-- [ ] **`tester`** — `tst_draft_targets.qml:1042`
+      **Fixed, with one part of the request not reachable as written**
+      (`tester`). `test_a_draft_is_back_when_a_failed_read_recovers` now
+      asserts, while `feedReadState` / `threadReadState` is `failed`, that the
+      number of displayed nodes carrying the draft equals the number of draft
+      fields rendered: the draft is displayed nowhere but in a composer's
+      field. Measured before writing it: **the feed's post composer is still
+      rendered through a failed list read** (`FeedScreen.qml` gates it on the
+      posting probe alone, and the probe runs before the list read), so for
+      the post case the shut-gate pair "no field, no text" is false of the
+      code and of the spec, whose clause reads "While no composer for a
+      draft's target is rendered". The thread screen does stop rendering its
+      reply composer (0 fields, 0 nodes with the text). So the assertion is
+      the one that holds in both: text only in rendered fields. It is
+      deliberately silent on whether a screen keeps its composer through a
+      failed read, which the spec does not decide.
+      **Fails without it:** in `DThreadScreen.qml`, the failure message's
+      `text: screen.failure` became `screen.failure + " " +
+      replyComposer.draft`: predicted the reply case fails, observed
+      `reply: ... 0 composer field(s) rendered and nowhere else`, actual 1,
+      expected 0. The same edit to the feed's first failure-banner `Text`
+      (`... can be shown." + composer.draft`): predicted the post case fails,
+      observed actual 2, expected 1. Both reverted. A mutant that merely
+      keeps the thread screen's composer mounted through the failure is **not**
+      caught, and is not a spec violation: a rendered composer holding its own
+      target's draft is allowed. **Spec observation for the owner, not acted
+      on:** the clause "because a read failed" holds for the thread screen
+      only; the feed's post composer survives a failed read.
+
+- [x] **`tester`** — `tst_draft_targets.qml:1042`
       `test_two_targets_whose_parts_run_together_alike_do_not_share_a_draft`. The
       separator sweep is a hand-written list of eleven strings, and the
       injectivity claim it makes ("the key must not depend on" the separator)
@@ -40,6 +68,24 @@ only at the lines mutated.
       characters. The test exists to hold that independence, and it does not hold
       it for an unlisted separator. Sweep every code unit 0 to 127, or build the
       colliding pair from the characters of the two parts instead of from a list.
+
+      **Fixed** (`tester`). The test now sweeps every UTF-16 code unit,
+      0 to 0xFFFF, and the empty separator, building the colliding pair from
+      the separator in hand (`"a"+s+"b"` with `"c"`, against `"a"` with
+      `"b"+s+"c"`), on one composer. It costs about eight seconds, which is
+      most of the file's runtime; it is the only way to reach whichever
+      character a mutant picks. **Fails without it:** the reviewer's mutant,
+      `[kind, stoaAddress, replyParent].join("\u0001")` in `targetKeyOf`'s
+      place: predicted fail at U+1, observed `separator U+1: the second target
+      holds 'for the first, separator U+1'`. A second mutant with a character
+      the old list could never have held, `.join("�")`: predicted fail at
+      the far end of the sweep, observed `separator U+fffd: the second target
+      holds ...`. Reverted.
+
+      **New scenario, checked.** *Targets whose address and parent read alike
+      when joined do not share a draft* says "any other single character, or
+      none" and asserts empty-then-restored; the test asserts the same two
+      things per separator.
 
 - [x] **`spec-writer`** — `specs/composer-view/spec.md`, requirements *A publish
       clears only the draft of the target it named* and *An unsubmitted draft is
