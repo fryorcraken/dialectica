@@ -8,8 +8,8 @@
 - [x] review: correctness, security, readability, architecture — `code-reviewer`
 - [ ] ~~review: spec-test — `spec-test-reviewer`~~ — owner decision 2026-10-11: no-behaviour move, tests have zero diff
 - [ ] ~~review: design — `design-reviewer`~~ — owner decision 2026-10-11: no-behaviour move, tests have zero diff
-- [ ] findings all ticked, `findings/` deleted — `closer`
-- [ ] `openspec validate --strict`, then `archive` — `closer`
+- [x] findings all ticked, `findings/` deleted — `closer`
+- [x] `openspec validate --strict`, then `archive` — `closer`
 - [ ] CI green, title/body checked, PR merged — `closer`
 
 ## 1. Before moving anything
