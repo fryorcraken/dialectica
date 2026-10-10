@@ -5,7 +5,7 @@
 - [ ] ~~spec — `spec-writer`~~ — no spec delta: a no-behaviour code move, `skip_specs: true` in `.openspec.yaml` says why; `proposal.md` is written
 - [x] design + code — `dev-writer`
 - [ ] ~~tests — `tester`~~ — owner decision 2026-10-11: no-behaviour move, tests have zero diff
-- [ ] review: correctness, security, readability, architecture — `code-reviewer`
+- [x] review: correctness, security, readability, architecture — `code-reviewer`
 - [ ] ~~review: spec-test — `spec-test-reviewer`~~ — owner decision 2026-10-11: no-behaviour move, tests have zero diff
 - [ ] ~~review: design — `design-reviewer`~~ — owner decision 2026-10-11: no-behaviour move, tests have zero diff
 - [ ] findings all ticked, `findings/` deleted — `closer`
