@@ -344,8 +344,9 @@ TestCase {
     //
     // spec.md:336-372 makes the three-way asymmetry the decision rather than an
     // inconsistency: cleared on a newly stored op, retained on a deduplicated one
-    // and on every refusal. A reviewer deleted `clearDraft()` from the stored arm
-    // (green), then added it to the `existing` arm — which the requirement's own
+    // and on every refusal. A reviewer deleted the draft-clearing call (then
+    // `clearDraft()`, now `clearDraftOf()`) from the stored arm (green), then
+    // added it to the `existing` arm — which the requirement's own
     // rationale forbids, "clearing would take away exactly what they need"
     // (green). Both halves of the asymmetry could be inverted with 124 tests
     // passing, and the failure mode is silent data loss.
