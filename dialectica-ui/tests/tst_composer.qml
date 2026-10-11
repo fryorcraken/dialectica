@@ -450,12 +450,13 @@ TestCase {
         compare(c.outcome, "stored")
         compare(c.draft, "", "a store never leaves its text in the field")
         compare(c.submittable, false)
-
-        // And not only the field: the entry held for the target is gone too.
-        var address = c.stoaAddress
-        c.stoaAddress = "cd".repeat(32)
-        c.stoaAddress = address
-        compare(c.draft, "", "nor brings it back when the target is shown again")
+        // Nothing is asserted here about the entry held for the target. Emptying
+        // the field is itself a change of its text, which drops the entry, so a
+        // check that the draft stays gone after the composer is re-pointed away
+        // and back is true whenever the field was cleared, and cannot fail for
+        // the entry. That entry is pinned where a publish names a target the
+        // composer no longer points at: `tst_draft_targets.qml`,
+        // `test_a_publish_answered_after_the_composer_was_re_pointed_clears_only_what_it_named`.
         c.destroy()
     }
 
