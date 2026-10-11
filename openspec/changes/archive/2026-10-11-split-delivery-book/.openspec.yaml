@@ -1,0 +1,12 @@
+# `schema` is REQUIRED for this file to be valid change metadata, and without it
+# `skip_specs` is silently NOT HONOURED. It must name a known schema; this
+# project's is the built-in `spec-driven`, set in `openspec/config.yaml`.
+schema: spec-driven
+created: 2026-10-11
+
+# No spec delta: this change moves the channel book and the inbound queue out of
+# `dialectica-core/src/delivery.rs` into two child modules, changing only where
+# the items are written and the visibility that a child module needs. No
+# observable behaviour of dialectica moves, so no requirement in
+# `openspec/specs/` is added, changed or removed.
+skip_specs: true

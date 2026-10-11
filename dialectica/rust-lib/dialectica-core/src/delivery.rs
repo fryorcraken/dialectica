@@ -68,16 +68,23 @@ use crate::op::OpId;
 use crate::parked::ParkBounds;
 use crate::parked::{parked_path_in, ParkError, ParkOutcome, Parked, ParkedStore, PARK_BOUNDS};
 use crate::sender::{sender_path_in, SenderError, SenderStore};
-use crate::shedding::{choose, Victim};
-use crate::transport::{
-    self, ChannelIdentity, InboundMessage, InboundRefusal, OpenChannels, PublishError,
-};
+use crate::transport::{self, ChannelIdentity, InboundMessage, InboundRefusal, PublishError};
 use crate::wire::panic_detail;
-use std::collections::{HashMap, HashSet, VecDeque};
+#[cfg(test)]
+use std::collections::HashMap;
+use std::collections::{HashSet, VecDeque};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc, Condvar, Mutex, MutexGuard};
 use std::time::Duration;
+
+mod book;
+mod queue;
+
+use book::{ChannelBook, Review, Taken};
+use queue::{InboundQueue, Offered};
+
+pub use queue::INBOUND_BOUND;
 
 // ─── The seam ─────────────────────────────────────────────────────────────
 
@@ -546,168 +553,6 @@ const MEMBERSHIP_PAGE: usize = 100;
 
 // ─── Which channels are open, and what waits on the processor ─────────────
 
-/// The channels this peer has open, and the ones it has asked for and not heard
-/// back about.
-///
-/// # Being opened is its own state, because of a race delivery really has
-///
-/// A channel counts as open only once delivery answers that it holds it —
-/// created it, or already had it ([`channel_answer`]). But delivery v0.2.1 emits
-/// `channelMessageReceived` from its runtime's callback thread whenever SDS hands
-/// it one — including after the runtime has created the channel and before the
-/// `channelCreate` answer has reached this peer. A message judged in that gap is
-/// refused as arriving on an unknown channel, and SDS has already treated it as
-/// delivered, so it is gone for this peer.
-///
-/// So a message taken on a channel that is **not open but being opened** is
-/// parked ([`ChannelBook::on_take`]), and decided by a review once the open
-/// settles ([`ChannelBook::settle`]).
-///
-/// # Being opened from the request, not from the call
-///
-/// An open counts from the moment a create, a join or startup asks for it —
-/// while it still waits in the worker's queue behind node creation and other
-/// opens — because delivery can hand over a message on a channel before this peer
-/// has asked delivery for it at all: a module restarted under a running delivery
-/// is handed its Stoas' messages as soon as it subscribes. The [`Opening`] guard
-/// is made where the request is made and travels to the worker inside
-/// [`Action::Open`], so every path that never reaches delivery — no worker, a
-/// worker gone, no sender identifier — settles the open by dropping it, and its
-/// parked messages are reviewed then rather than left for the next startup.
-/// `a_message_on_a_channel_whose_open_waits_behind_another_is_judged_once_that_open_settles`
-/// and `a_restarted_peer_keeps_what_delivery_hands_over_before_startup_asks_for_its_channel`
-/// are red while the worker made the guard as it called delivery.
-#[derive(Default)]
-struct ChannelBook {
-    open: OpenChannels,
-    /// Each channel being opened, with how many requests for it have not
-    /// settled. A count rather than a flag, because a repeated join can put a
-    /// second open in the queue before the first is answered, and the channel
-    /// is being opened until the last of them settles.
-    opening: HashMap<String, usize>,
-}
-
-/// What the boundary does with a payload it has taken: [`ChannelBook::on_take`]'s
-/// answer.
-///
-/// # The one reading carries the Stoa
-///
-/// `op-transport`: "The state is read once for each payload, and the payload is
-/// parked or judged on that one reading." So `Judge` carries the Stoa the
-/// channel was open for at that reading — `None` when it was not open — and the
-/// boundary judges against that, not against a second lookup made after the
-/// lock is released. A settle landing between the take and the judgement would
-/// otherwise have the two readings disagree: taken as unknown, then stored.
-/// `a_payload_taken_on_an_unknown_channel_is_refused_though_its_channel_opens_before_it_is_judged`
-/// is red with the lookup made at judgement.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Taken {
-    /// Put it through the boundary now, against this Stoa. With `None` — a
-    /// channel neither open nor being opened — the boundary refuses it as an
-    /// unknown channel.
-    Judge(Option<Address>),
-    /// Its channel is being opened and is not open: park it, judging nothing.
-    Park,
-}
-
-/// A review of parked messages, named for the event that begins it.
-///
-/// Made in exactly two places, [`ChannelBook::settle`] and
-/// [`ChannelBook::startup_review`]. The processor runs it ([`Processor::review`]).
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum Review {
-    /// Delivery reported that it holds this channel: judge each message parked
-    /// on it, as a message taken on an open channel is judged.
-    Held(String),
-    /// The last unsettled request for this channel settled some other way, and
-    /// it is not open: refuse each message parked on it as an unknown channel.
-    Unopened(String),
-    /// The module's first startup in this process: refuse each message parked on
-    /// a channel not in this set — the channels open or being opened then — as
-    /// an unknown channel, and leave the rest for their channel's next review.
-    Startup(HashSet<String>),
-}
-
-impl ChannelBook {
-    /// Whether a channel is open or being opened: what hand-over asks before a
-    /// message may take a place among the waiting payloads.
-    fn is_known(&self, channel_id: &str) -> bool {
-        self.open.is_open(channel_id) || self.opening.contains_key(channel_id)
-    }
-
-    /// **Whether a payload just taken is parked** — the one place that decides
-    /// it, asked once per payload, under the lock it was taken under.
-    ///
-    /// `op-transport`, "A message on a channel being opened is parked, and nothing
-    /// waits on an open": open, whether or not a further request is unsettled →
-    /// judged; not open and being opened → parked; neither → judged, and refused
-    /// as an unknown channel. Parked is the one state in which judging now would
-    /// refuse a message the open's answer may yet admit.
-    fn on_take(&self, channel_id: &str) -> Taken {
-        match self.open.stoa_of(channel_id) {
-            Some(stoa) => Taken::Judge(Some(*stoa)),
-            None if self.opening.contains_key(channel_id) => Taken::Park,
-            None => Taken::Judge(None),
-        }
-    }
-
-    /// A create, a join or startup asked for this channel.
-    fn request(&mut self, identity: &ChannelIdentity) {
-        let requests = self
-            .opening
-            .entry(identity.channel_id().to_string())
-            .or_insert(0);
-        *requests = requests.saturating_add(1);
-    }
-
-    /// **One request for this channel settled; the review it begins, if any** —
-    /// the one place a settle becomes a review.
-    ///
-    /// `op-transport`, "Parked messages are reviewed on three events and no
-    /// others", events 1 and 2:
-    ///
-    /// - **Held**, in answer to any request: the channel is open, and its parked
-    ///   messages are judged ([`Review::Held`]). Whatever else is unsettled for it.
-    /// - **Not held, and the last unsettled request, and not open**: nothing will
-    ///   open the channel now, and its parked messages are refused
-    ///   ([`Review::Unopened`]).
-    /// - **Anything else** begins no review: a decline while another request is
-    ///   unsettled leaves the parked messages for that request's answer, and a
-    ///   decline of a repeat for a channel already open finds nothing parked.
-    ///
-    /// A declined or given-up request never closes an open channel:
-    /// `stoa-membership`, "A declined repeat request leaves an open channel
-    /// open", because delivery created it once and nothing has closed it.
-    fn settle(&mut self, identity: &ChannelIdentity, held: bool) -> Option<Review> {
-        let channel_id = identity.channel_id();
-        let last = match self.opening.get_mut(channel_id) {
-            Some(requests) if *requests > 1 => {
-                *requests -= 1;
-                false
-            }
-            _ => {
-                self.opening.remove(channel_id);
-                true
-            }
-        };
-        if held {
-            self.open.open(identity);
-            return Some(Review::Held(channel_id.to_string()));
-        }
-        (last && !self.open.is_open(channel_id)).then(|| Review::Unopened(channel_id.to_string()))
-    }
-
-    /// **The review the module's first startup begins** — event 3 — once it has
-    /// counted the channel of every Stoa it asks for as being opened.
-    ///
-    /// The set is taken now, at the event, as the requirement reads ("whose
-    /// channel is then neither open nor being opened"). At startup the book is
-    /// new, so nothing is open yet and the set is startup's own requests.
-    fn startup_review(&self) -> Review {
-        Review::Startup(self.opening.keys().cloned().collect())
-    }
-}
-
 /// Everything the listener, the worker and the processor share, under one lock:
 /// the channel book, the payloads waiting to be taken, and the reviews waiting
 /// to be run.
@@ -1117,24 +962,6 @@ struct Outbox {
 
 // ─── Inbound: the bounded queue ───────────────────────────────────────────
 
-/// How many inbound messages may wait for the boundary.
-///
-/// `op-transport` requires a fixed count, and leaves the number to design.
-/// 256, from two bounds pulling against each other:
-///
-/// - **Memory.** This queue bounds a count, and a payload over the 150 KiB
-///   message limit is refused on hand-over ([`refused_on_hand_over`]) rather than
-///   held, so the payload bytes waiting are at most 256 × 150 KiB = 38,400 KiB
-///   = 37.5 MiB in a module process sharing its host, whatever the largest
-///   message the node carries. #30's 1024 would be 150 MiB by the same sum.
-/// - **Loss.** A discard here is final for this peer: by the time
-///   `channelMessageReceived` fires, SDS has treated the message as delivered and
-///   will not repair it. #30's justification for discarding freely ("a dropped op
-///   is recoverable through retransmission") does not hold. 256 is meant to be a
-///   burst deeper than any SQLite append falls behind by; the processor's speed
-///   per op has **not been measured**, so that is a judgement, not a figure.
-pub const INBOUND_BOUND: usize = 256;
-
 /// One `channelMessageReceived`, owned, as the listener received it.
 ///
 /// Every field the event carries — including the sender identifier and the
@@ -1172,83 +999,6 @@ fn parked_inbound(parked: &Parked) -> InboundMessage<'_> {
         sender_id: "",
         payload: &parked.payload,
         timestamp: 0,
-    }
-}
-
-/// What offering a message did.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Offered {
-    Waiting,
-    /// The queue was full, and the newest payload of the channel holding the
-    /// most — the offered one, or one already waiting — was discarded unread.
-    Discarded,
-}
-
-/// The payloads waiting to be taken, bounded by a fixed count. Plain data: the
-/// lock is [`Channels`]'s.
-///
-/// # A full queue discards the newest payload of the channel holding the most
-///
-/// Counting the arrival with its own channel ([`crate::shedding::choose`], the
-/// rule the parked messages' total bounds use too). This narrows #30's question
-/// — which payload a full queue loses — to the channel causing the pressure: a
-/// flood on one Stoa's channel loses that channel's own newest payloads, and a
-/// quiet Stoa's message arriving behind the flood is kept. Within the flooding
-/// channel it is still the newest that goes, as under the old rule, which
-/// discarded the arrival. That losing the newest loses least is a heuristic on
-/// SDS's catch-up order, which nothing here measures, and nothing depends on it
-/// for correctness (`park-pending-inbound`'s design, Decision 5). When one
-/// channel holds everything waiting, this is the old rule exactly.
-///
-/// # Offering never waits on the boundary
-///
-/// [`InboundQueue::offer`] pushes, or sheds and pushes, and returns: it is a
-/// scan of at most the bound under [`Channels`]'s lock, which no decision
-/// holds.
-struct InboundQueue {
-    messages: VecDeque<Arriving>,
-    bound: usize,
-}
-
-impl InboundQueue {
-    fn with_bound(bound: usize) -> Self {
-        InboundQueue {
-            messages: VecDeque::new(),
-            bound,
-        }
-    }
-
-    fn offer(&mut self, message: Arriving) -> Offered {
-        if self.messages.len() < self.bound {
-            self.messages.push_back(message);
-            return Offered::Waiting;
-        }
-        let waiting = self.messages.iter().map(|m| (m.channel_id.as_str(), 1));
-        let at = match choose(waiting, (message.channel_id.as_str(), 1)) {
-            // The arrival's channel holds the most, and the arrival is its
-            // newest: discarded, and every waiting payload kept.
-            Victim::Arrival => return Offered::Discarded,
-            // The queue is in arrival order, so the last waiting payload on the
-            // channel chosen is that channel's newest.
-            Victim::NewestOf(victim) => self.messages.iter().rposition(|m| m.channel_id == victim),
-        };
-        // `choose` names only a channel holding something, so `rposition` finds
-        // it; were it not to, the arrival is the one dropped, and the bound holds.
-        if let Some(at) = at {
-            self.messages.remove(at);
-            self.messages.push_back(message);
-        }
-        Offered::Discarded
-    }
-
-    /// The oldest waiting payload.
-    fn pop(&mut self) -> Option<Arriving> {
-        self.messages.pop_front()
-    }
-
-    #[cfg(test)]
-    fn len(&self) -> usize {
-        self.messages.len()
     }
 }
 
