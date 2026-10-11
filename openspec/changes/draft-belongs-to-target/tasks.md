@@ -64,8 +64,10 @@ it.
 - [x] 3.1 *A draft whose composer is not rendered stays held and is displayed
       nowhere*, for the same target: the composer stays mounted and its screen's
       gate stops rendering it, as before. Pinned by the two
-      `…_behind_a_shut_gate_is_held_unseen_and_comes_back` tests and
-      `test_a_draft_is_back_when_a_failed_read_recovers`.
+      `…_behind_a_shut_gate_is_held_unseen_and_comes_back` tests. Through a
+      failed read only the thread screen stops rendering its composer, and what
+      the requirement binds there is the draft's text (design.md, Decision 7).
+      Pinned by `test_a_draft_is_back_when_a_failed_read_recovers`.
 - [x] 3.2 *An unsubmitted draft is held by the view alone and ends with it*:
       satisfied by construction. `heldDrafts` is a property of a composer, which
       lives as long as its `Main.qml`, and the only expressions that pass draft

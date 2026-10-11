@@ -66,10 +66,12 @@ Alternatives, and what ruled each out:
   hard to name: `openThread` empties `chosen` before it sets `reading`. Holding
   each edit as it is made has no moment of leaving to miss.
 - **One composer instance per target**, by recreating the screen or putting the
-  composer in a `Loader` keyed by target. A draft behind a shut gate or a failed
-  read must outlive its composer not being rendered, so the instances would have
-  to be kept alive or their text stored anyway, which is this decision with a
-  restructured navigator added to it.
+  composer in a `Loader` keyed by target. A draft behind a shut gate, or behind
+  the thread screen's failed read, must outlive its composer not being rendered,
+  so the instances would have to be kept alive or their text stored anyway,
+  which is this decision with a restructured navigator added to it. Only the
+  thread screen's failed read is named because the feed keeps its composer
+  rendered through one (Decision 7).
 - **A store on `Main.qml`, or a `DDraftStore` singleton.** A singleton lives as
   long as the QML engine, so a view opened anew in the same engine would find
   the old drafts, against "A view opened anew MUST hold no draft". A store on
@@ -88,6 +90,9 @@ draft behind a shut gate stays held and unseen: the composer is still mounted
 and still holds the field, and its screen's gate is what stops rendering it,
 as before this change. A restored draft is not announced: nothing was added
 that could announce one.
+
+A failed read is not among those answers. Decision 7 has what was done about
+one and why.
 
 ### 2. The key is `JSON.stringify([kind, stoaAddress, replyParent])`
 
@@ -111,24 +116,43 @@ which parent.
   is not a guard against one: it is what turns the `undefined` of a target
   with nothing held into the "" the field can be assigned.
 
-**What breaks without each**, measured by making the edit and running the
-suite. The three are not equally pinned:
+**What breaks without each**, measured by making the edit to `targetKey` and
+running `tst_draft_targets.qml`; the join and `parentOp` edits were also run
+against `tst_composer.qml` and `tst_publish_outcome_visits.qml`, where nothing
+changed colour. Each of the three choices is pinned by a test:
 
 - Dropping the Stoa from the key turns many tests in `tst_draft_targets.qml`
   red, since a post composer's key is then one string for every Stoa. The one
   that isolates the choice for a reply is
   `test_two_parents_with_one_op_id_in_different_stoas_do_not_share_a_draft`,
   where the Stoa is the only part that differs.
-- Joining with `":"` turns exactly one test red,
+- Joining the three parts with one UTF-16 code unit, or with none, turns
+  exactly one test red,
   `test_two_targets_whose_parts_run_together_alike_do_not_share_a_draft`. That
-  test sweeps a hand-written list of separators, so a join on a character
-  outside the list passes it; the spec's scenario says any single character.
-- Keying on `parentOp` in place of `replyParent` turns **nothing** red: the
-  whole suite exits 0. No screen gives a post composer a parent, so the two
-  agree wherever `Main.qml` is driven. The choice is held by the spec's
-  definition of a post's target (the Stoa address alone) and by no test. What
-  would pin it is a post composer whose `parentOp` changes while it holds a
-  draft: keyed on `parentOp`, the field empties.
+  test sweeps every code unit from 0 to 0xFFFF and the empty separator, and
+  builds its colliding pair from the separator in hand, so it reaches whichever
+  one a join picks. Measured with three joins: `":"` fails at `separator U+3a`,
+  U+E000 (a private-use code unit, one no hand-written list would hold) fails
+  at `separator U+e000`, and `""` fails at `no separator`.
+
+  The sweep is most of that file's runtime: about eight of its fourteen
+  seconds, taken as the difference between the file's total and its total when
+  the sweep stops at its first pair. It was accepted because a list of
+  separators holds only for the ones its author thought of: review measured an
+  earlier list of eleven letting a join on U+0001 through.
+
+  One limit remains. The test detects a join on a single code unit and nothing
+  else. A join on a separator two code units long passes all three files,
+  measured with U+1F600, because no pair in the sweep is built from it; so
+  would any other encoding that maps two targets onto one key by some other
+  route. What makes the key injective is `JSON.stringify`, by the argument
+  above. The sweep shows only that no single-code-unit join stands in its place.
+- Keying on `parentOp` in place of `replyParent` turns exactly one test red,
+  `test_a_posts_draft_does_not_move_with_a_parent_it_is_never_sent`, at "a
+  parent given to a post moves nothing": the field empties. That test drives a
+  `DComposer` directly, and has to. No screen gives a post composer a parent,
+  so the two keys agree wherever `Main.qml` is driven, and every test that goes
+  through `Main.qml` in those three files stays green under the edit.
 
 A composer with no target (an empty address) gets a key like any other. It is
 what the transitions in Context pass through, and it needs no branch: showing
@@ -249,6 +273,69 @@ re-filled by the change of target and not by anything a visit does. The
 alternative, restoring the outcome with the draft, would display a publish
 outcome on a visit in which no publish was made, which the outcome requirement
 forbids.
+
+### 7. Through a failed read the draft's text is bound, and whether a composer is rendered is not
+
+The two screens answer a failed read differently, and this change picked
+neither answer: it edits `DComposer.qml` and no screen.
+
+- **The thread screen stops rendering its reply composer.** The composer's
+  `visible:` in `DThreadScreen.qml` requires `readState === "ok"` as well as an
+  open gate.
+- **The feed keeps rendering its post composer.** `FeedScreen.qml` gates it on
+  the posting probe alone, and `reload()` runs the probe before the list read.
+  With the gate open, a failed list read leaves the composer on screen with its
+  target's draft in the field.
+
+Measured in the failed state of
+`test_a_draft_is_back_when_a_failed_read_recovers`: one post field is rendered,
+and no reply field.
+
+So "a failed read stops the composer being rendered" is true of one screen and
+false of the other. The requirement was first written with a failed read beside
+the shut gate as a cause of a composer not being rendered, and was corrected
+when a test for that clause was written and the feed's field turned out to be
+there.
+
+**Why the spec does not decide it.** The owner's answers settle a shut gate
+(held, unseen, no read-only field) and say nothing of a failed read. Making the
+two screens agree, either way, is a behaviour change to a screen this change
+does not touch, on a question nobody was asked. So the requirement says a
+failed read's effect on rendering "is not decided here", and binds only what
+holds under either answer: the draft's text is displayed nowhere but in the
+field of a composer rendered for its target.
+
+**Why that is the right thing to bind.** A rendered composer holding its own
+target's draft is the composer working, on either screen. What the requirement
+exists to stop is the text showing where no composer is: in a failure banner, a
+label, or a composer that is hidden while its text is not. Retention needs
+nothing from the answer either. Both composers stay mounted whatever their
+screen renders, so the map of Decision 1 holds the draft through the failure
+and the field has it when the read recovers.
+
+**What leaving it open costs.** Either screen may change its answer with no
+change to the spec and no test of this change going red. Measured both ways,
+against `tst_draft_targets.qml`, which stays wholly green under each edit:
+
+- the reply composer's `visible:` without `readState === "ok"`, so that the
+  thread screen keeps its composer through a failure;
+- the post composer's `visible:` with `readState === "ok"` added, so that the
+  feed stops rendering its composer on one.
+
+That is by design and not a gap in the test. A later change that takes the
+feed's composer away on a failed read is allowed, and the draft still must not
+show anywhere while it is away and must be back when the read recovers. Other
+spec files were not run under these two edits, so whether a test outside this
+change holds either screen's gate is not known from here.
+
+**What breaks when the text escapes.** Appending the composer's draft to the
+failure banner's message turns that one test red on either screen, measured by
+making each edit and running the file:
+
+- in `DThreadScreen.qml`, the reply case fails with one node carrying the draft
+  where no field is rendered;
+- in `FeedScreen.qml`, the post case fails with two nodes carrying it where one
+  field is rendered.
 
 ## Risks / Trade-offs
 
