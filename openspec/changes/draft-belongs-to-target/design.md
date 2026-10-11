@@ -129,11 +129,13 @@ changed colour. Each of the three choices is pinned by a test:
 - Joining the three parts with one UTF-16 code unit, or with none, turns
   exactly one test red,
   `test_two_targets_whose_parts_run_together_alike_do_not_share_a_draft`. That
-  test sweeps every code unit from 0 to 0xFFFF and the empty separator, and
-  builds its colliding pair from the separator in hand, so it reaches whichever
-  one a join picks. Measured with three joins: `":"` fails at `separator U+3a`,
-  U+E000 (a private-use code unit, one no hand-written list would hold) fails
-  at `separator U+e000`, and `""` fails at `no separator`.
+  test sweeps every code unit from 0 to 0xFFFF and the empty separator, then
+  four characters outside the BMP (U+10000, U+1F3DB, U+1F600 and U+10FFFF),
+  and builds its colliding pair from the separator in hand, so it reaches
+  whichever of those a join picks. Measured with four joins: `":"` fails at
+  `separator U+3a`, U+E000 (a private-use code unit, one no hand-written list
+  would hold) fails at `separator U+e000`, `""` fails at `no separator`, and
+  U+1F600 fails at `separator U+1f600`.
 
   The sweep is most of that file's runtime: about eight of its fourteen
   seconds, taken as the difference between the file's total and its total when
@@ -141,12 +143,17 @@ changed colour. Each of the three choices is pinned by a test:
   separators holds only for the ones its author thought of: review measured an
   earlier list of eleven letting a join on U+0001 through.
 
-  One limit remains. The test detects a join on a single code unit and nothing
-  else. A join on a separator two code units long passes all three files,
-  measured with U+1F600, because no pair in the sweep is built from it; so
-  would any other encoding that maps two targets onto one key by some other
-  route. What makes the key injective is `JSON.stringify`, by the argument
-  above. The sweep shows only that no single-code-unit join stands in its place.
+  One limit remains. Outside the BMP the test holds a sample and not a sweep:
+  the code points above 0xFFFF number about a million, against a sweep of
+  65,536 that is already most of the file's runtime. So the test detects a join
+  on no separator, on any single code unit, or on one of those four
+  characters, and nothing else. A join on an astral character outside the
+  sample passes all three files, measured with U+1F601, because no pair is
+  built from it. So does a join on a separator of more than one character,
+  measured with `"::"` against `tst_draft_targets.qml` alone; and so would any
+  other encoding that maps two targets onto one key by some other route. What
+  makes the key injective is `JSON.stringify`, by the argument above. The test
+  shows only that none of the joins it builds a pair for stands in its place.
 - Keying on `parentOp` in place of `replyParent` turns exactly one test red,
   `test_a_posts_draft_does_not_move_with_a_parent_it_is_never_sent`, at "a
   parent given to a post moves nothing": the field empties. That test drives a
@@ -328,14 +335,27 @@ show anywhere while it is away and must be back when the read recovers. Other
 spec files were not run under these two edits, so whether a test outside this
 change holds either screen's gate is not known from here.
 
-**What breaks when the text escapes.** Appending the composer's draft to the
-failure banner's message turns that one test red on either screen, measured by
-making each edit and running the file:
+**What breaks when the text escapes.** In its failed state that test names the
+node and does not count: every displayed node whose text contains the draft
+must be the kind's draft field, by `objectName`. A failure banner carrying the
+draft is a node of another name on either screen, whatever the field beside it
+holds.
 
-- in `DThreadScreen.qml`, the reply case fails with one node carrying the draft
-  where no field is rendered;
-- in `FeedScreen.qml`, the post case fails with two nodes carrying it where one
-  field is rendered.
+Two measurements stand behind that, and neither is of the present assertion
+under a banner edit to both screens:
+
+- Appending the composer's draft to the failure banner's message turned that
+  one test red on each screen, against the assertion the test first carried,
+  which compared how many nodes carried the draft with how many fields were
+  rendered. In `DThreadScreen.qml` the reply case failed with one node where
+  no field was rendered; in `FeedScreen.qml` the post case failed with two
+  nodes where one field was rendered. Those two edits were not run again after
+  the assertion was replaced.
+- The count had a hole, found in review: a field that lost its text beside a
+  banner that gained it is one node and one field. The tester made that shape
+  on the feed, with the draft appended to the failure heading and the field
+  emptied, and recorded the by-name assertion failing at the heading. That is
+  why the test names the node.
 
 ## Risks / Trade-offs
 
