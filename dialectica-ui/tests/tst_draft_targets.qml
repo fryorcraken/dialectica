@@ -622,16 +622,16 @@ TestCase {
         // override and its pop, a zero-width space and joiner, a BOM, a tab and
         // newlines.
         //
-        // **Spelled as escapes, not typed**: the invisible ones cannot be seen
+        // **Spelled as `\u{...}` escapes, not typed**: the invisible ones cannot be seen
         // in an editor or a diff, and a formatter or a paste that stripped them
         // would leave a test that passes over a plainer string. The length is
         // pinned below for the same reason: 29 code units, counted by hand
         // from the pieces on this line.
-        var typed = "  \t中文 🏛 ‮abc‬ x​y‍z﻿\n\nend \n "
+        var typed = "  \t中文 🏛 \u{202E}abc\u{202C} x\u{200B}y\u{200D}z\u{FEFF}\n\nend \n "
         compare(typed.length, 29, "the text under test is the one described above")
-        verify(typed.indexOf("‮") >= 0 && typed.indexOf("‬") >= 0
-               && typed.indexOf("​") >= 0 && typed.indexOf("‍") >= 0
-               && typed.indexOf("﻿") >= 0, "and it holds each invisible character")
+        verify(typed.indexOf("\u{202E}") >= 0 && typed.indexOf("\u{202C}") >= 0
+               && typed.indexOf("\u{200B}") >= 0 && typed.indexOf("\u{200D}") >= 0
+               && typed.indexOf("\u{FEFF}") >= 0, "and it holds each invisible character")
         var cases = [
             { kind: "post", root: undefined, elsewhere: spec.stoaB },
             { kind: "reply", root: spec.rootX, elsewhere: spec.stoaB }
@@ -875,19 +875,21 @@ TestCase {
         s.view.destroy()
     }
 
-    // Scenario: A draft is back when a failed read recovers. And the clause of
-    // the requirement it sits under, for the failed state itself: the draft is
-    // displayed nowhere but in the field of a composer that is rendered.
+    // Scenarios: A draft is back when a failed read recovers (the post case),
+    // and A reply draft is back when a failed thread read recovers (the reply
+    // case); the table below drives both. And the clause of the requirement
+    // they sit under, for the failed state itself: the draft is displayed
+    // nowhere but in the field of a composer that is rendered.
     //
     // **Whether a composer is rendered while a read has failed is the screen's
     // own business and is not asserted.** The thread screen stops rendering
     // its reply composer; the feed's post composer is gated on the posting
     // probe alone and stays rendered through a failed list read. The
-    // requirement binds the text, not the composer: so what is counted is
-    // every displayed node carrying the draft, which must be exactly the
-    // fields rendered, none where there is no field. A banner, a label or a
-    // second copy anywhere else adds a node and fails this; so does a
-    // composer that is not rendered but whose text still is.
+    // requirement binds the text, not the composer: so what is checked is
+    // which nodes carry the draft, and every displayed one must be that
+    // kind's draft field, by name. A banner, a label or a second copy anywhere
+    // else is a node of another name and fails this; so does text still shown
+    // where no field is rendered.
     function test_a_draft_is_back_when_a_failed_read_recovers() {
         var draft = "written before the read failed"
         var cases = [
@@ -910,10 +912,18 @@ TestCase {
                 compare(s.view.threadReadState, "failed", "the thread read failed")
             }
 
-            var rendered = spec.visibleNamed(s.view, c.kind + "DraftField").length
-            compare(spec.textsShownContaining(s.view, draft).length, rendered,
-                    c.kind + ": while the read is failed, the draft is displayed in "
-                    + "the " + rendered + " composer field(s) rendered and nowhere else")
+            // Which nodes, and not how many: every displayed node carrying the
+            // draft is a composer's draft field. A count alone is green over a
+            // field that lost its text beside a banner that gained it.
+            var fieldName = c.kind + "DraftField"
+            var carrying = spec.visibleNodes(s.view, function (node) {
+                return typeof node.text === "string" && node.text.indexOf(draft) >= 0
+            })
+            for (var n = 0; n < carrying.length; n++)
+                compare(carrying[n].objectName, fieldName,
+                        c.kind + ": while the read is failed, the draft is displayed "
+                        + "only in a composer's draft field, but node " + n + " is "
+                        + String(carrying[n]))
 
             s.bridge[c.flag] = false
             spec.pressButtonReading(s.view, "Try reading again")
@@ -1016,8 +1026,8 @@ TestCase {
         var s = spec.started()
         spec.goTo(s.view, spec.stoaA)
         // A right-to-left override and a zero-width space: the two the
-        // warning counts, spelled as escapes because neither can be seen.
-        spec.enter(s.view, "post", "safe‮text​more")
+        // warning counts, spelled as `\u{...}` escapes because neither can be seen.
+        spec.enter(s.view, "post", "safe\u{202E}text\u{200B}more")
         verify(spec.textsShownContaining(s.view, "contains 2 invisible character(s)").length > 0,
                "the warning names how many were found when the text was typed")
         var before = spec.textsShown(s.view)
@@ -1084,13 +1094,29 @@ TestCase {
     // sweep reaches whichever `s` a mutant picks. The pair is built from `s`
     // and not from a table of known-colliding rows, so it needs no maintenance.
     //
+    // **And a sample of characters outside the BMP**, each two code units
+    // long, since "any other single character" includes them and a code-unit
+    // sweep builds no pair from one. 0x10FFFF cannot be swept: a million
+    // iterations, and the sweep is most of this file's runtime already. So
+    // these four are a sample (the first and last code points outside the BMP,
+    // the Stoa-like U+1F3DB, and U+1F600), and a join on an astral character
+    // outside the sample passes.
+    //
     // One composer serves the sweep: each pair differs from every other pair
     // in `s`, and a composer per code unit would only be slower.
     function test_two_targets_whose_parts_run_together_alike_do_not_share_a_draft() {
         var composer = composerComponent.createObject(null, { kind: "reply" })
-        for (var unit = -1; unit <= 0xFFFF; unit++) {
-            var sep = unit < 0 ? "" : String.fromCharCode(unit)
-            var which = unit < 0 ? "no separator" : "separator U+" + unit.toString(16)
+        var separators = [{ sep: "", which: "no separator" }]
+        for (var unit = 0; unit <= 0xFFFF; unit++)
+            separators.push({ sep: String.fromCharCode(unit),
+                              which: "separator U+" + unit.toString(16) })
+        separators.push({ sep: "\u{10000}", which: "separator U+10000" })
+        separators.push({ sep: "\u{1F3DB}", which: "separator U+1f3db" })
+        separators.push({ sep: "\u{1F600}", which: "separator U+1f600" })
+        separators.push({ sep: "\u{10FFFF}", which: "separator U+10ffff" })
+        for (var k = 0; k < separators.length; k++) {
+            var sep = separators[k].sep
+            var which = separators[k].which
             var first = "for the first, " + which
 
             composer.stoaAddress = "a" + sep + "b"

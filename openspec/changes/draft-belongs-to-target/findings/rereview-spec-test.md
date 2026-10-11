@@ -8,7 +8,7 @@ and `tst_publish_outcome_visits.qml`, plus issue #203 and its comment, fresh.
 The implementation was read only at the lines mutated and at the lines a test
 quotes.
 
-- [ ] **`tester`** — `dialectica-ui/tests/tst_draft_targets.qml:625` and
+- [x] **`tester`** — `dialectica-ui/tests/tst_draft_targets.qml:625` and
       `:1018-1019`. Both comments say the invisible characters are "**Spelled as
       escapes, not typed**" / "spelled as escapes because neither can be seen".
       They are typed. `git grep -n -P "\x{202E}|\x{200B}|\x{FEFF}"` finds the raw
@@ -28,7 +28,15 @@ quotes.
       `indexOf` checks mean something, or reword both comments to say the length
       pin is the protection.
 
-- [ ] **`tester`** — `dialectica-ui/tests/tst_draft_targets.qml:1089`
+      **Fixed** (`tester`): the same defect as the first entry of
+      `rereview-code.md`, whose outcome carries what was tried and how it was
+      verified on disk. The characters are `\u{...}` escapes now, in `typed`,
+      in the five `indexOf` checks (which therefore mean something against a
+      strip) and in the warning test. The reviewer's `U+...` spellings above
+      were themselves converted to the characters by the tools, which is why
+      the fix is in the `\u{...}` form.
+
+- [x] **`tester`** — `dialectica-ui/tests/tst_draft_targets.qml:1089`
       `test_two_targets_whose_parts_run_together_alike_do_not_share_a_draft`. The
       new scenario says "any other single character, or none, in place of `:`".
       The sweep covers every UTF-16 code unit and none, which is a single
@@ -44,7 +52,24 @@ quotes.
       composer. Add a few astral separators to the sweep, or have the spec say
       "any single UTF-16 code unit" so the scenario is the one the test pins.
 
-- [ ] **`tester`** — `dialectica-ui/tests/tst_draft_targets.qml:913-916`
+      **Fixed** (`tester`), by adding astral separators to the sweep: U+10000,
+      U+1F3DB, U+1F600 and U+10FFFF, written as `\u{...}` escapes. They are a
+      sample, not a sweep (a million iterations is not affordable, the BMP
+      sweep being most of the file's runtime already), and the test's comment
+      says so. Mutation: `targetKey` as
+      `[root.kind, root.stoaAddress, root.replyParent].join("\u{1F600}")`
+      turns `tst_draft_targets.qml` 40 passed, 1 failed,
+      `test_two_targets_whose_parts_run_together_alike_do_not_share_a_draft`
+      at "separator U+1f600: the second target holds 'for the first, separator
+      U+1f600'" -- the failure predicted. `design.md` already records that a
+      join on U+1F600 passed (Decision 2, "One limit remains", the paragraph
+      beginning "The test detects a join on a single code unit and nothing
+      else"); that paragraph is now stale for the four sampled characters, and
+      it is the `dev-writer`'s to correct: this role does not edit `design.md`.
+      The spec's "any other single character" is left as written; the test now
+      pins it for a BMP sweep plus four astral samples, and no more.
+
+- [x] **`tester`** — `dialectica-ui/tests/tst_draft_targets.qml:913-916`
       `test_a_draft_is_back_when_a_failed_read_recovers`, the new failed-state
       assertion. It compares the **number** of displayed nodes carrying the draft
       with the number of draft fields rendered. The requirement's clause is that
@@ -60,6 +85,30 @@ quotes.
       node. Severity: low; the implausible shape is a field that lost its text and a
       banner that gained it. Assert that every node `textsShownContaining` matches
       is named `<kind>DraftField`, which says the clause as written.
+
+      **Fixed** (`tester`). The failed-state check now collects every
+      displayed node whose text contains the draft and compares each one's
+      `objectName` with `<kind>DraftField`. I did not keep the reviewer's
+      count of rendered fields as a second assertion: a rendered field that
+      does not hold the draft is not forbidden by the requirement, only text
+      outside a field. Mutation, made to be the shape the reviewer named (a
+      count that agrees): `FeedScreen.qml`'s failure heading with
+      `composer.heldDraft(composer.targetKey)` appended, and `DComposer.qml`'s
+      `showDraftOfTarget` setting `field.text = ""` so the rendered field is
+      empty. One node carries the draft (the heading) and one field is
+      rendered, so the old count-equals-rendered check is satisfied. Observed:
+      `test_a_draft_is_back_when_a_failed_read_recovers` fails at "post: while
+      the read is failed, the draft is displayed only in a composer's draft
+      field, but node 0 is QQuickText(...)" (actual empty `objectName`,
+      expected `postDraftField`), the new assertion and not the later
+      recovery one. The second edit also reddens 23 other tests, as expected
+      of a composer that never restores; the point is where this test fails.
+      Both edits reverted. The old count was not itself re-run on that mutant:
+      that it passes is by the arithmetic above (1 node, 1 field).
+
+      The spec-writer's hand-back also noted that the comment above this test
+      named one scenario where the reply case now has its own: fixed in the
+      same edit, the comment names both.
 
 Mutations run, both with `sh dialectica-ui/tests/run-qml-tests.sh
 dialectica-ui/tests/tst_draft_targets.qml`, baseline 41 passed, 0 failed:
