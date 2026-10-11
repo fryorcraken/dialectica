@@ -787,13 +787,16 @@ TestCase {
         s.view.destroy()
     }
 
-    // ---- the draft, which the requirement leaves undecided ----------------
+    // ---- the draft, which this requirement does not decide -----------------
+    //
+    // Beginning a visit withdraws the outcome and leaves the draft alone. What
+    // a draft belongs to is `composer-view`'s "A draft belongs to the target it
+    // was entered for" and the requirements beside it, and
+    // `tst_draft_targets.qml` holds their tests. The two below stay here because
+    // they are the pair that pinned the old behaviour, one of which the spec
+    // kept and one of which it reversed.
 
-    // NO SPEC: `composer-view` does not decide whether an unsubmitted draft
-    // survives leaving the screen. This change clears only the outcome, so the
-    // draft is kept: the smallest change meeting the requirement, and the
-    // behaviour the view already had. `design.md` records the alternative.
-    // Which target a draft belongs to is deferred to issue #203.
+    // Scenario: A post draft is back when the same Stoa is reopened.
     function test_an_unsubmitted_draft_is_still_held_when_the_same_stoa_is_reopened() {
         var s = spec.openedOnStoaA()
         spec.visibleNamed(s.view, "postDraftField")[0].text = "half-written"
@@ -805,15 +808,14 @@ TestCase {
         s.view.destroy()
     }
 
-    // NO SPEC, and very probably a defect rather than a choice: the feed's
-    // composer is the same instance for every Stoa, so a draft typed in one
-    // Stoa is still in the field when another is opened, and submitting it
-    // publishes it to the Stoa now open. This test pins what the view does
-    // today so the decision is visible; it was not widened into this change,
-    // and the spec does not yet say which Stoa a draft belongs to. A fix flips
-    // both assertions. Tracked as issue #203, which also covers the reply
-    // composer's untested cross-thread equivalent.
-    function test_a_draft_typed_in_one_stoa_is_still_held_and_published_in_another() {
+    // Scenarios: "A draft typed in one Stoa is not in another Stoa's composer",
+    // "Text typed in one Stoa is not published to another" and "A draft
+    // returned to is published to its own Stoa".
+    //
+    // The feed mounts one composer that serves every Stoa, which is why this
+    // goes through the feed's own controls: the text could follow the user into
+    // B, and be published there.
+    function test_a_draft_typed_in_one_stoa_is_neither_held_nor_published_in_another() {
         var s = spec.openedOnStoaA()
         spec.visibleNamed(s.view, "postDraftField")[0].text = "meant for A"
 
@@ -821,12 +823,21 @@ TestCase {
         s.view.open(spec.stoaB, "Another Stoa", "")
         compare(s.view.chosen.stoa, spec.stoaB)
 
+        compare(spec.visibleNamed(s.view, "postDraftField")[0].text, "",
+                "B's composer is empty")
+        var submits = spec.visibleNamed(s.view, "postSubmitButton")
+        for (var i = 0; i < submits.length; i++)
+            submits[i].clicked()
+        compare(spec.countCalls(s.bridge, "publish_post"), 0,
+                "and nothing B's feed offers publishes what was typed in A")
+
+        spec.reopenFromTheList(s.view)
         compare(spec.visibleNamed(s.view, "postDraftField")[0].text, "meant for A",
-                "the draft typed in A is in B's composer")
+                "reopening A shows the draft again")
         spec.visibleNamed(s.view, "postSubmitButton")[0].clicked()
         var sent = spec.argsOfLast(s.bridge, "publish_post")
-        verify(sent !== null, "submitting reached publish_post")
-        compare(sent.stoa, spec.stoaB, "and it was published to B")
+        verify(sent !== null, "submitting it there reached publish_post")
+        compare(sent.stoa, spec.stoaA, "naming A")
         compare(sent.body, "meant for A")
         s.view.destroy()
     }
