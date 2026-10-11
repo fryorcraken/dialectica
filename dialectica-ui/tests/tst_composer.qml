@@ -344,8 +344,9 @@ TestCase {
     //
     // spec.md:336-372 makes the three-way asymmetry the decision rather than an
     // inconsistency: cleared on a newly stored op, retained on a deduplicated one
-    // and on every refusal. A reviewer deleted `clearDraft()` from the stored arm
-    // (green), then added it to the `existing` arm — which the requirement's own
+    // and on every refusal. A reviewer deleted the draft-clearing call (then
+    // `clearDraft()`, now `clearDraftOf()`) from the stored arm (green), then
+    // added it to the `existing` arm — which the requirement's own
     // rationale forbids, "clearing would take away exactly what they need"
     // (green). Both halves of the asymmetry could be inverted with 124 tests
     // passing, and the failure mode is silent data loss.
@@ -432,6 +433,30 @@ TestCase {
         compare(c.draft.length, 0)
         compare(c.submittable, false,
                 "and an empty composer offers nothing to submit")
+        c.destroy()
+    }
+
+    // `applyReply` takes the key of the target the publish named, and `submit()`
+    // always passes it. Called without one, it must not report "stored" and
+    // leave the stored text in the field, one press from a second signed op:
+    // the target is then the one the composer points at. No screen calls it
+    // this way; this pins the function's own shape (the change's `design.md`,
+    // Decision 4).
+    function test_a_stored_reply_applied_without_a_key_clears_the_draft_shown() {
+        var c = makeComposer({})
+        c.draft = "something worth publishing"
+        c.applyReply({ ok: true, value: { opId: "aa", wasNew: true } })
+
+        compare(c.outcome, "stored")
+        compare(c.draft, "", "a store never leaves its text in the field")
+        compare(c.submittable, false)
+        // Nothing is asserted here about the entry held for the target. Emptying
+        // the field is itself a change of its text, which drops the entry, so a
+        // check that the draft stays gone after the composer is re-pointed away
+        // and back is true whenever the field was cleared, and cannot fail for
+        // the entry. That entry is pinned where a publish names a target the
+        // composer no longer points at: `tst_draft_targets.qml`,
+        // `test_a_publish_answered_after_the_composer_was_re_pointed_clears_only_what_it_named`.
         c.destroy()
     }
 
