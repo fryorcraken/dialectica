@@ -1235,7 +1235,7 @@ jobs:
       # rejects. But two jobs installing two different Nixes is a difference
       # nobody would think to check when only one of them breaks. See the long
       # note on the same step in `build` for what the floor is and why.
-      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
           install_url: https://releases.nixos.org/nix/nix-2.35.2/install
           nix_path: nixpkgs=channel:nixos-unstable
@@ -1554,7 +1554,7 @@ jobs:
       #
       # If this is ever lowered, build `dialectica-ui` — not just `dialectica` —
       # at the candidate version first.
-      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
           install_url: https://releases.nixos.org/nix/nix-2.35.2/install
           nix_path: nixpkgs=channel:nixos-unstable
